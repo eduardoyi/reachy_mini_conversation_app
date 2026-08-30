@@ -633,6 +633,7 @@ and evidence.
 | 2026-08-29 | Phase 4 follow-up | The runtime now waits for final local STT segments before activation so a partial `Reachy` cannot open cloud before its addressed suffix arrives. The standalone detector retains partial/delta support; a regression proves `Reachy` → `Reachy, look left` and the next final wake execute locally with zero provider construction. |
 | 2026-08-29 | Phase 3 follow-up | Final adversarial re-review found all four release-blocking fixes resolved and no remaining P0/P1. The residual reordered-partial edge case was also closed so a late partial cannot reopen an already finalized transcript sequence. |
 | 2026-08-30 | Phase 3 live acceptance | Confirmed hybrid ambient startup and local audio capture, then found the documented Transformers Serve flag was invalid. `FORCE_MODEL` is positional, so the command now passes `openai/whisper-small` without `--force-model`; live STT acceptance remains pending. |
+| 2026-08-30 | Phase 3 live acceptance | Confirmed local WAV requests reach `/v1/audio/transcriptions`; the server returned HTTP 500 because `python-multipart` was absent from the serving environment. Added it explicitly to the isolated install command; live transcript quality and wake acceptance remain pending. |
 
 ## Next steps
 

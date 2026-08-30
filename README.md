@@ -251,7 +251,7 @@ required local transcription endpoint:
 ```bash
 # One-time install outside this project's virtual environment.
 /opt/homebrew/bin/uv tool install --python 3.12 --force \
-  "transformers[serving]" --with librosa
+  "transformers[serving]" --with librosa --with python-multipart
 
 # Terminal 3; the Reachy daemon already uses port 8000.
 transformers serve --host 127.0.0.1 --port 8766 \

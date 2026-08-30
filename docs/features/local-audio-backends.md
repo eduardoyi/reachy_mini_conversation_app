@@ -219,3 +219,4 @@ remain pending.
 | 2026-08-29 | Bounded uploads to 20 seconds and rejected MLX Audio's temp-file STT server for this privacy boundary; documented the in-memory Transformers Serve candidate and required live temp-directory verification. |
 | 2026-08-29 | Documented the processor-owned bounded executor and honest close behavior for blocking synchronous VAD/STT implementations. |
 | 2026-08-30 | Corrected the Transformers Serve launch command after live acceptance showed that `FORCE_MODEL` is positional. The installed 5.16.1 help summary omits the transcription route, but its server implementation includes `/v1/audio/transcriptions`. |
+| 2026-08-30 | Added `python-multipart` to the isolated server install after live transcription requests reached the endpoint but returned HTTP 500 because the serving extra did not install its upload parser. |

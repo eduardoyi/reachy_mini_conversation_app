@@ -60,7 +60,7 @@ One-time optional Apple Silicon local-STT install:
 
 ```bash
 /opt/homebrew/bin/uv tool install --python 3.12 --force \
-  "transformers[serving]" --with librosa
+  "transformers[serving]" --with librosa --with python-multipart
 ```
 
 Run three terminals:
