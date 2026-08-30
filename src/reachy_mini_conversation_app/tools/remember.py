@@ -44,5 +44,5 @@ class Remember(Tool):
         if stored is None:
             return {"error": "fact was empty or invalid; nothing was saved"}
 
-        logger.info("Tool call: remember fact=%s", stored.text[:120])
+        logger.info("Tool call: remember memory_id=%s", stored.id)
         return {"saved": stored.text, "memory_id": stored.id}

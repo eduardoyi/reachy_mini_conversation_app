@@ -17,6 +17,7 @@ This is a small project maintained by a small team. Low-quality, auto-generated,
 4. **No dead code, no LLM verbosity** in code, comments, or PR text.
 5. **Errors are logged, never swallowed.** Use `logger`, not `print`.
 6. **Run the full gate before review.** Don't waste a reviewer's time, and never open a PR with a red pipeline.
+7. **Read the active plan and relevant docs before work.** For non-trivial work, read the current plan in `docs/plans/`, the relevant feature documentation in `docs/features/`, the testing guidance, and the README/architecture material for the area you will change.
 
 Everything below expands these.
 
@@ -61,6 +62,14 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 - A bug fix needs a regression test. A feature needs at least a happy-path test.
 - Deliberately skipping a test (e.g. pure hardening)? Say so and let the human decide.
 
+### Test as you build
+
+- Tests and documentation ship in the same change as the feature. Do not defer them to a later cleanup.
+- Non-trivial features require comprehensive applicable coverage: unit tests for pure logic and state transitions; integration tests at audio/provider/tool boundaries using fake providers; simulator tests for Reachy lifecycle and movement integration; privacy tests for connection and byte-transfer guarantees; and error, timeout, cancellation, interruption, and reconnection paths.
+- Keep tests deterministic and hardware-independent where possible. Use fakes and fixtures for cloud services; do not make the test suite depend on a live Gemini session, real credentials, or physical hardware.
+- A regression test is required for every bug fix and should fail against the old behavior before the fix is accepted.
+- Record the relevant test files and validation commands in the feature documentation and plan status.
+
 ## Pull requests
 
 - **Respect the reviewer's time.** Run the gate, self-review your own diff, keep the change small and focused. Reply to comments in your own words and address the point. No AI walls of text, no unrelated churn that forces a re-review.
@@ -68,7 +77,7 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 - **Issue first for a feature or any non-trivial change**, so we agree on the approach before the code exists and you don't build something we can't merge. A small, obvious fix (typo, one-line bug) can go straight to a PR.
 - **Fill in the PR template, never overwrite it.** `.github/pull_request_template.md` exists for humans to read and to manually check their own work. Tick the boxes that apply and complete the sections. Do not rewrite, restructure, or delete any of it.
 - **PR title:** explain the work. Do not put agent or model names in it (no `codex`, `claude`, and so on).
-- **PR description:** concise and concrete. State what changed and why. 
+- **PR description:** concise and concrete. State what changed and why.
 - **Update `.env.example` for new config vars**. Never commit secrets or `.env`.
 
 ## Documentation
@@ -76,7 +85,40 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 - **One README, one source of truth.** Never create another `README.md`. Update the existing root `README.md`.
 - **Keep the README in sync.** If your change touches anything it documents (CLI flags, config vars, tools, install steps, behavior), update `README.md` in the same PR.
 - **Flag when the architecture diagram needs updating.** If your change alters the architecture, call it out in the PR. The diagram is generated: `docs/scheme.mmd` is the Mermaid source and `README.md` embeds the rendered `docs/assets/conversation_app_arch.svg`. It can only be updated by editing `scheme.mmd` and regenerating the SVG, so flag the need rather than hand-editing the SVG.
-- **Don't add Markdown files under `docs/`.** Extra docs in this repo go stale fast. If a feature genuinely needs its own document, it belongs in the [`reachy_mini` docs folder](https://github.com/pollen-robotics/reachy_mini/tree/main/docs), which syncs to the docs website. Flag the need and suggest a separate PR to `reachy_mini`, and only when a standalone document is truly necessary.
+- **This fork intentionally overrides the upstream no-Markdown-under-`docs/` rule.** Plans and durable feature documentation are required here. Put every design, implementation, migration, benchmark, rollout, and operational plan in `docs/plans/`, and durable major-feature documentation in `docs/features/`; do not scatter ad hoc Markdown elsewhere under `docs/`. Keep the root README and architecture source synchronized as above.
+
+### Plans and living project records
+
+- Every project plan, including future plans, must be recorded as Markdown in `docs/plans/` and listed in the plans index (`docs/plans/INDEX.md`). This includes design, implementation, migration, benchmark, rollout, and operational plans; do not keep the only copy in chat, a PR description, or an agent's notes.
+- Treat plans as living records. As work progresses, update the plan's status, completed and pending items, blockers, decisions, validation results, and dated progress log. Keep the plans index and any project status/log document current when scope or state changes.
+- A plan must identify its scope, assumptions, implementation order, acceptance criteria, risks, test strategy, and documentation updates. Mark superseded or completed plans explicitly rather than silently deleting them.
+
+### Durable feature documentation
+
+- A new or materially changed feature, provider, tool, state machine, privacy boundary, or extension point needs a durable document in `docs/features/` in the same change.
+- Each feature document must explain: overview and user-visible behavior; architecture and data flow; public contracts/configuration/tool APIs and state transitions; integration points and key files; safe extension points; constraints and gotchas; and a complete test inventory with the commands/results that were actually run.
+- Before extending an existing feature, read its feature document. Update it whenever behavior, contracts, extension points, privacy guarantees, or operational procedures change.
+
+### Verification and honest reporting
+
+- Verify that commands exist before running them; do not invent scripts or report a command as passing when it was not run.
+- Before handoff, run the relevant focused tests plus the full repository gate. Report the exact commands, outcomes, skipped checks, unavailable services/hardware, and known limitations. Do not claim simulator, hardware, cloud-provider, latency, or privacy validation without evidence from the current environment.
+- If the environment prevents a required check, leave the limitation visible in the plan and feature documentation and explain the next reproducible validation step.
+
+## Privacy, logging, and secrets
+
+- Treat audio, transcripts, camera frames, prompts, responses, household state, and identifiers as sensitive. Never log raw payloads or private content; log only the minimum state, counters, IDs, and error metadata needed to diagnose behavior.
+- Preserve explicit privacy boundaries in code and tests. In local ambient mode, cloud sessions must be closed and ambient audio/video must not be sent or persisted. Tests must assert these guarantees rather than relying only on code inspection.
+- Never commit API keys, tokens, credentials, `.env` files, or captured household media. Use local environment configuration and update `.env.example` for new variable names without adding values. Review the diff for secrets before handoff.
+- Review new dependencies for network access, data collection, platform assumptions, and licensing before adding them; call out the decision in the active plan.
+
+## Agent delegation and review
+
+- The primary agent owns the plan, scope, integration, documentation, verification, and final handoff, whether or not work is delegated.
+- Subagents receive bounded tasks with explicit files, acceptance criteria, and test requirements. They must follow this file and report evidence, not just a summary.
+- The primary agent must inspect every delegated diff, run focused tests, check architecture/privacy/typing/error/cancellation behavior, and perform an adversarial review before accepting it.
+- When review finds a defect or missing evidence, request a concrete fix from the responsible agent, then run the affected tests and review the revised diff again. Do not treat a first-pass response as approval.
+- Keep documentation, tests, and implementation aligned throughout the work; update the active plan after each meaningful milestone or decision.
 
 ---
 

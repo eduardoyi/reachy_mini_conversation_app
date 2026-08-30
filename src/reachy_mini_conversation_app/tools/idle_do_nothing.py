@@ -29,5 +29,5 @@ class IdleDoNothing(Tool):
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Stay still and silent for the current idle turn."""
         reason = kwargs.get("reason", "idle turn")
-        logger.info("Tool call: idle_do_nothing reason=%s", reason)
+        logger.info("Tool call: idle_do_nothing")
         return {"status": "idle", "reason": reason}

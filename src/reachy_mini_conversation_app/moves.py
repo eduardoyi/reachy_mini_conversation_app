@@ -122,6 +122,33 @@ class BreathingMove(Move):  # type: ignore
         return (head_pose, antennas, 0.0)
 
 
+class ActivationAcknowledgementMove(Move):  # type: ignore
+    """Short relative nod that returns to the captured full-body pose."""
+
+    duration = 0.18
+
+    def __init__(self, start_pose: FullBodyPose) -> None:
+        """Capture the worker's last commanded pose as the gesture baseline."""
+        self._start_pose = clone_full_body_pose(start_pose)
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+        """Return a relative nod and the exact captured pose at both endpoints."""
+        if t <= 0.0 or t >= self.duration:
+            start_head, start_antennas, body_yaw = clone_full_body_pose(self._start_pose)
+            return (
+                np.asarray(start_head, dtype=np.float64),
+                np.asarray(start_antennas, dtype=np.float64),
+                body_yaw,
+            )
+
+        progress = max(0.0, min(1.0, t / self.duration))
+        pitch = 4.0 * np.sin(np.pi * progress)
+        offset = create_head_pose(0, 0, 0, 0, pitch, 0, degrees=True)
+        head_pose = compose_world_offset(self._start_pose[0], offset, reorthonormalize=True)
+        antennas_array = np.asarray(self._start_pose[1], dtype=np.float64)
+        return head_pose, antennas_array, self._start_pose[2]
+
+
 def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
     """Create a deep copy of a full body pose tuple."""
     head, antennas, body_yaw = pose
@@ -245,6 +272,10 @@ class MovementManager:
         """
         self._command_queue.put(("queue_move", move))
 
+    def acknowledge_activation(self) -> None:
+        """Queue a relative activation acknowledgment on the movement worker."""
+        self._command_queue.put(("acknowledge_activation", None))
+
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
 
@@ -329,6 +360,12 @@ class MovementManager:
                 )
             else:
                 logger.warning("Ignored queue_move command with invalid payload: %s", payload)
+        elif command == "acknowledge_activation":
+            with self._status_lock:
+                start_pose = clone_full_body_pose(self._last_commanded_pose)
+            self.move_queue.append(ActivationAcknowledgementMove(start_pose))
+            self.state.update_activity()
+            logger.debug("Queued activation acknowledgment move")
         elif command == "clear_queue":
             self.move_queue.clear()
             self.state.current_move = None

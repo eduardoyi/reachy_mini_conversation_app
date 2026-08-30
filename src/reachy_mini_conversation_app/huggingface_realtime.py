@@ -42,7 +42,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
-from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16, resample_audio, audio_to_float32
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
@@ -342,7 +342,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             input_transcript = self.input_transcript_chunks_by_item
             if input_transcript.item_id == item_id and len(input_transcript.deltas) - 1 == sequence_counter:
                 await self.output_queue.put(AdditionalOutputs({"role": "user_partial", "content": transcript}))
-                logger.debug(f"Debounced partial emitted: {transcript}")
+                logger.debug("Debounced partial emitted")
         except asyncio.CancelledError:
             logger.debug("Debounced partial cancelled")
             raise
@@ -453,7 +453,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _send_startup_greeting_prompt(self) -> None:
         """Prompt the model to open the conversation once the session is ready."""
-        if self._startup_greeting_sent or not self.connection:
+        if not self._startup_greeting_enabled or self._startup_greeting_sent or not self.connection:
+            if not self._startup_greeting_enabled:
+                self._startup_greeting_sent = True
             return
 
         greeting_prompt = get_session_greeting_prompt().strip()
@@ -566,10 +568,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """Process the result of a tool call."""
         if completed_tool.error is not None:
             logger.error(
-                "Tool '%s' (id=%s) failed with error: %s",
+                "Tool '%s' (id=%s) failed with error type=%s",
                 completed_tool.tool_name,
                 completed_tool.id,
-                completed_tool.error,
+                type(completed_tool.error).__name__,
             )
             tool_result = {"error": completed_tool.error}
             tool_result_for_model = tool_result
@@ -585,7 +587,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 completed_tool.tool_name,
                 completed_tool.id,
             )
-            logger.debug("Tool '%s' model-visible result: %s", completed_tool.tool_name, tool_result_for_model)
         else:
             logger.warning(
                 "Tool '%s' (id=%s) returned no result and no error", completed_tool.tool_name, completed_tool.id
@@ -664,6 +665,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         ],
                     },
                 )
+                self._emit_traffic("video", jpeg_bytes)
                 if isinstance(image_width, int) and isinstance(image_height, int):
                     logger.info(
                         "Added camera image to conversation frame=%sx%s jpeg_bytes=%s",
@@ -725,6 +727,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
             # Manage events received from the realtime server.
             self.connection = conn
+            self._emit_connection_state(True)
             try:
                 self._connected_event.set()
             except Exception:
@@ -764,7 +767,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("response text delta")
 
                     if event.type == "response.output_text.done":
-                        logger.debug("response text done: %s", event.text)
+                        logger.debug("response text done")
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
@@ -787,7 +790,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
                         self._mark_activity("user_transcription_delta")
-                        logger.debug(f"User partial transcript: {event.delta}")
+                        logger.debug("User partial transcript received")
 
                         item_id = event.item_id
                         delta = event.delta or ""
@@ -810,7 +813,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._mark_activity("user_transcription_completed")
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
-                        logger.debug("User transcript: %s", raw_transcript)
+                        logger.debug("User transcript completed")
                         self.deps.movement_manager.set_listening(False)
 
                         await self._cancel_partial_transcript_task()
@@ -831,7 +834,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
                         self._mark_activity("assistant_transcript_done")
-                        logger.debug(f"Assistant transcript: {event.transcript}")
+                        logger.debug("Assistant transcript completed")
                         await self.output_queue.put(
                             AdditionalOutputs({"role": "assistant", "content": event.transcript})
                         )
@@ -860,18 +863,15 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         call_id: str = str(getattr(event, "call_id", uuid.uuid4()))
 
                         logger.info(
-                            "Tool call received — tool_name=%r, call_id=%s, args=%s",
+                            "Tool call received — tool_name=%r, call_id=%s",
                             tool_name,
                             call_id,
-                            args_json_str,
                         )
 
                         if not isinstance(tool_name, str) or not isinstance(args_json_str, str):
                             logger.error(
-                                "Invalid tool call: tool_name=%s (type=%s), args=%s (type=%s), call_id=%s",
-                                tool_name,
+                                "Invalid tool call: tool_name_type=%s, args_type=%s, call_id=%s",
                                 type(tool_name).__name__,
-                                args_json_str,
                                 type(args_json_str).__name__,
                                 call_id,
                             )
@@ -918,7 +918,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             logger.debug("response.create rejected; worker will retry after active response finishes")
                         else:
                             self._response_started_or_rejected_event.set()
-                            logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
+                            logger.error("Realtime error [%s] type=%s", code, type(err).__name__)
 
                         if code == "input_audio_buffer_commit_empty":
                             self.deps.movement_manager.set_listening(False)
@@ -942,6 +942,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                 # Stop background tool manager tasks (listener + cleanup) in all paths.
                 await self.tool_manager.shutdown()
+                self._emit_connection_state(False)
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
@@ -957,7 +958,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if not self.connection:
             return
 
-        _, audio_frame = frame
+        input_sample_rate, audio_frame = frame
         if audio_frame.size == 0:
             return
 
@@ -970,13 +971,29 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             if audio_frame.shape[1] > 1:
                 audio_frame = audio_frame[:, 0]
 
-        # Cast if needed
-        audio_frame = audio_to_int16(audio_frame)
+        # Convert to the provider's declared 16 kHz input rate before encoding.
+        try:
+            if input_sample_rate <= 0:
+                raise ValueError("Audio sample rate must be positive")
+            if input_sample_rate != self.SAMPLE_RATE:
+                audio_frame = audio_to_int16(
+                    resample_audio(
+                        audio_to_float32(audio_frame),
+                        input_sample_rate,
+                        self.SAMPLE_RATE,
+                    )
+                )
+            else:
+                audio_frame = audio_to_int16(audio_frame)
+        except (TypeError, ValueError) as error:
+            logger.debug("Dropping audio frame: invalid input (%s)", type(error).__name__)
+            return
 
         # Send to the realtime input buffer (guard against races during reconnect).
         try:
             audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
             await self.connection.input_audio_buffer.append(audio=audio_message)
+            self._emit_traffic("audio", audio_frame.nbytes)
         except Exception as e:
             logger.debug("Dropping audio frame: connection not ready (%s)", e)
             return

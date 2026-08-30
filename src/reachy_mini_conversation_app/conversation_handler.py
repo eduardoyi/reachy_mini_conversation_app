@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import ClassVar, TypeAlias
+from typing import Literal, ClassVar, TypeAlias
 from collections.abc import Callable
 
 import numpy as np
@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 AudioFrame: TypeAlias = tuple[int, NDArray[np.int16]]
 HandlerOutput: TypeAlias = AudioFrame | AdditionalOutputs | None
 QueueItem: TypeAlias = AudioFrame | AdditionalOutputs
+TrafficKind: TypeAlias = Literal["audio", "video"]
+TrafficObserver: TypeAlias = Callable[[TrafficKind, int], None]
+ConnectionObserver: TypeAlias = Callable[[bool], None]
 
 
 class ConversationHandler(AsyncStreamHandler, ABC):
@@ -35,12 +38,17 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     last_idle_behavior_time: float
     _activity_observer: Callable[[str], None] | None = None
     _transcript_observer: Callable[[str, str, bool], None] | None = None
+    _traffic_observer: TrafficObserver | None = None
+    _connection_observer: ConnectionObserver | None = None
+    _startup_greeting_enabled: bool = True
+    _initial_context: str = ""
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
         super().__init__()
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
+        self._initial_context = ""
 
     def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
         """Attach or detach an activity observer. Pass None to clear."""
@@ -49,6 +57,46 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_transcript_observer(self, observer: Callable[[str, str, bool], None] | None) -> None:
         """Attach/detach a transcript observer, called (role, text, final)."""
         self._transcript_observer = observer
+
+    def set_traffic_observer(self, observer: TrafficObserver | None) -> None:
+        """Attach/detach a provider traffic observer for successful media sends."""
+        self._traffic_observer = observer
+
+    def set_connection_observer(self, observer: ConnectionObserver | None) -> None:
+        """Attach/detach an observer for provider session connection changes."""
+        self._connection_observer = observer
+
+    def set_startup_greeting_enabled(self, enabled: bool) -> None:
+        """Enable or suppress a provider's automatic startup greeting."""
+        self._startup_greeting_enabled = bool(enabled)
+
+    def set_initial_context(self, context: str) -> None:
+        """Set bounded locally derived context before provider startup."""
+        self._initial_context = context.strip()
+
+    def get_initial_context(self) -> str:
+        """Return the locally derived context configured for startup."""
+        return self._initial_context
+
+    def _emit_traffic(self, kind: TrafficKind, byte_count: int) -> None:
+        """Notify observers after a provider media send succeeds."""
+        observer = self._traffic_observer
+        if observer is None or byte_count <= 0:
+            return
+        try:
+            observer(kind, byte_count)
+        except Exception:
+            logger.debug("traffic observer raised (ignored)", exc_info=True)
+
+    def _emit_connection_state(self, connected: bool) -> None:
+        """Notify observers when a provider session becomes connected or closed."""
+        observer = self._connection_observer
+        if observer is None:
+            return
+        try:
+            observer(connected)
+        except Exception:
+            logger.debug("connection observer raised (ignored)", exc_info=True)
 
     def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
         """Forward one transcript chunk to the observer, if attached."""

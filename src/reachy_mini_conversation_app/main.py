@@ -24,6 +24,9 @@ from reachy_mini_conversation_app.utils import (
 
 if TYPE_CHECKING:
     from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+    from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
 
 def _start_inactivity_timeout_thread(
@@ -61,6 +64,50 @@ def _start_inactivity_timeout_thread(
     return thread
 
 
+def _build_conversation_handler(
+    deps: ToolDependencies,
+    realtime_provider: str,
+    instance_path: str | None,
+    startup_voice: str | None,
+    logger: logging.Logger,
+) -> ConversationHandler:
+    """Build the selected realtime handler without importing unused providers."""
+    from reachy_mini_conversation_app.config import (
+        HF_LOCAL_CONNECTION_MODE,
+        REALTIME_PROVIDER_GEMINI,
+        REALTIME_PROVIDER_HUGGINGFACE,
+        get_hf_connection_selection,
+    )
+
+    if realtime_provider == REALTIME_PROVIDER_GEMINI:
+        from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+
+        logger.info("Using Gemini Live realtime handler")
+        return GeminiLiveHandler(
+            deps,
+            instance_path=instance_path,
+            startup_voice=startup_voice,
+        )
+
+    if realtime_provider != REALTIME_PROVIDER_HUGGINGFACE:
+        raise ValueError(f"Unsupported realtime provider: {realtime_provider!r}.")
+
+    from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
+
+    hf_connection_selection = get_hf_connection_selection()
+    transport_label = (
+        "Hugging Face direct websocket"
+        if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
+        else "Hugging Face session proxy"
+    )
+    logger.info("Using Hugging Face realtime handler (%s)", transport_label)
+    return HuggingFaceRealtimeHandler(
+        deps,
+        instance_path=instance_path,
+        startup_voice=startup_voice,
+    )
+
+
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args, _ = parse_args()
@@ -87,8 +134,10 @@ def run(
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
-        HF_LOCAL_CONNECTION_MODE,
+        REALTIME_PROVIDER_GEMINI,
+        config,
         set_instance_path,
+        get_realtime_provider,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
@@ -120,22 +169,26 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
-    logger.info(
-        "Configured Hugging Face realtime backend, connection mode: %s",
-        get_hf_connection_selection().mode,
-    )
+    realtime_provider = get_realtime_provider()
+    if realtime_provider == REALTIME_PROVIDER_GEMINI:
+        logger.info("Configured Gemini Live realtime backend")
+    else:
+        logger.info(
+            "Configured Hugging Face realtime backend, connection mode: %s",
+            get_hf_connection_selection().mode,
+        )
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-    from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
         try:
-            robot_kwargs = {}
+            media_backend = getattr(args, "media_backend", "default")
+            robot_kwargs: dict[str, Any] = {"media_backend": media_backend}
             if args.robot_name is not None:
                 robot_kwargs["robot_name"] = args.robot_name
 
-            logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+            logger.info("Initializing ReachyMini (media backend: %s)", media_backend)
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
@@ -165,25 +218,118 @@ def run(
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
-        """Build a Hugging Face realtime handler for the current runtime config."""
-        from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
-
-        hf_connection_selection = get_hf_connection_selection()
-        transport_label = (
-            "Hugging Face direct websocket"
-            if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
-            else "Hugging Face session proxy"
-        )
-        logger.info("Using Hugging Face realtime handler (%s)", transport_label)
-        return HuggingFaceRealtimeHandler(
+        """Build the selected realtime handler for the current runtime config."""
+        return _build_conversation_handler(
             deps,
+            get_realtime_provider(),
             instance_path=instance_path,
             startup_voice=startup_voice,
+            logger=logger,
         )
 
-    handler = build_handler(startup_settings.voice)
-
     stream_manager: LocalStream | None = None
+    hybrid_runtime: HybridRuntime | None = None
+    if config.HYBRID_RUNTIME_ENABLED:
+        from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
+        from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+        from reachy_mini_conversation_app.local_actions import LocalActionExecutor
+        from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
+        from reachy_mini_conversation_app.ambient_context import (
+            AmbientContextConfig,
+            AmbientContextStrategy,
+            AmbientContextProcessor,
+        )
+        from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter
+        from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD, OpenAICompatibleLocalSTT
+
+        def build_hybrid_handler() -> ConversationHandler:
+            """Build a provider only after an explicit hybrid activation."""
+            startup_voice = startup_settings.voice
+            if stream_manager is not None:
+                startup_voice = stream_manager.get_startup_voice() or startup_voice
+            return build_handler(startup_voice)
+
+        def queue_activation_acknowledgement(_reason: str) -> None:
+            """Queue a small movement-layer acknowledgment without motor I/O."""
+            movement_manager.acknowledge_activation()
+
+        def silence_local_output() -> None:
+            """Stop queued local movement and playback through their owners."""
+            movement_manager.clear_move_queue()
+            if stream_manager is not None:
+                stream_manager.clear_audio_queue()
+
+        context_processor: AmbientContextProcessor | None = None
+        wake_detector: TranscriptWakeWordDetector | None = None
+        intent_router: LocalIntentRouter | None = None
+        action_executor: LocalActionExecutor | None = None
+        local_processor: AmbientContextProcessor | None = None
+        if config.LOCAL_STT_BASE_URL is not None:
+            context_strategy = (
+                AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
+                if config.LOCAL_CONTEXT_STRATEGY == "continuous"
+                else AmbientContextStrategy.ACTIVATION_BUFFER
+            )
+            local_stt = OpenAICompatibleLocalSTT(
+                config.LOCAL_STT_BASE_URL,
+                model=config.LOCAL_STT_MODEL,
+                language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                timeout_seconds=config.LOCAL_STT_TIMEOUT_SECONDS,
+                max_text_chars=config.LOCAL_CONTEXT_MAX_CHARS,
+            )
+            context_processor = AmbientContextProcessor(
+                vad=RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD),
+                stt=local_stt,
+                config=AmbientContextConfig(
+                    strategy=context_strategy,
+                    transcript_window_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS,
+                    max_transcript_chars=config.LOCAL_CONTEXT_MAX_CHARS,
+                    min_silence_seconds=config.LOCAL_VAD_SILENCE_SECONDS,
+                    stt_timeout_seconds=config.LOCAL_STT_TIMEOUT_SECONDS,
+                ),
+            )
+            if context_strategy is AmbientContextStrategy.CONTINUOUS_TRANSCRIPT:
+                local_processor = context_processor
+                wake_detector = TranscriptWakeWordDetector(
+                    config.LOCAL_WAKE_WORD,
+                    cooldown_seconds=config.LOCAL_WAKE_COOLDOWN_SECONDS,
+                )
+                intent_router = LocalIntentRouter(wake_word=config.LOCAL_WAKE_WORD)
+                action_executor = LocalActionExecutor(
+                    deps,
+                    stop_callback=silence_local_output,
+                    silence_callback=silence_local_output,
+                )
+            else:
+                logger.info(
+                    "Activation-buffer context selected; voice wake remains disabled and keyboard stays available"
+                )
+            logger.info(
+                "Local ambient processing enabled strategy=%s endpoint=loopback",
+                context_strategy.value,
+            )
+        else:
+            logger.info("Local STT endpoint not configured; keyboard activation and RAM audio ring remain available")
+
+        hybrid_runtime = HybridRuntime(
+            build_hybrid_handler,
+            ambient_buffer=AmbientAudioBuffer(max_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS),
+            local_processor=local_processor,
+            context_processor=context_processor,
+            wake_detector=wake_detector,
+            intent_router=intent_router,
+            action_executor=action_executor,
+            local_processing_close_callback=context_processor.close if context_processor is not None else None,
+            acknowledgement_callback=queue_activation_acknowledgement,
+            inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
+        )
+        if context_processor is not None and wake_detector is not None:
+            context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)
+        handler: ConversationHandler | HybridRuntime = hybrid_runtime
+        logger.info("Hybrid runtime enabled; provider construction deferred until activation")
+    else:
+        handler = build_handler(startup_settings.voice)
+
     own_ui_server = None
 
     effective_settings_app = settings_app
@@ -202,8 +348,9 @@ def run(
         robot,
         settings_app=effective_settings_app,
         instance_path=instance_path,
-        handler_factory=build_handler,
+        handler_factory=None if hybrid_runtime is not None else build_handler,
         startup_voice=startup_settings.voice,
+        hybrid_runtime=hybrid_runtime,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.

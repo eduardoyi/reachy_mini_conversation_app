@@ -1,4 +1,4 @@
-/** Settings view: Hugging Face connection, voice, and runtime status. */
+/** Settings view: realtime provider connection, voice, and runtime status. */
 
 import {
   applyVoice,
@@ -14,6 +14,16 @@ import { h } from "../ui.js";
 const HF_CONNECTION_MODES = Object.freeze({
   DEPLOYED: "deployed",
   LOCAL: "local",
+});
+
+const REALTIME_PROVIDERS = Object.freeze({
+  HUGGINGFACE: "huggingface",
+  GEMINI: "gemini",
+});
+
+const PROVIDER_LABELS = Object.freeze({
+  [REALTIME_PROVIDERS.HUGGINGFACE]: "Hugging Face",
+  [REALTIME_PROVIDERS.GEMINI]: "Gemini Live",
 });
 
 const DEFAULT_HF_HOST = "localhost";
@@ -57,6 +67,12 @@ export async function mountSettingsView({ outlet, signal }) {
 }
 
 function buildConnectionSection({ onSaved } = {}) {
+  const providerSelect = h(
+    "select",
+    { class: "settings-select", name: "provider" },
+    h("option", { value: REALTIME_PROVIDERS.HUGGINGFACE }, PROVIDER_LABELS[REALTIME_PROVIDERS.HUGGINGFACE]),
+    h("option", { value: REALTIME_PROVIDERS.GEMINI }, PROVIDER_LABELS[REALTIME_PROVIDERS.GEMINI])
+  );
   const hfModeSelect = h(
     "select",
     { class: "settings-select", name: "hf_mode" },
@@ -107,6 +123,12 @@ function buildConnectionSection({ onSaved } = {}) {
     h(
       "label",
       { class: "settings-field" },
+      h("span", { class: "settings-label" }, "Realtime provider"),
+      providerSelect
+    ),
+    h(
+      "label",
+      { class: "settings-field" },
       h("span", { class: "settings-label" }, "Hugging Face connection"),
       hfModeSelect
     ),
@@ -123,22 +145,44 @@ function buildConnectionSection({ onSaved } = {}) {
     form
   );
 
+  function syncProviderFields() {
+    const isHuggingFace = providerSelect.value === REALTIME_PROVIDERS.HUGGINGFACE;
+    hfModeSelect.parentElement.style.display = isHuggingFace ? "" : "none";
+    hfLocalFields.style.display = isHuggingFace && hfModeSelect.value === HF_CONNECTION_MODES.LOCAL ? "" : "none";
+    hfModeSelect.disabled = !isHuggingFace;
+    hfHostInput.disabled = !isHuggingFace || hfModeSelect.value !== HF_CONNECTION_MODES.LOCAL;
+    hfPortInput.disabled = !isHuggingFace || hfModeSelect.value !== HF_CONNECTION_MODES.LOCAL;
+    hfHostInput.required = isHuggingFace && hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
+    hfPortInput.required = isHuggingFace && hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
+    if (isHuggingFace) {
+      submitButton.textContent = "Save connection";
+      hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
+    } else {
+      submitButton.textContent = "Save provider";
+      hint.textContent = "Gemini Live is selected. Configure GEMINI_API_KEY in the app environment; this page never handles credentials.";
+    }
+  }
+
   function syncLocalFields() {
     const isLocal = hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
-    hfLocalFields.style.display = isLocal ? "" : "none";
-    hfHostInput.disabled = !isLocal;
-    hfPortInput.disabled = !isLocal;
-    hfHostInput.required = isLocal;
-    hfPortInput.required = isLocal;
-    hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
+    if (providerSelect.value === REALTIME_PROVIDERS.HUGGINGFACE) {
+      hfLocalFields.style.display = isLocal ? "" : "none";
+      hfHostInput.disabled = !isLocal;
+      hfPortInput.disabled = !isLocal;
+      hfHostInput.required = isLocal;
+      hfPortInput.required = isLocal;
+      hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
+    }
   }
 
   hfModeSelect.addEventListener("change", syncLocalFields);
+  providerSelect.addEventListener("change", syncProviderFields);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (submitButton.disabled) return;
     submitButton.disabled = true;
+    providerSelect.disabled = true;
     hfModeSelect.disabled = true;
     hfHostInput.disabled = true;
     hfPortInput.disabled = true;
@@ -146,8 +190,14 @@ function buildConnectionSection({ onSaved } = {}) {
     status.classList.remove("is-error");
     status.textContent = "Saving…";
     try {
-      const payload = { hf_mode: hfModeSelect.value };
-      if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
+      const payload = { provider: providerSelect.value };
+      if (providerSelect.value === REALTIME_PROVIDERS.HUGGINGFACE) {
+        payload.hf_mode = hfModeSelect.value;
+      }
+      if (
+        providerSelect.value === REALTIME_PROVIDERS.HUGGINGFACE &&
+        hfModeSelect.value === HF_CONNECTION_MODES.LOCAL
+      ) {
         payload.hf_host = hfHostInput.value.trim();
         if (hfPortInput.value) {
           payload.hf_port = Number.parseInt(hfPortInput.value, 10);
@@ -162,17 +212,23 @@ function buildConnectionSection({ onSaved } = {}) {
       status.classList.add("is-error");
     } finally {
       submitButton.disabled = false;
+      providerSelect.disabled = false;
       hfModeSelect.disabled = false;
+      syncProviderFields();
       syncLocalFields();
       form.removeAttribute("aria-busy");
     }
   });
 
-  syncLocalFields();
+  syncProviderFields();
 
   return {
     element,
     syncFromStatus(payload) {
+      const provider = payload?.realtime_provider || payload?.backend;
+      if (Object.values(REALTIME_PROVIDERS).includes(provider)) {
+        providerSelect.value = provider;
+      }
       if (Object.values(HF_CONNECTION_MODES).includes(payload?.hf_connection_mode)) {
         hfModeSelect.value = payload.hf_connection_mode;
       }
@@ -182,6 +238,7 @@ function buildConnectionSection({ onSaved } = {}) {
       if (payload?.hf_direct_port != null) {
         hfPortInput.value = String(payload.hf_direct_port);
       }
+      syncProviderFields();
       syncLocalFields();
     },
   };
@@ -275,17 +332,39 @@ function buildStatusSection() {
     element,
     render(payload) {
       list.replaceChildren();
-      list.appendChild(statusRow("HF connection", formatHfMode(payload.hf_connection_mode)));
-      if (payload.hf_connection_mode === HF_CONNECTION_MODES.LOCAL) {
-        list.appendChild(statusRow("HF target", formatHfTarget(payload)));
+      const provider = payload.realtime_provider || payload.backend;
+      list.appendChild(statusRow("Provider", PROVIDER_LABELS[provider] || provider || "-"));
+      if (provider === REALTIME_PROVIDERS.HUGGINGFACE) {
+        list.appendChild(statusRow("HF connection", formatHfMode(payload.hf_connection_mode)));
+        if (payload.hf_connection_mode === HF_CONNECTION_MODES.LOCAL) {
+          list.appendChild(statusRow("HF target", formatHfTarget(payload)));
+        }
+        list.appendChild(
+          statusRow(
+            "Configuration",
+            payload.has_hf_connection ? "Ready" : "Missing",
+            payload.has_hf_connection ? "ok" : "warn"
+          )
+        );
+      } else if (provider === REALTIME_PROVIDERS.GEMINI) {
+        const ready = payload.has_realtime_target ?? payload.can_proceed_with_gemini;
+        list.appendChild(
+          statusRow(
+            "Gemini configuration",
+            ready ? "Configured" : payload.missing_config || "Missing GEMINI_API_KEY",
+            ready ? "ok" : "warn"
+          )
+        );
+        list.appendChild(
+          statusRow(
+            "Credentials",
+            "Managed in the app environment",
+            undefined
+          )
+        );
+      } else {
+        list.appendChild(statusRow("Configuration", "Unavailable", "warn"));
       }
-      list.appendChild(
-        statusRow(
-          "Configuration",
-          payload.has_hf_connection ? "Ready" : "Missing",
-          payload.has_hf_connection ? "ok" : "warn"
-        )
-      );
       const backendState = payload.backend_connected
         ? "connected"
         : payload.backend_connection_state || "not_started";

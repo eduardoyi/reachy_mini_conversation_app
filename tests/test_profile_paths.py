@@ -69,6 +69,19 @@ def test_profile_name_resolves_directly_to_storage_dir() -> None:
     assert (profile_dir / "profile.md").is_file()
 
 
+def test_household_companion_profile_loads_character_and_existing_tools() -> None:
+    """The bundled household character is valid and uses only normal tool IDs."""
+    profile = read_profile_from_directory(
+        "household_companion",
+        DEFAULT_PROFILES_DIRECTORY / "household_companion",
+    )
+
+    assert "curious little household companion" in profile.instructions
+    assert "Comfortable silence" in profile.instructions
+    assert "raw motor control" in profile.instructions
+    assert {"move_head", "head_tracking", "remember", "forget"}.issubset(profile.default_tools)
+
+
 def test_prompts_load_from_compact_builtin_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prompt loading should read compact built-in profile instructions directly."""
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "mad_scientist_assistant")

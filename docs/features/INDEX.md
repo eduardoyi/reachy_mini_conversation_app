@@ -1,0 +1,42 @@
+# Feature documentation
+
+Feature documents explain behavior that exists in the application and how a
+future agent can safely extend it. Read the relevant feature document before
+modifying a major or cross-cutting feature, and update it in the same change as
+the implementation.
+
+## Index
+
+| Feature | Document | Status |
+|---------|----------|--------|
+| Gemini Live provider | [gemini-live-provider.md](gemini-live-provider.md) | in-progress |
+| Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
+| Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
+| Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |
+| Local transcript wake word | [wake-word.md](wake-word.md) | in-progress |
+| Deterministic local intents | [local-intents.md](local-intents.md) | in-progress |
+
+Do not describe planned architecture as shipped behavior. The living
+implementation plan in [`../plans/reachy-hybrid-household-companion.md`](../plans/reachy-hybrid-household-companion.md)
+is the source for work that has not landed yet.
+
+## When a feature document is required
+
+Create or update one when a change introduces or significantly changes:
+
+- a user-facing flow or runtime mode;
+- a provider, audio path, VAD/STT boundary, tool dispatcher, or AI pipeline;
+- persistent data, configuration, or a privacy/security invariant; or
+- a cross-cutting extension point another feature will depend on.
+
+Trivial fixes, cosmetic-only changes, and pure test/tooling changes normally do
+not require a new feature document, but a regression test is still required
+for a bug fix.
+
+## Required contents
+
+Copy [`_template.md`](_template.md) and include the overview, user behavior,
+architecture/data flow, canonical files and contracts, configuration, safe
+extension points, constraints/gotchas, failure modes, dependencies, and an
+exact test inventory. Add a dated changelog. Keep the document focused; split
+an area only when one document becomes difficult to navigate.

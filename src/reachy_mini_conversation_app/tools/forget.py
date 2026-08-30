@@ -38,7 +38,7 @@ class Forget(Tool):
 
         result = forget_memory_fact(deps.instance_path, query=query)
         if result.removed is None:
-            logger.info("Tool call: forget query=%s no_match", query[:120])
+            logger.info("Tool call: forget no_match")
             return {"error": f'no memory matched "{query}"; nothing was removed'}
 
         response: dict[str, Any] = {
@@ -48,5 +48,5 @@ class Forget(Tool):
         if len(result.candidates) > 1:
             response["other_matches"] = [fact.text for fact in result.candidates[1:]]
 
-        logger.info("Tool call: forget query=%s removed=%s", query[:120], result.removed.text[:120])
+        logger.info("Tool call: forget removed memory_id=%s", result.removed.id)
         return response

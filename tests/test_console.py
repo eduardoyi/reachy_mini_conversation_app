@@ -1,6 +1,7 @@
 """Tests for the headless console stream."""
 
 import asyncio
+import logging
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -14,7 +15,10 @@ from fastapi.testclient import TestClient
 
 import reachy_mini_conversation_app.console as console_mod
 from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
-from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
+from reachy_mini_conversation_app.console import LocalStream, _AudioCaptureWorker
+from reachy_mini_conversation_app.streaming import AdditionalOutputs
+from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
@@ -29,7 +33,10 @@ def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
     """Send one JSON-RPC request over /rpc and return the response envelope."""
     with TestClient(app).websocket_connect("/rpc") as ws:
         ws.send_json({"jsonrpc": "2.0", "id": "1", "method": method, "params": params or {}})
-        return ws.receive_json()
+        while True:
+            response = ws.receive_json()
+            if response.get("id") == "1":
+                return response
 
 
 async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
@@ -40,6 +47,95 @@ async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("Timed out waiting for condition")
+
+
+class _HybridTestHandler:
+    """Provider stub whose lifecycle records the loop that owns it."""
+
+    def __init__(self, *, connect_gate: threading.Event | None = None) -> None:
+        self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+        self.started = threading.Event()
+        self._connect_gate = connect_gate
+        self.start_loop: asyncio.AbstractEventLoop | None = None
+        self.shutdown_loop: asyncio.AbstractEventLoop | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._connected = False
+        self.received: list[np.ndarray] = []
+        self.say_loop: asyncio.AbstractEventLoop | None = None
+        self.say_texts: list[str] = []
+        self._activity_observer: Any = None
+        self._transcript_observer: Any = None
+        self._traffic_observer: Any = None
+        self._connection_observer: Any = None
+        self.initial_context = ""
+
+    async def start_up(self) -> None:
+        self.start_loop = asyncio.get_running_loop()
+        if self._connect_gate is not None:
+            await asyncio.to_thread(self._connect_gate.wait)
+        self._stop_event = asyncio.Event()
+        self._connected = True
+        self.started.set()
+        if self._connection_observer is not None:
+            self._connection_observer(True)
+        try:
+            await self._stop_event.wait()
+        finally:
+            self._connected = False
+            if self._connection_observer is not None:
+                self._connection_observer(False)
+
+    async def shutdown(self) -> None:
+        self.shutdown_loop = asyncio.get_running_loop()
+        if self._stop_event is not None:
+            self._stop_event.set()
+
+    def _is_connected(self) -> bool:
+        return self._connected
+
+    async def receive(self, frame: tuple[int, np.ndarray]) -> None:
+        self.received.append(frame[1].copy())
+
+    async def emit(self) -> None:
+        return None
+
+    async def say(self, _text: str) -> None:
+        self.say_loop = asyncio.get_running_loop()
+        self.say_texts.append(_text)
+
+    def set_activity_observer(self, observer: Any) -> None:
+        self._activity_observer = observer
+
+    def set_transcript_observer(self, observer: Any) -> None:
+        self._transcript_observer = observer
+
+    def set_traffic_observer(self, observer: Any) -> None:
+        self._traffic_observer = observer
+
+    def set_connection_observer(self, observer: Any) -> None:
+        self._connection_observer = observer
+
+    def set_startup_greeting_enabled(self, _enabled: bool) -> None:
+        return None
+
+    def set_initial_context(self, context: str) -> None:
+        self.initial_context = context
+
+
+def _run_loop_in_thread(loop: asyncio.AbstractEventLoop) -> tuple[threading.Thread, threading.Event]:
+    """Run a dedicated event loop and return its thread/readiness signal."""
+    ready = threading.Event()
+
+    def run_loop() -> None:
+        asyncio.set_event_loop(loop)
+        ready.set()
+        loop.run_forever()
+        loop.close()
+
+    thread = threading.Thread(target=run_loop, name="hybrid-test-loop", daemon=True)
+    thread.start()
+    assert ready.wait(timeout=1.0)
+    return thread, ready
 
 
 def test_clear_audio_queue_prefers_clear_player() -> None:
@@ -107,6 +203,143 @@ def test_mic_reports_and_toggles_mute_state_over_rpc() -> None:
 
     # headless streams keep the mic live
     assert LocalStream(MagicMock(), robot)._mic_muted is False
+
+
+def test_hybrid_activation_rpc_rejects_unavailable_local_loop() -> None:
+    """The UI loop cannot invoke a hybrid runtime before LocalStream starts."""
+    runtime = MagicMock()
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(runtime, robot, settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    response = _rpc_call(app, "conversation.activate")
+
+    assert response["error"]["data"]["reason"] == "loop_unavailable"
+    runtime.activate.assert_not_called()
+
+
+def test_rpc_commands_reject_unavailable_local_loop() -> None:
+    """Say and interrupt report a stable error until LocalStream owns a loop."""
+    handler = MagicMock()
+    handler._is_connected.return_value = True
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+
+    for method, params in (("conversation.say", {"text": "hello"}), ("conversation.interrupt", {})):
+        response = _rpc_call(app, method, params)
+        assert response["error"]["data"]["reason"] == "loop_unavailable"
+        handler.say.assert_not_called()
+
+
+def test_hybrid_activation_rpc_runs_runtime_on_localstream_loop() -> None:
+    """RPC activation and cleanup stay on the LocalStream-owned event loop."""
+    target_loop = asyncio.new_event_loop()
+    thread, _ = _run_loop_in_thread(target_loop)
+    providers: list[_HybridTestHandler] = []
+
+    def provider_factory() -> _HybridTestHandler:
+        provider = _HybridTestHandler()
+        providers.append(provider)
+        return provider
+
+    runtime = HybridRuntime(
+        provider_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=1.0, sample_rate=16_000),
+        inactivity_timeout_s=0,
+    )
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(runtime, robot, settings_app=app, hybrid_runtime=runtime)
+    stream._asyncio_loop = target_loop
+    stream._init_settings_ui_if_needed()
+    startup_future = asyncio.run_coroutine_threadsafe(runtime.start_up(), target_loop)
+
+    try:
+        response = _rpc_call(app, "conversation.activate")
+
+        assert response.get("result", {}).get("ok") is True, response
+        assert len(providers) == 1
+        provider = providers[0]
+        assert provider.started.wait(timeout=1.0)
+        assert provider.start_loop is target_loop
+
+        close_future = asyncio.run_coroutine_threadsafe(stream._close_hybrid_runtime(), target_loop)
+        close_future.result(timeout=2.0)
+        startup_future.result(timeout=2.0)
+        assert provider.shutdown_loop is target_loop
+        assert runtime.active_handler is None
+    finally:
+        if not startup_future.done():
+            startup_future.cancel()
+        target_loop.call_soon_threadsafe(target_loop.stop)
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+
+def test_hybrid_rpc_say_and_interrupt_run_on_localstream_loop() -> None:
+    """Text commands and playback flushing stay on the LocalStream owner loop."""
+    target_loop = asyncio.new_event_loop()
+    thread, _ = _run_loop_in_thread(target_loop)
+    providers: list[_HybridTestHandler] = []
+    clear_loops: list[asyncio.AbstractEventLoop] = []
+
+    def provider_factory() -> _HybridTestHandler:
+        provider = _HybridTestHandler()
+        providers.append(provider)
+        return provider
+
+    runtime = HybridRuntime(
+        provider_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=1.0, sample_rate=16_000),
+        inactivity_timeout_s=0,
+    )
+    app = FastAPI()
+    audio = SimpleNamespace(
+        clear_player=lambda: clear_loops.append(asyncio.get_running_loop()),
+        clear_output_buffer=MagicMock(),
+    )
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=None))
+    stream = LocalStream(runtime, robot, settings_app=app, hybrid_runtime=runtime)
+    stream._asyncio_loop = target_loop
+    stream._init_settings_ui_if_needed()
+    startup_future = asyncio.run_coroutine_threadsafe(runtime.start_up(), target_loop)
+
+    try:
+        activation_response = _rpc_call(app, "conversation.activate")
+        assert activation_response.get("result", {}).get("ok") is True, activation_response
+        provider = providers[0]
+        assert provider.started.wait(timeout=1.0)
+
+        say_response = _rpc_call(app, "conversation.say", {"text": "hello"})
+        interrupt_response = _rpc_call(app, "conversation.interrupt")
+
+        assert say_response.get("result") == {"ok": True}
+        assert interrupt_response.get("result") == {"ok": True}
+        assert provider.say_loop is target_loop
+        assert provider.say_texts == ["hello"]
+        assert clear_loops and all(loop is target_loop for loop in clear_loops)
+
+        close_future = asyncio.run_coroutine_threadsafe(stream._close_hybrid_runtime(), target_loop)
+        close_future.result(timeout=2.0)
+        startup_future.result(timeout=2.0)
+        assert provider.shutdown_loop is target_loop
+
+        async def runtime_tasks() -> list[str]:
+            return [
+                task.get_name()
+                for task in asyncio.all_tasks()
+                if not task.done() and task.get_name().startswith(("hybrid-",))
+            ]
+
+        assert asyncio.run_coroutine_threadsafe(runtime_tasks(), target_loop).result(timeout=1.0) == []
+    finally:
+        if not startup_future.done():
+            startup_future.cancel()
+        target_loop.call_soon_threadsafe(target_loop.stop)
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
 
 
 def test_rest_api_is_removed_in_favor_of_rpc() -> None:
@@ -189,6 +422,7 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     app = FastAPI()
     handler = MagicMock()
     handler.shutdown = AsyncMock()
+    handler._is_connected.return_value = False
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(
         handler,
@@ -373,6 +607,7 @@ def test_status_reports_backend_connection_failure(
     app = FastAPI()
     handler = MagicMock()
     handler.connection = None
+    handler._is_connected.return_value = False
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
     stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
@@ -399,6 +634,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
     app = FastAPI()
     handler = MagicMock()
     handler.connection = None
+    handler._is_connected.return_value = False
     handler.shutdown = AsyncMock()
     media = SimpleNamespace(
         audio=None,
@@ -433,7 +669,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
 
 def test_media_warmup_overlaps_audio_startup_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Audio configuration should run while the media pipelines warm up."""
-    monkeypatch.setattr("reachy_mini_conversation_app.console.has_hf_realtime_target", lambda: True)
+    monkeypatch.setattr("reachy_mini_conversation_app.console.has_realtime_target", lambda: True)
 
     handler = MagicMock()
     handler.shutdown = AsyncMock()
@@ -478,17 +714,20 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
 
     class FakeHandler:
         def __init__(self) -> None:
-            self.connection = None
+            self.connected = False
             self.output_queue = asyncio.Queue()
             self.started = asyncio.Event()
             self.stopped = asyncio.Event()
             self.shutdown_calls = 0
 
         async def start_up(self) -> None:
-            self.connection = object()
+            self.connected = True
             self.started.set()
             await self.stopped.wait()
-            self.connection = None
+            self.connected = False
+
+        def _is_connected(self) -> bool:
+            return self.connected
 
         async def shutdown(self) -> None:
             self.shutdown_calls += 1
@@ -768,6 +1007,706 @@ def test_local_stream_launch_waits_for_missing_hf_target_without_starting_media(
     media.start_playing.assert_not_called()
 
 
+def test_backend_connected_uses_handler_contract_without_connection_attribute() -> None:
+    """Connection status should follow the handler contract, not provider internals."""
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    stream = LocalStream(handler, MagicMock())
+
+    assert stream._backend_connected() is False
+
+    handler._is_connected.return_value = True
+
+    assert stream._backend_connected() is True
+
+
+@pytest.mark.asyncio
+async def test_local_stream_delegates_voice_catalog_to_active_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-Hugging-Face provider's voices should reach the settings operations unchanged."""
+    monkeypatch.setattr(console_mod, "get_realtime_provider", lambda: "gemini")
+    handler = MagicMock()
+    handler.get_available_voices = AsyncMock(return_value=["Puck", "Kore"])
+    handler.get_current_voice.return_value = "Puck"
+    stream = LocalStream(handler, MagicMock())
+
+    assert await stream.get_available_voices() == ["Puck", "Kore"]
+    assert stream.get_current_voice() == "Puck"
+
+    handler.get_available_voices.assert_awaited_once_with()
+    handler.get_current_voice.assert_called_once_with()
+
+
+def _patch_provider_status(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    ready: bool,
+    missing_message: str,
+) -> None:
+    """Patch provider/config boundaries for deterministic status RPC tests."""
+    monkeypatch.setattr(console_mod, "get_realtime_provider", lambda: provider)
+    monkeypatch.setattr(console_mod, "has_realtime_target", lambda: ready)
+    monkeypatch.setattr(console_mod, "get_realtime_missing_config_message", lambda: missing_message)
+    monkeypatch.setattr(console_mod, "get_hf_session_url", lambda: None)
+    monkeypatch.setattr(console_mod, "get_hf_direct_ws_url", lambda: None)
+    monkeypatch.setattr(
+        console_mod,
+        "get_hf_connection_selection",
+        lambda: SimpleNamespace(mode="deployed", has_target=False),
+    )
+
+
+def test_status_reports_ready_gemini_without_exposing_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini readiness is provider-specific and status never includes its key."""
+    secret = "gemini-status-secret"
+    _patch_provider_status(monkeypatch, "gemini", True, "GEMINI_API_KEY is not configured.")
+    handler = MagicMock()
+    handler._is_connected.return_value = True
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert status["backend"] == "gemini"
+    assert status["realtime_provider"] == "gemini"
+    assert status["has_realtime_target"] is True
+    assert status["can_proceed"] is True
+    assert status["backend_connected"] is True
+    assert secret not in repr(status)
+
+
+def test_status_redacts_gemini_key_from_backend_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider errors must not echo a configured Gemini credential to the UI."""
+    secret = "gemini-error-secret"
+    _patch_provider_status(monkeypatch, "gemini", True, "GEMINI_API_KEY is not configured.")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", secret, raising=False)
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._set_backend_connection_state("disconnected", RuntimeError(f"authentication failed for {secret}"))
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert secret not in repr(status)
+    assert status["backend_error"] == "RuntimeError: authentication failed for [redacted]"
+
+
+def test_status_reports_missing_gemini_key_without_hf_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing Gemini configuration should be visible without claiming HF controls apply."""
+    _patch_provider_status(monkeypatch, "gemini", False, "GEMINI_API_KEY is not configured.")
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._set_backend_connection_state("waiting_for_config", "GEMINI_API_KEY is not configured.")
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert status["backend"] == "gemini"
+    assert status["has_realtime_target"] is False
+    assert status["can_proceed"] is False
+    assert status["can_proceed_with_gemini"] is False
+    assert status["missing_config"] == "GEMINI_API_KEY is not configured."
+    assert status["has_hf_connection"] is False
+    assert "GEMINI_API_KEY" in status["backend_error"]
+
+
+@pytest.mark.asyncio
+async def test_startup_loop_uses_selected_provider_readiness_not_hf_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured Gemini provider must start even when Hugging Face has no target."""
+    _patch_provider_status(monkeypatch, "gemini", True, "GEMINI_API_KEY is not configured.")
+
+    class FakeHandler:
+        def __init__(self) -> None:
+            self.started = False
+            self.output_queue = asyncio.Queue()
+
+        def _is_connected(self) -> bool:
+            return self.started
+
+        async def start_up(self) -> None:
+            self.started = True
+            stream._stop_event.set()
+
+        async def shutdown(self) -> None:
+            self.started = False
+
+    handler = FakeHandler()
+    stream = LocalStream(handler, MagicMock())
+
+    await stream._run_handler_startup_loop()
+
+    assert handler.started is True
+    assert stream._backend_connection_state == "connecting"
+
+
+@pytest.mark.asyncio
+async def test_startup_logs_redact_gemini_key_from_provider_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Startup diagnostics should not log a Gemini credential from provider errors."""
+    secret = "gemini-startup-secret"
+    _patch_provider_status(monkeypatch, "gemini", True, "GEMINI_API_KEY is not configured.")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", secret, raising=False)
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    stream = LocalStream(handler, MagicMock())
+    stream._backend_retry_delay = 0
+
+    async def fail_and_stop() -> None:
+        stream._stop_event.set()
+        raise RuntimeError(f"authentication failed for {secret}")
+
+    handler.start_up = AsyncMock(side_effect=fail_and_stop)
+
+    with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+        await stream._run_handler_startup_loop()
+
+    assert secret not in caplog.text
+    assert "RuntimeError: authentication failed for [redacted]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_record_loop_forwards_ordered_frames_and_polls_empty_capture() -> None:
+    """Capture polling preserves frame order and keeps empty polls off the loop."""
+    pending_frames: list[np.ndarray | None] = [
+        None,
+        np.array([1, 2], dtype=np.int16),
+        None,
+        np.array([3, 4], dtype=np.int16),
+        np.array([5, 6], dtype=np.int16),
+    ]
+
+    def get_audio_sample() -> np.ndarray | None:
+        if pending_frames:
+            return pending_frames.pop(0)
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+    )
+    received: list[tuple[int, np.ndarray]] = []
+    handler = MagicMock()
+    stream = LocalStream(handler, SimpleNamespace(media=media))
+
+    async def receive(audio: tuple[int, np.ndarray]) -> None:
+        received.append(audio)
+        if len(received) == 3:
+            stream._stop_event.set()
+
+    handler.receive = receive
+
+    await asyncio.wait_for(stream.record_loop(), timeout=1.0)
+
+    assert [sample_rate for sample_rate, _ in received] == [16_000, 16_000, 16_000]
+    np.testing.assert_array_equal(received[0][1], np.array([1, 2], dtype=np.int16))
+    np.testing.assert_array_equal(received[1][1], np.array([3, 4], dtype=np.int16))
+    np.testing.assert_array_equal(received[2][1], np.array([5, 6], dtype=np.int16))
+
+
+@pytest.mark.asyncio
+async def test_hybrid_record_loop_fences_capture_queue_at_activation(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The real capture worker keeps pre-barrier frames local and sends only newer frames."""
+    pre_frames = [np.array([11 + index], dtype=np.int16) for index in range(3)]
+    post_frames = [np.array([21 + index], dtype=np.int16) for index in range(2)]
+    emitted_pre = 0
+    phase = "pre"
+    release_pre = threading.Event()
+    release_post = threading.Event()
+
+    def get_audio_sample() -> np.ndarray | None:
+        nonlocal emitted_pre
+        if pre_frames:
+            emitted_pre += 1
+            return pre_frames.pop(0)
+        if phase == "pre":
+            release_pre.wait()
+            return None
+        if post_frames:
+            return post_frames.pop(0)
+        release_post.wait()
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+    )
+    local_frames: list[np.ndarray] = []
+
+    class LocalProcessor:
+        def observe_frame(self, frame: tuple[int, np.ndarray]) -> None:
+            local_frames.append(frame[1].copy())
+
+    providers: list[_HybridTestHandler] = []
+
+    def provider_factory() -> _HybridTestHandler:
+        provider = _HybridTestHandler()
+        providers.append(provider)
+        return provider
+
+    runtime = HybridRuntime(
+        provider_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20.0, sample_rate=16_000),
+        local_processor=LocalProcessor(),
+        inactivity_timeout_s=0,
+    )
+    stream = LocalStream(runtime, SimpleNamespace(media=media), hybrid_runtime=runtime)
+    worker = _AudioCaptureWorker(media, poll_interval=0)
+    stream._capture_worker = worker
+
+    with caplog.at_level(logging.DEBUG, logger=console_mod.logger.name):
+        worker.start()
+        await _wait_until(lambda: emitted_pre == 3)
+        release_pre.set()
+        worker.stop()
+        assert worker.sequence == 3
+        assert providers == []
+
+        phase = "post"
+        assert await runtime.activate("integration")
+        assert len(providers) == 1
+        assert providers[0].started.wait(timeout=1.0)
+
+        record_task = asyncio.create_task(stream.record_loop())
+        await _wait_until(lambda: len(providers[0].received) == 2)
+        stream._stop_event.set()
+        release_post.set()
+        await asyncio.wait_for(record_task, timeout=1.0)
+
+    assert [int(frame[0]) for frame in local_frames] == [11, 12, 13]
+    assert [int(frame[0]) for frame in providers[0].received] == [21, 22]
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    assert not list(tmp_path.iterdir())
+    assert "ambient-household-sentinel" not in caplog.text
+
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_capture_epoch_fences_inflight_frame_and_preserves_fifo() -> None:
+    """A pull started before activation stays local while later frames keep FIFO order."""
+    pull_started = threading.Event()
+    release_preactivation_pull = threading.Event()
+    allow_postactivation_pulls = threading.Event()
+    release_postactivation_pull = threading.Event()
+    postactivation_frames = [
+        np.array([21], dtype=np.int16),
+        np.array([22], dtype=np.int16),
+    ]
+    first_pull = True
+
+    def get_audio_sample() -> np.ndarray | None:
+        nonlocal first_pull
+        if first_pull:
+            first_pull = False
+            pull_started.set()
+            release_preactivation_pull.wait()
+            return np.array([11], dtype=np.int16)
+        allow_postactivation_pulls.wait()
+        if postactivation_frames:
+            return postactivation_frames.pop(0)
+        release_postactivation_pull.wait()
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+    )
+    local_frames: list[int] = []
+
+    class LocalProcessor:
+        def observe_frame(self, frame: tuple[int, np.ndarray]) -> None:
+            local_frames.append(int(frame[1][0]))
+
+    providers: list[_HybridTestHandler] = []
+
+    def provider_factory() -> _HybridTestHandler:
+        provider = _HybridTestHandler()
+        providers.append(provider)
+        return provider
+
+    runtime = HybridRuntime(
+        provider_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20.0, sample_rate=16_000),
+        local_processor=LocalProcessor(),
+        inactivity_timeout_s=0,
+    )
+    stream = LocalStream(runtime, SimpleNamespace(media=media), hybrid_runtime=runtime)
+    record_task = asyncio.create_task(stream.record_loop())
+
+    try:
+        assert await asyncio.to_thread(pull_started.wait, 1.0)
+        worker = stream._capture_worker
+        assert worker is not None
+        assert worker.capture_epoch == 1
+
+        assert await runtime.activate("inflight-race")
+        assert providers and providers[0].started.wait(timeout=1.0)
+
+        release_preactivation_pull.set()
+        await _wait_until(lambda: local_frames == [11])
+        assert providers[0].received == []
+
+        allow_postactivation_pulls.set()
+        await _wait_until(lambda: [int(frame[0]) for frame in providers[0].received] == [21, 22])
+    finally:
+        release_preactivation_pull.set()
+        allow_postactivation_pulls.set()
+        release_postactivation_pull.set()
+        stream._stop_event.set()
+        await asyncio.wait_for(record_task, timeout=1.0)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_capture_flushes_ordered_postactivation_frames_after_delayed_ready() -> None:
+    """The real capture loop retains over one second until delayed provider readiness."""
+    pre_frames = [np.full(16_000, value, dtype=np.int16) for value in (11, 12)]
+    post_frames = [np.full(16_000, value, dtype=np.int16) for value in (21, 22, 23)]
+    phase = "pre"
+    pre_complete = threading.Event()
+    post_complete = threading.Event()
+    release_pre = threading.Event()
+    release_post = threading.Event()
+    connect_gate = threading.Event()
+
+    def get_audio_sample() -> np.ndarray | None:
+        if pre_frames:
+            frame = pre_frames.pop(0)
+            if not pre_frames:
+                pre_complete.set()
+            return frame
+        if phase == "pre":
+            release_pre.wait()
+            return None
+        if post_frames:
+            frame = post_frames.pop(0)
+            if not post_frames:
+                post_complete.set()
+            return frame
+        release_post.wait()
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+    )
+    local_frames: list[int] = []
+
+    class LocalProcessor:
+        def observe_frame(self, frame: tuple[int, np.ndarray]) -> None:
+            local_frames.append(int(frame[1][0]))
+
+    providers: list[_HybridTestHandler] = []
+
+    def provider_factory() -> _HybridTestHandler:
+        provider = _HybridTestHandler(connect_gate=connect_gate)
+        providers.append(provider)
+        return provider
+
+    runtime = HybridRuntime(
+        provider_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20.0, sample_rate=16_000),
+        local_processor=LocalProcessor(),
+        inactivity_timeout_s=0,
+    )
+    stream = LocalStream(runtime, SimpleNamespace(media=media), hybrid_runtime=runtime)
+    capture_worker = _AudioCaptureWorker(media, poll_interval=0)
+    stream._capture_worker = capture_worker
+    record_task = asyncio.create_task(stream.record_loop())
+
+    try:
+        assert await asyncio.to_thread(pre_complete.wait, 1.0)
+        release_pre.set()
+        await _wait_until(lambda: local_frames == [11, 12])
+
+        assert await runtime.activate("delayed-ready")
+        phase = "post"
+        assert await asyncio.to_thread(post_complete.wait, 1.0)
+        await asyncio.sleep(0)
+
+        assert providers and providers[0].received == []
+        connect_gate.set()
+        assert await asyncio.to_thread(providers[0].started.wait, 1.0)
+        await _wait_until(lambda: [int(frame[0]) for frame in providers[0].received] == [21, 22, 23])
+    finally:
+        release_pre.set()
+        release_post.set()
+        connect_gate.set()
+        stream._stop_event.set()
+        await asyncio.wait_for(record_task, timeout=1.0)
+        await runtime.close()
+
+    assert local_frames == [11, 12]
+    assert [int(frame[0]) for frame in providers[0].received] == [21, 22, 23]
+    assert runtime.postactivation_frames_dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_localstream_silence_frames_do_not_refresh_cloud_inactivity() -> None:
+    """Continuous capture polling cannot keep an otherwise idle cloud session alive."""
+
+    class FakeClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = FakeClock()
+    provider = _HybridTestHandler()
+    runtime = HybridRuntime(
+        lambda: provider,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=1.0, sample_rate=16_000),
+        inactivity_timeout_s=5.0,
+        clock=clock,
+    )
+    media = SimpleNamespace()
+    stream = LocalStream(runtime, SimpleNamespace(media=media), hybrid_runtime=runtime)
+
+    assert await runtime.activate("inactivity-test")
+    assert provider.started.wait(timeout=1.0)
+    for _ in range(20):
+        clock.now += 0.25
+        await stream._receive_hybrid_frame((16_000, np.zeros(160, dtype=np.int16)), None)
+
+    clock.now = 5.0
+    assert await runtime.check_inactivity()
+    assert runtime.mode.value == "LOCAL_AMBIENT"
+    assert provider.shutdown_loop is asyncio.get_running_loop()
+
+
+@pytest.mark.asyncio
+async def test_blocked_capture_does_not_block_event_loop_or_close() -> None:
+    """A stuck SDK pull cannot starve the loop or delay bounded shutdown."""
+    pull_started = threading.Event()
+    release_pull = threading.Event()
+
+    def get_audio_sample() -> None:
+        pull_started.set()
+        release_pull.wait()
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+        stop_recording=MagicMock(),
+        stop_playing=MagicMock(),
+    )
+    stream = LocalStream(MagicMock(), SimpleNamespace(media=media))
+    record_task = asyncio.create_task(stream.record_loop())
+
+    try:
+        assert await asyncio.to_thread(pull_started.wait, 1.0)
+        worker = stream._capture_worker
+        assert worker is not None
+        started = asyncio.get_running_loop().time()
+        await asyncio.sleep(0.02)
+        assert asyncio.get_running_loop().time() - started < 0.2
+
+        shutdown_started = asyncio.get_running_loop().time()
+        stream.close()
+        await asyncio.wait_for(record_task, timeout=0.4)
+        assert asyncio.get_running_loop().time() - shutdown_started < 0.35
+        assert media.stop_recording.called
+        assert media.stop_playing.called
+    finally:
+        release_pull.set()
+        worker = locals().get("worker")
+        if worker is not None and worker._thread is not None:
+            await asyncio.to_thread(worker._thread.join, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_capture_worker_drops_oldest_frame_when_queue_is_full() -> None:
+    """Overflow keeps the newest bounded window in FIFO order."""
+    next_frame = 0
+
+    def get_audio_sample() -> np.ndarray:
+        nonlocal next_frame
+        frame = np.array([next_frame], dtype=np.int16)
+        next_frame += 1
+        return frame
+
+    worker = _AudioCaptureWorker(
+        SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=get_audio_sample),
+        queue_size=2,
+        poll_interval=0,
+    )
+    worker.start()
+    try:
+        await _wait_until(lambda: worker.dropped_frames >= 3)
+        worker.stop()
+
+        queued_frames: list[np.ndarray] = []
+        while (item := worker.get_nowait()) is not None:
+            queued_frames.append(item[1])
+
+        assert len(queued_frames) == 2
+        retained_values = [int(frame[0]) for frame in queued_frames]
+        assert retained_values[1] == retained_values[0] + 1
+        assert retained_values[-1] >= 3
+    finally:
+        worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_capture_worker_exception_is_typed_and_does_not_log_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Capture errors stop the worker with metadata-only diagnostics."""
+    sentinel = "microphone-household-secret"
+
+    def get_audio_sample() -> None:
+        raise RuntimeError(sentinel)
+
+    worker = _AudioCaptureWorker(
+        SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=get_audio_sample),
+        stop_join_timeout=0.01,
+    )
+    with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+        worker.start()
+        await _wait_until(lambda: worker.failure_type == "RuntimeError")
+        worker.stop()
+
+    assert sentinel not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_capture_worker_stop_is_idempotent_for_blocked_pull(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Repeated stop requests do not repeat diagnostics for one stuck worker."""
+    pull_started = threading.Event()
+    release_pull = threading.Event()
+
+    def get_audio_sample() -> None:
+        pull_started.set()
+        release_pull.wait()
+        return None
+
+    worker = _AudioCaptureWorker(
+        SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=get_audio_sample),
+        stop_join_timeout=0.01,
+    )
+    worker.start()
+    try:
+        assert await asyncio.to_thread(pull_started.wait, 1.0)
+        with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+            worker.stop()
+            assert worker._thread is not None and worker._thread.is_alive()
+            release_pull.set()
+            worker.stop()
+        assert caplog.text.count("Audio capture worker did not stop") == 1
+        assert worker._thread is not None and not worker._thread.is_alive()
+    finally:
+        release_pull.set()
+        if worker._thread is not None:
+            worker.stop()
+            await asyncio.to_thread(worker._thread.join, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_play_loop_resamples_provider_output_to_media_rate() -> None:
+    """Playback should convert Gemini's 24 kHz output to the SDK's device rate."""
+    source = np.arange(6, dtype=np.float32)
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=16_000),
+        push_audio_sample=MagicMock(),
+    )
+    handler = MagicMock()
+    robot = SimpleNamespace(media=media)
+    stream = LocalStream(handler, robot)
+
+    async def emit_output() -> tuple[int, np.ndarray] | None:
+        if not media.push_audio_sample.called:
+            return 24_000, source
+        stream._stop_event.set()
+        return None
+
+    handler.emit = emit_output
+
+    await stream.play_loop()
+
+    media.get_output_audio_samplerate.assert_called_once_with()
+    media.push_audio_sample.assert_called_once()
+    np.testing.assert_allclose(
+        media.push_audio_sample.call_args.args[0],
+        np.array([0.0, 1.5, 3.0, 4.5], dtype=np.float32),
+    )
+
+
+@pytest.mark.asyncio
+async def test_play_loop_does_not_log_additional_output_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Queued transcripts and tool results remain out of playback logs."""
+    sentinel = "playback-household-secret"
+    handler = MagicMock()
+    stream = LocalStream(handler, SimpleNamespace(media=SimpleNamespace()))
+
+    async def emit_output() -> AdditionalOutputs:
+        stream._stop_event.set()
+        return AdditionalOutputs({"role": "assistant", "content": sentinel})
+
+    handler.emit = emit_output
+
+    with caplog.at_level(logging.DEBUG, logger=console_mod.logger.name):
+        await stream.play_loop()
+
+    assert sentinel not in caplog.text
+
+
+def test_backend_config_can_select_gemini_without_accepting_a_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider selection may be persisted, but browser-supplied Gemini keys are rejected."""
+    _patch_provider_status(monkeypatch, "huggingface", True, "GEMINI_API_KEY is not configured.")
+    captured_providers: list[str] = []
+    monkeypatch.setattr(
+        console_mod, "get_realtime_provider", lambda: "gemini" if captured_providers else "huggingface"
+    )
+
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._persist_realtime_provider = captured_providers.append  # type: ignore[method-assign]
+    stream._init_settings_ui_if_needed()
+
+    selected = _rpc_call(app, "backend.config", {"provider": "gemini"})
+
+    assert selected["result"]["backend"] == "gemini"
+    assert captured_providers == ["gemini"]
+    assert not (tmp_path / ".env").exists()
+
+    rejected = _rpc_call(app, "backend.config", {"provider": "gemini", "gemini_api_key": "browser-secret"})
+
+    assert rejected["error"]["data"]["reason"] == "gemini_key_not_editable"
+    assert "browser-secret" not in repr(rejected)
+    assert not (tmp_path / ".env").exists()
+
+
 def _rpc_robot() -> SimpleNamespace:
     """Return a robot mock whose audio pipeline supports clear_audio_queue()."""
     audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
@@ -792,21 +1731,42 @@ def test_rpc_status_and_mic_over_websocket() -> None:
     assert stream._mic_muted is True
 
 
+def test_hybrid_status_exposes_postactivation_drop_diagnostic() -> None:
+    """Status includes the bounded handshake overflow diagnostic."""
+    runtime = HybridRuntime(lambda: MagicMock())
+    runtime._postactivation_frames_dropped = 3
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert status["postactivation_frames_dropped"] == 3
+
+
 def test_rpc_interrupt_broadcasts_turn_listening() -> None:
     """conversation.interrupt clears playback and pushes a turn:listening event."""
+    target_loop = asyncio.new_event_loop()
+    thread, _ = _run_loop_in_thread(target_loop)
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
     handler._is_connected.return_value = True
     app = FastAPI()
     stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._asyncio_loop = target_loop
     stream._init_settings_ui_if_needed()
-    with TestClient(app).websocket_connect("/rpc") as ws:
-        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.interrupt"})
-        msgs = [ws.receive_json(), ws.receive_json()]
-    results = [m for m in msgs if "result" in m]
-    notes = [m for m in msgs if m.get("method") == "conversation.turn"]
-    assert results and results[0]["result"] == {"ok": True}
-    assert notes and notes[0]["params"] == {"state": "listening", "reason": "interrupted"}
+    try:
+        with TestClient(app).websocket_connect("/rpc") as ws:
+            ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.interrupt"})
+            msgs = [ws.receive_json(), ws.receive_json()]
+        results = [m for m in msgs if "result" in m]
+        notes = [m for m in msgs if m.get("method") == "conversation.turn"]
+        assert results and results[0]["result"] == {"ok": True}
+        assert notes and notes[0]["params"] == {"state": "listening", "reason": "interrupted"}
+    finally:
+        target_loop.call_soon_threadsafe(target_loop.stop)
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
 
 
 def test_rpc_say_requires_active_session() -> None:

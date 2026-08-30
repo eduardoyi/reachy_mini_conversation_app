@@ -8,7 +8,7 @@ import pytest
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
-from reachy_mini_conversation_app.moves import MovementManager
+from reachy_mini_conversation_app.moves import MovementManager, ActivationAcknowledgementMove
 from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
 
@@ -109,3 +109,34 @@ def test_speaking_anchor_composes_emotions_and_holds_dances_from_neutral() -> No
     manager.state.move_start_time = manager._now()
     head, _, _ = manager._get_primary_pose(manager._now())
     assert np.allclose(head, dance_head)
+
+
+def test_activation_acknowledgement_is_worker_owned_relative_and_returns_to_start() -> None:
+    """The activation command preserves the worker's full-body baseline."""
+    robot = MagicMock()
+    manager = MovementManager(robot)
+    start_head = create_head_pose(12, -8, 5, 3, 11, 19, degrees=True)
+    start_pose = (start_head, (0.31, -0.27), 0.42)
+    manager._last_commanded_pose = start_pose
+
+    manager.acknowledge_activation()
+
+    robot.set_target.assert_not_called()
+    assert manager._command_queue.qsize() == 1
+    manager._poll_signals(manager._now())
+
+    assert len(manager.move_queue) == 1
+    move = manager.move_queue.popleft()
+    assert isinstance(move, ActivationAcknowledgementMove)
+
+    at_start, antennas_start, yaw_start = move.evaluate(0.0)
+    at_peak, antennas_peak, yaw_peak = move.evaluate(move.duration / 2.0)
+    at_end, antennas_end, yaw_end = move.evaluate(move.duration)
+
+    np.testing.assert_array_equal(at_start, start_head)
+    np.testing.assert_array_equal(at_end, start_head)
+    assert not np.allclose(at_peak, start_head)
+    np.testing.assert_array_equal(antennas_start, start_pose[1])
+    np.testing.assert_array_equal(antennas_peak, start_pose[1])
+    np.testing.assert_array_equal(antennas_end, start_pose[1])
+    assert (yaw_start, yaw_peak, yaw_end) == (start_pose[2],) * 3

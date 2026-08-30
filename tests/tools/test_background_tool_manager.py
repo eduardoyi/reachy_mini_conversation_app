@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -276,6 +277,24 @@ class TestUpdateProgress:
         assert bg.progress.message == "half done"
 
         # Cancel to clean up
+        await manager.cancel_tool(bg.tool_id)
+        await asyncio.sleep(0.05)
+
+    @pytest.mark.asyncio
+    async def test_update_progress_does_not_log_message(
+        self, manager: BackgroundToolManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Keep free-text progress messages out of diagnostic logs."""
+        sentinel = "progress-household-secret"
+        routine = _make_routine("prog", delay=0.5)
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False, with_progress=True)
+
+        with caplog.at_level(logging.DEBUG, logger="reachy_mini_conversation_app.tools.background_tool_manager"):
+            ok = await manager.update_progress(bg.tool_id, 0.5, sentinel)
+
+        assert ok is True
+        assert sentinel not in caplog.text
+
         await manager.cancel_tool(bg.tool_id)
         await asyncio.sleep(0.05)
 

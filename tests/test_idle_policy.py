@@ -1,5 +1,9 @@
 from __future__ import annotations
+import logging
 from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
 
 import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 from reachy_mini_conversation_app.tools.move_head import MoveHead
@@ -53,3 +57,16 @@ def test_choose_idle_tool_call_keeps_args_with_weighted_candidate(monkeypatch) -
     )
 
     assert selected == ("move_head", {"direction": "right"})
+
+
+@pytest.mark.asyncio
+async def test_idle_tool_does_not_log_reason(caplog: pytest.LogCaptureFixture) -> None:
+    """Idle rationale remains in the tool result but not in application logs."""
+    sentinel = "idle-household-secret"
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.tools.idle_do_nothing"):
+        result = await IdleDoNothing()(deps, reason=sentinel)
+
+    assert result["reason"] == sentinel
+    assert sentinel not in caplog.text

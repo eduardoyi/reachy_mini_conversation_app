@@ -219,7 +219,7 @@ class BackgroundToolManager(BaseModel):
             return False
 
         tool.progress = ToolProgress(progress=max(0.0, min(1.0, progress)), message=message)
-        logger.debug(f"Tool {tool_id} progress: {progress:.1%} - {message or ''}")
+        logger.debug("Tool %s progress: %.1f%%", tool_id, progress * 100.0)
         return True
 
     async def cancel_tool(self, tool_id: str, log: bool = True) -> bool:

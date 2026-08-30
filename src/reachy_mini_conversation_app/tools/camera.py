@@ -42,7 +42,7 @@ class Camera(Tool):
             logger.warning("camera: empty question")
             return {"error": "question must be a non-empty string"}
 
-        logger.info("Tool call: camera question=%s", question[:120])
+        logger.info("Tool call: camera")
 
         if not deps.camera_enabled:
             logger.error("Camera is disabled")

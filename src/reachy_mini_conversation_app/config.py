@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import math
 import logging
 from pathlib import Path
 from dataclasses import dataclass
@@ -61,6 +62,42 @@ HF_AVAILABLE_VOICES: list[str] = [
 ]
 
 HF_BACKEND = "huggingface"
+GEMINI_BACKEND = "gemini"
+REALTIME_PROVIDER_ENV = "REALTIME_PROVIDER"
+REALTIME_PROVIDER_HUGGINGFACE = HF_BACKEND
+REALTIME_PROVIDER_GEMINI = GEMINI_BACKEND
+DEFAULT_REALTIME_PROVIDER = REALTIME_PROVIDER_HUGGINGFACE
+GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
+GEMINI_LIVE_MODEL_ENV = "GEMINI_LIVE_MODEL"
+GEMINI_VOICE_ENV = "GEMINI_VOICE"
+DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview"
+DEFAULT_GEMINI_VOICE = "Puck"
+HYBRID_RUNTIME_ENABLED_ENV = "HYBRID_RUNTIME_ENABLED"
+HYBRID_CLOUD_INACTIVITY_SECONDS_ENV = "HYBRID_CLOUD_INACTIVITY_SECONDS"
+HYBRID_AMBIENT_BUFFER_SECONDS_ENV = "HYBRID_AMBIENT_BUFFER_SECONDS"
+LOCAL_CONTEXT_STRATEGY_ENV = "LOCAL_CONTEXT_STRATEGY"
+LOCAL_STT_BASE_URL_ENV = "LOCAL_STT_BASE_URL"
+LOCAL_STT_MODEL_ENV = "LOCAL_STT_MODEL"
+LOCAL_STT_TIMEOUT_SECONDS_ENV = "LOCAL_STT_TIMEOUT_SECONDS"
+LOCAL_VAD_RMS_THRESHOLD_ENV = "LOCAL_VAD_RMS_THRESHOLD"
+LOCAL_VAD_SILENCE_SECONDS_ENV = "LOCAL_VAD_SILENCE_SECONDS"
+LOCAL_WAKE_WORD_ENV = "LOCAL_WAKE_WORD"
+LOCAL_WAKE_COOLDOWN_SECONDS_ENV = "LOCAL_WAKE_COOLDOWN_SECONDS"
+LOCAL_CONTEXT_MAX_CHARS_ENV = "LOCAL_CONTEXT_MAX_CHARS"
+DEFAULT_HYBRID_RUNTIME_ENABLED = False
+DEFAULT_HYBRID_CLOUD_INACTIVITY_SECONDS = 60.0
+DEFAULT_HYBRID_AMBIENT_BUFFER_SECONDS = 20.0
+MAX_HYBRID_AMBIENT_BUFFER_SECONDS = 20.0
+LOCAL_CONTEXT_CONTINUOUS = "continuous"
+LOCAL_CONTEXT_ON_ACTIVATION = "activation"
+DEFAULT_LOCAL_CONTEXT_STRATEGY = LOCAL_CONTEXT_CONTINUOUS
+DEFAULT_LOCAL_STT_MODEL = "whisper-1"
+DEFAULT_LOCAL_STT_TIMEOUT_SECONDS = 5.0
+DEFAULT_LOCAL_VAD_RMS_THRESHOLD = 500.0
+DEFAULT_LOCAL_VAD_SILENCE_SECONDS = 0.6
+DEFAULT_LOCAL_WAKE_WORD = "Reachy"
+DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS = 2.0
+DEFAULT_LOCAL_CONTEXT_MAX_CHARS = 2_000
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
@@ -154,10 +191,125 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
     return candidate
 
 
+def _normalize_realtime_provider(value: str | None) -> str:
+    """Normalize the realtime provider, rejecting invalid cloud selections."""
+    candidate = (value or "").strip().lower()
+    if not candidate:
+        return DEFAULT_REALTIME_PROVIDER
+
+    if candidate not in {REALTIME_PROVIDER_HUGGINGFACE, REALTIME_PROVIDER_GEMINI}:
+        raise ValueError(
+            f"Invalid {REALTIME_PROVIDER_ENV}={value!r}. Expected "
+            f"{REALTIME_PROVIDER_HUGGINGFACE!r} or {REALTIME_PROVIDER_GEMINI!r}."
+        )
+    return candidate
+
+
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured realtime transcription language."""
     candidate = (value or "").strip()
     return candidate or "en"
+
+
+def _resolve_non_negative_seconds(
+    env_name: str,
+    default: float,
+    *,
+    allow_zero: bool = True,
+) -> float | None:
+    """Parse a non-negative seconds setting, returning None only for disabled values."""
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        seconds = float(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using default.", env_name, raw_value)
+        return default
+    if not math.isfinite(seconds) or seconds < 0 or (seconds == 0 and not allow_zero):
+        logger.warning("Ignoring invalid %s=%r; using default.", env_name, raw_value)
+        return default
+    return seconds
+
+
+def resolve_hybrid_cloud_inactivity_seconds() -> float | None:
+    """Read the cloud conversational inactivity timeout; zero disables it."""
+    value = _resolve_non_negative_seconds(
+        HYBRID_CLOUD_INACTIVITY_SECONDS_ENV,
+        DEFAULT_HYBRID_CLOUD_INACTIVITY_SECONDS,
+    )
+    return None if value == 0 else value
+
+
+def resolve_hybrid_ambient_buffer_seconds() -> float:
+    """Read the RAM ring duration, capped at the privacy-bound 20-second maximum."""
+    value = _resolve_non_negative_seconds(
+        HYBRID_AMBIENT_BUFFER_SECONDS_ENV,
+        DEFAULT_HYBRID_AMBIENT_BUFFER_SECONDS,
+        allow_zero=False,
+    )
+    if value is None or value > MAX_HYBRID_AMBIENT_BUFFER_SECONDS:
+        logger.warning(
+            "Ignoring %s above the %.1f-second bound; using default.",
+            HYBRID_AMBIENT_BUFFER_SECONDS_ENV,
+            MAX_HYBRID_AMBIENT_BUFFER_SECONDS,
+        )
+        return DEFAULT_HYBRID_AMBIENT_BUFFER_SECONDS
+    return value
+
+
+def is_hybrid_runtime_enabled() -> bool:
+    """Return whether the opt-in local ambient runtime is enabled."""
+    return _env_flag(HYBRID_RUNTIME_ENABLED_ENV, default=DEFAULT_HYBRID_RUNTIME_ENABLED)
+
+
+def resolve_local_context_strategy() -> str:
+    """Return the configured ambient transcription strategy."""
+    candidate = (os.getenv(LOCAL_CONTEXT_STRATEGY_ENV) or "").strip().lower()
+    if not candidate:
+        return DEFAULT_LOCAL_CONTEXT_STRATEGY
+    if candidate not in {LOCAL_CONTEXT_CONTINUOUS, LOCAL_CONTEXT_ON_ACTIVATION}:
+        logger.warning("Ignoring invalid %s=%r; using default.", LOCAL_CONTEXT_STRATEGY_ENV, candidate)
+        return DEFAULT_LOCAL_CONTEXT_STRATEGY
+    return candidate
+
+
+def resolve_local_stt_base_url() -> str | None:
+    """Return an explicitly configured local STT endpoint."""
+    return (os.getenv(LOCAL_STT_BASE_URL_ENV) or "").strip() or None
+
+
+def resolve_local_stt_model() -> str:
+    """Return the configured OpenAI-compatible local STT model name."""
+    return (os.getenv(LOCAL_STT_MODEL_ENV) or "").strip() or DEFAULT_LOCAL_STT_MODEL
+
+
+def resolve_local_context_max_chars() -> int:
+    """Return the bounded number of ambient transcript characters retained."""
+    raw_value = os.getenv(LOCAL_CONTEXT_MAX_CHARS_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_LOCAL_CONTEXT_MAX_CHARS
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using default.", LOCAL_CONTEXT_MAX_CHARS_ENV, raw_value)
+        return DEFAULT_LOCAL_CONTEXT_MAX_CHARS
+    if value < 128 or value > 8_000:
+        logger.warning("Ignoring invalid %s=%r; using default.", LOCAL_CONTEXT_MAX_CHARS_ENV, raw_value)
+        return DEFAULT_LOCAL_CONTEXT_MAX_CHARS
+    return value
+
+
+def resolve_local_processing_seconds(env_name: str, default: float) -> float:
+    """Return a positive finite local-processing duration setting."""
+    value = _resolve_non_negative_seconds(env_name, default, allow_zero=False)
+    return default if value is None else value
+
+
+def resolve_local_vad_rms_threshold() -> float:
+    """Return the non-negative PCM RMS threshold for the baseline local VAD."""
+    value = _resolve_non_negative_seconds(LOCAL_VAD_RMS_THRESHOLD_ENV, DEFAULT_LOCAL_VAD_RMS_THRESHOLD)
+    return DEFAULT_LOCAL_VAD_RMS_THRESHOLD if value is None else value
 
 
 @dataclass(frozen=True)
@@ -310,6 +462,28 @@ _warn_on_obsolete_backend_env()
 class Config:
     """Configuration class for the conversation app."""
 
+    REALTIME_PROVIDER = _normalize_realtime_provider(os.getenv(REALTIME_PROVIDER_ENV))
+    GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
+    GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
+    HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
+    HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
+    LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
+    LOCAL_STT_BASE_URL = resolve_local_stt_base_url()
+    LOCAL_STT_MODEL = resolve_local_stt_model()
+    LOCAL_STT_TIMEOUT_SECONDS = resolve_local_processing_seconds(
+        LOCAL_STT_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_STT_TIMEOUT_SECONDS
+    )
+    LOCAL_VAD_RMS_THRESHOLD = resolve_local_vad_rms_threshold()
+    LOCAL_VAD_SILENCE_SECONDS = resolve_local_processing_seconds(
+        LOCAL_VAD_SILENCE_SECONDS_ENV, DEFAULT_LOCAL_VAD_SILENCE_SECONDS
+    )
+    LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
+    LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
+        LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
+    )
+    LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
@@ -420,6 +594,28 @@ config = Config()
 def refresh_runtime_config_from_env() -> None:
     """Refresh mutable runtime config fields from the current environment."""
     _warn_on_obsolete_backend_env()
+    config.REALTIME_PROVIDER = _normalize_realtime_provider(os.getenv(REALTIME_PROVIDER_ENV))
+    config.GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
+    config.GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    config.GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    config.HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
+    config.HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
+    config.HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
+    config.LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
+    config.LOCAL_STT_BASE_URL = resolve_local_stt_base_url()
+    config.LOCAL_STT_MODEL = resolve_local_stt_model()
+    config.LOCAL_STT_TIMEOUT_SECONDS = resolve_local_processing_seconds(
+        LOCAL_STT_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_STT_TIMEOUT_SECONDS
+    )
+    config.LOCAL_VAD_RMS_THRESHOLD = resolve_local_vad_rms_threshold()
+    config.LOCAL_VAD_SILENCE_SECONDS = resolve_local_processing_seconds(
+        LOCAL_VAD_SILENCE_SECONDS_ENV, DEFAULT_LOCAL_VAD_SILENCE_SECONDS
+    )
+    config.LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
+    config.LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
+        LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
+    )
+    config.LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
@@ -441,6 +637,11 @@ def get_available_voices() -> list[str]:
 def get_default_voice() -> str:
     """Return the default Hugging Face voice."""
     return HF_DEFAULTS.voice
+
+
+def get_realtime_provider() -> str:
+    """Return the selected realtime provider."""
+    return config.REALTIME_PROVIDER
 
 
 def get_hf_session_url() -> str | None:
@@ -476,6 +677,20 @@ def get_hf_connection_selection() -> HFConnectionSelection:
 def has_hf_realtime_target() -> bool:
     """Return whether Hugging Face has a target for the selected mode."""
     return get_hf_connection_selection().has_target
+
+
+def has_realtime_target() -> bool:
+    """Return whether the selected provider has its required connection target."""
+    if get_realtime_provider() == GEMINI_BACKEND:
+        return bool((config.GEMINI_API_KEY or "").strip())
+    return has_hf_realtime_target()
+
+
+def get_realtime_missing_config_message() -> str:
+    """Return the configuration message for the selected provider's missing target."""
+    if get_realtime_provider() == GEMINI_BACKEND:
+        return f"{GEMINI_API_KEY_ENV} is not configured."
+    return f"{HF_REALTIME_WS_URL_ENV} is not configured."
 
 
 def set_instance_path(instance_path: str | Path | None) -> None:

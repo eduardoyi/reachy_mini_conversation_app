@@ -1,8 +1,12 @@
 import time
+import base64
 import asyncio
+import logging
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
 
 import reachy_mini_conversation_app.conversation_handler as conv_mod
@@ -165,6 +169,48 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
 
 
 @pytest.mark.asyncio
+async def test_huggingface_realtime_does_not_log_conversational_payloads(
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Realtime transcripts, tool arguments/results, and errors stay out of logs."""
+    sentinel = "hf-household-secret"
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(hf_mod, "get_session_greeting_prompt", lambda: "")
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.client = _make_fake_realtime_client(
+        events=(
+            _FakeEvent("response.output_text.done", text=sentinel),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta=sentinel),
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript=sentinel),
+            _FakeEvent("response.output_audio_transcript.done", transcript=sentinel),
+            _FakeEvent(
+                "response.function_call_arguments.done",
+                name="camera",
+                arguments=f'{{"question": "{sentinel}"}}',
+                call_id="call-1",
+            ),
+            _FakeEvent("error", error=SimpleNamespace(code="bad_request", message=sentinel)),
+        )
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    monkeypatch.setattr(
+        type(handler.tool_manager),
+        "start_tool",
+        AsyncMock(return_value=SimpleNamespace(tool_id="camera-call-1")),
+    )
+
+    caplog.set_level(logging.DEBUG, logger=hf_mod.logger.name)
+    await handler._run_realtime_session()
+
+    assert sentinel not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_emit_skips_idle_signal_while_response_active(monkeypatch: Any) -> None:
     """Idle tools should not trigger while a response is still active."""
     movement_manager = MagicMock()
@@ -214,6 +260,114 @@ async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> 
 
     await handler._handle_tool_result(_completed("call_b"))
     assert create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_receive_resamples_input_to_declared_provider_rate() -> None:
+    """Non-16 kHz microphone frames preserve duration at the HF send boundary."""
+    append = AsyncMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = SimpleNamespace(input_audio_buffer=SimpleNamespace(append=append))
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, count: traffic.append((kind, count)))
+
+    source = np.arange(800, dtype=np.int16)
+    await handler.receive((8_000, source))
+
+    encoded_audio = append.await_args.kwargs["audio"]
+    decoded_audio = base64.b64decode(encoded_audio)
+    assert len(decoded_audio) == 1_600 * np.dtype(np.int16).itemsize
+    assert traffic == [("audio", len(decoded_audio))]
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_failure_does_not_notify_traffic_observer() -> None:
+    """An HF audio transport failure does not count as sent traffic."""
+    append = AsyncMock(side_effect=RuntimeError("transport unavailable"))
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = SimpleNamespace(input_audio_buffer=SimpleNamespace(append=append))
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, count: traffic.append((kind, count)))
+
+    await handler.receive((8_000, np.ones(80, dtype=np.int16)))
+
+    assert traffic == []
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_cancellation_does_not_notify_traffic_observer() -> None:
+    """Cancellation at the HF send boundary propagates without counting traffic."""
+    append = AsyncMock(side_effect=asyncio.CancelledError)
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = SimpleNamespace(input_audio_buffer=SimpleNamespace(append=append))
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, count: traffic.append((kind, count)))
+
+    with pytest.raises(asyncio.CancelledError):
+        await handler.receive((8_000, np.ones(80, dtype=np.int16)))
+
+    assert traffic == []
+
+
+@pytest.mark.asyncio
+async def test_camera_send_notifies_traffic_observer_after_success(monkeypatch: Any) -> None:
+    """A successful Hugging Face camera attachment counts one provider frame."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    create = AsyncMock()
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=SimpleNamespace(create=create)))
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, count: traffic.append((kind, count)))
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="camera-call",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": "aGVsbG8=", "jpeg_bytes": 5},
+        )
+    )
+
+    assert traffic == [("video", 5)]
+
+
+@pytest.mark.asyncio
+async def test_failed_camera_send_does_not_notify_traffic_observer(monkeypatch: Any) -> None:
+    """A Hugging Face camera transport failure is not counted as a sent frame."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    create = AsyncMock(side_effect=[None, RuntimeError("transport unavailable")])
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=SimpleNamespace(create=create)))
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, count: traffic.append((kind, count)))
+
+    with pytest.raises(RuntimeError, match="transport unavailable"):
+        await handler._handle_tool_result(
+            ToolNotification(
+                id="camera-call",
+                tool_name="camera",
+                is_idle_tool_call=False,
+                status=ToolState.COMPLETED,
+                result={"b64_im": "aGVsbG8=", "jpeg_bytes": 5},
+            )
+        )
+
+    assert traffic == []
+
+
+@pytest.mark.asyncio
+async def test_startup_greeting_can_be_suppressed_for_hybrid_sessions(monkeypatch: Any) -> None:
+    """The provider-neutral greeting control suppresses Hugging Face's prompt."""
+    monkeypatch.setattr(hf_mod, "get_session_greeting_prompt", lambda: "Say hello")
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    create = AsyncMock()
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=SimpleNamespace(create=create)))
+    handler.set_startup_greeting_enabled(False)
+
+    await handler._send_startup_greeting_prompt()
+
+    create.assert_not_awaited()
 
 
 def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:

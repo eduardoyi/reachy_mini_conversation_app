@@ -1,6 +1,7 @@
 """Tests for the camera tool."""
 
 import base64
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -58,3 +59,22 @@ async def test_camera_tool_reports_error_when_camera_disabled() -> None:
 
     assert "error" in result
     reachy_mini.media.get_frame_jpeg.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_camera_tool_does_not_log_question(caplog: pytest.LogCaptureFixture) -> None:
+    """Camera observations remain out of application logs."""
+    sentinel = "camera-household-secret"
+    reachy_mini = MagicMock()
+    reachy_mini.media.get_frame_jpeg.return_value = b"jpeg"
+    deps = ToolDependencies(
+        reachy_mini=reachy_mini,
+        movement_manager=MagicMock(),
+        camera_enabled=True,
+    )
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.tools.camera"):
+        result = await Camera()(deps, question=sentinel)
+
+    assert "b64_im" in result
+    assert sentinel not in caplog.text

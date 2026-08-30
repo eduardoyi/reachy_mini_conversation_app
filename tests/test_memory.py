@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -90,6 +91,26 @@ async def test_memory_tools_use_instance_storage(tmp_path: Path) -> None:
     assert remember_result["saved"] == "Has a dog named Mochi"
     assert forget_result["removed"] == "Has a dog named Mochi"
     assert list_memory_facts(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_memory_tools_do_not_log_household_content(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Memory tool arguments and stored facts remain out of application logs."""
+    sentinel = "memory-household-secret"
+    deps = ToolDependencies(
+        reachy_mini=MagicMock(),
+        movement_manager=MagicMock(),
+        instance_path=tmp_path,
+    )
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.tools"):
+        await Remember()(deps, fact=sentinel)
+        await Forget()(deps, query=sentinel)
+
+    assert sentinel not in caplog.text
 
 
 def test_prompt_includes_memory_fragment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

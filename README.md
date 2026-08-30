@@ -24,6 +24,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Architecture](#architecture)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Realtime provider selection](#realtime-provider-selection)
 - [Running the app](#running-the-app)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
 - [Creating and adding tools](#creating-and-adding-tools)
@@ -33,7 +34,8 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 
 ## Overview
 
-- Low-latency audio conversation through the Hugging Face realtime backend, using the built-in server or a local endpoint.
+- Realtime audio conversation through the selected backend. Hugging Face remains the default; Gemini Live is opt-in.
+- Optional hybrid mode keeps audio processing local until activation, supplies recent locally derived context, and handles exact movement commands without cloud.
 - Vision is handled by the realtime backend when the `camera` tool is used.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble.
 - Async tools integrate motion, camera capture, and MCP Tool Spaces. The optional web UI (`--ui`) manages conversations, personalities, tools, and settings.
@@ -96,17 +98,189 @@ pip install -e .[dev]                   # Development tools
 
 ## Configuration
 
-The default setup uses the Hugging Face backend and does not require an API key.
+The default setup uses the Hugging Face backend and does not require a Gemini API key.
 
-Copy `.env.example` to `.env` when you want to point Hugging Face at your own local endpoint.
+Copy `.env.example` to a local, ignored `.env` when you want to select Gemini or
+point Hugging Face at your own local endpoint. Never commit `.env` or put a
+credential in the web UI.
 
 | Variable | Description |
 |----------|-------------|
+| `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default) or `gemini`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
+| `GEMINI_API_KEY` | Required only when `REALTIME_PROVIDER=gemini`. Configure it in the local app environment; it is not accepted by settings RPC and is never logged. |
+| `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. |
+| `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
+| `HYBRID_RUNTIME_ENABLED` | Opt into local ambient mode. Defaults to `0`, preserving the direct provider path. |
+| `HYBRID_CLOUD_INACTIVITY_SECONDS` | Seconds without cloud conversation activity before the provider closes and ambient mode resumes. Defaults to `60`; `0` disables this close. |
+| `HYBRID_AMBIENT_BUFFER_SECONDS` | RAM-only ambient PCM ring duration, capped at 20 seconds and defaulting to `20`. |
+| `LOCAL_CONTEXT_STRATEGY` | `continuous` (default) transcribes completed local speech segments and enables transcript wake/local commands; `activation` transcribes the RAM snapshot only after keyboard activation. |
+| `LOCAL_STT_BASE_URL` | Optional OpenAI-compatible transcription base URL. Only explicit loopback hosts are accepted; when unset, hybrid mode retains keyboard activation and the RAM ring without local STT. |
+| `LOCAL_STT_MODEL` | Model name sent to the local endpoint. Defaults to `whisper-1`. |
+| `LOCAL_STT_TIMEOUT_SECONDS` | Per-request local STT timeout. Defaults to `5`. |
+| `LOCAL_VAD_RMS_THRESHOLD` | PCM RMS speech threshold for the initial lightweight VAD. Defaults to `500`. |
+| `LOCAL_VAD_SILENCE_SECONDS` | Silence needed to close a local speech segment. Defaults to `0.6`. |
+| `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`. |
+| `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
+| `LOCAL_CONTEXT_MAX_CHARS` | Maximum rolling context sent as text when a cloud session opens. Defaults to `2000`; valid range is 128–8000. |
+
+### Realtime provider selection
+
+Think of `REALTIME_PROVIDER` as the one switch that chooses which realtime
+conversation handler receives the local microphone stream. With no setting, the
+existing Hugging Face path is selected. To try Gemini Live, set the selector and
+the required key in the ignored local `.env` file:
+
+```env
+REALTIME_PROVIDER=gemini
+GEMINI_API_KEY=<configure locally; never commit>
+# GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
+# GEMINI_VOICE=Puck
+```
+
+The Phase 1 audio path is direct: 16 kHz microphone PCM → Gemini Live → 24 kHz
+assistant PCM → the generic local resampler already used by `LocalStream` → the
+Reachy Mini speaker. The provider choice does not create a second tool or
+movement loop. Existing tools, profiles, memory, simulated movement, speech
+movement, transcripts, interruptions, and reconnect handling remain shared.
+The `camera` tool captures a frame only when the assistant requests that tool;
+camera frames are not sent merely because a camera is available.
+
+In the Settings view, Connection selects the provider. Hugging Face endpoint
+controls are shown only for Hugging Face. Gemini's key is environment-only, so
+the page cannot enter or display it. If the selected provider is missing its
+required target, the app keeps the settings surface available and reports what
+is missing instead of starting a backend with incomplete configuration. Saving
+a provider change writes the selector to the instance `.env` and requests an
+in-process backend rebuild/reconnect when the runtime can do so. Profile and
+voice changes use the same reconnect path.
+
+The Gemini adapter, provider-neutral runtime wiring, shared resampler, bounded
+daemon-capture worker, and automated tests have passed the repository gate. The
+latest WebRTC attempt first hit a producer-startup race (`KeyError`) until the
+producer registered. A retry selected WebRTC and initialized the bidirectional
+client, reaching `connection_ready_ms=640.8` and greeting-tool timings of
+231.6 ms and 230.9 ms, but the SDK reverse-audio send queue then failed with
+`not-negotiated (-4)`. No complete WebRTC conversation, first-audio, or interruption
+benchmark was obtained. The current Reachy SDK main still contains the same
+send-chain implementation, so this workaround is not validated and should not
+be presented as expected to work on this Mac. Disk-pressure cleanup left 19 GiB
+free, and the Python runtime was rebuilt for arm64. The earlier 545.7 ms and
+270.8/274.2 ms samples remain historical only.
+The Phase 1 root gate passed 392 tests in 7.64 s; Ruff was clean, formatting left
+81 files unchanged, and strict mypy was clean across 46 source files.
+
+Before the later native-audio wedge, a user manually completed one long,
+responsive Phase 1 Gemini conversation over the SDK LOCAL backend, including a
+successful barge-in/interruption. This is user-observed qualitative evidence,
+not an instrumented first-audio or interruption-latency result; reproducible
+quantitative benchmark evidence remains incomplete. The Phase 0 `Exacto!`
+feedback loop is a separate baseline speaker-to-microphone echo observation and
+must not be conflated with this Phase 1 LOCAL success. WebRTC was a later
+fallback, and its `not-negotiated (-4)` failure does not invalidate the earlier
+LOCAL conversation.
+
+The Phase 0 speaker echo loop remains a Mac speaker/headphone benchmark item,
+separate from the successful Phase 1 LOCAL conversation. Use headphones for
+repeatable testing. WebRTC remains unvalidated on this Mac; use the SDK LOCAL
+media backend for the simulator path. Quantitative Phase 1 first-audio evidence
+and live Phase 3–5 measurements remain pending. The source diagram in
+[`docs/scheme.mmd`](docs/scheme.mmd) includes the provider choice; the generated
+SVG is not hand-edited and still needs regeneration.
+
+### Hybrid ambient mode
+
+Set `HYBRID_RUNTIME_ENABLED=1` to keep the local media loop running while the
+selected provider is closed. The runtime starts in `LOCAL_AMBIENT`; microphone
+frames are copied into a bounded mono-int16 RAM ring and passed to a local
+processing boundary. No ambient bytes or camera frames are sent to a cloud
+provider, and no raw audio is written to disk or logged. The ring is never
+replayed when a session opens.
+
+Press Space or Enter in the browser conversation view to activate. With a local
+STT endpoint and `LOCAL_CONTEXT_STRATEGY=continuous`, saying “Reachy” also
+activates from locally derived transcript text. The runtime briefly enters
+`LOCAL_COMMAND` and acknowledges physically before any cloud setup. Exact
+`stop`, `be quiet`, `look left`, `look right`, and `look at me` requests run
+through the existing movement/tool boundaries without opening cloud. Anything
+uncertain escalates to one fresh selected provider handler in
+`CLOUD_CONVERSATION`. Provider setup failure, cancellation, or configured
+conversational inactivity returns to ambient mode.
+
+For an addressed question captured before cloud startup, the rolling transcript
+is added as untrusted background and the bounded wake-stripped question is sent
+as the first user text turn after provider readiness. Raw pre-wake audio is not
+replayed or uploaded.
+
+Provider readiness can take time after activation. Postactivation frames are
+held in a bounded 20-second FIFO until the provider is ready; overflow drops
+oldest frames and increments the diagnostic `postactivation_frames_dropped`.
+Cloud inactivity starts once the provider reports connected and pauses while
+the user is speaking; ambient capture alone does not keep the cloud session
+alive.
+
+Keyboard activation remains available through the browser UI and the
+`conversation.activate` JSON-RPC method; headless runs do not start a blocking
+stdin listener. Ambient PCM adopts the first sample rate it receives and
+rejects mixed-rate frames rather than resampling them.
+
+The status RPC exposes `ambient_audio_seconds_buffered`,
+`ambient_audio_bytes_sent_to_cloud`, `cloud_audio_bytes_sent`,
+`cloud_video_frames_sent`, and accumulated `gemini_session_duration`. Counters
+are updated at successful provider send boundaries; they do not replace the
+privacy tests. Status also exposes bounded context, wake, local-command,
+activation-latency, and postactivation-drop diagnostics without transcript or
+audio payloads.
+
+The final automated Phase 3–5 integration gate passed all 649 tests plus Ruff,
+formatting, strict mypy, lock consistency, JavaScript syntax, and diff checks.
+Live microphone, local-model, wake-quality, dinner-demo, and CPU/RAM acceptance
+measurements remain pending.
+
+#### Local STT benchmark server
+
+The app does not install a speech model. It talks to a replaceable local
+OpenAI-compatible endpoint, keeping model code outside the core application.
+For the first cross-platform benchmark, Hugging Face Transformers provides the
+required local transcription endpoint:
+
+```bash
+# One-time install outside this project's virtual environment.
+/opt/homebrew/bin/uv tool install --python 3.12 --force \
+  "transformers[serving]" --with librosa
+
+# Terminal 3; the Reachy daemon already uses port 8000.
+transformers serve --host 127.0.0.1 --port 8766 \
+  --force-model openai/whisper-small
+```
+
+Then add this to the ignored `.env`:
+
+```env
+HYBRID_RUNTIME_ENABLED=1
+LOCAL_CONTEXT_STRATEGY=continuous
+LOCAL_STT_BASE_URL=http://127.0.0.1:8766/v1
+LOCAL_STT_MODEL=openai/whisper-small
+REACHY_MINI_CUSTOM_PROFILE=household_companion
+```
+
+The first transcription downloads/loads the selected model and can be slower.
+The adapter accepts only `localhost`, `127.0.0.0/8`, or `::1`, disables proxy
+environment discovery, constructs at most 20 seconds of WAV data in memory,
+and never adds an API key. The current Transformers transcription handler reads
+the upload as bytes and decodes it from `BytesIO`; the live acceptance protocol
+must still monitor temporary directories before confirming the end-to-end
+RAM-only guarantee. MLX Audio's current server is not recommended here because
+its STT execution path writes a temporary audio file. Strategy A (`continuous`)
+is the full dinner-demo path. Strategy B
+(`activation`) keeps only the raw RAM ring until Space/Enter is pressed; voice
+wake and local voice commands are intentionally unavailable in that strategy.
+See [`docs/features/local-audio-backends.md`](docs/features/local-audio-backends.md)
+for its contracts and limitations.
 
 ### Hugging Face Connection Modes
 
@@ -162,6 +336,50 @@ reachy-mini-conversation-app
 
 The app runs in console mode. Add `--ui` to serve the web interface at http://127.0.0.1:7860/.
 
+### Simulator development
+
+Use two terminals: start the Reachy Mini simulator first, then start this app.
+On macOS, use the virtual environment's `mjpython`; the ordinary
+`reachy-mini-daemon --sim` command cannot launch the MuJoCo passive viewer on
+macOS because `launch_passive` requires `mjpython`:
+
+```bash
+# Install the optional simulator dependencies, including MuJoCo.
+uv sync --frozen --group dev --group sim
+
+# Terminal 1 — macOS
+.venv/bin/mjpython -m reachy_mini.daemon.app.main \
+  --sim --scene empty --fastapi-host 127.0.0.1 --fastapi-port 8000
+
+# Terminal 2
+# GEMINI_API_KEY remains in the ignored .env; select Gemini explicitly here.
+REALTIME_PROVIDER=gemini .venv/bin/reachy-mini-conversation-app --media-backend local
+```
+
+This is the console-only benchmark command. Add `--ui` only when port 7860 is
+free: `REALTIME_PROVIDER=gemini .venv/bin/reachy-mini-conversation-app --media-backend local --ui`.
+
+The optional `sim` group supplies the locked MuJoCo 3.3.0 dependency. It is not
+required for ordinary non-simulator runs.
+
+The SDK LOCAL backend produced the accepted simulator conversations on this
+Mac. A separate WebRTC attempt reached setup and then failed its reverse-audio
+send chain with `not-negotiated (-4)`, so WebRTC is not an accepted workaround
+here. Quantitative first-response-audio benchmarking is still pending.
+
+On Linux or Windows, use the normal daemon CLI in Terminal 1:
+
+```bash
+reachy-mini-daemon --sim
+```
+
+Then run `reachy-mini-conversation-app --ui` in Terminal 2. Do not pass
+`--headless` when rendered camera frames are needed, and do not pass
+`--no-media` when testing audio or camera capture. The first macOS run uses the
+default microphone and speaker and may require macOS microphone/audio
+permissions. The app's `--no-camera` option disables only its camera tool; it
+is not a daemon capture or privacy switch.
+
 ### CLI options
 
 | Option | Default | Description |
@@ -169,6 +387,7 @@ The app runs in console mode. Add `--ui` to serve the web interface at http://12
 | `--no-camera` | `False` | Run without camera capture. |
 | `--ui` | `False` | Serve the web UI at http://127.0.0.1:7860/, in addition to console mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
+| `--media-backend` | `default` | Primary app choices: `default`, `local`, `webrtc`, or `no_media`. The value is used only when this process constructs the SDK robot. `no_media` disables usable conversation audio and is for headless/non-audio diagnostics, not this benchmark. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 
 ### Examples
