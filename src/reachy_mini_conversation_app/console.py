@@ -27,6 +27,7 @@ from reachy_mini_conversation_app.config import (
     LOCKED_PROFILE,
     REALTIME_PROVIDER_ENV,
     HF_REALTIME_WS_URL_ENV,
+    AUDIO_OUTPUT_BACKEND_SDK,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
     HF_REALTIME_CONNECTION_MODE_ENV,
@@ -40,6 +41,7 @@ from reachy_mini_conversation_app.config import (
     get_realtime_provider,
     build_hf_direct_ws_url,
     parse_hf_direct_target,
+    get_audio_output_backend,
     get_hf_connection_selection,
     refresh_runtime_config_from_env,
     get_realtime_missing_config_message,
@@ -55,6 +57,7 @@ from reachy_mini_conversation_app.personality_routes import (
     register_personality_methods,
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
+from reachy_mini_conversation_app.audio.speaker_output import SpeakerOutput, create_speaker_output
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
@@ -297,6 +300,7 @@ class LocalStream:
         handler_factory: HandlerFactory | None = None,
         startup_voice: Optional[str] = None,
         hybrid_runtime: HybridRuntime | None = None,
+        speaker_output_factory: Callable[[int], SpeakerOutput] | None = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
@@ -321,6 +325,8 @@ class LocalStream:
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
         self._capture_worker: _AudioCaptureWorker | None = None
+        self._speaker_output: SpeakerOutput | None = None
+        self._speaker_output_factory = speaker_output_factory
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
         # Notifications (conversation.turn/phase/transcript/activity) are pushed
         # here from activity + transcripts. Survives handler rebuilds (mounted once).
@@ -330,6 +336,19 @@ class LocalStream:
         self._last_level_emit: dict[str, float] = {}
         self._install_handler(handler)
         self._attach_hybrid_runtime()
+
+    def _build_speaker_output(self) -> SpeakerOutput | None:
+        """Build an explicitly selected app-owned speaker output."""
+        backend = get_audio_output_backend()
+        if backend == AUDIO_OUTPUT_BACKEND_SDK:
+            return None
+        try:
+            sample_rate = int(self._robot.media.get_output_audio_samplerate())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("Selected audio output requires a valid SDK output sample rate") from exc
+        if self._speaker_output_factory is not None:
+            return self._speaker_output_factory(sample_rate)
+        return create_speaker_output(backend, sample_rate, logger_instance=logger)
 
     def _attach_hybrid_runtime(self) -> None:
         """Wire LocalStream's queue, state, and capture boundary into hybrid mode."""
@@ -1299,8 +1318,10 @@ class LocalStream:
                 if env_path.exists():
                     load_dotenv(dotenv_path=str(env_path), override=True)
                     refresh_runtime_config_from_env()
-            except Exception:
-                pass  # Instance .env loading is optional; continue with defaults
+            except ValueError:
+                raise
+            except Exception as error:
+                logger.debug("Unable to load instance environment: %s", type(error).__name__)
 
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading the instance .env so status endpoint sees the right value)
@@ -1333,9 +1354,30 @@ class LocalStream:
                 return
             self._set_backend_connection_state("not_started")
 
-        # Start media after key is set/available
-        self._robot.media.start_recording()
-        self._robot.media.start_playing()
+        # Select output after the optional instance .env has been loaded above.
+        if self._speaker_output is not None:
+            self._speaker_output.close()
+        self._speaker_output = self._build_speaker_output()
+
+        # Start media after key is set/available.
+        try:
+            self._robot.media.start_recording()
+            if self._speaker_output is None:
+                self._robot.media.start_playing()
+            if self._speaker_output is not None:
+                self._speaker_output.start()
+        except Exception:
+            if self._speaker_output is not None:
+                self._speaker_output.close()
+            try:
+                self._robot.media.stop_playing()
+            except Exception as error:
+                logger.debug("Error stopping playback after startup failure: %s", type(error).__name__)
+            try:
+                self._robot.media.stop_recording()
+            except Exception as error:
+                logger.debug("Error stopping recording after startup failure: %s", type(error).__name__)
+            raise
 
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
@@ -1387,12 +1429,19 @@ class LocalStream:
         try:
             self._robot.media.stop_recording()
         except Exception as e:
-            logger.debug(f"Error stopping recording (may already be stopped): {e}")
+            logger.debug("Error stopping recording (may already be stopped): %s", type(e).__name__)
 
         try:
             self._robot.media.stop_playing()
         except Exception as e:
-            logger.debug(f"Error stopping playback (may already be stopped): {e}")
+            logger.debug("Error stopping playback (may already be stopped): %s", type(e).__name__)
+
+        speaker_output = self._speaker_output
+        if speaker_output is not None:
+            try:
+                speaker_output.close()
+            except Exception as e:
+                logger.debug("Error closing app-owned speaker output: %s", type(e).__name__)
 
         # close() runs on watcher threads, loop-owned state must change on the loop.
         loop = self._asyncio_loop
@@ -1415,12 +1464,18 @@ class LocalStream:
         logger.info("User intervention: flushing player queue")
         if self._hybrid_runtime is not None:
             self._hybrid_runtime.clear_provider_output()
-        self._clear_robot_playback()
+        if self._speaker_output is not None:
+            self._speaker_output.flush()
+        else:
+            self._clear_robot_playback()
         self._drain_output_queue()
 
     def _clear_robot_playback(self) -> None:
         """Flush SDK playback without recursively entering the hybrid runtime."""
         media = self._robot.media
+        if self._speaker_output is not None:
+            self._speaker_output.flush()
+            return
         audio = getattr(media, "audio", None)
         if audio is None:
             return
@@ -1523,13 +1578,18 @@ class LocalStream:
                     audio_frame = resample_audio(
                         audio_to_float32(audio_data),
                         input_sample_rate,
-                        self._robot.media.get_output_audio_samplerate(),
+                        self._speaker_output.sample_rate
+                        if self._speaker_output is not None
+                        else self._robot.media.get_output_audio_samplerate(),
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
                     logger.warning("Ignoring invalid output audio frame: %s", exc)
                     continue
 
-                self._robot.media.push_audio_sample(audio_frame)
+                if self._speaker_output is not None:
+                    self._speaker_output.push(audio_frame)
+                else:
+                    self._robot.media.push_audio_sample(audio_frame)
                 self._emit_level("assistant", audio_frame)
 
             else:

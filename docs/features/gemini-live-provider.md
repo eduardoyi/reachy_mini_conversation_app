@@ -215,7 +215,7 @@ inferred from the provider selector alone.
 | Provider constants | `src/reachy_mini_conversation_app/config.py` | Keep `HF_BACKEND="huggingface"`, `GEMINI_BACKEND="gemini"`, and Gemini env/default constants available to callers. |
 | Handler factory | `src/reachy_mini_conversation_app/main.py` | Build exactly the selected handler and reject unknown values before starting either backend. |
 | Gemini adapter | `src/reachy_mini_conversation_app/gemini_live.py` | Implement `ConversationHandler` for Gemini Live audio, events, transcripts, interruptions, tools, camera results, reconnect, and shutdown. |
-| Shared media loop | `src/reachy_mini_conversation_app/console.py` | Record the SDK input frame, emit handler output, resample output for the SDK speaker, expose settings, and supervise reconnects. The bounded capture worker isolates synchronous SDK pulls from asyncio. |
+| Shared media loop | `src/reachy_mini_conversation_app/console.py` | Record the SDK input frame, emit handler output, resample output for the selected speaker boundary, expose settings, and supervise reconnects. The bounded capture worker isolates synchronous SDK pulls from asyncio. |
 | Audio conversion | `src/reachy_mini_conversation_app/streaming.py` | Provide the generic mono-float32 resampler used when provider and SDK rates differ. |
 | Latency diagnostics | `src/reachy_mini_conversation_app/gemini_live.py` | Expose bounded `GeminiLatencySnapshot` numeric samples (maximum 32 per sample list) and marker-order diagnostics without retaining payloads. |
 | Common contract | `src/reachy_mini_conversation_app/conversation_handler.py` | Preserve the lifecycle, receive/emit, profile, voice, transcript, activity, typed traffic, connection, and greeting-control interfaces shared by providers. |
@@ -247,6 +247,7 @@ message, and transport-only base64 is removed from the model-visible JSON.
 | `HYBRID_RUNTIME_ENABLED` | No | `0`; set to `1` to keep the provider closed until keyboard activation. |
 | `HYBRID_CLOUD_INACTIVITY_SECONDS` | No | `60`; set to `0` to disable hybrid session inactivity close. |
 | `HYBRID_AMBIENT_BUFFER_SECONDS` | No | `20`, capped at 20 seconds for the RAM-only ring. |
+| `AUDIO_OUTPUT_BACKEND` | No | `sdk`; `gstreamer` explicitly selects the experimental app-owned simulator speaker output. This changes only local playback, not the Gemini transport. |
 
 Provider readiness is deliberately separate from provider selection. The
 selected Gemini provider is not ready until the key is non-empty; the selected

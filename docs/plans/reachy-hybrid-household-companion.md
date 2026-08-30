@@ -1,7 +1,7 @@
 # Reachy Hybrid Household Companion — Implementation Plan
 
 - Status: `in-progress`
-- Active phase: `Phases 3–5 implementation; Phase 1 benchmark completion deferred`
+- Active phase: `Phases 3–5 live validation; macOS simulator playback mitigation validation`
 - Owner: Reachy project
 - Created: 2026-08-29
 - Last updated: 2026-08-30
@@ -600,12 +600,13 @@ and a measured—not speculative—assessment of Raspberry Pi 5 8GB plausibility
 
 ## Deviations from the approved plan
 
-No implementation deviations have been recorded. Phase 1 provider selection,
-adapter, runtime, resampler, and automated-test work follows the approved plan;
-the real simulator/Gemini benchmark is the remaining Phase 1 validation. Add a
-dated entry here whenever implementation, scope, provider behavior, dependency
-choice, or acceptance criteria changes from the approved plan, with the reason
-and evidence.
+The approved plan retained the SDK speaker path. On 2026-08-30, three native
+macOS simulator crashes established that assistant PCM entering the SDK LOCAL
+`audiomixer` is unsafe on this machine. An explicit app-owned GStreamer speaker
+adapter was added as a simulator containment path. It changes only local
+playback, adds no dependency or agent layer, leaves `sdk` as the default, and
+does not monkey-patch the SDK. The deviation remains provisional until repeated
+live validation; the durable fix still belongs upstream.
 
 ## Execution log
 
@@ -668,24 +669,31 @@ and evidence.
 | 2026-08-30 | Phases 3–5 live acceptance | The macOS crash-containment rerun remained alive, but the metadata-only status snapshot showed 98.08 seconds buffered, one speech frame, zero STT requests, and zero ambient bytes sent to cloud. The default RMS threshold of 500 did not admit the spoken command in this run; benchmark a lower process-local threshold before changing the shared default. |
 | 2026-08-30 | Phase 3 live STT tuning | A process-local RMS threshold of 100 admitted 65 speech frames and created one STT request, but the request exceeded the five-second app timeout. A following synthetic `computer look left` request to the same warmed Transformers endpoint returned the correct text in 1.25 seconds. Repeat live testing with a temporary longer timeout before changing the model or shared defaults. |
 | 2026-08-30 | Split-final gate | Final CI-equivalent verification passed Ruff, formatting, strict mypy across 54 source files, all 672 tests in 13.37 seconds, lock consistency, both JavaScript syntax checks, and `git diff --check`. `REACHY_MINI_SKIP_DOTENV=1` isolated tests from the ignored live `.env`; live split-final and native-crash validation remain pending. |
+| 2026-08-30 | Native audio crash root cause | A third live run crashed about 2.25 seconds after Gemini called `MoveHead` and response playback began, despite the Darwin `clear_player()` skip. All three macOS reports have the same native arm64 null dereference on `audiomixer0:src` at GStreamer `do_convert_out+140`, with zero samples and null sample arrays before ORC runs. The app's public audio shape is valid. The skip is therefore insufficient, Phase 5 local-command acceptance is still pending, and repeated live playback tests remain paused. |
+| 2026-08-30 | Native audio mitigation plan | Selected an explicit, reversible simulator output adapter that routes assistant PCM through a small app-owned GStreamer pipeline without `audiomixer`, while retaining SDK capture, providers, tools, and movement. It will not monkey-patch SDK internals or add a dependency. The SDK mixer still exists for capture, audio-reactive wobbling will not receive assistant PCM, and live repeated-command validation is required before treating the bypass as effective. GStreamer 1.28.6 is not the primary path because its relevant converter/aggregator sources match installed 1.28.4. |
+| 2026-08-30 | Native audio mitigation implementation | Added the explicit `AUDIO_OUTPUT_BACKEND=gstreamer` path with bounded/leaky queues, generation-safe interruption, fail-closed configuration/startup, and combined SDK/app shutdown. Adversarial review rejected earlier passes for lifecycle, flush-race, and test-isolation defects, then approved the corrected implementation with no remaining P0/P1 findings. The 126-test focused set passed in both file orders. Final root verification passed Ruff, formatting, strict mypy across 57 source files, all 697 tests in 15.07 seconds, lock consistency, both JavaScript syntax checks, and `git diff --check`. Live containment evidence remains pending. |
 
 ## Next steps
 
-1. Repeat the short direct Phase 1 LOCAL benchmark with corrected first-audio
+1. Run repeated simulator/Gemini turns with
+   `AUDIO_OUTPUT_BACKEND=gstreamer`, including delayed first audio, tools,
+   interruption, inactivity close, and clean shutdown. Confirm that no SDK
+   `push_audio_sample()` path is used and retain any native crash report.
+2. Repeat the short direct Phase 1 LOCAL benchmark with corrected first-audio
    instrumentation; retain unavailable/reordered counts instead of inventing a
    latency when provider events arrive out of order.
-2. Start the loopback local STT endpoint and run Strategy A and Strategy B dinner
+3. Start the loopback local STT endpoint and run Strategy A and Strategy B dinner
    demos with headphones, recording the report's latency, transcript quality,
    CPU, and RSS fields.
-3. Run a labelled transcript-wake baseline and, without adding a runtime
+4. Run a labelled transcript-wake baseline and, without adding a runtime
    dependency, benchmark the 16 kHz `andyjmorgan` ONNX candidate through the
    existing acoustic seam; record false positives, misses, activation latency,
    CPU, and RSS. Compare the 24 kHz/1.5-second Edge candidate only after its
    license and shared-stream adapter are reviewed.
-4. Run all five local commands in the simulator; record first-word retention,
+5. Run all five local commands in the simulator; record first-word retention,
    movement behavior, local-command latency, and whether each command stays
    cloud-free.
-5. Update this plan, the feature documents, and
+6. Update this plan, the feature documents, and
    [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) after each accepted live
    result. Regenerate the architecture SVG from [`docs/scheme.mmd`](../scheme.mmd)
    through the existing workflow when available.
@@ -707,3 +715,4 @@ and evidence.
 | 2026-08-30 | Recorded ready-made wake-word research and kept acoustic model selection pending measured quality, platform/resource results, and licensing review. |
 | 2026-08-30 | Added bounded split-final wake follow-up handling, config, docs, and deterministic lifecycle/privacy coverage; live wake/command acceptance and latency remain pending. |
 | 2026-08-30 | Adjusted the split-final default from one to two seconds after review of the 0.6-second silence boundary and local STT delay; the wait remains bounded and no live latency claim is made. |
+| 2026-08-30 | Added the explicit simulator speaker-output containment after three repeatable SDK mixer crashes; default SDK behavior is unchanged, adversarial review and the complete automated gate passed, and live effectiveness is not yet claimed. |

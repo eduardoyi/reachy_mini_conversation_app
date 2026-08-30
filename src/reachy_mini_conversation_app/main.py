@@ -433,9 +433,8 @@ def run(
 
     # Each async service → its own thread/loop
     movement_manager.start()
-    # Audio-reactive head motion is driven by the daemon's wobbler, which
-    # taps the media pipeline at push_audio_sample. The console stream pushes
-    # assistant audio through that pipeline directly.
+    # Audio-reactive head motion follows SDK playback. The explicit simulator
+    # output bypass does not feed assistant PCM into this wobbler.
     robot.enable_wobbling()
 
     timeout_minutes = resolve_app_timeout_minutes()

@@ -16,7 +16,12 @@ from fastapi.testclient import TestClient
 
 from reachy_mini.media.media_manager import MediaBackend
 import reachy_mini_conversation_app.console as console_mod
-from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
+from reachy_mini_conversation_app.config import (
+    HF_AVAILABLE_VOICES,
+    AUDIO_OUTPUT_BACKEND_ENV,
+    AUDIO_OUTPUT_BACKEND_SDK,
+    config,
+)
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.console import LocalStream, _AudioCaptureWorker
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
@@ -753,6 +758,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
 def test_media_warmup_overlaps_audio_startup_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Audio configuration should run while the media pipelines warm up."""
     monkeypatch.setattr("reachy_mini_conversation_app.console.has_realtime_target", lambda: True)
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: AUDIO_OUTPUT_BACKEND_SDK)
 
     handler = MagicMock()
     handler.shutdown = AsyncMock()
@@ -786,6 +792,52 @@ def test_media_warmup_overlaps_audio_startup_config(monkeypatch: pytest.MonkeyPa
         stream.launch()
     finally:
         asyncio.set_event_loop(asyncio.new_event_loop())
+
+    media.start_recording.assert_called_once_with()
+    media.start_playing.assert_called_once_with()
+
+
+def test_app_speaker_output_skips_sdk_playback_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app-owned path uses the recording pipeline without starting SDK playback."""
+
+    class FakeSpeakerOutput:
+        sample_rate = 16_000
+
+        def __init__(self) -> None:
+            self.started = 0
+
+        def start(self) -> None:
+            self.started += 1
+
+        def push(self, _audio: np.ndarray) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    output = FakeSpeakerOutput()
+    monkeypatch.setattr(console_mod, "has_realtime_target", lambda: True)
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    monkeypatch.setattr(console_mod.asyncio, "run", lambda runner: runner.close())
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=16_000),
+        start_recording=MagicMock(),
+        start_playing=MagicMock(),
+    )
+    stream = LocalStream(
+        MagicMock(),
+        SimpleNamespace(media=media),
+        speaker_output_factory=lambda _sample_rate: output,
+    )
+
+    stream.launch()
+
+    media.start_recording.assert_called_once_with()
+    media.start_playing.assert_not_called()
+    assert output.started == 1
 
 
 @pytest.mark.asyncio
@@ -1736,6 +1788,229 @@ async def test_play_loop_resamples_provider_output_to_media_rate() -> None:
         media.push_audio_sample.call_args.args[0],
         np.array([0.0, 1.5, 3.0, 4.5], dtype=np.float32),
     )
+
+
+@pytest.mark.asyncio
+async def test_play_loop_routes_selected_app_output_without_sdk_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The opt-in speaker bypass receives resampled audio while SDK output stays untouched."""
+
+    class FakeSpeakerOutput:
+        sample_rate = 16_000
+
+        def __init__(self) -> None:
+            self.frames: list[np.ndarray] = []
+            self.flushes = 0
+            self.closed = 0
+
+        def start(self) -> None:
+            return None
+
+        def push(self, audio: np.ndarray) -> None:
+            self.frames.append(audio.copy())
+
+        def flush(self) -> None:
+            self.flushes += 1
+
+        def close(self) -> None:
+            self.closed += 1
+
+    output = FakeSpeakerOutput()
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    monkeypatch.setattr(console_mod, "create_speaker_output", lambda *_args, **_kwargs: output)
+
+    source = np.arange(6, dtype=np.float32)
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=16_000),
+        push_audio_sample=MagicMock(),
+    )
+    handler = MagicMock()
+    stream = LocalStream(
+        handler,
+        SimpleNamespace(media=media),
+        speaker_output_factory=lambda _sample_rate: output,
+    )
+    stream._speaker_output = stream._build_speaker_output()
+
+    async def emit_output() -> tuple[int, np.ndarray] | None:
+        if not output.frames:
+            return 24_000, source
+        stream._stop_event.set()
+        return None
+
+    handler.emit = emit_output
+
+    await stream.play_loop()
+
+    media.push_audio_sample.assert_not_called()
+    media.get_output_audio_samplerate.assert_called_once_with()
+    assert len(output.frames) == 1
+    np.testing.assert_allclose(output.frames[0], np.array([0.0, 1.5, 3.0, 4.5], dtype=np.float32))
+
+
+def test_close_stops_sdk_playback_and_closes_selected_app_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shutdown stops the SDK playback pipeline and the app-owned output."""
+
+    class FakeSpeakerOutput:
+        sample_rate = 16_000
+
+        def __init__(self) -> None:
+            self.flushes = 0
+            self.closed = 0
+
+        def start(self) -> None:
+            return None
+
+        def push(self, _audio: np.ndarray) -> None:
+            return None
+
+        def flush(self) -> None:
+            self.flushes += 1
+
+        def close(self) -> None:
+            self.closed += 1
+
+    output = FakeSpeakerOutput()
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    monkeypatch.setattr(console_mod, "create_speaker_output", lambda *_args, **_kwargs: output)
+
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=16_000),
+        push_audio_sample=MagicMock(),
+        stop_playing=MagicMock(),
+    )
+    stream = LocalStream(
+        MagicMock(),
+        SimpleNamespace(media=media),
+        speaker_output_factory=lambda _sample_rate: output,
+    )
+    assert stream._speaker_output is None
+    stream._speaker_output = stream._build_speaker_output()
+
+    assert stream._speaker_output is output
+    stream.close()
+    media.stop_playing.assert_called_once_with()
+    assert output.closed == 1
+
+
+def test_speaker_output_is_not_built_during_stream_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Output selection waits until launch has reloaded any instance environment."""
+    factory = MagicMock()
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    stream = LocalStream(
+        MagicMock(),
+        SimpleNamespace(media=SimpleNamespace(get_output_audio_samplerate=MagicMock(return_value=16_000))),
+        speaker_output_factory=factory,
+    )
+
+    assert stream._speaker_output is None
+    factory.assert_not_called()
+
+
+def test_invalid_instance_audio_output_fails_before_media_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An invalid persisted output selector must not silently restore SDK routing."""
+    (tmp_path / ".env").write_text("AUDIO_OUTPUT_BACKEND=unknown\n", encoding="utf-8")
+    monkeypatch.setenv(AUDIO_OUTPUT_BACKEND_ENV, AUDIO_OUTPUT_BACKEND_SDK)
+    monkeypatch.setattr(config, "AUDIO_OUTPUT_BACKEND", "sdk")
+    monkeypatch.setattr(console_mod, "has_realtime_target", lambda: True)
+    media = SimpleNamespace(start_recording=MagicMock(), start_playing=MagicMock())
+    stream = LocalStream(MagicMock(), SimpleNamespace(media=media), instance_path=str(tmp_path))
+
+    with pytest.raises(ValueError, match="Invalid AUDIO_OUTPUT_BACKEND"):
+        stream.launch()
+
+    media.start_recording.assert_not_called()
+    media.start_playing.assert_not_called()
+
+
+def test_output_start_failure_stops_sdk_media_without_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed app-owned output cannot resume assistant routing through the SDK."""
+
+    class FailingSpeakerOutput:
+        sample_rate = 16_000
+
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def start(self) -> None:
+            raise RuntimeError("speaker start failed")
+
+        def push(self, _audio: np.ndarray) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed += 1
+
+    output = FailingSpeakerOutput()
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    monkeypatch.setattr(console_mod, "has_realtime_target", lambda: True)
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=16_000),
+        start_recording=MagicMock(),
+        start_playing=MagicMock(),
+        stop_recording=MagicMock(),
+        stop_playing=MagicMock(),
+    )
+    stream = LocalStream(
+        MagicMock(),
+        SimpleNamespace(media=media),
+        speaker_output_factory=lambda _sample_rate: output,
+    )
+
+    with pytest.raises(RuntimeError, match="speaker start failed"):
+        stream.launch()
+
+    media.start_recording.assert_called_once_with()
+    media.start_playing.assert_not_called()
+    media.stop_playing.assert_called_once_with()
+    media.stop_recording.assert_called_once_with()
+    assert output.closed == 1
+
+
+def test_clear_audio_queue_flushes_selected_app_output_without_sdk_flush(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Barge-in flushes only the selected app-owned path."""
+
+    class FakeSpeakerOutput:
+        sample_rate = 16_000
+
+        def __init__(self) -> None:
+            self.flushes = 0
+
+        def start(self) -> None:
+            return None
+
+        def push(self, _audio: np.ndarray) -> None:
+            return None
+
+        def flush(self) -> None:
+            self.flushes += 1
+
+        def close(self) -> None:
+            return None
+
+    output = FakeSpeakerOutput()
+    monkeypatch.setattr(console_mod, "get_audio_output_backend", lambda: "gstreamer")
+    monkeypatch.setattr(console_mod, "create_speaker_output", lambda *_args, **_kwargs: output)
+    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    media = SimpleNamespace(audio=audio, get_output_audio_samplerate=MagicMock(return_value=16_000))
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    stream = LocalStream(
+        handler,
+        SimpleNamespace(media=media),
+        speaker_output_factory=lambda _sample_rate: output,
+    )
+    stream._speaker_output = stream._build_speaker_output()
+
+    stream.clear_audio_queue()
+
+    assert output.flushes == 1
+    audio.clear_player.assert_not_called()
+    audio.clear_output_buffer.assert_not_called()
 
 
 @pytest.mark.asyncio

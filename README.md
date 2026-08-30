@@ -128,6 +128,7 @@ credential in the web UI.
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
 | `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | Seconds to wait for one next final local command after a wake-only transcript. Defaults to `2`; timeout opens the normal cloud path. |
 | `LOCAL_CONTEXT_MAX_CHARS` | Maximum rolling context sent as text when a cloud session opens. Defaults to `2000`; valid range is 128–8000. |
+| `AUDIO_OUTPUT_BACKEND` | `sdk` (default) uses Reachy Mini playback. `gstreamer` explicitly selects the experimental app-owned speaker path used to work around the macOS simulator SDK mixer crash. Invalid values stop startup. |
 
 ### Realtime provider selection
 
@@ -369,8 +370,23 @@ free: `REALTIME_PROVIDER=gemini .venv/bin/reachy-mini-conversation-app --media-b
 The optional `sim` group supplies the locked MuJoCo 3.3.0 dependency. It is not
 required for ordinary non-simulator runs.
 
-The SDK LOCAL backend produced the accepted simulator conversations on this
-Mac. A separate WebRTC attempt reached setup and then failed its reverse-audio
+The SDK LOCAL backend produced the earlier accepted simulator conversations on
+this Mac, but three later cloud-activation runs crashed in the native SDK
+GStreamer `audiomixer` zero-frame path. For the current macOS simulator test,
+explicitly route assistant sound around that mixer input:
+
+```bash
+AUDIO_OUTPUT_BACKEND=gstreamer REALTIME_PROVIDER=gemini \
+  .venv/bin/reachy-mini-conversation-app --media-backend local --ui
+```
+
+This is an experimental simulator containment path, not an upstream SDK fix.
+It keeps SDK microphone capture, providers, tools, and normal movement, but the
+SDK audio-reactive wobbler does not receive assistant PCM. The SDK mixer still
+exists for capture, so repeated live validation is required before the crash is
+considered contained. Unset the variable to restore the normal SDK output path.
+
+A separate WebRTC attempt reached setup and then failed its reverse-audio
 send chain with `not-negotiated (-4)`, so WebRTC is not an accepted workaround
 here. Quantitative first-response-audio benchmarking is still pending.
 

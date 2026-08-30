@@ -271,15 +271,24 @@ the runtime status now exposes `local_stt_completed`,
 metadata-only diagnostics needed to distinguish that boundary failure. No raw
 transcript or audio is returned by the status RPC.
 
-Two subsequent live app runs ended in native macOS GStreamer
+Three live app runs ended in native macOS GStreamer
 `audiomixer0:src` `SIGSEGV` failures after cloud activation, without a Python
 exception. As a containment workaround, `LocalStream` skips the SDK
 `audio.clear_player()` call only when `sys.platform == "darwin"` and the public
 media backend is `MediaBackend.LOCAL`; provider/app queues still drain. This
-does not prove the root cause or fix the SDK/GStreamer failure, and
-already-buffered native audio may remain after barge-in. WebRTC and non-macOS
-backends retain their native flush behavior. Hardware and live validation of
-the workaround remain pending.
+does not fix the SDK/GStreamer failure: the third run crashed after Gemini's
+`MoveHead` tool call and likely first response audio without entering the native
+clear path. All three reports share a zero-sample/null-array dereference at
+GStreamer `do_convert_out+140` before ORC runs. The app's final public playback
+shape is valid, so live SDK playback tests are paused while an explicit
+simulator output bypass is implemented. Already-buffered native audio may remain
+after barge-in. WebRTC and non-macOS backends retain their native flush behavior.
+
+The explicit bypass is now implemented behind
+`AUDIO_OUTPUT_BACKEND=gstreamer` and documented in
+[`simulator-speaker-output.md`](simulator-speaker-output.md). It is still
+awaiting repeated live Gemini validation; its automated tests do not prove that
+a native process crash is resolved.
 
 After adding the diagnostics and macOS containment on 2026-08-30, the full
 repository gate passed: Ruff and formatting were clean, strict mypy found no
@@ -322,3 +331,5 @@ JavaScript syntax checks, and `git diff --check` also passed.
 | 2026-08-30 | Root verification after diagnostics and crash containment passed Ruff, formatting, strict mypy, all 654 tests, lock consistency, JavaScript syntax, and diff checks. |
 | 2026-08-30 | Added the bounded two-second one-shot wake-follow-up window for split final STT segments, allowing for the existing silence boundary and local STT delay. Exact local success clears the postactivation FIFO; uncertain/timeout cloud paths preserve it. Deterministic lifecycle, capture-boundary, race, cancellation, and privacy regressions pass; live split-final measurements remain pending. |
 | 2026-08-30 | Final split-follow-up verification passed Ruff, formatting, strict mypy, all 672 tests, lock consistency, JavaScript syntax, and diff checks with live dotenv loading disabled for test isolation. |
+| 2026-08-30 | A third macOS crash proved the native `clear_player()` skip insufficient. All three reports fault before ORC in GStreamer `do_convert_out` with zero samples and null sample arrays. The visible `look left` movement was Gemini's tool call, not local routing, so Phase 5 live acceptance remains pending. Selected an explicit app-owned simulator playback adapter for implementation; no live fix is claimed yet. |
+| 2026-08-30 | Implemented the explicit app-owned GStreamer speaker adapter with bounded/leaky queues, generation-safe interruption, fail-closed startup, combined SDK/app shutdown, and order-independent regression tests. The default SDK path is unchanged and live native-crash containment remains unproven. |

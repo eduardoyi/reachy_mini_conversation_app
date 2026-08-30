@@ -131,6 +131,13 @@ seconds. `REACHY_MINI_SKIP_DOTENV=1` prevented the ignored live `.env` from
 changing test provider selection. Lock consistency, JavaScript syntax, and the
 diff check also passed.
 
+After the explicit simulator speaker-output mitigation, the final root gate
+passed Ruff, formatting, strict mypy across 57 source files, and all 697 tests
+in 15.07 seconds. Lock consistency, both JavaScript syntax checks, and the diff
+check also passed. This proves the app boundary and lifecycle behavior under
+tests; it does not prove native crash containment until repeated live Gemini
+audio succeeds.
+
 ## 9. Proof ambient audio was not sent to cloud
 
 Automated tests assert the send boundary, not only counters:
@@ -186,13 +193,19 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
 - Split wake/command finals are handled by a bounded one-shot local follow-up
   window, but the real local STT segmentation and its activation latency have
   not been measured.
-- Two app runs ended in native macOS `SIGSEGV` crashes on GStreamer's
+- Three app runs ended in native macOS `SIGSEGV` crashes on GStreamer's
   `audiomixer0:src` thread after cloud audio activation. There was no Python
   traceback or clean shutdown. The app now contains this path by skipping
   native `audio.clear_player()` only for macOS SDK `MediaBackend.LOCAL` while
-  continuing to drain provider/app queues. This is a workaround, not a proven
-  root fix; barge-in may leave already-buffered native audio, and live/hardware
-  validation remains pending.
+  continuing to drain provider/app queues, but the third run crashed without
+  that call and proved the workaround insufficient. Every report faults at
+  `do_convert_out+140` with zero samples and null sample arrays before ORC runs;
+  the app's public playback shape is valid. Live SDK playback tests are paused
+  pending validation of the new explicit
+  `AUDIO_OUTPUT_BACKEND=gstreamer` simulator bypass. That adapter is covered by
+  deterministic queue, interruption, lifecycle, configuration, and routing
+  tests, but has not yet survived a live Gemini run. Barge-in on the SDK path
+  may leave already-buffered native audio.
 - MLX Audio's current STT server explicitly bridges inference through a file in
   `/tmp`, so it was rejected for this RAM-only ambient path. The selected
   Transformers candidate decodes uploaded bytes through `BytesIO`; the live run
@@ -208,7 +221,10 @@ Mac and Pi workload data.
 
 ## 12. Recommendation
 
-First run both dinner-demo strategies on the Mac with the same microphone and
+First validate the explicit macOS simulator playback bypass across repeated
+cloud turns, tool calls, interruptions, and clean shutdown; retain the SDK
+playback path as the default until that evidence exists. Then run both
+dinner-demo strategies on the Mac with the same microphone and
 local model, recording activation/context/connection/first-audio latency,
 process CPU/RSS, transcript quality, wake false positives/misses, and local
 command latency. Repeat the wake test with the intended `Reachy` phrase and

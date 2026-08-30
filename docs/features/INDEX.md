@@ -13,6 +13,7 @@ the implementation.
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
 | Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |
+| Simulator speaker output bypass | [simulator-speaker-output.md](simulator-speaker-output.md) | in-progress |
 | Local transcript wake word | [wake-word.md](wake-word.md) | in-progress |
 | Deterministic local intents | [local-intents.md](local-intents.md) | in-progress |
 

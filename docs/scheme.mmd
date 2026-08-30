@@ -32,6 +32,13 @@ flowchart TB
     Backend -- assistant audio -->
     Motion@{ label: "<span style='font-size:16px;font-weight:bold;'>Motion Control</span><br><span style='font-size:13px;color:#f57f17;'>Audio Sync</span>" }
 
+    Backend -- assistant PCM --> Stream
+
+    Stream -- selected output -->
+    Speaker@{ label: "<span style='font-size:16px;font-weight:bold;'>Speaker Output</span><br><span style='font-size:12px;color:#0277bd;'>Reachy SDK default<br/>app GStreamer simulator opt-in</span>" }
+
+    Speaker -- audible response --> User
+
     Backend -- tool calls -->
     Handlers@{ label: "<span style='font-size:16px;font-weight:bold;'>Tool Layer</span><br><span style='font-size:12px;color:#f9a825;'>Built-in + external tools<br/>+ MCP Tool Spaces</span>" }
 
@@ -64,6 +71,7 @@ flowchart TB
      LocalActions:::localStyle
      Backend:::aiStyle
      Motion:::coreStyle
+     Speaker:::uiStyle
      Profiles:::toolStyle
      Handlers:::toolStyle
      Robot:::hardwareStyle

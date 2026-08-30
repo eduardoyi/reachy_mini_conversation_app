@@ -85,6 +85,10 @@ LOCAL_WAKE_WORD_ENV = "LOCAL_WAKE_WORD"
 LOCAL_WAKE_COOLDOWN_SECONDS_ENV = "LOCAL_WAKE_COOLDOWN_SECONDS"
 LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV = "LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS"
 LOCAL_CONTEXT_MAX_CHARS_ENV = "LOCAL_CONTEXT_MAX_CHARS"
+AUDIO_OUTPUT_BACKEND_ENV = "AUDIO_OUTPUT_BACKEND"
+AUDIO_OUTPUT_BACKEND_SDK = "sdk"
+AUDIO_OUTPUT_BACKEND_GSTREAMER = "gstreamer"
+DEFAULT_AUDIO_OUTPUT_BACKEND = AUDIO_OUTPUT_BACKEND_SDK
 DEFAULT_HYBRID_RUNTIME_ENABLED = False
 DEFAULT_HYBRID_CLOUD_INACTIVITY_SECONDS = 60.0
 DEFAULT_HYBRID_AMBIENT_BUFFER_SECONDS = 20.0
@@ -314,6 +318,19 @@ def resolve_local_vad_rms_threshold() -> float:
     return DEFAULT_LOCAL_VAD_RMS_THRESHOLD if value is None else value
 
 
+def resolve_audio_output_backend() -> str:
+    """Return the selected speaker output backend, defaulting to the SDK path."""
+    candidate = (os.getenv(AUDIO_OUTPUT_BACKEND_ENV) or "").strip().lower()
+    if not candidate:
+        return DEFAULT_AUDIO_OUTPUT_BACKEND
+    if candidate not in {AUDIO_OUTPUT_BACKEND_SDK, AUDIO_OUTPUT_BACKEND_GSTREAMER}:
+        raise ValueError(
+            f"Invalid {AUDIO_OUTPUT_BACKEND_ENV}={candidate!r}. Expected "
+            f"{AUDIO_OUTPUT_BACKEND_SDK!r} or {AUDIO_OUTPUT_BACKEND_GSTREAMER!r}."
+        )
+    return candidate
+
+
 @dataclass(frozen=True)
 class HFConnectionSelection:
     """Resolved Hugging Face connection mode and target availability."""
@@ -489,6 +506,7 @@ class Config:
         LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
     )
     LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
+    AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
@@ -624,6 +642,7 @@ def refresh_runtime_config_from_env() -> None:
         LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
     )
     config.LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
+    config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
@@ -650,6 +669,11 @@ def get_default_voice() -> str:
 def get_realtime_provider() -> str:
     """Return the selected realtime provider."""
     return config.REALTIME_PROVIDER
+
+
+def get_audio_output_backend() -> str:
+    """Return the selected application speaker output backend."""
+    return config.AUDIO_OUTPUT_BACKEND
 
 
 def get_hf_session_url() -> str | None:

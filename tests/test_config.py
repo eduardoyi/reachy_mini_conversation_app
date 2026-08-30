@@ -16,6 +16,33 @@ def test_realtime_provider_defaults_to_huggingface(monkeypatch) -> None:
     assert config.get_realtime_provider() == config.REALTIME_PROVIDER_HUGGINGFACE
 
 
+def test_audio_output_defaults_to_sdk(monkeypatch) -> None:
+    """Speaker routing remains on the official SDK path unless explicitly changed."""
+    monkeypatch.delenv(config.AUDIO_OUTPUT_BACKEND_ENV, raising=False)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.get_audio_output_backend() == config.AUDIO_OUTPUT_BACKEND_SDK
+
+
+@pytest.mark.parametrize("raw_value", ["gstreamer", " GSTREAMER "])
+def test_audio_output_accepts_explicit_gstreamer(monkeypatch, raw_value: str) -> None:
+    """The app-owned speaker path requires an explicit validated selector."""
+    monkeypatch.setenv(config.AUDIO_OUTPUT_BACKEND_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.get_audio_output_backend() == config.AUDIO_OUTPUT_BACKEND_GSTREAMER
+
+
+def test_audio_output_rejects_unknown_values(monkeypatch) -> None:
+    """Invalid speaker configuration fails closed instead of changing the production path."""
+    monkeypatch.setenv(config.AUDIO_OUTPUT_BACKEND_ENV, "sounddevice")
+
+    with pytest.raises(ValueError, match="Invalid AUDIO_OUTPUT_BACKEND"):
+        config.refresh_runtime_config_from_env()
+
+
 @pytest.mark.parametrize(
     "raw_value, expected",
     [
