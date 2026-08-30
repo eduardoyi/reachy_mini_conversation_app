@@ -81,8 +81,10 @@ class RuntimeStatusSnapshot:
     gemini_session_duration: float = 0.0
     postactivation_frames_dropped: int = 0
     local_context_chars: int = 0
+    transcript_segments_accepted: int = 0
     wake_detections: int = 0
     wake_cooldown_suppressed: int = 0
+    wake_final_update_count: int = 0
     local_commands_executed: int = 0
     local_command_failures: int = 0
     local_command_escalations: int = 0
@@ -131,8 +133,10 @@ class RuntimeStatusSnapshot:
             "gemini_session_duration": self.gemini_session_duration,
             "postactivation_frames_dropped": self.postactivation_frames_dropped,
             "local_context_chars": self.local_context_chars,
+            "transcript_segments_accepted": self.transcript_segments_accepted,
             "wake_detections": self.wake_detections,
             "wake_cooldown_suppressed": self.wake_cooldown_suppressed,
+            "wake_final_update_count": self.wake_final_update_count,
             "local_commands_executed": self.local_commands_executed,
             "local_command_failures": self.local_command_failures,
             "local_command_escalations": self.local_command_escalations,
@@ -345,8 +349,12 @@ class HybridRuntime:
             gemini_session_duration=metrics.gemini_session_duration,
             postactivation_frames_dropped=postactivation_frames_dropped,
             local_context_chars=local_context_chars,
+            transcript_segments_accepted=(
+                context_metrics.transcript_segments_accepted if context_metrics is not None else 0
+            ),
             wake_detections=wake_metrics.detection_count if wake_metrics is not None else 0,
             wake_cooldown_suppressed=wake_metrics.cooldown_suppressed_count if wake_metrics is not None else 0,
+            wake_final_update_count=wake_metrics.final_update_count if wake_metrics is not None else 0,
             local_commands_executed=local_commands_executed,
             local_command_failures=local_command_failures,
             local_command_escalations=local_command_escalations,

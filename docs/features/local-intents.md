@@ -13,8 +13,12 @@ those local decisions through existing tool and movement/playback boundaries;
 neither class opens a provider or persists the utterance.
 
 The modules are intentionally small so `HybridRuntime` can route only an exact
-addressed suffix while in `LOCAL_COMMAND`. Automated integration is complete;
-simulator/microphone acceptance and measured latency remain pending.
+addressed suffix while in `LOCAL_COMMAND`. Automated integration is complete.
+A live simulator run with the configured wake phrase `computer` reached local
+activation, but `look left` escalated to Gemini and Gemini performed the
+movement. It therefore did not satisfy local-command acceptance. The same path
+with `Reachy` remains blocked because no exact matching final transcript token
+reached the detector.
 
 ## User-facing behavior
 
@@ -173,8 +177,12 @@ mypy --pretty --show-error-codes
 
 Validated on 2026-08-29: the focused router/action suites, integration tests,
 Ruff, formatting, and strict mypy passed. After final integration, the full
-repository gate passed all 649 tests. Live simulator command latency and motion
-acceptance remain pending.
+repository gate passed all 649 tests. On 2026-08-30, a live simulator run with
+`LOCAL_WAKE_WORD=computer` confirmed final STT → wake detector → local
+activation, but the command escalated to Gemini and Gemini called `MoveHead`.
+A `Reachy` wake was not accepted because no exact matching final transcript
+token reached the detector. Live local-command acceptance, false-positive/miss
+rates, latency, and the remaining commands still require measurement.
 
 ## Changelog
 
@@ -183,3 +191,4 @@ acceptance remain pending.
 | 2026-08-29 | Added the fail-closed typed local intent router and deterministic test matrix. |
 | 2026-08-29 | Added the async executor using existing movement/tool boundaries, with failure and cancellation coverage. |
 | 2026-08-29 | Integrated wake-suffix routing into `LOCAL_COMMAND`; exact success remains local and every uncertain/failing decision escalates. |
+| 2026-08-30 | Live `computer, look left` reached local activation but escalated; Gemini performed the movement, so Phase 5 live acceptance remains pending. The `Reachy` failure remains isolated to the exact final-transcript match boundary. |

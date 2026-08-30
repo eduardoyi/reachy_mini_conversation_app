@@ -1,7 +1,7 @@
-# Feature: local transcript wake word
+# Feature: local transcript and acoustic wake word
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -139,6 +139,31 @@ allowlist.
    privacy, and latency; then run the focused test command and the repository
    gate from `docs/TESTING.md`.
 
+## Ready-made acoustic candidates
+
+The current runtime uses the dependency-free transcript detector. Research
+identified candidates for a future implementation of the existing
+`AcousticWakeWordDetector` seam; no model or runtime dependency has been added.
+
+| Candidate | Integration fit | Evidence and caveats | License caveat |
+|-----------|-----------------|----------------------|----------------|
+| [`andyjmorgan/reachy-wake-word`](https://github.com/andyjmorgan/reachy-wake-word) | Best first seam fit. Its ONNX model accepts mono 16 kHz PCM16, matching the normalized local audio boundary; an adapter can feed frames to openWakeWord without opening another microphone. | The published model targets phonetic `reechy`, not a guaranteed literal `Reachy`. Reported accuracy, recall, and false-positive rates are maintainer results and require an actual microphone benchmark. | Repository code is Apache-2.0, but the pretrained model is CC BY-NC-SA 4.0. Confirm that its non-commercial terms fit this project before bundling it. |
+| [`luisomoreau/hey_reachy_wake_word_detection`](https://huggingface.co/spaces/luisomoreau/hey_reachy_wake_word_detection) / [Edge Impulse project](https://studio.edgeimpulse.com/public/855375/latest) | Exact-phrase candidate with Mac ARM64 and Linux AARCH64 artifacts, but it expects 24 kHz and a 12,000-sample (1.5-second) window. It must be adapted to the shared audio stream and lower-level classifier API; the example's `AudioImpulseRunner` owns a microphone. | The author reports only Apple Silicon testing and describes the small training set as non-production-grade. Resampling, windowing, and model-process lifecycle need latency and resource tests. | The public Edge Impulse project lists BSD 3-Clause Clear; the Hugging Face Space does not clearly declare an application license. Audit the app, model, and training assets separately before reuse. |
+| [`openWakeWord`](https://github.com/dscripka/openWakeWord) | General 16 kHz local model API with configurable score thresholds, optional VAD, and verifier support; suitable as the adapter framework for a selected model. | Its built-in model list has no Reachy model. A custom model still needs phrase-specific data and deployment testing on Mac and Raspberry Pi. | Code is Apache-2.0, while bundled pretrained models are CC BY-NC-SA 4.0 and are not automatically suitable for commercial use. |
+
+There is no merged official Pollen wake-word solution to reuse today: the
+[Conversation App standby/wake PR #514](https://github.com/pollen-robotics/reachy_mini_conversation_app/pull/514)
+is open, and the SDK's [wake-word issue #1253](https://github.com/pollen-robotics/reachy_mini/issues/1253)
+is unresolved. The PR is useful architectural context, not an upstream
+dependency or acceptance evidence.
+
+The next safe step is an offline, metadata-only benchmark of the 16 kHz ONNX
+candidate against the current seam, followed by a separate comparison with the
+24 kHz Edge candidate if its licensing is acceptable. Record threshold,
+debounce, false positives, misses, activation latency, CPU, and RSS. Keep the
+keyboard fallback, do not add fuzzy transcript aliases, and never log or store
+the wake audio.
+
 ## Constraints, privacy, and failure modes
 
 - The V0 implementation has no model dependency and performs no network I/O.
@@ -163,6 +188,9 @@ allowlist.
 - The detector is not an acoustic wake-word model. Recognition quality,
   false-positive rate, and missed activations must be measured with the actual
   local STT backend and microphone before selecting a production backend.
+- An acoustic candidate must remain local and consume the existing normalized
+  audio stream. A model that opens its own microphone would duplicate capture
+  and can violate the single-audio-owner design.
 
 ## Dependencies
 
@@ -207,7 +235,13 @@ Focused validation on 2026-08-29: Ruff, formatting, strict mypy for the new
 source file, and all 18 wake-word tests passed. The movement regression and
 hybrid lifecycle suite passed alongside them (64 tests total). The earlier
 full repository gate was refreshed after those regressions and passed all 649
-tests. Live wake-quality and latency measurement remain pending.
+tests. On 2026-08-30, the live final-STT path worked with a configured
+`LOCAL_WAKE_WORD=computer` through local activation. The attached command then
+escalated to Gemini, so this validates the alternate wake phrase but not local
+command routing. The default `Reachy` path produced no action because no exact
+matching final transcript token reached the detector; this is not evidence for
+a new wake-word alias. Wake false-positive/miss rates and latency remain
+unmeasured.
 
 ## Changelog
 
@@ -217,3 +251,5 @@ tests. Live wake-quality and latency measurement remain pending.
 | 2026-08-29 | Wired continuous local transcripts to hybrid activation while retaining keyboard activation and cloud-free exact commands. |
 | 2026-08-29 | Added explicit accepted-detection consumption for integrations that act on partial wakes; added cooldown and lifecycle regressions. |
 | 2026-08-29 | Restricted the current runtime integration to final local STT segments so a partial `Reachy` cannot open cloud before its command suffix arrives; added local-command and next-wake regression coverage. |
+| 2026-08-30 | Live validation isolated the default `Reachy` no-action result to the exact final-transcript match boundary; a configured `computer` wake reached the detector path successfully. |
+| 2026-08-30 | Researched ready-made acoustic candidates: the 16 kHz `andyjmorgan` ONNX model is the closest seam fit but targets `reechy` and is CC BY-NC-SA; the 24 kHz/1.5 s Edge Impulse `Hey Reachy` candidate needs an adapter and has an unclear Space license; openWakeWord has no Reachy model. No model or dependency was added. |

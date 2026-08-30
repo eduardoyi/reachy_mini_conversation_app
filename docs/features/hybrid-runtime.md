@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -113,7 +113,7 @@ Configuration is defined in `config.py`:
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | `2` | Duplicate wake suppression window. |
 | `LOCAL_CONTEXT_MAX_CHARS` | `2000` | Bound retained/injected derived text. |
 
-Status includes these exact counters:
+The `conversation.status` JSON-RPC result includes these exact counters:
 
 - `ambient_audio_seconds_buffered`
 - `ambient_audio_bytes_sent_to_cloud`
@@ -126,9 +126,11 @@ zero because no ambient ring data is sent. Gemini session duration uses a
 monotonic connection boundary and accumulates across fresh sessions. The
 diagnostic `postactivation_frames_dropped` is separate from these five
 required traffic/session counters. Additional metadata-only diagnostics include
-context character count and activation latency, wake detections/suppression,
-local command execution/failure/escalation and latency, and
-`postactivation_frames_dropped`. Gemini's
+context character count, `transcript_segments_accepted`, activation latency,
+wake detections/suppression, `wake_final_update_count`, local command
+execution/failure/escalation and latency, and `postactivation_frames_dropped`.
+The local STT request/completion/failure/timeout/drop, latency, in-flight, and
+pending-at-activation counters are also returned at the top level. Gemini's
 `first_audio_unavailable_count`, `first_audio_reordered_count`, and
 `first_audio_ambiguous_count` remain provider latency diagnostics; they are not
 privacy counters and contain no audio or transcript data. An audio-first event
@@ -211,6 +213,9 @@ not exercise a live browser or cloud session. The regression
 `test_hybrid_capture_epoch_fences_inflight_frame_and_preserves_fifo` blocks an
 SDK pull across activation, asserts that frame stays local, and then asserts
 that later provider-bound frames retain FIFO order.
+The console regressions also verify that macOS LOCAL skips native playback
+clearing while draining the app/provider queue, while WebRTC and non-macOS
+LOCAL retain native flushing and older SDKs retain the fallback path.
 The browser contract checks are source-level because the repository has no
 JavaScript test harness. The final repository gate passed on 2026-08-29: Ruff
 clean, formatting left 87 files unchanged, strict mypy clean across 49 source
@@ -239,6 +244,33 @@ strict mypy was clean across 54 source files, and all 649 tests passed in
 11.39 seconds. `uv lock --check`, both JavaScript syntax checks, and
 `git diff --check` also passed.
 
+On 2026-08-30, live local STT returned HTTP 200 and a configured
+`LOCAL_WAKE_WORD=computer` reached the final-transcript detector and local
+activation. The request then escalated to Gemini, whose `MoveHead` tool call
+moved the simulator; this was not a live local-command pass. The default
+`Reachy` phrase produced no local action because no exact matching final
+transcript token reached the detector;
+the runtime status now exposes `local_stt_completed`,
+`transcript_segments_accepted`, `wake_final_update_count`, and the other
+metadata-only diagnostics needed to distinguish that boundary failure. No raw
+transcript or audio is returned by the status RPC.
+
+Two subsequent live app runs ended in native macOS GStreamer
+`audiomixer0:src` `SIGSEGV` failures after cloud activation, without a Python
+exception. As a containment workaround, `LocalStream` skips the SDK
+`audio.clear_player()` call only when `sys.platform == "darwin"` and the public
+media backend is `MediaBackend.LOCAL`; provider/app queues still drain. This
+does not prove the root cause or fix the SDK/GStreamer failure, and
+already-buffered native audio may remain after barge-in. WebRTC and non-macOS
+backends retain their native flush behavior. Hardware and live validation of
+the workaround remain pending.
+
+After adding the diagnostics and macOS containment on 2026-08-30, the full
+repository gate passed: Ruff and formatting were clean, strict mypy found no
+issues in 54 source files, and all 654 tests passed in 12.28 seconds.
+`uv lock --check`, both JavaScript syntax checks, and `git diff --check` also
+passed.
+
 ## Changelog
 
 | Date | Change |
@@ -256,3 +288,7 @@ strict mypy was clean across 54 source files, and all 649 tests passed in
 | 2026-08-29 | Integrated Phase 3–5 local context strategies, loopback STT/RMS VAD, transcript wake, exact local commands, text-only Gemini context, and deterministic privacy/lifecycle tests. Live acceptance remains pending. |
 | 2026-08-29 | Final Phase 3–5 integration gate passed all 649 tests plus Ruff, formatting, strict mypy, lock, JavaScript syntax, and diff checks. Live microphone/local-model acceptance remains pending. |
 | 2026-08-29 | Capture epochs are now reserved before blocking SDK pulls and included in the activation barrier snapshot, closing the in-flight preactivation privacy race; LocalStream regression coverage verifies the later postactivation FIFO. |
+| 2026-08-30 | `conversation.status` now forwards the complete metadata-only `RuntimeStatusSnapshot`, including accepted transcript-segment and final wake-update counters; RPC regression coverage verifies every field and rejects raw payload keys. Live `computer` wake reached local activation while no exact `Reachy` final transcript token reached the detector. |
+| 2026-08-30 | Corrected the live record after logs showed `computer, look left` escalated to Gemini and Gemini performed the movement. Two app runs then ended in native GStreamer `audiomixer0:src` segmentation faults after cloud activation; no Python exception was emitted. |
+| 2026-08-30 | Added app-level crash containment for macOS SDK `MediaBackend.LOCAL`: skip native `audio.clear_player()` while preserving provider/app queue draining; WebRTC and non-macOS flushes are unchanged. This is not a proven root fix, may leave already-buffered native audio after barge-in, and still needs live/hardware validation. |
+| 2026-08-30 | Root verification after diagnostics and crash containment passed Ruff, formatting, strict mypy, all 654 tests, lock consistency, JavaScript syntax, and diff checks. |

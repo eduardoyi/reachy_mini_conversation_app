@@ -1,14 +1,16 @@
 # Hybrid household companion benchmark
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Machine: Apple Silicon Mac, simulator, SDK LOCAL media backend
 - Scope: Phases 0–5
 
 This report separates implemented/automated evidence from live measurements.
-Phases 3–5 are implemented and comprehensively tested with fakes, but their
-microphone/local-model acceptance measurements have not yet been run. Missing
-values are marked `not measured`; they are not estimated.
+Phases 3–5 are implemented and comprehensively tested with fakes. Live local
+STT and one configured wake path have now been exercised, but local-command
+acceptance, microphone quality, latency, and resource measurements remain
+incomplete.
+Missing values are marked `not measured`; they are not estimated.
 
 ## 1. Architecture implemented
 
@@ -94,11 +96,11 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | First response audio | Provider instrumentation | not measured; event ordering can make a sample explicitly unavailable/reordered |
 | Strategy A dinner context | Automated integration | correct ordered text injection; live latency/quality not measured |
 | Strategy B dinner context | Automated integration | acknowledgment precedes local STT, which precedes provider construction; live latency not measured |
-| Wake activation latency | Automated deterministic clock only | live microphone value not measured |
-| Wake false positives / misses | — | not measured |
-| Local command latency | Automated deterministic clock only | live simulator value not measured |
+| Wake activation latency | Automated deterministic clock plus one live path | live numeric value not measured |
+| Wake false positives / misses | One live configured wake-word check | `LOCAL_WAKE_WORD=computer` reached the final-STT detector; default `Reachy` produced no action because no exact matching token reached the detector; rates remain not measured |
+| Local command latency | Automated deterministic clock plus one live simulator attempt | `computer, look left` triggered local wake but escalated to Gemini; Gemini called `MoveHead`, so live local-command acceptance and latency remain not measured |
 | Local STT CPU / process RSS | — | not measured |
-| Local STT backend | Implemented protocol / planned Mac run | loopback OpenAI-compatible endpoint; Transformers Serve with `openai/whisper-small` is the first benchmark candidate, not yet validated live |
+| Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
 
 The direct Phase 1 saved-log rerun and all Phase 3–5 live measurements remain
 required before this report can be marked complete.
@@ -107,6 +109,12 @@ Automated verification on 2026-08-29 passed the full 649-test repository suite,
 Ruff, formatting, strict mypy, lock consistency, JavaScript syntax, and diff
 checks. These results use fakes for cloud and local STT boundaries and do not
 substitute for the live measurements above.
+
+The 2026-08-30 diagnostics and macOS crash-containment update passed Ruff,
+formatting, strict mypy across 54 source files, all 654 tests in 12.28 seconds,
+lock consistency, both JavaScript syntax checks, and the diff check. Native
+GStreamer stability still requires a live rerun; unit tests cannot prove that a
+process-level mixer crash is resolved.
 
 ## 9. Proof ambient audio was not sent to cloud
 
@@ -117,6 +125,11 @@ Automated tests assert the send boundary, not only counters:
 - exact local commands never construct a provider;
 - public/LAN/DNS STT targets and environment proxy forwarding are rejected;
 - raw PCM is not logged or written to an application file.
+
+The `conversation.status` RPC now exposes metadata-only local processing
+counters, including accepted transcript segments and final wake updates, so a
+live no-action result can be distinguished from an STT or detector boundary
+miss without returning transcript or audio content.
 
 The accepted five-minute Phase 2 live soak retained a full 20-second RAM ring
 while `ambient_audio_bytes_sent_to_cloud`, cloud audio, and cloud video remained
@@ -137,6 +150,19 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   rooms. Its threshold must be measured with the actual microphone.
 - A transcript-based wake word depends on local STT completing a segment. It is
   a V0 implementation and must be compared with an acoustic detector.
+- The final-STT → detector → local-router → movement path worked with a
+  configured `computer` wake word only as far as local activation. The command
+  then escalated to Gemini, whose tool call moved the simulator; this is not a
+  local-command acceptance pass. The default `Reachy` phrase produced no action
+  because no exact matching final transcript token reached the detector; no
+  alias was added.
+- Two app runs ended in native macOS `SIGSEGV` crashes on GStreamer's
+  `audiomixer0:src` thread after cloud audio activation. There was no Python
+  traceback or clean shutdown. The app now contains this path by skipping
+  native `audio.clear_player()` only for macOS SDK `MediaBackend.LOCAL` while
+  continuing to drain provider/app queues. This is a workaround, not a proven
+  root fix; barge-in may leave already-buffered native audio, and live/hardware
+  validation remains pending.
 - MLX Audio's current STT server explicitly bridges inference through a file in
   `/tmp`, so it was rejected for this RAM-only ambient path. The selected
   Transformers candidate decodes uploaded bytes through `BytesIO`; the live run
@@ -155,7 +181,9 @@ Mac and Pi workload data.
 First run both dinner-demo strategies on the Mac with the same microphone and
 local model, recording activation/context/connection/first-audio latency,
 process CPU/RSS, transcript quality, wake false positives/misses, and local
-command latency. Prefer Strategy A only if its always-on local cost and wake
-quality are acceptable. Then benchmark a Pi-compatible VAD/STT backend through
-the existing protocols before selecting production models or starting later
-memory, Home Assistant, face recognition, heartbeat, or local-LLM work.
+command latency. Repeat the wake test with the intended `Reachy` phrase and
+investigate a proper-name-capable local STT or acoustic detector rather than
+adding command aliases. Prefer Strategy A only if its always-on local cost and
+wake quality are acceptable. Then benchmark a Pi-compatible VAD/STT backend
+through the existing protocols before selecting production models or starting
+later memory, Home Assistant, face recognition, heartbeat, or local-LLM work.

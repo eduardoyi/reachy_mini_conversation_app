@@ -382,6 +382,7 @@ async def test_wake_local_stop_executes_without_constructing_cloud_handler() -> 
     factory.assert_not_called()
     assert runtime.metrics.cloud_audio_bytes_sent == 0
     assert runtime.status.wake_detections == 1
+    assert runtime.status.wake_final_update_count == 1
     await runtime.close()
 
 

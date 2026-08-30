@@ -9,7 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
-| [Reachy hybrid household companion](reachy-hybrid-household-companion.md) | `in-progress` | 2026-08-29 | Phases 0–5 |
+| [Reachy hybrid household companion](reachy-hybrid-household-companion.md) | `in-progress` | 2026-08-30 | Phases 0–5 |
 
 The required living benchmark report is
 [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md). It remains `in-progress`

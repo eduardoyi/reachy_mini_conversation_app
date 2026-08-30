@@ -4,7 +4,7 @@
 - Active phase: `Phases 3–5 implementation; Phase 1 benchmark completion deferred`
 - Owner: Reachy project
 - Created: 2026-08-29
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Scope: Phases 0–5
 - Required final report: [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) at the repository root
 
@@ -447,10 +447,26 @@ Purpose: replace keyboard-only activation while retaining a reliable fallback.
 **Acceptance:** wake detection runs locally, does not depend on Gemini, and
   measured false-positive/missed-activation behavior is documented.
 
-**Phase 4 status: implementation complete; live acceptance pending.** Wake
+**Phase 4 status: implementation complete; live acceptance partial.** Wake
 detection has no network/provider path and is integrated only with continuous
-local STT. Microphone false-positive/miss and latency measurements remain
-required before selecting this V0 approach over an acoustic detector.
+local STT. A live run with `LOCAL_WAKE_WORD=computer` reached the final-STT
+detector path, while the default `Reachy` phrase produced no action because no
+exact matching final transcript token reached the detector. Microphone
+false-positive/miss and latency measurements remain required before selecting
+this V0 approach over an acoustic detector; no alias was added.
+
+Ready-made acoustic research found no upstream Reachy model that is ready to
+adopt without validation. The 16 kHz ONNX candidate in
+[`andyjmorgan/reachy-wake-word`](https://github.com/andyjmorgan/reachy-wake-word)
+is the closest fit for the existing normalized audio seam, but it targets
+phonetic `reechy` and its pretrained model is CC BY-NC-SA 4.0. The
+[`Hey Reachy` Edge Impulse candidate](https://huggingface.co/spaces/luisomoreau/hey_reachy_wake_word_detection)
+is closer to the desired phrase and has Mac ARM64/Linux AARCH64 artifacts, but
+expects 24 kHz/1.5-second windows, the example owns its microphone, and the
+Space's application license is unclear. [`openWakeWord`](https://github.com/dscripka/openWakeWord)
+provides a suitable local adapter framework, but no Reachy model; its code is
+Apache-2.0 while bundled pretrained models are non-commercial. Benchmark these
+as candidates only; no model or dependency has been added.
 
 ### Phase 5 — first local commands
 
@@ -470,9 +486,13 @@ Purpose: make common physical requests instant and cloud-free.
 **Acceptance:** local commands execute without opening Gemini, uncertain input
 escalates, and all required behavior, privacy, latency, and resource tests pass.
 
-**Phase 5 status: implementation complete; live acceptance pending.** Exact
+**Phase 5 status: implementation complete; live acceptance partial.** Exact
 commands and failure escalation are covered through fake provider/tool/movement
-boundaries. Simulator movement and measured local-command latency remain
+boundaries. A live run with `LOCAL_WAKE_WORD=computer` reached local activation
+but then escalated to Gemini; Gemini performed the movement, so this was not a
+live local-command acceptance. The default `Reachy` end-to-end command remains
+blocked at the exact final-transcript match boundary. Simulator local-command
+acceptance, latency, all-command coverage, and movement measurements remain
 required.
 
 ## Test and benchmark matrix
@@ -541,7 +561,7 @@ and a measured—not speculative—assessment of Raspberry Pi 5 8GB plausibility
 | Ambient privacy | Gemini is closed while idle. Only derived bounded local text may be injected after activation; raw pre-wake audio is never uploaded. |
 | Provider greeting | Existing handlers may greet on connect. Hybrid activation should suppress an unnecessary automatic greeting and let the user’s address drive the response. |
 | Local VAD/STT reuse | Keep the protocol compatible with Hugging Face speech-to-speech's modular VAD/STT ideas rather than adopting its full VAD→STT→LLM→TTS stack. The first sidecar benchmark uses the official Transformers Serve transcription API. MLX Audio's current server is excluded because its STT inference path writes raw input to a temporary file. Preserve a CPU/Linux path and benchmark before selecting models. |
-| Wake-word reuse | Hugging Face speech-to-speech does not provide a wake-word stage. Evaluate local openWakeWord and inspect the community Reachy Mini wake-word Space/model before training a custom “Reachy” ONNX model. Treat community artifacts as candidates until source, model, license, platform support, false accepts, and missed activations are measured. |
+| Wake-word reuse | Hugging Face speech-to-speech does not provide a wake-word stage. The 16 kHz ONNX [`andyjmorgan/reachy-wake-word`](https://github.com/andyjmorgan/reachy-wake-word) model is the best fit for the current acoustic seam, but targets phonetic `reechy` and is CC BY-NC-SA 4.0. The 24 kHz/1.5-second [`Hey Reachy` Edge Impulse candidate](https://huggingface.co/spaces/luisomoreau/hey_reachy_wake_word_detection) needs resampling/windowing and a shared-stream adapter; its Space license is unclear. [`openWakeWord`](https://github.com/dscripka/openWakeWord) is Apache-2.0 code with no Reachy model, and bundled models are non-commercial. The official [Conversation App PR #514](https://github.com/pollen-robotics/reachy_mini_conversation_app/pull/514) and SDK [issue #1253](https://github.com/pollen-robotics/reachy_mini/issues/1253) remain unresolved. Treat all community artifacts as benchmark candidates until source, model, license, platform support, false accepts, and missed activations are measured. No model or dependency is selected. |
 | Local AI scope | Use interfaces for VAD/STT and `LocalDecisionModel`, but do not install or run the complete HF stack, a local LLM, or another agent framework yet. |
 | Tools and movement | Reuse `Tool`, `ToolDependencies`, and `MovementManager`; LLMs and local routers never issue raw motor commands. |
 | Documentation location | The user explicitly overrides upstream’s no-Markdown-under-`docs/` preference. App-specific plans/features/testing docs stay here. Do not alter SDK instructions. |
@@ -634,6 +654,12 @@ and evidence.
 | 2026-08-29 | Phase 3 follow-up | Final adversarial re-review found all four release-blocking fixes resolved and no remaining P0/P1. The residual reordered-partial edge case was also closed so a late partial cannot reopen an already finalized transcript sequence. |
 | 2026-08-30 | Phase 3 live acceptance | Confirmed hybrid ambient startup and local audio capture, then found the documented Transformers Serve flag was invalid. `FORCE_MODEL` is positional, so the command now passes `openai/whisper-small` without `--force-model`; live STT acceptance remains pending. |
 | 2026-08-30 | Phase 3 live acceptance | Confirmed local WAV requests reach `/v1/audio/transcriptions`; the server returned HTTP 500 because `python-multipart` was absent from the serving environment. Added it explicitly to the isolated install command; live transcript quality and wake acceptance remain pending. |
+| 2026-08-30 | Phases 3–5 diagnostics | Exposed the complete metadata-only `RuntimeStatusSnapshot` through `conversation.status`, including `transcript_segments_accepted` and `wake_final_update_count`; added an RPC regression covering every status field without raw transcript/audio payloads. |
+| 2026-08-30 | Phases 4–5 live acceptance | Transformers STT returned HTTP 200. With `LOCAL_WAKE_WORD=computer`, `look left` completed final-STT → wake detection → local activation, then escalated to Gemini; Gemini called `MoveHead`, so Phase 5 live acceptance did not pass. The default `Reachy` phrase produced no action because no exact matching final transcript token reached the detector; no alias was added and wake-quality/latency measurements remain pending. |
+| 2026-08-30 | Native audio crash | Two app runs ended with macOS `SIGSEGV` reports on GStreamer's `audiomixer0:src` thread (`do_convert_out` → `do_quantize` → audio aggregator) after cloud activation. There was no Python traceback or clean shutdown. Live cloud-audio testing is paused pending a safe SDK/GStreamer mitigation or upstream fix. |
+| 2026-08-30 | Native audio crash containment | Added an app-level macOS + SDK `MediaBackend.LOCAL` workaround that skips native `clear_player()` while continuing to drain provider/app queues. This is containment, not a proven root fix; already-buffered native audio may remain after barge-in, and hardware/live validation is pending. |
+| 2026-08-30 | Phase 4 research | Reviewed ready-made acoustic wake candidates and official Reachy status. The 16 kHz `andyjmorgan` ONNX model is the closest seam fit but targets phonetic `reechy` and is CC BY-NC-SA; the 24 kHz/1.5-second Edge Impulse `Hey Reachy` candidate needs a shared-stream adapter and has an unclear Space license; openWakeWord has no Reachy model. Official PR #514 and SDK issue #1253 remain unresolved. No model or dependency was added; benchmark evidence is still required. |
+| 2026-08-30 | Diagnostics/containment gate | Root verification passed Ruff, formatting, strict mypy across 54 source files, all 654 tests in 12.28 seconds, `uv lock --check`, both JavaScript syntax checks, and `git diff --check`. Live validation of the macOS containment remains pending. |
 
 ## Next steps
 
@@ -643,10 +669,15 @@ and evidence.
 2. Start the loopback local STT endpoint and run Strategy A and Strategy B dinner
    demos with headphones, recording the report's latency, transcript quality,
    CPU, and RSS fields.
-3. Run a labelled local wake set and all five local commands in the simulator;
-   record false positives, misses, first-word retention, movement behavior, and
-   local-command latency.
-4. Update this plan, the feature documents, and
+3. Run a labelled transcript-wake baseline and, without adding a runtime
+   dependency, benchmark the 16 kHz `andyjmorgan` ONNX candidate through the
+   existing acoustic seam; record false positives, misses, activation latency,
+   CPU, and RSS. Compare the 24 kHz/1.5-second Edge candidate only after its
+   license and shared-stream adapter are reviewed.
+4. Run all five local commands in the simulator; record first-word retention,
+   movement behavior, local-command latency, and whether each command stays
+   cloud-free.
+5. Update this plan, the feature documents, and
    [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) after each accepted live
    result. Regenerate the architecture SVG from [`docs/scheme.mmd`](../scheme.mmd)
    through the existing workflow when available.
@@ -665,3 +696,4 @@ and evidence.
 | 2026-08-29 | Recorded the 545.7 ms Gemini connection-ready sample, 270.8/274.2 ms tool timings, the healthy event loop and daemon/Gemini sockets alongside the LOCAL capture-worker block, 19 GiB free disk, arm64 Python rebuild, and the `--media-backend webrtc` simulator target; retained Phase 1 as in progress pending complete WebRTC validation. |
 | 2026-08-29 | Implemented Phases 3–5 as one milestone with replaceable local audio backends, both context strategies, local transcript wake, exact local commands, household profile, text-only provider context, and comprehensive focused tests. Each phase remains in progress until its live acceptance measurements are recorded. |
 | 2026-08-29 | Created the living hybrid benchmark report with measured Phase 1/2 evidence and explicit `not measured` Phase 3–5 fields; no Raspberry Pi feasibility claim is made. |
+| 2026-08-30 | Recorded ready-made wake-word research and kept acoustic model selection pending measured quality, platform/resource results, and licensing review. |

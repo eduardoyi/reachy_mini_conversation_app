@@ -5,6 +5,7 @@ selects the provider, and edits only the Hugging Face connection target.
 """
 
 import os
+import sys
 import time
 import queue
 import asyncio
@@ -315,6 +316,7 @@ class LocalStream:
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
+        self._macos_local_flush_warning_logged = False
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
@@ -940,6 +942,7 @@ class LocalStream:
 
         mode_value = status.mode.value
         generation = status.generation
+        status_payload = status()
         counters = {
             "ambient_audio_seconds_buffered": metrics.ambient_audio_seconds_buffered,
             "ambient_audio_bytes_sent_to_cloud": metrics.ambient_audio_bytes_sent_to_cloud,
@@ -952,6 +955,7 @@ class LocalStream:
             "hybrid_runtime_enabled": True,
             "hybrid_state": mode_value,
             "hybrid_generation": generation,
+            **status_payload,
             **counters,
             "hybrid_metrics": counters,
         }
@@ -1403,10 +1407,10 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush queued playback audio immediately on user barge-in.
 
-        Calls the SDK's ``clear_player()`` — now a first-class flush on both
-        the local GStreamer and WebRTC backends (the WebRTC one also tells the
-        daemon to drop audio already queued for the speaker). Falls back to the
-        deprecated ``clear_output_buffer()`` only for older SDKs.
+        Calls the SDK's ``clear_player()`` on supported backends and drains the
+        provider/app queue. macOS LOCAL skips the native player flush as a
+        crash-containment workaround, so already-buffered native audio may
+        remain. Older SDKs fall back to ``clear_output_buffer()``.
         """
         logger.info("User intervention: flushing player queue")
         if self._hybrid_runtime is not None:
@@ -1416,13 +1420,22 @@ class LocalStream:
 
     def _clear_robot_playback(self) -> None:
         """Flush SDK playback without recursively entering the hybrid runtime."""
-        audio = getattr(self._robot.media, "audio", None)
-        if audio is not None:
-            if hasattr(audio, "clear_player") and callable(audio.clear_player):
-                audio.clear_player()
-            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
-                # Older SDK without clear_player(); best-effort.
-                audio.clear_output_buffer()
+        media = self._robot.media
+        audio = getattr(media, "audio", None)
+        if audio is None:
+            return
+
+        if sys.platform == "darwin" and getattr(media, "backend", None) == LOCAL_PLAYER_BACKEND:
+            if not self._macos_local_flush_warning_logged:
+                logger.warning("Skipping native clear_player on macOS LOCAL media; buffered native audio may remain.")
+                self._macos_local_flush_warning_logged = True
+            return
+
+        if hasattr(audio, "clear_player") and callable(audio.clear_player):
+            audio.clear_player()
+        elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
+            # Older SDK without clear_player(); best-effort.
+            audio.clear_output_buffer()
         # The provider output queue is drained by clear_audio_queue or the
         # hybrid runtime's provider interruption hook.
 

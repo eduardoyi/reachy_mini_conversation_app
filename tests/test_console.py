@@ -1,5 +1,6 @@
 """Tests for the headless console stream."""
 
+import sys
 import asyncio
 import logging
 import threading
@@ -13,12 +14,18 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from reachy_mini.media.media_manager import MediaBackend
 import reachy_mini_conversation_app.console as console_mod
 from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.console import LocalStream, _AudioCaptureWorker
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
-from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
+from reachy_mini_conversation_app.hybrid_runtime import (
+    RuntimeMode,
+    HybridRuntime,
+    RuntimeStatusSnapshot,
+    TrafficMetricsSnapshot,
+)
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
@@ -147,7 +154,7 @@ def test_clear_audio_queue_prefers_clear_player() -> None:
         clear_player=MagicMock(),
         clear_output_buffer=MagicMock(),
     )
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.WEBRTC))
     stream = LocalStream(handler, robot)
 
     stream.clear_audio_queue()
@@ -157,18 +164,94 @@ def test_clear_audio_queue_prefers_clear_player() -> None:
     assert handler.output_queue.empty()
 
 
-def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
+def test_clear_audio_queue_falls_back_to_output_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Older SDKs without clear_player() still flush via clear_output_buffer()."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
     audio = SimpleNamespace(clear_output_buffer=MagicMock())  # no clear_player
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.LOCAL))
     stream = LocalStream(handler, robot)
+    monkeypatch.setattr(sys, "platform", "linux")
 
     stream.clear_audio_queue()
 
     audio.clear_output_buffer.assert_called_once()
     assert handler.output_queue.empty()
+
+
+def test_clear_audio_queue_skips_native_flush_on_macos_local_and_drains_queue(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MacOS LOCAL containment preserves app/provider queue draining."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    handler.output_queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
+    audio = SimpleNamespace(
+        clear_player=MagicMock(),
+        clear_output_buffer=MagicMock(),
+    )
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.LOCAL))
+    stream = LocalStream(handler, robot)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+        stream.clear_audio_queue()
+        stream.clear_audio_queue()
+
+    audio.clear_player.assert_not_called()
+    audio.clear_output_buffer.assert_not_called()
+    assert handler.output_queue.empty()
+    assert sum("Skipping native clear_player" in record.message for record in caplog.records) == 1
+
+
+def test_clear_audio_queue_flushes_local_backend_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The LOCAL backend still uses the native flush off macOS."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.LOCAL))
+    stream = LocalStream(handler, robot)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    stream.clear_audio_queue()
+
+    audio.clear_player.assert_called_once()
+    audio.clear_output_buffer.assert_not_called()
+
+
+def test_clear_audio_queue_flushes_webrtc_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WebRTC remains flushable on macOS."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.WEBRTC))
+    stream = LocalStream(handler, robot)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    stream.clear_audio_queue()
+
+    audio.clear_player.assert_called_once()
+    audio.clear_output_buffer.assert_not_called()
+
+
+def test_clear_audio_queue_macos_local_drains_active_hybrid_provider_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MacOS LOCAL containment still drains the active hybrid provider queue."""
+    provider = MagicMock()
+    provider.output_queue = asyncio.Queue()
+    provider.output_queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
+    runtime = HybridRuntime(lambda: MagicMock())
+    runtime._active_handler = provider
+    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.LOCAL))
+    stream = LocalStream(runtime, robot, hybrid_runtime=runtime)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    stream.clear_audio_queue()
+
+    audio.clear_player.assert_not_called()
+    assert provider.output_queue.empty()
 
 
 def test_clear_audio_queue_drains_queue_in_place() -> None:
@@ -1742,6 +1825,77 @@ def test_hybrid_status_exposes_postactivation_drop_diagnostic() -> None:
     status = _rpc_call(app, "conversation.status")["result"]
 
     assert status["postactivation_frames_dropped"] == 3
+
+
+def test_conversation_status_exposes_all_runtime_diagnostics_without_payloads() -> None:
+    """The status RPC forwards runtime counters but never transcript/audio payloads."""
+    runtime_status = RuntimeStatusSnapshot(
+        mode=RuntimeMode.CLOUD_CONVERSATION,
+        generation=7,
+        active=True,
+        closed=False,
+        provider_task_running=True,
+        inactivity_monitor_running=True,
+        connected=True,
+        ambient_audio_seconds_buffered=12.5,
+        ambient_audio_bytes_sent_to_cloud=0,
+        cloud_audio_bytes_sent=123,
+        cloud_video_frames_sent=4,
+        gemini_session_duration=5.5,
+        postactivation_frames_dropped=2,
+        local_context_chars=17,
+        transcript_segments_accepted=3,
+        wake_detections=4,
+        wake_cooldown_suppressed=5,
+        wake_final_update_count=6,
+        local_commands_executed=7,
+        local_command_failures=8,
+        local_command_escalations=9,
+        local_command_latency_seconds_total=10.5,
+        local_command_latency_seconds_max=11.5,
+        context_activation_latency_seconds_total=12.5,
+        context_activation_latency_seconds_max=13.5,
+        local_context_strategy="continuous_transcript",
+        local_audio_seconds_observed=14.5,
+        local_speech_frames=15,
+        local_stt_requests=16,
+        local_stt_completed=17,
+        local_stt_failures=18,
+        local_stt_timeouts=19,
+        local_stt_dropped=20,
+        local_stt_latency_seconds_total=21.5,
+        local_stt_latency_seconds_max=22.5,
+        local_stt_inflight_peak=23,
+        local_stt_pending_at_activation=24,
+    )
+    runtime = MagicMock()
+    runtime.status = runtime_status
+    runtime.metrics = TrafficMetricsSnapshot(
+        ambient_audio_seconds_buffered=12.5,
+        ambient_audio_bytes_sent_to_cloud=0,
+        cloud_audio_bytes_sent=123,
+        cloud_video_frames_sent=4,
+        gemini_session_duration=5.5,
+    )
+    runtime._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    for key, value in runtime_status().items():
+        assert status[key] == value
+    assert status["hybrid_metrics"] == {
+        "ambient_audio_seconds_buffered": 12.5,
+        "ambient_audio_bytes_sent_to_cloud": 0,
+        "cloud_audio_bytes_sent": 123,
+        "cloud_video_frames_sent": 4,
+        "gemini_session_duration": 5.5,
+        "postactivation_frames_dropped": 2,
+    }
+    assert "raw_audio" not in status
+    assert "transcript_text" not in status
 
 
 def test_rpc_interrupt_broadcasts_turn_listening() -> None:
