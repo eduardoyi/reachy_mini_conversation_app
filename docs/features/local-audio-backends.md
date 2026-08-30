@@ -218,3 +218,4 @@ remain pending.
 | 2026-08-29 | Disabled environment proxy discovery and added an optional validated language hint, with regression coverage for proxy bypass and multipart inclusion/omission. |
 | 2026-08-29 | Bounded uploads to 20 seconds and rejected MLX Audio's temp-file STT server for this privacy boundary; documented the in-memory Transformers Serve candidate and required live temp-directory verification. |
 | 2026-08-29 | Documented the processor-owned bounded executor and honest close behavior for blocking synchronous VAD/STT implementations. |
+| 2026-08-30 | Corrected the Transformers Serve launch command after live acceptance showed that `FORCE_MODEL` is positional. The installed 5.16.1 help summary omits the transcription route, but its server implementation includes `/v1/audio/transcriptions`. |

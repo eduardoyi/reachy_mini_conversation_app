@@ -72,7 +72,7 @@ Run three terminals:
 
 # Terminal 2 — local STT
 transformers serve --host 127.0.0.1 --port 8766 \
-  --force-model openai/whisper-small
+  openai/whisper-small
 
 # Terminal 3 — app and UI
 .venv/bin/reachy-mini-conversation-app --media-backend local --ui
