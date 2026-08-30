@@ -1,10 +1,10 @@
 # Reachy Hybrid Household Companion — Implementation Plan
 
 - Status: `in-progress`
-- Active phase: `Human acoustic wake and audible-cadence acceptance`
+- Active phase: `Audible playback retest after native burst-retention fix`
 - Owner: Reachy project
 - Created: 2026-08-29
-- Last updated: 2026-08-30
+- Last updated: 2026-08-31
 - Scope: Phases 0–5
 - Required final report: [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) at the repository root
 
@@ -681,6 +681,7 @@ live validation; the durable fix still belongs upstream.
 | 2026-08-30 | Automated live playback smoke | Root launched the real simulator, Transformers Serve, and the app-owned GStreamer/Gemini path with the microphone muted to prevent acoustic feedback. Two fresh cloud sessions connected in 451.4 ms and 327.7 ms with the app-owned sink selected, completed a `move_head` tool call and two interruptions, and stayed alive; the first returned to `LOCAL_AMBIENT` after inactivity. A separate startup/stop cycle shut down the app cleanly before the daemon. Ambient-cloud bytes, postactivation drops, and local-processing drops remained zero. The status surface does not prove sink acceptance, and a Mac `say` wake probe did not reach VAD/STT, so human acoustic wake/command and audible-cadence acceptance remain pending. |
 | 2026-08-30 | Final automated gate | The exact gate passed Ruff, formatting, strict mypy across 59 source files, all 726 tests with one explicit native skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. The opt-in native speaker child passed separately in 1.15 seconds. A post-close frame race found during root review was fixed with a regression so closed runtimes no longer perform local observation. |
 | 2026-08-30 | Phase 5 live acceptance | Human speech `computer, look left` reached local Whisper (HTTP 200), transitioned `LOCAL_AMBIENT` → `LOCAL_COMMAND`, executed the existing `move_head`/`look_left` action, and returned to `LOCAL_AMBIENT`. No Gemini handler was constructed or connected, so the command-path privacy acceptance passed. Local execution followed the STT response by about 14 ms. End-to-end speech latency, the other four commands, and sustained local-processing drop rates remain pending. |
+| 2026-08-31 | Native playback quality blocker | Human headphone acceptance remained choppy/fast-forwarded after the sample-clock correction. Native reproduction proved the two former eight-buffer/500 ms downstream-leaky queues silently deleted burst audio: only 5 of 20 100 ms buffers survived while `push-buffer` still returned success. Replaced buffer-count limits with a bounded 30-second byte/time contract while preserving non-blocking pushes, downstream leaking beyond the bound, and immediate generation-safe flush; incompatible appsrc versions now fail closed instead of silently becoming unbounded. The revised native child retains 20/20 uniquely marked buffers in order with contiguous timing and verifies a two-frame post-flush restart; the focused suite and opt-in native child pass. Final root verification passed Ruff, formatting, strict mypy across 59 source files, all 730 tests with one explicit native skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. Fresh human audible retest remains pending. |
 
 ## Next steps
 

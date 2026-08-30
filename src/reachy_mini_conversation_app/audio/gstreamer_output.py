@@ -6,7 +6,11 @@ import gi
 
 from reachy_mini_conversation_app.audio.speaker_output import AudioFrame, _GStreamerPipeline
 from reachy_mini_conversation_app.audio.sample_timeline import SampleTimeline, apply_sample_timing
-from reachy_mini_conversation_app.audio.gstreamer_contract import send_flush_events
+from reachy_mini_conversation_app.audio.gstreamer_contract import (
+    send_flush_events,
+    configure_bounded_audio_buffers,
+    configure_nonblocking_audio_source,
+)
 
 
 gi.require_version("Gst", "1.0")
@@ -35,14 +39,8 @@ class NativeGStreamerPipeline:
         appsrc.set_property("is-live", True)
         appsrc.set_property("format", Gst.Format.TIME)
         appsrc.set_property("do-timestamp", False)
-        appsrc.set_property("block", False)
-        appsrc.set_property("max-buffers", 8)
-        appsrc.set_property("max-bytes", sample_rate * 4 // 2)
-        if appsrc.find_property("leaky-type") is not None:
-            appsrc.set_property("leaky-type", 2)
-        audio_queue.set_property("max-size-buffers", 8)
-        audio_queue.set_property("max-size-bytes", 0)
-        audio_queue.set_property("max-size-time", 500_000_000)
+        configure_nonblocking_audio_source(appsrc)
+        configure_bounded_audio_buffers(appsrc, audio_queue, sample_rate)
         audio_queue.set_property("leaky", 2)
 
         for element in (appsrc, audio_queue, audioconvert, audioresample, audiosink):

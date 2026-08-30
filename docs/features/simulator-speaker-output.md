@@ -1,7 +1,7 @@
 # Feature: simulator speaker output bypass
 
 - Status: `in-progress`
-- Last updated: 2026-08-30
+- Last updated: 2026-08-31
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview and behavior
@@ -36,10 +36,13 @@ provider audio
 ```
 
 The app-owned path uses one bounded Python queue and bounded/leaky native
-queues. `push()` copies a one-dimensional finite float32 frame and returns
-without waiting on the native sink. Under pressure, the oldest queued frame is
-dropped and only a numeric drop counter is logged. Audio samples are never
-logged or persisted.
+queues. Construction fails closed when appsrc lacks downstream-leak support.
+The native stages retain up to 30 seconds by audio bytes/time rather
+than by provider buffer count, because Gemini may deliver more than eight
+small buffers in a sub-second burst. `push()` copies a one-dimensional finite
+float32 frame and returns without waiting on the native sink. Beyond the bound,
+the oldest queued frame is dropped. Audio samples are never logged or
+persisted.
 
 Every accepted frame carries the current flush generation. Barge-in increments
 the generation, drains queued frames, and flushes appsrc. A frame accepted
@@ -103,6 +106,9 @@ robot path should remain on the SDK unless separately designed and measured.
   after a short bound. Queued pre-interruption frames are discarded; the
   native flush is deferred and runs before later-generation audio, and native
   close is completed later by a daemon cleanup worker after the push returns.
+- Native queue limits must remain time/byte based and downstream-leaky. A
+  blocking queue could delay interruption, while the former eight-buffer,
+  500 ms limits silently deleted normal Gemini bursts.
 - [`docs/scheme.mmd`](../scheme.mmd) contains the new output branch. The
   generated `docs/assets/conversation_app_arch.svg` remains pending regeneration
   through the repository's diagram workflow and is not hand-edited.
@@ -171,6 +177,16 @@ passed (`24 passed`). This validates the sample timeline, fake-buffer, and
 flush-result contracts only; it does not establish native sink cadence or
 audible quality.
 
+Human acceptance on 2026-08-31 confirmed that the first timestamp-only fix was
+still choppy and sounded fast-forwarded. A native reproduction showed why: the
+old 500 ms limits retained only 5 of 20 rapidly supplied 100 ms buffers while
+`push-buffer` still returned success. The replacement keeps the pipeline
+non-blocking and leaky but raises both native stages to a 30-second time/byte
+bound. The revised native child retains all 20 uniquely marked buffers in
+order, verifies contiguous 100 ms PTS/duration metadata, then confirms two
+post-flush frames restart correctly. Audible acceptance remains pending a fresh
+process restart and human headphone retest.
+
 Commands run:
 
 ```bash
@@ -211,7 +227,9 @@ with the same opt-in environment and the test narrowed to
 The broader hermetic command above remains the repeatable default; native
 hardware/sink availability can still vary by machine.
 
-Final root verification passed Ruff, formatting, strict mypy across 59 source
-files, all 726 tests with one explicit native skip, lock consistency, both
-JavaScript syntax checks, and `git diff --check`. A separately enabled final
-native child run passed in 1.15 seconds.
+The 2026-08-31 burst-retention fix passed the focused output/console suite and
+the revised opt-in native child passed independently. Ruff,
+formatting, and strict mypy across 59 source files were clean. Final root
+verification passed all 730 tests with one explicit native skip, lock
+consistency, both JavaScript syntax checks, and `git diff --check`. Human
+audible retest remains pending.

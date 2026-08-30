@@ -1,7 +1,7 @@
 # Hybrid household companion benchmark
 
 - Status: `in-progress`
-- Last updated: 2026-08-30
+- Last updated: 2026-08-31
 - Machine: Apple Silicon Mac, simulator, SDK LOCAL media backend
 - Scope: Phases 0–5
 
@@ -119,7 +119,7 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
 | Split-final wake follow-up | Deterministic hybrid-runtime/capture tests | Exact follow-up stays cloud-free; uncertain follow-up and timeout preserve the FIFO for cloud; live latency/resource value not measured |
 | Local capture pressure | Deterministic LocalStream/runtime burst test | Slow local observation no longer holds the capture handoff; admitted local frames remain ordered, capture-worker drops stay zero, and sustained live drop rate is not measured |
-| App-owned speaker timing | Deterministic timing/flush tests, native child, and live Gemini smoke | 7 timeline tests and 3 flush-contract tests passed; the native child exited zero; two fresh live sessions completed without a native crash, but audible quality was not measured |
+| App-owned speaker timing | Deterministic timing/flush tests, native child, and live Gemini smoke | Human playback remained choppy after the timestamp fix; the old 500 ms queues retained only 5/20 burst buffers. A bounded 30-second replacement now retains 20/20 with contiguous timing, but audible retest is pending |
 
 The direct Phase 1 saved-log rerun and all Phase 3–5 live measurements remain
 required before this report can be marked complete.
@@ -253,6 +253,16 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   close, without the prior native crash. Audible cadence still needs a human
   headphone check. Barge-in on the SDK path may leave already-buffered native
   audio.
+- The first sample-clock correction did not fix audible quality. Human
+  acceptance still sounded choppy/fast-forwarded. Native probing then proved
+  the two downstream-leaky 500 ms queues silently discarded normal burst
+  audio: only 5 of 20 100 ms frames survived even though `push-buffer` returned
+  success. The queues now remain non-blocking and bounded but retain 30 seconds
+  by bytes/time; incompatible appsrc versions fail closed rather than buffering
+  without a bound. The revised native regression retains 20/20 uniquely marked
+  buffers in order and verifies playback after a flush. The full repository
+  gate passes 730 tests with one explicit native skip. A
+  fresh human headphone retest is still required.
 - MLX Audio's current STT server explicitly bridges inference through a file in
   `/tmp`, so it was rejected for this RAM-only ambient path. The selected
   Transformers candidate decodes uploaded bytes through `BytesIO`; the live run
@@ -268,9 +278,9 @@ Mac and Pi workload data.
 
 ## 12. Recommendation
 
-First complete the short human headphone check for audible cadence on the
-explicit macOS simulator playback bypass; retain the SDK playback path as the
-default outside this explicit simulator workaround. Then run both
+First repeat the short human headphone check after restarting Terminal 3 so it
+loads the bounded 30-second native buffer fix; retain the SDK playback path as
+the default outside this explicit simulator workaround. Then run both
 dinner-demo strategies on the Mac with the same microphone and
 local model, recording activation/context/connection/first-audio latency,
 process CPU/RSS, transcript quality, wake false positives/misses, and local
