@@ -114,7 +114,7 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Strategy B dinner context | Automated integration | acknowledgment precedes local STT, which precedes provider construction; live latency not measured |
 | Wake activation latency | Automated deterministic clock plus one live path | live numeric value not measured |
 | Wake false positives / misses | One live configured wake-word check | `LOCAL_WAKE_WORD=computer` reached the final-STT detector; default `Reachy` produced no action because no exact matching token reached the detector; rates remain not measured |
-| Local command latency | Automated deterministic clock plus one live simulator attempt | `computer, look left` triggered local wake but escalated to Gemini; Gemini called `MoveHead`, so live local-command acceptance and latency remain not measured |
+| Local command latency | Automated deterministic clock plus live simulator acceptance | `computer, look left` produced local STT HTTP 200, entered `LOCAL_COMMAND`, executed local `look_left`, and returned to `LOCAL_AMBIENT` without constructing Gemini; execution followed the STT response by about 14 ms, while end-to-end speech latency remains unmeasured |
 | Local STT CPU / process RSS | — | not measured |
 | Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
 | Split-final wake follow-up | Deterministic hybrid-runtime/capture tests | Exact follow-up stays cloud-free; uncertain follow-up and timeout preserve the FIFO for cloud; live latency/resource value not measured |
@@ -186,6 +186,12 @@ The `conversation.status` RPC now exposes metadata-only local processing
 counters, including accepted transcript segments and final wake updates, so a
 live no-action result can be distinguished from an STT or detector boundary
 miss without returning transcript or audio content.
+
+The 2026-08-30 live `computer, look left` acceptance produced a local STT 200,
+then `LOCAL_AMBIENT` → `LOCAL_COMMAND` → local `look_left` →
+`LOCAL_AMBIENT`. No Gemini handler construction or connection appeared in the
+run. This proves the command stayed local; it does not by itself measure raw
+ambient byte counters or end-to-end speech latency.
 
 The accepted five-minute Phase 2 live soak retained a full 20-second RAM ring
 while `ambient_audio_bytes_sent_to_cloud`, cloud audio, and cloud video remained
