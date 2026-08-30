@@ -93,6 +93,15 @@ counted only after a successful explicitly requested camera send. Ambient
 playback waits on the runtime state wakeup rather than polling while no cloud
 handler exists.
 
+LocalStream hands copied local frames to a bounded eight-frame runtime FIFO and
+does not wait for the processor to finish. One runtime worker consumes that FIFO
+sequentially, preserving the order presented to local VAD/STT while the capture
+loop remains available to drain the SDK queue. A full local FIFO drops the newest
+local frame and increments `local_processing_frames_dropped`; this is distinct
+from capture-worker drops and from the provider handshake FIFO. Runtime close
+cancels the worker and releases queued callers without retaining frame data;
+frames arriving after close are dropped before any observation fallback.
+
 The handshake FIFO measures time samples rather than scalar array elements, so
 an SDK frame shaped `(16000, 2)` represents one second. A `(1, 2)` frame is one
 stereo sample, while a `(N, 1)` frame remains `N` mono samples.
@@ -140,7 +149,13 @@ diagnostic `postactivation_frames_dropped` is separate from these five
 required traffic/session counters. Additional metadata-only diagnostics include
 context character count, `transcript_segments_accepted`, activation latency,
 wake detections/suppression, `wake_final_update_count`, local command
-execution/failure/escalation and latency, and `postactivation_frames_dropped`.
+execution/failure/escalation and latency, last local command outcome and router
+reason, router-rejection/follow-up-timeout counters, and both capture/local
+processing drop counters. `local_command_last_outcome` is one of
+`local_executed`, `router_rejected`, `followup_timeout`, or
+`local_execution_failed`; `local_command_last_router_reason` uses the existing
+`IntentDecisionReason` values and is null when no router decision exists. These
+fields contain counters/enums only, never addressed text.
 The local STT request/completion/failure/timeout/drop, latency, in-flight, and
 pending-at-activation counters are also returned at the top level. Gemini's
 `first_audio_unavailable_count`, `first_audio_reordered_count`, and
@@ -189,10 +204,12 @@ LLM routing into this boundary.
 - Strategy A never waits for an in-flight continuous STT result during
   activation. Strategy B waits only for its bounded local STT timeout and uses
   keyboard activation because it has no continuous transcript to detect wake.
-- Local frame observation is currently awaited inline at the capture boundary;
-  a slow VAD can delay capture and increment the existing capture-drop metric.
-  This remains a measured performance follow-up, not an unbounded worker
-  refactor in the split-final fix.
+- LocalStream no longer waits for local frame observation at the capture
+  boundary. The runtime worker is sequential and bounded to eight queued frames;
+  overload is fail-closed by dropping newest local work and reporting
+  `local_processing_frames_dropped`. This prevents a slow asynchronous VAD/STT
+  call from holding the capture loop, but sustained overload can still drop
+  local frames and requires target-microphone measurement.
 - An addressed transcript suffix is capped at 512 characters and sent only
   after cloud activation; it is never logged. Exact local commands consume the
   suffix locally and never submit it to a provider.
@@ -221,6 +238,9 @@ across:
 - `tests/test_wake_word.py`
 - `tests/test_local_intent_router.py`
 - `tests/test_local_actions.py`
+- `tests/test_hybrid_smoke.py`
+- `tests/audio/test_sample_timeline.py`
+- `tests/audio/test_gstreamer_contract.py`
 
 `tests/test_console.py` exercises the JSON-RPC activation path, owner-loop
 marshalling, capture worker, delayed provider readiness, the deterministic
@@ -232,6 +252,22 @@ that later provider-bound frames retain FIFO order.
 The console regressions also verify that macOS LOCAL skips native playback
 clearing while draining the app/provider queue, while WebRTC and non-macOS
 LOCAL retain native flushing and older SDKs retain the fallback path.
+The hermetic smoke harness composes the real runtime, wake detector, intent
+router, and local action executor to exercise all five exact local commands,
+split-final exact and delayed/non-exact follow-ups, uncertain addressed-text
+escalation, inactivity teardown, repeated provider lifecycle, bounded burst
+handling, cloud-byte privacy (including a real fake provider traffic callback),
+payload-safe logging, and no-file behavior without credentials or hardware.
+Its speaker checks use a fake public output seam; they do not claim native
+GStreamer timing or SDK mixer coverage. The optional native child smoke is
+documented in [simulator speaker output](simulator-speaker-output.md). The live
+simulator/Gemini smoke now supplies process-survival evidence, while audible
+quality still requires a human headphone check.
+The GI-free sample-timeline tests cover the app-owned output's sample-derived
+PTS/DTS/duration and reset contract, but do not replace native sink or live
+audible validation.
+The GI-free GStreamer contract tests also verify ordered flush events and
+fail-closed native rejection handling.
 The browser contract checks are source-level because the repository has no
 JavaScript test harness. The final repository gate passed on 2026-08-29: Ruff
 clean, formatting left 87 files unchanged, strict mypy clean across 49 source
@@ -302,6 +338,18 @@ capture-boundary dual observation, FIFO preservation, and the zero ambient
 cloud-byte privacy invariant. These are deterministic fake-boundary tests; no
 live split-final latency or local-command acceptance is claimed.
 
+The local-routing regressions distinguish same-final router rejection,
+split-final follow-up timeout, and local executor failure using only enum,
+reason, and counter metadata. The LocalStream pressure regression holds a local
+processor, feeds a paced capture burst, and verifies capture-worker drops stay
+zero while admitted local frames remain ordered. Separate runtime regressions
+cover bounded local-FIFO drops, cancellation of an active observation, queued
+caller release, zero ambient cloud bytes, and status-RPC enum serialization.
+On 2026-08-30, the focused hybrid/runtime/console/router/action/main command
+passed 205 tests; the dotenv-isolated full command passed 726 tests with one
+explicit skip. Ruff, formatting, strict mypy across 59 source files, and
+`git diff --check` also passed.
+
 The final 2026-08-30 CI-equivalent gate passed Ruff, formatting, strict mypy
 across 54 source files, and all 672 tests in 13.37 seconds. The command used
 `REACHY_MINI_SKIP_DOTENV=1` so the ignored live `.env` could not select Gemini
@@ -333,3 +381,5 @@ JavaScript syntax checks, and `git diff --check` also passed.
 | 2026-08-30 | Final split-follow-up verification passed Ruff, formatting, strict mypy, all 672 tests, lock consistency, JavaScript syntax, and diff checks with live dotenv loading disabled for test isolation. |
 | 2026-08-30 | A third macOS crash proved the native `clear_player()` skip insufficient. All three reports fault before ORC in GStreamer `do_convert_out` with zero samples and null sample arrays. The visible `look left` movement was Gemini's tool call, not local routing, so Phase 5 live acceptance remains pending. Selected an explicit app-owned simulator playback adapter for implementation; no live fix is claimed yet. |
 | 2026-08-30 | Implemented the explicit app-owned GStreamer speaker adapter with bounded/leaky queues, generation-safe interruption, fail-closed startup, combined SDK/app shutdown, and order-independent regression tests. The default SDK path is unchanged and live native-crash containment remains unproven. |
+| 2026-08-30 | Added metadata-only local routing outcomes/reasons and counters, plus a bounded sequential local-processing FIFO. LocalStream now hands frames off without awaiting slow local observation; deterministic pressure, backpressure, cancellation, close, ordering, and privacy tests cover the new seam. Live microphone/STT timing and sustained-overload rates remain unmeasured. |
+| 2026-08-30 | Closed a lifecycle race where a late frame could bypass the cleared local queue and still reach the processor; late frames now drop without observation, with regression coverage. Open-runtime direct observation behavior remains covered. |

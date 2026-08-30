@@ -146,7 +146,16 @@ matching.
 - Action execution, cloud escalation, acknowledgment, interruption, and
   movement errors belong to the caller and must be tested at that boundary.
 - Tool error payloads and callback exceptions become typed `FAILED` results;
-  cancellation is deliberately re-raised so lifecycle owners can stop work.
+cancellation is deliberately re-raised so lifecycle owners can stop work.
+
+`HybridRuntime` exposes the outcome of the latest addressed-command attempt as
+metadata only. `local_command_last_outcome` distinguishes `local_executed`,
+`router_rejected`, `followup_timeout`, and `local_execution_failed`;
+`local_command_last_router_reason` carries an `IntentDecisionReason` only for a
+router decision. The cumulative router-rejection and follow-up-timeout counters
+make a same-final rejection distinguishable from a missing split-final follow-up
+without retaining or returning transcript text. An executor failure increments
+the existing failure/escalation counters and reports no router reason.
 
 ## Dependencies
 
@@ -167,8 +176,10 @@ matching.
 
 `tests/test_hybrid_runtime.py` verifies that exact local decisions do not
 construct a cloud handler, failures and uncertain text escalate, and required
-privacy counters remain zero. `tests/test_main.py` verifies composition with
-the existing movement/playback owners.
+privacy counters remain zero. It also distinguishes same-final router rejection,
+split-final timeout, and local execution failure using enum/reason/counter
+metadata only. `tests/test_main.py` verifies composition with the existing
+movement/playback owners.
 
 Focused validation for this module:
 
@@ -195,6 +206,11 @@ FIFO preservation, cancellation/close, capture-boundary dual observation, and
 zero ambient-cloud bytes. They use fake providers and local processors; no live
 split-final latency claim is made.
 
+The status-RPC regression verifies that these enum values serialize to stable
+strings and that no transcript or audio payload key is introduced. Exact
+allowlisting remains unchanged; the observability path does not add aliases or
+fuzzy matching.
+
 ## Changelog
 
 | Date | Change |
@@ -204,3 +220,4 @@ split-final latency claim is made.
 | 2026-08-29 | Integrated wake-suffix routing into `LOCAL_COMMAND`; exact success remains local and every uncertain/failing decision escalates. |
 | 2026-08-30 | Live `computer, look left` reached local activation but escalated; Gemini performed the movement, so Phase 5 live acceptance remains pending. The `Reachy` failure remains isolated to the exact final-transcript match boundary. |
 | 2026-08-30 | Added the configurable two-second one-shot split-final follow-up path and deterministic tests for local success, cloud escalation, timeout, FIFO, cancellation, and privacy. Live STT segmentation and latency remain pending. |
+| 2026-08-30 | Added metadata-only routing outcomes/reasons and counters for router rejection, split-final timeout, and executor failure. The exact fail-closed allowlist is unchanged. |

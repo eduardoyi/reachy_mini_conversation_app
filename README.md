@@ -244,9 +244,10 @@ privacy tests. Status also exposes bounded context, wake, local-command,
 activation-latency, and postactivation-drop diagnostics without transcript or
 audio payloads.
 
-The current automated Phase 3–5 integration gate passed all 672 tests plus Ruff,
-formatting, strict mypy, lock consistency, JavaScript syntax, and diff checks.
-Live microphone, local-model, wake-quality, dinner-demo, and CPU/RAM acceptance
+The current automated integration gate passes 726 tests with one explicitly
+opt-in native-audio test skipped by default, plus Ruff, formatting, strict
+mypy, lock consistency, JavaScript syntax, and diff checks. Live microphone,
+local-model, wake-quality, dinner-demo, audible-cadence, and CPU/RAM acceptance
 measurements remain pending.
 
 #### Local STT benchmark server

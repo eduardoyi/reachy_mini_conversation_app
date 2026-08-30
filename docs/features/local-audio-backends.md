@@ -1,7 +1,7 @@
 # Feature: local audio backends
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -55,8 +55,12 @@ flowchart LR
 `local_audio_backends.py` owns only backend-specific validation and transport.
 The processor passes copied frames and is the only component that decides
 whether a continuous segment or an activation snapshot is transcribed. The
-STT backend returns derived text only; pre-activation PCM is never forwarded to
-the cloud provider by this module.
+`HybridRuntime` receives LocalStream frames through a bounded eight-frame FIFO;
+one worker observes them sequentially, so a slow asynchronous VAD/STT call does
+not hold the capture loop. The FIFO drops newest local work when full and
+reports `local_processing_frames_dropped`. The STT backend returns derived text
+only; pre-activation PCM is never forwarded to the cloud provider by this
+module.
 
 ## Canonical files and contracts
 
@@ -183,11 +187,13 @@ Tests are hardware-, credential-, disk-, and network-independent.
 
 ### Integration tests
 
-`tests/test_hybrid_runtime.py` and `tests/test_main.py` prove that the local STT
-boundary is composed only for hybrid local processing, that Strategy B receives
-the defensive RAM snapshot locally, and that no pre-activation audio bytes
-reach a provider. A live local STT server is intentionally not a test-suite
-dependency.
+`tests/test_hybrid_runtime.py`, `tests/test_console.py`, and `tests/test_main.py`
+prove that the local STT boundary is composed only for hybrid local processing,
+that Strategy B receives the defensive RAM snapshot locally, that no
+pre-activation audio bytes reach a provider, and that a blocked local processor
+does not block the LocalStream capture handoff. Runtime backpressure, ordered
+admission, cancellation, and close are deterministic fake-boundary tests. A
+live local STT server is intentionally not a test-suite dependency.
 
 ### Simulator / end-to-end tests
 
@@ -207,8 +213,10 @@ CPU/RAM, and transcript quality on the development machine.
 Validation on 2026-08-29: focused Ruff checks passed, formatting was unchanged,
 strict mypy passed for the backend source, and 39 focused tests passed in 0.91 s.
 After final integration and added duration-bound coverage, the full repository
-gate passed all 649 tests. Live local-server privacy and resource validation
-remain pending.
+gate passed all 649 tests. On 2026-08-30, the focused hybrid/runtime/console
+suite passed 130 tests and the dotenv-isolated repository suite passed 726 tests
+with one explicit skip; live local-server privacy, microphone timing, and
+resource validation remain pending.
 
 ## Changelog
 
@@ -220,3 +228,4 @@ remain pending.
 | 2026-08-29 | Documented the processor-owned bounded executor and honest close behavior for blocking synchronous VAD/STT implementations. |
 | 2026-08-30 | Corrected the Transformers Serve launch command after live acceptance showed that `FORCE_MODEL` is positional. The installed 5.16.1 help summary omits the transcription route, but its server implementation includes `/v1/audio/transcriptions`. |
 | 2026-08-30 | Added `python-multipart` to the isolated server install after live transcription requests reached the endpoint but returned HTTP 500 because the serving extra did not install its upload parser. |
+| 2026-08-30 | Added the bounded sequential LocalStream-to-HybridRuntime handoff and metadata-only local-processing drop counter. Deterministic pressure/cancellation/close tests prove ordering and privacy behavior; sustained live VAD/STT load remains unmeasured. |

@@ -12,7 +12,7 @@ from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
 from reachy_mini_conversation_app.local_actions import LocalActionExecutor
-from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime
+from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime, LocalCommandOutcome
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
     AmbientContextConfig,
@@ -20,7 +20,7 @@ from reachy_mini_conversation_app.ambient_context import (
     AmbientContextProcessor,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter
+from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, HandlerOutput, ConversationHandler
 
 
@@ -722,6 +722,86 @@ async def test_uncertain_wake_utterance_escalates_to_cloud() -> None:
 
 
 @pytest.mark.asyncio
+async def test_same_final_router_rejection_reports_metadata_reason() -> None:
+    """A same-final non-allowlisted suffix records its router reason without text."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+    )
+
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, look left please", 1, 2, 1))
+        await handler.started.wait()
+        handler.set_connected(True)
+        await handler.say_called.wait()
+
+        status = runtime.status
+        assert status.local_command_last_outcome is LocalCommandOutcome.ROUTER_REJECTED
+        assert status.local_command_last_router_reason is IntentDecisionReason.UNSUPPORTED_COMMAND
+        assert status.local_command_router_rejections == 1
+        assert status.local_command_followup_timeouts == 0
+        assert status.local_command_failures == 0
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_wake_followup_timeout_reports_metadata_reason() -> None:
+    """A wake-only final records timeout separately from router rejection."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.01,
+    )
+
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+        await handler.started.wait()
+        handler.set_connected(True)
+        await wait_until(lambda: runtime.status.local_command_followup_timeouts == 1)
+
+        status = runtime.status
+        assert status.local_command_last_outcome is LocalCommandOutcome.FOLLOWUP_TIMEOUT
+        assert status.local_command_last_router_reason is None
+        assert status.local_command_router_rejections == 0
+        assert status.local_command_failures == 0
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_local_execution_failure_reports_metadata_reason() -> None:
+    """An exact route whose local executor fails records execution failure metadata."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+    )
+
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, be quiet", 1, 2, 1))
+        await handler.started.wait()
+
+        status = runtime.status
+        assert status.local_command_last_outcome is LocalCommandOutcome.LOCAL_EXECUTION_FAILED
+        assert status.local_command_last_router_reason is None
+        assert status.local_command_router_rejections == 0
+        assert status.local_command_followup_timeouts == 0
+        assert status.local_command_failures == 1
+        assert status.local_command_escalations == 1
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_activation_text_failure_is_private_and_keeps_session_usable(caplog) -> None:
     """A failed addressed-turn send logs only error metadata and leaves cloud active."""
     sentinel = "private addressed household question"
@@ -1267,20 +1347,133 @@ async def test_cancellation_during_close_finishes_cleanup_before_propagating() -
 
 
 @pytest.mark.asyncio
-async def test_after_close_frames_stay_local_and_processor_errors_are_nonfatal(
+async def test_local_processor_errors_are_nonfatal(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Closed runtime keeps local processing alive and logs only error metadata."""
+    """An open runtime keeps processor errors local and logs only error metadata."""
     sentinel = 31415
     processor = FakeLocalProcessor(fail=True)
     runtime = HybridRuntime(lambda: FakeHandler(), local_processor=processor)
-    await runtime.close()
     caplog.set_level(logging.WARNING)
     await runtime.handle_frame(frame(sentinel))
 
     assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
     assert "RuntimeError" in caplog.text
     assert str(sentinel) not in caplog.text
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_after_close_frames_are_dropped_without_local_observation() -> None:
+    """A frame racing after close cannot reach the local processor."""
+    processor = FakeLocalProcessor()
+    runtime = HybridRuntime(lambda: FakeHandler(), local_processor=processor)
+
+    await runtime.close()
+    await runtime.handle_frame(frame(2718))
+
+    assert processor.frames == []
+
+
+@pytest.mark.asyncio
+async def test_local_processing_backpressure_is_bounded_and_private() -> None:
+    """A blocked local processor drops only bounded local work, never cloud audio."""
+
+    class BlockingLocalProcessor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.frames: list[int] = []
+
+        async def observe_frame(self, observed_frame: AudioFrame) -> None:
+            self.frames.append(int(observed_frame[1][0]))
+            self.started.set()
+            await self.release.wait()
+
+    processor = BlockingLocalProcessor()
+    factory = MagicMock(side_effect=AssertionError("cloud must remain closed"))
+    runtime = HybridRuntime(factory, local_processor=processor)
+
+    try:
+        await runtime.handle_frame(frame(0), wait_for_local_processing=False)
+        await processor.started.wait()
+        for value in range(1, 12):
+            await runtime.handle_frame(frame(value), wait_for_local_processing=False)
+
+        status = runtime.status
+        assert status.local_processing_frames_dropped >= 1
+        assert status.local_processing_frames_dropped <= 3
+        assert status.local_command_last_outcome is None
+        assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+        factory.assert_not_called()
+
+        processor.release.set()
+        await wait_until(lambda: len(processor.frames) == 9)
+        assert processor.frames == list(range(9))
+    finally:
+        processor.release.set()
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_waits_for_successful_async_local_processing() -> None:
+    """The default direct runtime call completes after async local observation."""
+
+    class CompletingLocalProcessor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.completed = asyncio.Event()
+
+        async def observe_frame(self, _frame: AudioFrame) -> None:
+            self.started.set()
+            await asyncio.sleep(0)
+            self.completed.set()
+
+    processor = CompletingLocalProcessor()
+    runtime = HybridRuntime(lambda: FakeHandler(), local_processor=processor)
+
+    try:
+        await runtime.handle_frame(frame(0))
+        assert processor.started.is_set()
+        assert processor.completed.is_set()
+        assert runtime.status.local_processing_frames_dropped == 0
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_blocked_local_processing_and_queued_waiter() -> None:
+    """Runtime close cancels both the active local observation and queued caller."""
+
+    class CancellationLocalProcessor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+            self.never = asyncio.Event()
+
+        async def observe_frame(self, _frame: AudioFrame) -> None:
+            self.started.set()
+            try:
+                await self.never.wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+
+    processor = CancellationLocalProcessor()
+    runtime = HybridRuntime(lambda: FakeHandler(), local_processor=processor)
+
+    await runtime.handle_frame(frame(0), wait_for_local_processing=False)
+    await processor.started.wait()
+    queued = asyncio.create_task(runtime.handle_frame(frame(1)))
+    await asyncio.sleep(0)
+
+    await runtime.close()
+
+    with pytest.raises(asyncio.CancelledError):
+        await queued
+    assert processor.cancelled.is_set()
+    assert runtime.status.closed
+    assert runtime.status.local_processing_frames_dropped == 0
 
 
 @pytest.mark.asyncio

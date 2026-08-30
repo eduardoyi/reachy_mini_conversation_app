@@ -73,6 +73,7 @@ The public `SpeakerOutput` contract is deliberately small:
 | File | Responsibility |
 |---|---|
 | `src/reachy_mini_conversation_app/audio/speaker_output.py` | Output protocol, bounded worker, lazy native boundary, and explicit factory. |
+| `src/reachy_mini_conversation_app/audio/gstreamer_contract.py` | GI-free native event contract and fail-closed flush helper. |
 | `src/reachy_mini_conversation_app/audio/gstreamer_output.py` | Native appsrc-to-speaker GStreamer pipeline loaded only for the opt-in backend. |
 | `src/reachy_mini_conversation_app/console.py` | Late selection, provider-audio routing, barge-in flush, and combined app/SDK lifecycle. |
 | `src/reachy_mini_conversation_app/config.py` | Validated selector and constants. |
@@ -115,19 +116,67 @@ worker failure, flush generation races, and payload-safe logging.
 resampling, SDK/app shutdown, startup cleanup, interruption routing, and the
 persisted-environment regression. `tests/test_config.py` covers defaults,
 normalization, and fail-closed invalid values.
+`tests/test_hybrid_smoke.py` covers the public output seam's burst and
+interruption ordering alongside the hybrid privacy and local/cloud boundary.
+
+## Validation tiers
+
+The hermetic tier runs without a speaker, simulator, SDK daemon, or cloud
+credentials. `tests/test_hybrid_smoke.py` composes the real runtime and local
+command boundaries, checks split-final routing and provider traffic, and uses
+a fake speaker pipeline for bounded bursts and interruption ordering. These
+tests do not exercise native GStreamer timing or claim coverage of the SDK
+`audiomixer`. `tests/audio/test_sample_timeline.py` separately verifies the
+pure sample-clock contract and a GI-free buffer metadata fake: durations come
+from sample counts, burst arrival cannot compress playback, and long gaps or
+flush/start reset continuity.
+`tests/audio/test_gstreamer_contract.py` verifies that the two native flush
+events are ordered and that either rejected event fails closed.
+
+The optional native tier runs a child process that constructs the real
+app-owned GStreamer pipeline and performs burst, flush, and close cycles. It
+is explicitly opt-in, has a hard parent timeout, and reports a child exit or
+signal. Missing GI/GStreamer dependencies are a loud skip. It does not use
+Gemini, the simulator, or the SDK `audiomixer`, so a passing result is only a
+native app-output lifecycle smoke result.
+
+The live tier uses the simulator and Gemini with
+`AUDIO_OUTPUT_BACKEND=gstreamer`. A 2026-08-30 automated root smoke completed
+two fresh sessions with the real app-owned sink selected without a native
+crash, including a `move_head` tool call, two interruptions, and inactivity
+return to ambient. Provider connection samples were 451.4 ms and 327.7 ms. A
+separate startup/stop cycle shut down the app cleanly before the daemon. This is
+process-level containment evidence; the status surface does not prove native
+sink acceptance, and audible cadence and naturalness still need a human
+headphone check.
+
+The native pipeline now disables automatic arrival-time timestamps and assigns
+explicit PTS, DTS, duration, and DISCONT metadata from that sample timeline.
+It checks both native flush-event return values; a rejection raises into the
+speaker worker so output is stopped rather than silently continuing.
+The pure tests do not inspect a native `Gst.Buffer` or a real sink's cadence,
+so repeated native/live audible validation remains required.
 
 Root verification on 2026-08-30 passed the 126 focused tests in both forward
 and reverse file order. The final repository gate passed Ruff, formatting,
 strict mypy across 57 source files, and all 697 tests in 15.07 seconds. Lock
 consistency, both JavaScript syntax checks, and `git diff --check` also passed.
-Live simulator/Gemini repetition remains pending and will be recorded here
-rather than inferred from unit tests.
+The live simulator/Gemini result above is recorded separately from the
+deterministic suite and does not turn subjective audio quality into an
+automated claim.
+
+The timing regression tests passed on 2026-08-30 (`7 passed`), the GI-free
+flush contract passed (`3 passed`), and the combined speaker/timing subset
+passed (`24 passed`). This validates the sample timeline, fake-buffer, and
+flush-result contracts only; it does not establish native sink cadence or
+audible quality.
 
 Commands run:
 
 ```bash
 pytest tests/audio/test_speaker_output.py tests/test_console.py tests/test_config.py -q
 pytest tests/test_config.py tests/test_console.py tests/audio/test_speaker_output.py -q
+REACHY_MINI_SKIP_DOTENV=1 pytest tests/audio/test_sample_timeline.py tests/audio/test_gstreamer_contract.py tests/audio/test_speaker_output.py -q
 ruff check . --fix
 ruff format .
 mypy --pretty --show-error-codes
@@ -139,5 +188,30 @@ git diff --check
 ```
 
 A real native construction/start/push/flush/close smoke check also exited zero
-with a finite silent float32 frame; it did not use Gemini or the simulator and
-therefore is not live acceptance evidence.
+with finite silent float32 frames after the timing change; it did not use
+Gemini or the simulator and therefore is not live acceptance evidence.
+
+The current hermetic smoke command passed 11 tests and skipped the opt-in
+native child because `REACHY_RUN_NATIVE_AUDIO_SMOKE` was unset:
+
+```bash
+REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_hybrid_smoke.py -q -rs
+```
+
+Run the native tier only when the machine may safely open its default audio
+sink:
+
+```bash
+REACHY_MINI_SKIP_DOTENV=1 REACHY_RUN_NATIVE_AUDIO_SMOKE=1 .venv/bin/pytest tests/test_hybrid_smoke.py -q -rs
+```
+
+The explicit native child test passed three consecutive times on 2026-08-30
+with the same opt-in environment and the test narrowed to
+`tests/test_hybrid_smoke.py::test_optional_native_speaker_subprocess_smoke`.
+The broader hermetic command above remains the repeatable default; native
+hardware/sink availability can still vary by machine.
+
+Final root verification passed Ruff, formatting, strict mypy across 59 source
+files, all 726 tests with one explicit native skip, lock consistency, both
+JavaScript syntax checks, and `git diff --check`. A separately enabled final
+native child run passed in 1.15 seconds.

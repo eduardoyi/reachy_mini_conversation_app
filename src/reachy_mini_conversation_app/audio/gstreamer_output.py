@@ -5,6 +5,8 @@ import importlib
 import gi
 
 from reachy_mini_conversation_app.audio.speaker_output import AudioFrame, _GStreamerPipeline
+from reachy_mini_conversation_app.audio.sample_timeline import SampleTimeline, apply_sample_timing
+from reachy_mini_conversation_app.audio.gstreamer_contract import send_flush_events
 
 
 gi.require_version("Gst", "1.0")
@@ -32,7 +34,7 @@ class NativeGStreamerPipeline:
         appsrc.set_property("caps", caps)
         appsrc.set_property("is-live", True)
         appsrc.set_property("format", Gst.Format.TIME)
-        appsrc.set_property("do-timestamp", True)
+        appsrc.set_property("do-timestamp", False)
         appsrc.set_property("block", False)
         appsrc.set_property("max-buffers", 8)
         appsrc.set_property("max-bytes", sample_rate * 4 // 2)
@@ -56,28 +58,50 @@ class NativeGStreamerPipeline:
 
         self._pipeline = pipeline
         self._appsrc = appsrc
+        self._timeline = SampleTimeline(sample_rate)
 
     def start(self) -> None:
         """Set the dedicated pipeline to PLAYING."""
+        self._timeline.reset()
         result = self._pipeline.set_state(Gst.State.PLAYING)
         if result == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("GStreamer speaker pipeline failed to start")
 
     def push(self, audio: AudioFrame) -> None:
         """Push one copied frame into the non-blocking appsrc."""
+        timing = self._timeline.next_timing(
+            sample_count=int(audio.size),
+            running_time_ns=self._running_time_ns(),
+        )
         buffer = Gst.Buffer.new_wrapped(audio.tobytes())
+        apply_sample_timing(buffer, timing, Gst.BufferFlags.DISCONT)
         result = self._appsrc.emit("push-buffer", buffer)
         if result != Gst.FlowReturn.OK:
             raise RuntimeError("GStreamer speaker appsrc rejected audio")
 
     def flush(self) -> None:
         """Flush pending source data without touching the SDK pipeline."""
-        self._appsrc.send_event(Gst.Event.new_flush_start())
-        self._appsrc.send_event(Gst.Event.new_flush_stop(True))
+        self._timeline.reset()
+        send_flush_events(
+            self._appsrc,
+            Gst.Event.new_flush_start(),
+            Gst.Event.new_flush_stop(True),
+        )
 
     def close(self) -> None:
         """Stop the dedicated pipeline."""
         self._pipeline.set_state(Gst.State.NULL)
+
+    def _running_time_ns(self) -> int:
+        """Return the native pipeline running time for a new sample cue."""
+        clock = self._pipeline.get_clock()
+        if clock is None:
+            return 0
+        clock_time = int(clock.get_time())
+        base_time = int(self._pipeline.get_base_time())
+        if clock_time == int(Gst.CLOCK_TIME_NONE) or base_time == int(Gst.CLOCK_TIME_NONE):
+            return 0
+        return max(0, clock_time - base_time)
 
 
 def build_gstreamer_pipeline(sample_rate: int) -> _GStreamerPipeline:

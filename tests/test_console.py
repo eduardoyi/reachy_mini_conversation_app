@@ -28,6 +28,7 @@ from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.hybrid_runtime import (
     RuntimeMode,
     HybridRuntime,
+    LocalCommandOutcome,
     RuntimeStatusSnapshot,
     TrafficMetricsSnapshot,
 )
@@ -39,6 +40,7 @@ from reachy_mini_conversation_app.personality_routes import (
     RouteError,
     build_personality_ops,
 )
+from reachy_mini_conversation_app.local_intent_router import IntentDecisionReason
 
 
 def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
@@ -1630,6 +1632,78 @@ async def test_hybrid_localstream_silence_frames_do_not_refresh_cloud_inactivity
 
 
 @pytest.mark.asyncio
+async def test_hybrid_capture_pressure_keeps_ordered_local_processing_off_capture_worker() -> None:
+    """A slow local processor must not make the recorder discard its bounded capture queue."""
+
+    class BlockingLocalProcessor:
+        """Hold one local frame while the capture worker produces a paced burst."""
+
+        def __init__(self) -> None:
+            """Initialize deterministic release and observation signals."""
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.frames: list[np.ndarray] = []
+
+        async def observe_frame(self, frame: tuple[int, np.ndarray]) -> None:
+            """Retain ordered frame labels and wait for explicit release."""
+            self.frames.append(frame[1].copy())
+            self.started.set()
+            await self.release.wait()
+
+    processor = BlockingLocalProcessor()
+    produced_all = threading.Event()
+    capture_blocked = threading.Event()
+    release_media = threading.Event()
+    next_value = 0
+
+    def get_audio_sample() -> np.ndarray | None:
+        """Emit six paced frames, then stop producing until teardown releases the fake media."""
+        nonlocal next_value
+        if next_value < 6:
+            frame = np.array([next_value], dtype=np.int16)
+            next_value += 1
+            if next_value > 1:
+                threading.Event().wait(0.01)
+            if next_value == 6:
+                produced_all.set()
+            return frame
+        capture_blocked.set()
+        release_media.wait()
+        return None
+
+    media = SimpleNamespace(
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=get_audio_sample,
+    )
+    runtime = HybridRuntime(
+        lambda: _HybridTestHandler(),
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20.0, sample_rate=16_000),
+        local_processor=processor,
+    )
+    stream = LocalStream(runtime, SimpleNamespace(media=media), hybrid_runtime=runtime)
+    worker = _AudioCaptureWorker(media, queue_size=4, poll_interval=0)
+    stream._capture_worker = worker
+    record_task = asyncio.create_task(stream.record_loop())
+
+    try:
+        await processor.started.wait()
+        assert await asyncio.to_thread(produced_all.wait, 1.0)
+        assert await asyncio.to_thread(capture_blocked.wait, 1.0)
+
+        assert worker.dropped_frames == 0
+
+        processor.release.set()
+        await _wait_until(lambda: len(processor.frames) == 6)
+        assert [int(frame[0]) for frame in processor.frames] == [0, 1, 2, 3, 4, 5]
+    finally:
+        processor.release.set()
+        release_media.set()
+        stream._stop_event.set()
+        await asyncio.wait_for(record_task, timeout=1.0)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_blocked_capture_does_not_block_event_loop_or_close() -> None:
     """A stuck SDK pull cannot starve the loop or delay bounded shutdown."""
     pull_started = threading.Event()
@@ -2126,6 +2200,11 @@ def test_conversation_status_exposes_all_runtime_diagnostics_without_payloads() 
         local_commands_executed=7,
         local_command_failures=8,
         local_command_escalations=9,
+        local_command_last_outcome=LocalCommandOutcome.ROUTER_REJECTED,
+        local_command_last_router_reason=IntentDecisionReason.UNSUPPORTED_COMMAND,
+        local_command_router_rejections=10,
+        local_command_followup_timeouts=11,
+        local_processing_frames_dropped=12,
         local_command_latency_seconds_total=10.5,
         local_command_latency_seconds_max=11.5,
         context_activation_latency_seconds_total=12.5,
@@ -2168,6 +2247,7 @@ def test_conversation_status_exposes_all_runtime_diagnostics_without_payloads() 
         "cloud_video_frames_sent": 4,
         "gemini_session_duration": 5.5,
         "postactivation_frames_dropped": 2,
+        "local_processing_frames_dropped": 12,
     }
     assert "raw_audio" not in status
     assert "transcript_text" not in status

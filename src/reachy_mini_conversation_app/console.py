@@ -465,7 +465,7 @@ class LocalStream:
         runtime = self._hybrid_runtime
         if runtime is None:
             return
-        await runtime.handle_frame(frame, capture_sequence=sequence)
+        await runtime.handle_frame(frame, capture_sequence=sequence, wait_for_local_processing=False)
 
     def _capture_sequence(self) -> int | None:
         """Return the latest capture epoch for activation fencing."""
@@ -954,6 +954,11 @@ class LocalStream:
                 "cloud_video_frames_sent": 0,
                 "gemini_session_duration": 0.0,
                 "postactivation_frames_dropped": 0,
+                "local_command_last_outcome": None,
+                "local_command_last_router_reason": None,
+                "local_command_router_rejections": 0,
+                "local_command_followup_timeouts": 0,
+                "local_processing_frames_dropped": 0,
             }
 
         status = runtime.status
@@ -969,6 +974,7 @@ class LocalStream:
             "cloud_video_frames_sent": metrics.cloud_video_frames_sent,
             "gemini_session_duration": metrics.gemini_session_duration,
             "postactivation_frames_dropped": status.postactivation_frames_dropped,
+            "local_processing_frames_dropped": status.local_processing_frames_dropped,
         }
         return {
             "hybrid_runtime_enabled": True,

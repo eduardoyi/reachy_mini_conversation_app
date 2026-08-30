@@ -16,6 +16,7 @@ Missing values are marked `not measured`; they are not estimated.
 
 ```text
 Mac microphone → LocalStream → HybridRuntime
+                              ├─ bounded sequential local-processing handoff
                               ├─ LOCAL_AMBIENT
                               │    20 s RAM PCM ring
                               │    RMS VAD → loopback local STT
@@ -49,6 +50,13 @@ The local STT adapter accepts only explicit loopback hosts, disables proxy
 environment discovery, sends no credentials, builds WAV input in memory, and
 returns text only. Gemini is constructed only after activation. Existing
 provider, tool, movement, profile, and local-memory boundaries are reused.
+
+For the explicit macOS simulator workaround, `AUDIO_OUTPUT_BACKEND=gstreamer`
+routes assistant PCM through an app-owned bounded pipeline. Its appsrc uses a
+sample-derived timeline with explicit PTS/DTS/duration, first-cue running-time
+anchoring, long-gap reanchoring, and start/flush resets. The default `sdk`
+output remains unchanged. Native flush-event rejection fails closed and stops
+the app-owned speaker worker.
 
 ## 2. How to run it
 
@@ -110,6 +118,8 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Local STT CPU / process RSS | — | not measured |
 | Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
 | Split-final wake follow-up | Deterministic hybrid-runtime/capture tests | Exact follow-up stays cloud-free; uncertain follow-up and timeout preserve the FIFO for cloud; live latency/resource value not measured |
+| Local capture pressure | Deterministic LocalStream/runtime burst test | Slow local observation no longer holds the capture handoff; admitted local frames remain ordered, capture-worker drops stay zero, and sustained live drop rate is not measured |
+| App-owned speaker timing | Deterministic timing/flush tests, native child, and live Gemini smoke | 7 timeline tests and 3 flush-contract tests passed; the native child exited zero; two fresh live sessions completed without a native crash, but audible quality was not measured |
 
 The direct Phase 1 saved-log rerun and all Phase 3–5 live measurements remain
 required before this report can be marked complete.
@@ -137,6 +147,30 @@ in 15.07 seconds. Lock consistency, both JavaScript syntax checks, and the diff
 check also passed. This proves the app boundary and lifecycle behavior under
 tests; it does not prove native crash containment until repeated live Gemini
 audio succeeds.
+
+The local-routing and capture-pressure regressions now pass in the focused
+hybrid/runtime/console set. Runtime status reports only enum/reason/counter
+metadata for router rejection, split-final timeout, executor failure, and
+bounded local-processing drops; it does not expose transcript or audio content.
+The new worker is a foundation for live testing, not evidence of microphone
+quality, local STT latency, sustained overload capacity, or native process
+stability.
+The focused hybrid/runtime/console/router/action/main command passed 205 tests
+and the dotenv-isolated `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q
+--tb=short` command passed 726 tests with one explicit skip. Ruff, formatting,
+strict mypy across 59 source files, and `git diff --check` also passed.
+
+After the sample-clock timing fix, the focused timing/output suite passed 24
+tests. The optional native app-owned construction/push/flush/close child also
+exited zero after the change (three consecutive review runs and one final root
+run). A live root smoke then completed two fresh Gemini sessions with the
+app-owned sink selected: provider connection took 451.4 ms and 327.7 ms, a
+`move_head` tool call completed, two interruptions completed, inactivity
+returned the first session to `LOCAL_AMBIENT`, and the process did not crash. A
+separate startup/stop cycle shut down the app cleanly before the daemon. This is
+useful process-level containment evidence, but the current status surface does
+not prove native sink acceptance and an automated agent cannot judge audible
+cadence or naturalness.
 
 ## 9. Proof ambient audio was not sent to cloud
 
@@ -179,9 +213,11 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   timeout. A subsequent synthetic `computer look left` probe against the same
   warmed loopback server returned the correct text in 1.25 seconds. Live
   command latency and a suitable cold-request timeout remain unaccepted.
-- The capture loop currently awaits each local VAD observation. A slow VAD can
-  delay capture and increase bounded capture-worker drops; CPU/drop-rate
-  measurements are required before changing this concurrency boundary.
+- LocalStream now hands local frames to a bounded sequential runtime worker, so
+  a slow asynchronous VAD/STT observation no longer blocks the capture loop.
+  Local-worker overflow drops newest local work and is counted separately from
+  capture-worker drops. Sustained local VAD/STT CPU and drop-rate measurements
+  remain required on the target microphone.
 - A transcript-based wake word depends on local STT completing a segment. It is
   a V0 implementation and must be compared with an acoustic detector.
 - The final-STT → detector → local-router → movement path worked with a
@@ -202,10 +238,15 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   `do_convert_out+140` with zero samples and null sample arrays before ORC runs;
   the app's public playback shape is valid. Live SDK playback tests are paused
   pending validation of the new explicit
-  `AUDIO_OUTPUT_BACKEND=gstreamer` simulator bypass. That adapter is covered by
-  deterministic queue, interruption, lifecycle, configuration, and routing
-  tests, but has not yet survived a live Gemini run. Barge-in on the SDK path
-  may leave already-buffered native audio.
+  `AUDIO_OUTPUT_BACKEND=gstreamer` simulator bypass. The first bypass run
+  survived several turns but sounded choppy/accelerated; arrival-time
+  timestamping was the strongest suspected cause. The app-owned pipeline now
+  uses explicit sample-derived PTS/DTS/duration and is covered by a GI-free
+  timeline regression. It survived two fresh live Gemini sessions after the
+  timing change, including a tool call, two interruptions, and inactivity
+  close, without the prior native crash. Audible cadence still needs a human
+  headphone check. Barge-in on the SDK path may leave already-buffered native
+  audio.
 - MLX Audio's current STT server explicitly bridges inference through a file in
   `/tmp`, so it was rejected for this RAM-only ambient path. The selected
   Transformers candidate decodes uploaded bytes through `BytesIO`; the live run
@@ -221,9 +262,9 @@ Mac and Pi workload data.
 
 ## 12. Recommendation
 
-First validate the explicit macOS simulator playback bypass across repeated
-cloud turns, tool calls, interruptions, and clean shutdown; retain the SDK
-playback path as the default until that evidence exists. Then run both
+First complete the short human headphone check for audible cadence on the
+explicit macOS simulator playback bypass; retain the SDK playback path as the
+default outside this explicit simulator workaround. Then run both
 dinner-demo strategies on the Mac with the same microphone and
 local model, recording activation/context/connection/first-audio latency,
 process CPU/RSS, transcript quality, wake false positives/misses, and local

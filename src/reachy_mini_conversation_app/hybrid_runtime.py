@@ -21,7 +21,7 @@ from reachy_mini_conversation_app.local_processing import (
     LocalProcessingBackend,
     NullLocalProcessingBackend,
 )
-from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter
+from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.conversation_handler import (
     AudioFrame,
     TrafficKind,
@@ -41,6 +41,15 @@ class RuntimeMode(str, Enum):
     CLOUD_CONVERSATION = "CLOUD_CONVERSATION"
 
 
+class LocalCommandOutcome(str, Enum):
+    """Metadata-only outcome for the most recent local command attempt."""
+
+    LOCAL_EXECUTED = "local_executed"
+    ROUTER_REJECTED = "router_rejected"
+    FOLLOWUP_TIMEOUT = "followup_timeout"
+    LOCAL_EXECUTION_FAILED = "local_execution_failed"
+
+
 CallbackResult: TypeAlias = None | Awaitable[None]
 HandlerFactory: TypeAlias = Callable[[], ConversationHandler | Awaitable[ConversationHandler]]
 AcknowledgementCallback: TypeAlias = Callable[[str], CallbackResult]
@@ -50,6 +59,7 @@ StateObserver: TypeAlias = Callable[[RuntimeMode, str, int], None]
 CaptureBarrierProvider: TypeAlias = Callable[[], int | None]
 Clock: TypeAlias = Callable[[], float]
 PostActivationFrame: TypeAlias = tuple[int | None, AudioFrame]
+LocalProcessingItem: TypeAlias = tuple[AudioFrame, asyncio.Future[None]]
 LocalProcessingCloseCallback: TypeAlias = Callable[[], CallbackResult]
 
 
@@ -89,6 +99,11 @@ class RuntimeStatusSnapshot:
     local_commands_executed: int = 0
     local_command_failures: int = 0
     local_command_escalations: int = 0
+    local_command_last_outcome: LocalCommandOutcome | None = None
+    local_command_last_router_reason: IntentDecisionReason | None = None
+    local_command_router_rejections: int = 0
+    local_command_followup_timeouts: int = 0
+    local_processing_frames_dropped: int = 0
     local_command_latency_seconds_total: float = 0.0
     local_command_latency_seconds_max: float = 0.0
     context_activation_latency_seconds_total: float = 0.0
@@ -141,6 +156,17 @@ class RuntimeStatusSnapshot:
             "local_commands_executed": self.local_commands_executed,
             "local_command_failures": self.local_command_failures,
             "local_command_escalations": self.local_command_escalations,
+            "local_command_last_outcome": (
+                self.local_command_last_outcome.value if self.local_command_last_outcome is not None else None
+            ),
+            "local_command_last_router_reason": (
+                self.local_command_last_router_reason.value
+                if self.local_command_last_router_reason is not None
+                else None
+            ),
+            "local_command_router_rejections": self.local_command_router_rejections,
+            "local_command_followup_timeouts": self.local_command_followup_timeouts,
+            "local_processing_frames_dropped": self.local_processing_frames_dropped,
             "local_command_latency_seconds_total": self.local_command_latency_seconds_total,
             "local_command_latency_seconds_max": self.local_command_latency_seconds_max,
             "context_activation_latency_seconds_total": self.context_activation_latency_seconds_total,
@@ -164,6 +190,7 @@ class HybridRuntime:
     """Coordinate local ambient capture with one on-demand cloud handler."""
 
     _MAX_ADDRESSED_TEXT_CHARS = 512
+    _LOCAL_PROCESSING_QUEUE_SIZE = 8
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
     _POSTACTIVATION_BUFFER_SECONDS = 20.0
@@ -258,6 +285,8 @@ class HybridRuntime:
         self._local_start_event = asyncio.Event()
         self._output_wakeup_event = asyncio.Event()
         self._local_event_tasks: set[asyncio.Task[bool]] = set()
+        self._local_processing_queue: asyncio.Queue[LocalProcessingItem] | None = None
+        self._local_processing_task: asyncio.Task[None] | None = None
 
         self._metrics_lock = threading.Lock()
         self._ambient_audio_bytes_sent_to_cloud = 0
@@ -268,6 +297,11 @@ class HybridRuntime:
         self._local_commands_executed = 0
         self._local_command_failures = 0
         self._local_command_escalations = 0
+        self._local_command_last_outcome: LocalCommandOutcome | None = None
+        self._local_command_last_router_reason: IntentDecisionReason | None = None
+        self._local_command_router_rejections = 0
+        self._local_command_followup_timeouts = 0
+        self._local_processing_frames_dropped = 0
         self._local_command_latency_seconds_total = 0.0
         self._local_command_latency_seconds_max = 0.0
         self._context_activation_latency_seconds_total = 0.0
@@ -336,6 +370,11 @@ class HybridRuntime:
             local_commands_executed = self._local_commands_executed
             local_command_failures = self._local_command_failures
             local_command_escalations = self._local_command_escalations
+            local_command_last_outcome = self._local_command_last_outcome
+            local_command_last_router_reason = self._local_command_last_router_reason
+            local_command_router_rejections = self._local_command_router_rejections
+            local_command_followup_timeouts = self._local_command_followup_timeouts
+            local_processing_frames_dropped = self._local_processing_frames_dropped
             local_command_latency_seconds_total = self._local_command_latency_seconds_total
             local_command_latency_seconds_max = self._local_command_latency_seconds_max
             context_activation_latency_seconds_total = self._context_activation_latency_seconds_total
@@ -364,6 +403,11 @@ class HybridRuntime:
             local_commands_executed=local_commands_executed,
             local_command_failures=local_command_failures,
             local_command_escalations=local_command_escalations,
+            local_command_last_outcome=local_command_last_outcome,
+            local_command_last_router_reason=local_command_last_router_reason,
+            local_command_router_rejections=local_command_router_rejections,
+            local_command_followup_timeouts=local_command_followup_timeouts,
+            local_processing_frames_dropped=local_processing_frames_dropped,
             local_command_latency_seconds_total=local_command_latency_seconds_total,
             local_command_latency_seconds_max=local_command_latency_seconds_max,
             context_activation_latency_seconds_total=context_activation_latency_seconds_total,
@@ -660,6 +704,8 @@ class HybridRuntime:
                 followup_text = await self._wait_for_wake_followup()
                 if followup_text is not None:
                     addressed_text = followup_text
+                else:
+                    self._record_local_command_outcome(LocalCommandOutcome.FOLLOWUP_TIMEOUT)
 
             if addressed_text and await self._try_local_command(addressed_text):
                 async with self._state_lock:
@@ -773,20 +819,39 @@ class HybridRuntime:
         if decision.should_escalate:
             with self._metrics_lock:
                 self._local_command_escalations += 1
+            self._record_local_command_outcome(LocalCommandOutcome.ROUTER_REJECTED, decision.reason)
             return False
 
         started_at = self._clock()
         result = await executor.execute(decision)
         duration = max(0.0, self._clock() - started_at)
+        executed = result.status is LocalActionStatus.EXECUTED
         with self._metrics_lock:
             self._local_command_latency_seconds_total += duration
             self._local_command_latency_seconds_max = max(self._local_command_latency_seconds_max, duration)
-            if result.status is LocalActionStatus.EXECUTED:
+            if executed:
                 self._local_commands_executed += 1
             else:
                 self._local_command_failures += 1
                 self._local_command_escalations += 1
-        return result.status is LocalActionStatus.EXECUTED
+        self._record_local_command_outcome(
+            LocalCommandOutcome.LOCAL_EXECUTED if executed else LocalCommandOutcome.LOCAL_EXECUTION_FAILED
+        )
+        return executed
+
+    def _record_local_command_outcome(
+        self,
+        outcome: LocalCommandOutcome,
+        router_reason: IntentDecisionReason | None = None,
+    ) -> None:
+        """Record local routing metadata without retaining addressed text."""
+        with self._metrics_lock:
+            self._local_command_last_outcome = outcome
+            self._local_command_last_router_reason = router_reason
+            if outcome is LocalCommandOutcome.ROUTER_REJECTED:
+                self._local_command_router_rejections += 1
+            elif outcome is LocalCommandOutcome.FOLLOWUP_TIMEOUT:
+                self._local_command_followup_timeouts += 1
 
     async def _context_for_activation(self) -> str:
         """Build bounded text context while keeping the ambient PCM snapshot local."""
@@ -1034,7 +1099,13 @@ class HybridRuntime:
             if self._is_current_handler(handler, generation):
                 await self._deactivate_cloud("provider_stopped")
 
-    async def handle_frame(self, frame: AudioFrame, *, capture_sequence: int | None = None) -> None:
+    async def handle_frame(
+        self,
+        frame: AudioFrame,
+        *,
+        capture_sequence: int | None = None,
+        wait_for_local_processing: bool = True,
+    ) -> None:
         """Route one captured frame locally or to the active cloud generation."""
         self._assert_owner_loop()
         copied_frame = self._copy_frame(frame)
@@ -1079,12 +1150,12 @@ class HybridRuntime:
                     logger.warning("Ambient frame rejected: %s", type(error).__name__)
 
         if local_frame:
-            await self._observe_local(copied_frame)
+            await self._enqueue_local_frame(copied_frame, wait_for_completion=wait_for_local_processing)
             return
         if postactivation_frame:
             self._enqueue_postactivation(copied_frame, capture_sequence)
             if observe_postactivation_locally:
-                await self._observe_local(copied_frame)
+                await self._enqueue_local_frame(copied_frame, wait_for_completion=wait_for_local_processing)
             return
         if handler is None:
             return
@@ -1107,6 +1178,78 @@ class HybridRuntime:
             except Exception as error:
                 logger.warning("Hybrid provider receive failed: %s", type(error).__name__)
                 await self._deactivate_cloud("provider_receive_failed")
+
+    async def _enqueue_local_frame(self, frame: AudioFrame, *, wait_for_completion: bool) -> None:
+        """Queue one copied frame for ordered local processing without blocking capture."""
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            queue = self._local_processing_queue
+            task = self._local_processing_task
+            if queue is None:
+                queue = asyncio.Queue(maxsize=self._LOCAL_PROCESSING_QUEUE_SIZE)
+                self._local_processing_queue = queue
+            if task is None or task.done():
+                self._local_processing_task = asyncio.create_task(
+                    self._run_local_processing(queue), name="hybrid-local-processing"
+                )
+
+        completed = asyncio.get_running_loop().create_future()
+        try:
+            queue.put_nowait((frame, completed))
+        except asyncio.QueueFull:
+            completed.cancel()
+            with self._metrics_lock:
+                self._local_processing_frames_dropped += 1
+                dropped_frames = self._local_processing_frames_dropped
+            if dropped_frames == 1 or dropped_frames % 100 == 0:
+                logger.warning("Local processing queue full; dropped_frames=%d", dropped_frames)
+            return
+        if wait_for_completion:
+            await asyncio.shield(completed)
+
+    async def _run_local_processing(self, queue: asyncio.Queue[LocalProcessingItem]) -> None:
+        """Run local observation sequentially so VAD/STT retains capture order."""
+        while True:
+            frame, completed = await queue.get()
+            try:
+                try:
+                    result = self._local_processor.observe_frame(frame)
+                    if inspect.isawaitable(result):
+                        await result
+                    if not completed.done():
+                        completed.set_result(None)
+                except asyncio.CancelledError:
+                    if not completed.done():
+                        completed.cancel()
+                    raise
+                except Exception as error:
+                    if not completed.done():
+                        completed.set_result(None)
+                    logger.warning("Local ambient processing failed: %s", type(error).__name__)
+            finally:
+                queue.task_done()
+
+    async def _stop_local_processing(self) -> None:
+        """Cancel the local worker and release queued frame waiters during close."""
+        with self._lifecycle_lock:
+            task = self._local_processing_task
+            queue = self._local_processing_queue
+            self._local_processing_task = None
+            self._local_processing_queue = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await self._await_cancelled_task(task)
+        if queue is None:
+            return
+        while True:
+            try:
+                _, completed = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            queue.task_done()
+            if not completed.done():
+                completed.cancel()
 
     async def _observe_local(self, frame: AudioFrame) -> None:
         try:
@@ -1294,6 +1437,7 @@ class HybridRuntime:
             activation_task.cancel()
             await self._await_cancelled_task(activation_task)
         await self._deactivate_cloud("runtime_closed")
+        await self._stop_local_processing()
         callback = self._local_processing_close_callback
         if callback is not None:
             try:
@@ -1351,6 +1495,7 @@ __all__ = [
     "AcknowledgementCallback",
     "HandlerFactory",
     "HybridRuntime",
+    "LocalCommandOutcome",
     "RuntimeMode",
     "RuntimeStatusSnapshot",
     "TrafficMetricsSnapshot",
