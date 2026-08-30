@@ -167,6 +167,11 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   only one frame as speech at the default threshold of 500, so it made zero STT
   requests. Ambient cloud bytes remained zero. A lower temporary threshold must
   be measured before changing the cross-platform default.
+- With a process-local threshold of 100, 65 frames were classified as speech
+  and one STT request was created, but that live request exceeded the five-second
+  timeout. A subsequent synthetic `computer look left` probe against the same
+  warmed loopback server returned the correct text in 1.25 seconds. Live
+  command latency and a suitable cold-request timeout remain unaccepted.
 - The capture loop currently awaits each local VAD observation. A slow VAD can
   delay capture and increase bounded capture-worker drops; CPU/drop-rate
   measurements are required before changing this concurrency boundary.
