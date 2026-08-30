@@ -1,7 +1,7 @@
 # Feature: deterministic local intents
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-30
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -19,6 +19,11 @@ activation, but `look left` escalated to Gemini and Gemini performed the
 movement. It therefore did not satisfy local-command acceptance. The same path
 with `Reachy` remains blocked because no exact matching final transcript token
 reached the detector.
+
+If local STT emits the wake and command as separate final segments, the runtime
+waits briefly for one follow-up and routes its exact stripped text through the
+same fail-closed boundary. The timeout is bounded; uncertain follow-ups still
+escalate to Gemini and are never guessed locally.
 
 ## User-facing behavior
 
@@ -184,6 +189,12 @@ A `Reachy` wake was not accepted because no exact matching final transcript
 token reached the detector. Live local-command acceptance, false-positive/miss
 rates, latency, and the remaining commands still require measurement.
 
+The split-final integration regressions additionally cover exact follow-up
+success without provider construction, uncertain/timeout cloud escalation with
+FIFO preservation, cancellation/close, capture-boundary dual observation, and
+zero ambient-cloud bytes. They use fake providers and local processors; no live
+split-final latency claim is made.
+
 ## Changelog
 
 | Date | Change |
@@ -192,3 +203,4 @@ rates, latency, and the remaining commands still require measurement.
 | 2026-08-29 | Added the async executor using existing movement/tool boundaries, with failure and cancellation coverage. |
 | 2026-08-29 | Integrated wake-suffix routing into `LOCAL_COMMAND`; exact success remains local and every uncertain/failing decision escalates. |
 | 2026-08-30 | Live `computer, look left` reached local activation but escalated; Gemini performed the movement, so Phase 5 live acceptance remains pending. The `Reachy` failure remains isolated to the exact final-transcript match boundary. |
+| 2026-08-30 | Added the configurable two-second one-shot split-final follow-up path and deterministic tests for local success, cloud escalation, timeout, FIFO, cancellation, and privacy. Live STT segmentation and latency remain pending. |

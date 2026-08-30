@@ -126,6 +126,7 @@ credential in the web UI.
 | `LOCAL_VAD_SILENCE_SECONDS` | Silence needed to close a local speech segment. Defaults to `0.6`. |
 | `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
+| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | Seconds to wait for one next final local command after a wake-only transcript. Defaults to `2`; timeout opens the normal cloud path. |
 | `LOCAL_CONTEXT_MAX_CHARS` | Maximum rolling context sent as text when a cloud session opens. Defaults to `2000`; valid range is 128–8000. |
 
 ### Realtime provider selection
@@ -211,6 +212,12 @@ uncertain escalates to one fresh selected provider handler in
 `CLOUD_CONVERSATION`. Provider setup failure, cancellation, or configured
 conversational inactivity returns to ambient mode.
 
+If local STT emits the wake and command as two final segments, Reachy waits up
+to `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` (default two seconds) for exactly one
+next final segment. An exact command stays local; an uncertain follow-up is
+sent as the addressed cloud turn, and a timeout opens the normal cloud path.
+The wait is bounded and is released during shutdown or cancellation.
+
 For an addressed question captured before cloud startup, the rolling transcript
 is added as untrusted background and the bounded wake-stripped question is sent
 as the first user text turn after provider readiness. Raw pre-wake audio is not
@@ -236,7 +243,7 @@ privacy tests. Status also exposes bounded context, wake, local-command,
 activation-latency, and postactivation-drop diagnostics without transcript or
 audio payloads.
 
-The final automated Phase 3–5 integration gate passed all 649 tests plus Ruff,
+The current automated Phase 3–5 integration gate passed all 672 tests plus Ruff,
 formatting, strict mypy, lock consistency, JavaScript syntax, and diff checks.
 Live microphone, local-model, wake-quality, dinner-demo, and CPU/RAM acceptance
 measurements remain pending.

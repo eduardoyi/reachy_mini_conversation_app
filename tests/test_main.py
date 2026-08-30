@@ -257,6 +257,7 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
     monkeypatch.setattr(config.config, "LOCAL_VAD_SILENCE_SECONDS", 0.6)
     monkeypatch.setattr(config.config, "LOCAL_WAKE_WORD", "Reachy")
     monkeypatch.setattr(config.config, "LOCAL_WAKE_COOLDOWN_SECONDS", 2.0)
+    monkeypatch.setattr(config.config, "LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS", 2.0)
     monkeypatch.setattr(config.config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
     monkeypatch.setattr(main_mod.app_lifecycle, "wake_up_if_sleeping", lambda *_args: False)
     monkeypatch.setattr(main_mod.app_lifecycle, "initialize_tools_with_default_fallback", lambda *_args: None)
@@ -329,6 +330,7 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
         assert runtime.kwargs["intent_router"] is None
         assert runtime.kwargs["action_executor"] is None
     assert runtime.kwargs["local_processing_close_callback"] is not None
+    assert runtime.kwargs["wake_followup_timeout_s"] == 2.0
     build_handler.assert_not_called()
 
 

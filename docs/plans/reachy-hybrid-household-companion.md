@@ -478,6 +478,9 @@ Purpose: make common physical requests instant and cloud-free.
 - [x] Use physical acknowledgment where spoken TTS is unnecessary.
 - [x] Escalate uncertainty and local-action failure to Gemini; test that the
   router never confidently guesses.
+- [x] Handle wake-only and command-as-separate-final STT segments with one
+  bounded local follow-up window; preserve postactivation FIFO for cloud
+  escalation and release the waiter on timeout/cancellation.
 - [x] Add the curious, playful, concise, warm, slightly mischievous household
   profile through the existing profile system.
 - [x] Create the living benchmark report and next-phase recommendation.
@@ -487,13 +490,13 @@ Purpose: make common physical requests instant and cloud-free.
 escalates, and all required behavior, privacy, latency, and resource tests pass.
 
 **Phase 5 status: implementation complete; live acceptance partial.** Exact
-commands and failure escalation are covered through fake provider/tool/movement
-boundaries. A live run with `LOCAL_WAKE_WORD=computer` reached local activation
-but then escalated to Gemini; Gemini performed the movement, so this was not a
-live local-command acceptance. The default `Reachy` end-to-end command remains
-blocked at the exact final-transcript match boundary. Simulator local-command
-acceptance, latency, all-command coverage, and movement measurements remain
-required.
+commands, failure escalation, and split-final wake follow-up behavior are
+covered through fake provider/tool/movement and capture-boundary tests. A live
+run with `LOCAL_WAKE_WORD=computer` reached local activation but then escalated
+to Gemini; Gemini performed the movement, so this was not a live local-command
+acceptance. The default `Reachy` end-to-end command remains blocked at the
+exact final-transcript match boundary. Simulator local-command acceptance,
+latency, all-command coverage, and movement measurements remain required.
 
 ## Test and benchmark matrix
 
@@ -660,6 +663,9 @@ and evidence.
 | 2026-08-30 | Native audio crash containment | Added an app-level macOS + SDK `MediaBackend.LOCAL` workaround that skips native `clear_player()` while continuing to drain provider/app queues. This is containment, not a proven root fix; already-buffered native audio may remain after barge-in, and hardware/live validation is pending. |
 | 2026-08-30 | Phase 4 research | Reviewed ready-made acoustic wake candidates and official Reachy status. The 16 kHz `andyjmorgan` ONNX model is the closest seam fit but targets phonetic `reechy` and is CC BY-NC-SA; the 24 kHz/1.5-second Edge Impulse `Hey Reachy` candidate needs a shared-stream adapter and has an unclear Space license; openWakeWord has no Reachy model. Official PR #514 and SDK issue #1253 remain unresolved. No model or dependency was added; benchmark evidence is still required. |
 | 2026-08-30 | Diagnostics/containment gate | Root verification passed Ruff, formatting, strict mypy across 54 source files, all 654 tests in 12.28 seconds, `uv lock --check`, both JavaScript syntax checks, and `git diff --check`. Live validation of the macOS containment remains pending. |
+| 2026-08-30 | Phase 5 split-final follow-up | Added a configurable two-second, one-shot waiter for a wake-only final transcript, allowing for the existing silence boundary and local STT delay while staying bounded. The first next final is routed through the existing exact local-intent boundary; local success clears the postactivation FIFO, while uncertainty/timeout preserves it for cloud activation. Capture-boundary, success, escalation, timeout, cancellation, race, and privacy regressions pass; no live split-final measurement is claimed. |
+| 2026-08-30 | Phase 3 performance follow-up | Review confirmed that the capture loop currently awaits each local VAD observation; a slow VAD can delay capture and increase capture-worker drops. The limitation is bounded and counted but intentionally not refactored in the split-final change; measure it with the local backend before changing concurrency. |
+| 2026-08-30 | Split-final gate | Final CI-equivalent verification passed Ruff, formatting, strict mypy across 54 source files, all 672 tests in 13.37 seconds, lock consistency, both JavaScript syntax checks, and `git diff --check`. `REACHY_MINI_SKIP_DOTENV=1` isolated tests from the ignored live `.env`; live split-final and native-crash validation remain pending. |
 
 ## Next steps
 
@@ -697,3 +703,5 @@ and evidence.
 | 2026-08-29 | Implemented Phases 3–5 as one milestone with replaceable local audio backends, both context strategies, local transcript wake, exact local commands, household profile, text-only provider context, and comprehensive focused tests. Each phase remains in progress until its live acceptance measurements are recorded. |
 | 2026-08-29 | Created the living hybrid benchmark report with measured Phase 1/2 evidence and explicit `not measured` Phase 3–5 fields; no Raspberry Pi feasibility claim is made. |
 | 2026-08-30 | Recorded ready-made wake-word research and kept acoustic model selection pending measured quality, platform/resource results, and licensing review. |
+| 2026-08-30 | Added bounded split-final wake follow-up handling, config, docs, and deterministic lifecycle/privacy coverage; live wake/command acceptance and latency remain pending. |
+| 2026-08-30 | Adjusted the split-final default from one to two seconds after review of the 0.6-second silence boundary and local STT delay; the wait remains bounded and no live latency claim is made. |

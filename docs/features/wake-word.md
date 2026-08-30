@@ -44,6 +44,12 @@ activation event. The detector still supports partial/delta callers directly,
 and `consume_detection()` remains available to future integrations that act on
 partial detections.
 
+When a final wake contains no suffix, `HybridRuntime` acknowledges locally and
+waits for at most one next final local segment for the configured short timeout.
+An exact stripped command remains local; an uncertain follow-up or timeout uses
+the ordinary cloud activation path. A wake and command in the same final
+segment keeps the immediate path above unchanged.
+
 The detector returns no event for ordinary speech. An integration can keep the
 keyboard activation path as a separate reliable fallback. The implementation
 does not itself decide whether a detected command is safe or whether a
@@ -253,3 +259,4 @@ unmeasured.
 | 2026-08-29 | Restricted the current runtime integration to final local STT segments so a partial `Reachy` cannot open cloud before its command suffix arrives; added local-command and next-wake regression coverage. |
 | 2026-08-30 | Live validation isolated the default `Reachy` no-action result to the exact final-transcript match boundary; a configured `computer` wake reached the detector path successfully. |
 | 2026-08-30 | Researched ready-made acoustic candidates: the 16 kHz `andyjmorgan` ONNX model is the closest seam fit but targets `reechy` and is CC BY-NC-SA; the 24 kHz/1.5 s Edge Impulse `Hey Reachy` candidate needs an adapter and has an unclear Space license; openWakeWord has no Reachy model. No model or dependency was added. |
+| 2026-08-30 | Added the bounded two-second one-shot waiter for wake-only final segments followed by a separate final command, allowing for the existing silence boundary and local STT delay. Exact follow-ups remain local; uncertain/timeout paths use normal cloud activation, and close/cancellation releases the waiter. Live segmentation and latency remain unmeasured. |

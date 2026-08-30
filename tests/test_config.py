@@ -145,6 +145,7 @@ def test_local_processing_defaults_keep_endpoint_disabled(monkeypatch) -> None:
         config.LOCAL_CONTEXT_STRATEGY_ENV,
         config.LOCAL_STT_BASE_URL_ENV,
         config.LOCAL_STT_MODEL_ENV,
+        config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV,
         config.LOCAL_CONTEXT_MAX_CHARS_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
@@ -154,7 +155,18 @@ def test_local_processing_defaults_keep_endpoint_disabled(monkeypatch) -> None:
     assert config.config.LOCAL_CONTEXT_STRATEGY == config.LOCAL_CONTEXT_CONTINUOUS
     assert config.config.LOCAL_STT_BASE_URL is None
     assert config.config.LOCAL_STT_MODEL == config.DEFAULT_LOCAL_STT_MODEL
+    assert config.config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS == config.DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
     assert config.config.LOCAL_CONTEXT_MAX_CHARS == config.DEFAULT_LOCAL_CONTEXT_MAX_CHARS
+
+
+@pytest.mark.parametrize("raw_value", ["0", "-1", "nan", "inf", "not-a-duration"])
+def test_wake_followup_timeout_rejects_unusable_values(monkeypatch, raw_value: str) -> None:
+    """A follow-up wait always remains finite and positive after env parsing."""
+    monkeypatch.setenv(config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS == config.DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
 
 
 @pytest.mark.parametrize("raw_value", ["later", "", "CONTINUOUS", " activation "])
@@ -183,6 +195,7 @@ def test_local_processing_overrides_refresh_without_exposing_credentials(monkeyp
     monkeypatch.setenv(config.LOCAL_VAD_SILENCE_SECONDS_ENV, "0.8")
     monkeypatch.setenv(config.LOCAL_WAKE_WORD_ENV, " Johnny ")
     monkeypatch.setenv(config.LOCAL_WAKE_COOLDOWN_SECONDS_ENV, "4")
+    monkeypatch.setenv(config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, "0.75")
     monkeypatch.setenv(config.LOCAL_CONTEXT_MAX_CHARS_ENV, "4096")
 
     config.refresh_runtime_config_from_env()
@@ -194,4 +207,5 @@ def test_local_processing_overrides_refresh_without_exposing_credentials(monkeyp
     assert config.config.LOCAL_VAD_SILENCE_SECONDS == 0.8
     assert config.config.LOCAL_WAKE_WORD == "Johnny"
     assert config.config.LOCAL_WAKE_COOLDOWN_SECONDS == 4.0
+    assert config.config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS == 0.75
     assert config.config.LOCAL_CONTEXT_MAX_CHARS == 4096

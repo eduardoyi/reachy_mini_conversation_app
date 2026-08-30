@@ -37,6 +37,14 @@ response rather than existing only as background instructions. Strategy B keeps 
 snapshot locally after keyboard activation. Strategy B has no continuous text
 stream, so voice wake/local voice commands are intentionally disabled.
 
+When Strategy A emits a wake-only final followed by a separate command final,
+the runtime acknowledges and waits for one next final for up to
+`LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` (two seconds by default). Exact local
+commands stay local; uncertain text or timeout follows the normal Gemini path.
+During that short window, postactivation frames are retained in the bounded
+cloud FIFO while also being offered to local processing. This behavior is
+covered by deterministic tests but has not yet been measured with live STT.
+
 The local STT adapter accepts only explicit loopback hosts, disables proxy
 environment discovery, sends no credentials, builds WAV input in memory, and
 returns text only. Gemini is constructed only after activation. Existing
@@ -101,6 +109,7 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Local command latency | Automated deterministic clock plus one live simulator attempt | `computer, look left` triggered local wake but escalated to Gemini; Gemini called `MoveHead`, so live local-command acceptance and latency remain not measured |
 | Local STT CPU / process RSS | — | not measured |
 | Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
+| Split-final wake follow-up | Deterministic hybrid-runtime/capture tests | Exact follow-up stays cloud-free; uncertain follow-up and timeout preserve the FIFO for cloud; live latency/resource value not measured |
 
 The direct Phase 1 saved-log rerun and all Phase 3–5 live measurements remain
 required before this report can be marked complete.
@@ -115,6 +124,12 @@ formatting, strict mypy across 54 source files, all 654 tests in 12.28 seconds,
 lock consistency, both JavaScript syntax checks, and the diff check. Native
 GStreamer stability still requires a live rerun; unit tests cannot prove that a
 process-level mixer crash is resolved.
+
+After the split-final follow-up fix, the clean CI-equivalent gate passed Ruff,
+formatting, strict mypy across 54 source files, and all 672 tests in 13.37
+seconds. `REACHY_MINI_SKIP_DOTENV=1` prevented the ignored live `.env` from
+changing test provider selection. Lock consistency, JavaScript syntax, and the
+diff check also passed.
 
 ## 9. Proof ambient audio was not sent to cloud
 
@@ -148,6 +163,9 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   marker does not precede audio.
 - The initial RMS VAD is amplitude-dependent and does not solve echo or noisy
   rooms. Its threshold must be measured with the actual microphone.
+- The capture loop currently awaits each local VAD observation. A slow VAD can
+  delay capture and increase bounded capture-worker drops; CPU/drop-rate
+  measurements are required before changing this concurrency boundary.
 - A transcript-based wake word depends on local STT completing a segment. It is
   a V0 implementation and must be compared with an acoustic detector.
 - The final-STT → detector → local-router → movement path worked with a
@@ -156,6 +174,9 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   local-command acceptance pass. The default `Reachy` phrase produced no action
   because no exact matching final transcript token reached the detector; no
   alias was added.
+- Split wake/command finals are handled by a bounded one-shot local follow-up
+  window, but the real local STT segmentation and its activation latency have
+  not been measured.
 - Two app runs ended in native macOS `SIGSEGV` crashes on GStreamer's
   `audiomixer0:src` thread after cloud audio activation. There was no Python
   traceback or clean shutdown. The app now contains this path by skipping

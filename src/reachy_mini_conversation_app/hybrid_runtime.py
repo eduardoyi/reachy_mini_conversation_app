@@ -1,5 +1,6 @@
 """Provider lifecycle and privacy boundary for the local/cloud runtime."""
 
+import math
 import time
 import asyncio
 import inspect
@@ -198,12 +199,15 @@ class HybridRuntime:
         acknowledgement_callback: AcknowledgementCallback | None = None,
         state_observer: StateObserver | None = None,
         inactivity_timeout_s: float = 0.0,
+        wake_followup_timeout_s: float = 2.0,
         clock: Clock = time.monotonic,
         monitor_interval_s: float = 0.1,
     ) -> None:
         """Initialize an idle runtime without constructing a provider handler."""
         if inactivity_timeout_s < 0:
             raise ValueError("Inactivity timeout must not be negative")
+        if wake_followup_timeout_s <= 0 or not math.isfinite(wake_followup_timeout_s):
+            raise ValueError("Wake follow-up timeout must be finite and positive")
         if monitor_interval_s <= 0:
             raise ValueError("Inactivity monitor interval must be positive")
 
@@ -220,6 +224,7 @@ class HybridRuntime:
         self._activity_observer: ActivityObserver | None = None
         self._transcript_observer: TranscriptObserver | None = None
         self._inactivity_timeout_s = float(inactivity_timeout_s)
+        self._wake_followup_timeout_s = float(wake_followup_timeout_s)
         self._clock = clock
         self._monitor_interval_s = monitor_interval_s
 
@@ -233,6 +238,7 @@ class HybridRuntime:
         self._provider_task: asyncio.Task[None] | None = None
         self._inactivity_task: asyncio.Task[None] | None = None
         self._activation_task: asyncio.Task[bool] | None = None
+        self._wake_followup_future: asyncio.Future[str] | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
         self._last_conversation_activity = self._clock()
@@ -532,7 +538,7 @@ class HybridRuntime:
         return await activation_task
 
     def observe_local_transcript(self, segment: TranscriptSegment) -> None:
-        """Route one final locally-derived transcript through wake detection."""
+        """Route one final local transcript through wake or its bounded follow-up."""
         # The current local STT boundary emits complete final segments. Waiting
         # for one preserves the addressed suffix for local commands; acting on
         # a partial "Reachy" would start cloud setup before the command arrives.
@@ -540,7 +546,17 @@ class HybridRuntime:
             return
         detector = self._wake_detector
         with self._lifecycle_lock:
-            if detector is None or self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
+            mode = self._mode
+            followup = self._wake_followup_future
+            if (
+                followup is not None
+                and not followup.done()
+                and not self._closed
+                and mode is not RuntimeMode.CLOUD_CONVERSATION
+            ):
+                followup.set_result(segment.text[: self._MAX_ADDRESSED_TEXT_CHARS])
+                return
+            if detector is None or self._closed or mode is not RuntimeMode.LOCAL_AMBIENT:
                 return
         try:
             detection = detector.process_transcript(
@@ -555,16 +571,52 @@ class HybridRuntime:
         if detection is None:
             return
         detector.consume_detection()
+        followup_waiter: asyncio.Future[str] | None = None
+        if not detection.remaining_text:
+            try:
+                followup_waiter = asyncio.get_running_loop().create_future()
+            except RuntimeError:
+                logger.warning("Local wake follow-up skipped: runtime loop unavailable")
+                return
+            with self._lifecycle_lock:
+                if self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
+                    return
+                self._wake_followup_future = followup_waiter
         try:
             task = asyncio.create_task(
                 self.activate("wake_word", addressed_text=detection.remaining_text),
                 name="hybrid-wake-activation",
             )
         except RuntimeError:
+            if followup_waiter is not None:
+                self._clear_wake_followup_waiter(followup_waiter)
             logger.warning("Local wake activation skipped: runtime loop unavailable")
             return
         self._local_event_tasks.add(task)
         task.add_done_callback(self._local_event_tasks.discard)
+
+    def _clear_wake_followup_waiter(self, waiter: asyncio.Future[str] | None = None) -> None:
+        """Release the pending one-shot wake follow-up without retaining text."""
+        with self._lifecycle_lock:
+            current = self._wake_followup_future
+            if current is None or (waiter is not None and current is not waiter):
+                return
+            self._wake_followup_future = None
+            if not current.done():
+                current.cancel()
+
+    async def _wait_for_wake_followup(self) -> str | None:
+        """Wait briefly for one final transcript after a wake-only segment."""
+        with self._lifecycle_lock:
+            waiter = self._wake_followup_future
+        if waiter is None:
+            return None
+        try:
+            return await asyncio.wait_for(asyncio.shield(waiter), timeout=self._wake_followup_timeout_s)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._clear_wake_followup_waiter(waiter)
 
     async def start_up(self) -> None:
         """Keep the local ambient runtime alive without opening a provider."""
@@ -603,6 +655,11 @@ class HybridRuntime:
                 closed = self._closed
             if closed:
                 raise asyncio.CancelledError
+
+            if reason == "wake_word" and not addressed_text:
+                followup_text = await self._wait_for_wake_followup()
+                if followup_text is not None:
+                    addressed_text = followup_text
 
             if addressed_text and await self._try_local_command(addressed_text):
                 async with self._state_lock:
@@ -683,6 +740,10 @@ class HybridRuntime:
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "provider_setup_failed")
             return False
         finally:
+            with self._lifecycle_lock:
+                activation_is_current = self._activation_task is asyncio.current_task()
+            if activation_is_current:
+                self._clear_wake_followup_waiter()
             with self._lifecycle_lock:
                 if self._activation_task is asyncio.current_task():
                     self._activation_task = None
@@ -979,6 +1040,7 @@ class HybridRuntime:
         copied_frame = self._copy_frame(frame)
         local_frame = False
         postactivation_frame = False
+        observe_postactivation_locally = False
         handler: ConversationHandler | None = None
         generation = 0
         async with self._state_lock:
@@ -997,6 +1059,10 @@ class HybridRuntime:
                 else:
                     handler = active_handler
             elif mode is RuntimeMode.LOCAL_COMMAND:
+                with self._lifecycle_lock:
+                    observe_postactivation_locally = (
+                        self._wake_followup_future is not None and not self._wake_followup_future.done()
+                    )
                 if barrier is not None and capture_sequence is not None and capture_sequence > barrier:
                     postactivation_frame = True
                 else:
@@ -1017,6 +1083,8 @@ class HybridRuntime:
             return
         if postactivation_frame:
             self._enqueue_postactivation(copied_frame, capture_sequence)
+            if observe_postactivation_locally:
+                await self._observe_local(copied_frame)
             return
         if handler is None:
             return
@@ -1132,6 +1200,7 @@ class HybridRuntime:
                 mode = self._mode
                 active_handler = self._active_handler
                 if mode is RuntimeMode.LOCAL_AMBIENT and active_handler is None:
+                    self._clear_wake_followup_waiter()
                     return False
 
                 if mode is RuntimeMode.LOCAL_COMMAND:
@@ -1207,6 +1276,7 @@ class HybridRuntime:
             raise
 
     async def _finish_close(self) -> None:
+        self._clear_wake_followup_waiter()
         current_task = asyncio.current_task()
         local_event_tasks = tuple(task for task in self._local_event_tasks if task is not current_task)
         for task in local_event_tasks:

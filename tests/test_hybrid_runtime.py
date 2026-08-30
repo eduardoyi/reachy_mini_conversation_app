@@ -55,6 +55,21 @@ class FakeLocalProcessor:
         self.frames.append((frame[0], frame[1].copy()))
 
 
+class TranscriptOnFrameProcessor(FakeLocalProcessor):
+    """Emit one deterministic final transcript whenever a frame is observed."""
+
+    def __init__(self) -> None:
+        """Initialize the processor without an attached runtime callback."""
+        super().__init__()
+        self.transcript_callback: Callable[[AudioFrame], None] | None = None
+
+    def observe_frame(self, frame: AudioFrame) -> None:
+        """Retain the frame and optionally emit a local final transcript."""
+        super().observe_frame(frame)
+        if self.transcript_callback is not None:
+            self.transcript_callback(frame)
+
+
 class FakeHandler(ConversationHandler):
     """Long-lived provider fake with observable lifecycle counters."""
 
@@ -420,6 +435,267 @@ async def test_partial_wake_defers_to_final_local_command_and_next_wake() -> Non
     assert detector.metrics_snapshot().detection_count == 2
     assert movement_manager.queue_move.call_count == 2
     await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_executes_exact_command_without_cloud() -> None:
+    """A wake-only final and immediate exact follow-up stay entirely local."""
+    factory = MagicMock(side_effect=AssertionError("cloud must remain closed"))
+    movement_manager = MagicMock()
+    executor = LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    acknowledgements: list[str] = []
+    runtime = HybridRuntime(
+        factory,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=executor,
+        acknowledgement_callback=acknowledgements.append,
+        wake_followup_timeout_s=0.2,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    runtime.observe_local_transcript(TranscriptSegment("stop", 2, 3, 2))
+    await wait_until(lambda: runtime.status.local_commands_executed == 1)
+
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert acknowledgements == ["wake_word"]
+    assert movement_manager.clear_move_queue.call_count == 1
+    assert runtime.status.local_command_escalations == 0
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    factory.assert_not_called()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_uncertain_text_escalates_with_text_without_logging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An uncertain split follow-up opens cloud with that text, without logging it."""
+    sentinel = "private household follow-up"
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.2,
+    )
+
+    with caplog.at_level(logging.INFO):
+        runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        runtime.observe_local_transcript(TranscriptSegment(sentinel, 2, 3, 2))
+        await handler.started.wait()
+        handler.set_connected(True)
+        await handler.say_called.wait()
+
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    assert handler.say_texts == [sentinel]
+    assert runtime.status.local_command_escalations == 1
+    assert sentinel not in caplog.text
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_timeout_uses_normal_cloud_activation() -> None:
+    """A missing split command times out and opens cloud without an injected turn."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.01,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await handler.started.wait()
+
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    assert handler.say_texts == []
+    assert runtime.status.local_command_escalations == 0
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_timeout_preserves_observed_fifo_for_cloud() -> None:
+    """A timeout keeps the locally observed post-barrier frame for the provider."""
+    processor = FakeLocalProcessor()
+    handler = FakeHandler(drop_unready_frames=True)
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.05,
+    )
+    runtime.set_capture_barrier_provider(lambda: 0)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    await runtime.handle_frame(frame(9), capture_sequence=1)
+    await handler.started.wait()
+    handler.set_connected(True)
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+
+    assert len(processor.frames) == 1
+    assert int(processor.frames[0][1][0]) == 9
+    assert int(handler.receive_frames[0][1][0]) == 9
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_cancellation_releases_waiter() -> None:
+    """Deactivation cancels a pending split-follow-up waiter and returns ambient."""
+    runtime = HybridRuntime(
+        lambda: FakeHandler(),
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=30,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    waiter = runtime._wake_followup_future
+    local_event_tasks = tuple(runtime._local_event_tasks)
+    assert waiter is not None and not waiter.done()
+
+    assert await runtime.deactivate_cloud("test_cancel")
+    await asyncio.gather(*local_event_tasks, return_exceptions=True)
+
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert runtime._wake_followup_future is None
+    assert waiter.cancelled()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_close_before_activation_starts_releases_waiter() -> None:
+    """Shutdown releases a waiter even when it cancels its not-yet-started task."""
+    runtime = HybridRuntime(
+        lambda: FakeHandler(),
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=30,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    waiter = runtime._wake_followup_future
+    assert waiter is not None and not waiter.done()
+
+    await runtime.close()
+
+    assert runtime._wake_followup_future is None
+    assert waiter.cancelled()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_dual_frame_path_observes_and_preserves_fifo_on_local_success() -> None:
+    """A post-barrier follow-up frame feeds local STT and is cleared after local success."""
+    processor = TranscriptOnFrameProcessor()
+    factory = MagicMock(side_effect=AssertionError("cloud must remain closed"))
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = (
+        [0.73, 0.1, -0.2, 0.3, -0.4, 0.5, -0.6],
+        [0.11, -0.22],
+    )
+    movement_manager = MagicMock()
+    runtime = HybridRuntime(
+        factory,
+        local_processor=processor,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=robot, movement_manager=movement_manager)),
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 0)
+    processor.transcript_callback = lambda _frame: runtime.observe_local_transcript(
+        TranscriptSegment("look left", 2, 3, 2)
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    await runtime.handle_frame(frame(7), capture_sequence=1)
+    await wait_until(lambda: runtime.status.local_commands_executed == 1)
+
+    assert len(processor.frames) == 1
+    assert int(processor.frames[0][1][0]) == 7
+    assert len(runtime._postactivation_frames) == 0
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    factory.assert_not_called()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_dual_frame_path_preserves_fifo_for_cloud_escalation() -> None:
+    """An uncertain post-barrier follow-up keeps queued audio for provider readiness."""
+    sentinel = "private cloud follow-up"
+    processor = TranscriptOnFrameProcessor()
+    handler = FakeHandler(drop_unready_frames=True)
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 0)
+    processor.transcript_callback = lambda _frame: runtime.observe_local_transcript(
+        TranscriptSegment(sentinel, 2, 3, 2)
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    await runtime.handle_frame(frame(8), capture_sequence=1)
+    await handler.started.wait()
+    handler.set_connected(True)
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+    await handler.say_called.wait()
+
+    assert int(handler.receive_frames[0][1][0]) == 8
+    assert handler.say_texts == [sentinel]
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_wake_followup_late_segment_after_timeout_is_not_reused() -> None:
+    """A final arriving after timeout cannot become a second local command."""
+    handler = FakeHandler()
+    movement_manager = MagicMock()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(
+            ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
+        ),
+        wake_followup_timeout_s=0.01,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
+    await handler.started.wait()
+    runtime.observe_local_transcript(TranscriptSegment("stop", 2, 3, 2))
+    await asyncio.sleep(0)
+
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    assert movement_manager.clear_move_queue.call_count == 0
+    assert handler.say_texts == []
+    await runtime.close()
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_wake_followup_timeout_must_be_finite_and_positive(timeout: float) -> None:
+    """Wake follow-up waits cannot be disabled or made unbounded accidentally."""
+    with pytest.raises(ValueError, match="Wake follow-up timeout"):
+        HybridRuntime(lambda: FakeHandler(), wake_followup_timeout_s=timeout)
 
 
 @pytest.mark.asyncio

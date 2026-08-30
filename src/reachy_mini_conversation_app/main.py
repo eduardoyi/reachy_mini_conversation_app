@@ -322,6 +322,7 @@ def run(
             local_processing_close_callback=context_processor.close if context_processor is not None else None,
             acknowledgement_callback=queue_activation_acknowledgement,
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
+            wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
         if context_processor is not None and wake_detector is not None:
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)

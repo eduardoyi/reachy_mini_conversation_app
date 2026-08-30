@@ -46,6 +46,17 @@ untrusted background context; the suffix is the actual user turn that asks the
 provider to respond. Failure is metadata-only and does not crash the session;
 deactivation cancels a blocked submission.
 
+If local STT emits a wake-only final followed by a separate final command, the
+runtime enters `LOCAL_COMMAND`, acknowledges immediately, and waits for exactly
+one next final segment for the configured short timeout. Exact local commands
+execute without provider construction and return to ambient mode. An uncertain
+follow-up is preserved as the addressed text for the normal cloud activation;
+timeout also follows the normal cloud path. While this waiter is active,
+post-barrier frames are both retained in the bounded cloud FIFO and observed by
+the local processor. Local success clears that FIFO; timeout or escalation
+leaves it intact for provider readiness. Shutdown and cancellation release the
+waiter without retaining its text.
+
 ## Architecture and data flow
 
 ```text
@@ -111,6 +122,7 @@ Configuration is defined in `config.py`:
 | `LOCAL_VAD_SILENCE_SECONDS` | `0.6` | Silence used to close a speech segment. |
 | `LOCAL_WAKE_WORD` | `Reachy` | Transcript wake phrase in continuous mode. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | `2` | Duplicate wake suppression window. |
+| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | `2` | Short wait for one next final command when wake and command arrive as separate local STT segments. Timeout opens the normal cloud path. |
 | `LOCAL_CONTEXT_MAX_CHARS` | `2000` | Bound retained/injected derived text. |
 
 The `conversation.status` JSON-RPC result includes these exact counters:
@@ -177,6 +189,10 @@ LLM routing into this boundary.
 - Strategy A never waits for an in-flight continuous STT result during
   activation. Strategy B waits only for its bounded local STT timeout and uses
   keyboard activation because it has no continuous transcript to detect wake.
+- Local frame observation is currently awaited inline at the capture boundary;
+  a slow VAD can delay capture and increment the existing capture-drop metric.
+  This remains a measured performance follow-up, not an unbounded worker
+  refactor in the split-final fix.
 - An addressed transcript suffix is capped at 512 characters and sent only
   after cloud activation; it is never logged. Exact local commands consume the
   suffix locally and never submit it to a provider.
@@ -271,6 +287,18 @@ issues in 54 source files, and all 654 tests passed in 12.28 seconds.
 `uv lock --check`, both JavaScript syntax checks, and `git diff --check` also
 passed.
 
+The split-final wake-follow-up regressions cover exact local success, uncertain
+cloud escalation, timeout, cancellation/close, first-final races,
+capture-boundary dual observation, FIFO preservation, and the zero ambient
+cloud-byte privacy invariant. These are deterministic fake-boundary tests; no
+live split-final latency or local-command acceptance is claimed.
+
+The final 2026-08-30 CI-equivalent gate passed Ruff, formatting, strict mypy
+across 54 source files, and all 672 tests in 13.37 seconds. The command used
+`REACHY_MINI_SKIP_DOTENV=1` so the ignored live `.env` could not select Gemini
+or hybrid mode inside otherwise hermetic tests. Lock consistency, both
+JavaScript syntax checks, and `git diff --check` also passed.
+
 ## Changelog
 
 | Date | Change |
@@ -292,3 +320,5 @@ passed.
 | 2026-08-30 | Corrected the live record after logs showed `computer, look left` escalated to Gemini and Gemini performed the movement. Two app runs then ended in native GStreamer `audiomixer0:src` segmentation faults after cloud activation; no Python exception was emitted. |
 | 2026-08-30 | Added app-level crash containment for macOS SDK `MediaBackend.LOCAL`: skip native `audio.clear_player()` while preserving provider/app queue draining; WebRTC and non-macOS flushes are unchanged. This is not a proven root fix, may leave already-buffered native audio after barge-in, and still needs live/hardware validation. |
 | 2026-08-30 | Root verification after diagnostics and crash containment passed Ruff, formatting, strict mypy, all 654 tests, lock consistency, JavaScript syntax, and diff checks. |
+| 2026-08-30 | Added the bounded two-second one-shot wake-follow-up window for split final STT segments, allowing for the existing silence boundary and local STT delay. Exact local success clears the postactivation FIFO; uncertain/timeout cloud paths preserve it. Deterministic lifecycle, capture-boundary, race, cancellation, and privacy regressions pass; live split-final measurements remain pending. |
+| 2026-08-30 | Final split-follow-up verification passed Ruff, formatting, strict mypy, all 672 tests, lock consistency, JavaScript syntax, and diff checks with live dotenv loading disabled for test isolation. |

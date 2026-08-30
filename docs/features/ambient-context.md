@@ -154,6 +154,10 @@ Important contracts:
   overload without logging content. VAD has one admitted call at a time, and
   `vad_dropped` records frames rejected while a blocking VAD worker is still
   running.
+- The owning capture loop currently awaits each local frame observation. A slow
+  VAD can therefore delay capture and contribute to capture-worker drops; this
+  is a benchmark follow-up rather than a reason to remove the bounded admission
+  and executor safeguards.
 - Speech shorter than `min_speech_seconds` is discarded once the configured
   silence boundary is reached. A sample-rate change also discards the current
   segment and advances its sequence barrier; neither can block later context.
@@ -224,3 +228,4 @@ recorded separately in the plan.
 | 2026-08-29 | Added a two-request continuous-STT admission bound with overload metrics and ordering-safe drop behavior. |
 | 2026-08-29 | Replaced uncancellable default-thread dispatch with a processor-owned bounded executor. Sync timeout/cancellation now retains admission and frame ownership until the worker exits; close reports still-running work honestly, with deterministic blocking VAD/STT regressions. |
 | 2026-08-29 | Rejected reordered partial updates after the same transcript sequence was finalized, preventing late partials from reopening or duplicating final context. |
+| 2026-08-30 | Recorded the current inline capture/VAD await boundary and its possible capture-drop impact; concurrency remains a measured performance follow-up. |
