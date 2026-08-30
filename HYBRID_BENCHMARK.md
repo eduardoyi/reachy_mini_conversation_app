@@ -163,6 +163,10 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   marker does not precede audio.
 - The initial RMS VAD is amplitude-dependent and does not solve echo or noisy
   rooms. Its threshold must be measured with the actual microphone.
+- A 2026-08-30 macOS rerun buffered 98.08 seconds of local audio but classified
+  only one frame as speech at the default threshold of 500, so it made zero STT
+  requests. Ambient cloud bytes remained zero. A lower temporary threshold must
+  be measured before changing the cross-platform default.
 - The capture loop currently awaits each local VAD observation. A slow VAD can
   delay capture and increase bounded capture-worker drops; CPU/drop-rate
   measurements are required before changing this concurrency boundary.
