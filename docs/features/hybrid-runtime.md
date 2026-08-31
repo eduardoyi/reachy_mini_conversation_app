@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-08-30
+- Last updated: 2026-08-31
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -44,7 +44,12 @@ the bounded wake-stripped suffix is submitted through `ConversationHandler.say`
 only after the new provider reports ready. The rolling transcript remains
 untrusted background context; the suffix is the actual user turn that asks the
 provider to respond. Failure is metadata-only and does not crash the session;
-deactivation cancels a blocked submission.
+deactivation cancels a blocked submission. Provider readiness now means any
+provider-owned initial-history seed has completed. While the addressed text is
+being submitted, new microphone frames enter the existing bounded
+postactivation FIFO without blocking capture; they flush only after `say()`
+finishes. The resulting order is context history, addressed text, then live
+audio.
 
 If local STT emits a wake-only final followed by a separate final command, the
 runtime enters `LOCAL_COMMAND`, acknowledges immediately, and waits for exactly
@@ -213,6 +218,11 @@ LLM routing into this boundary.
 - An addressed transcript suffix is capped at 512 characters and sent only
   after cloud activation; it is never logged. Exact local commands consume the
   suffix locally and never submit it to a provider.
+- Strategy A currently keeps the activation segment in the rolling transcript,
+  so Gemini initial history may contain the addressed question before the same
+  stripped suffix is submitted as the live turn. This bounded duplication is a
+  known follow-up; live response-quality testing determines whether it must be
+  removed from the provider-neutral context snapshot.
 - The initial RMS VAD is amplitude-based and must be replaced or tuned from
   microphone measurements; it does not solve echo cancellation.
 - Generated architecture SVG regeneration is pending; `docs/scheme.mmd` is the
@@ -356,10 +366,16 @@ across 54 source files, and all 672 tests in 13.37 seconds. The command used
 or hybrid mode inside otherwise hermetic tests. Lock consistency, both
 JavaScript syntax checks, and `git diff --check` also passed.
 
+The 2026-08-31 ordered-history correction passed 108 focused Gemini/runtime
+tests. Final root verification passed Ruff, formatting, strict mypy across 59
+source files, 736 tests with one explicit native skip, lock consistency, both
+JavaScript syntax checks, and `git diff --check`.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-08-31 | Fixed the failed live dinner handoff: Gemini context now uses ordered initial history, and the runtime serializes addressed text before releasing bounded postactivation PCM. Added seed error/cancellation/shutdown and nonblocking ordering regressions; live context-quality retest remains pending. |
 | 2026-08-29 | Added Phase 2 runtime contract, privacy boundary, configuration, and validation inventory. |
 | 2026-08-29 | Recorded the clean 456-test repository gate and retained manual simulator/live-provider acceptance as pending. |
 | 2026-08-29 | Added activation-seam FIFO retention and event-driven ambient playback wakeups with regression coverage; the focused/full suites now pass 89/459 tests. |

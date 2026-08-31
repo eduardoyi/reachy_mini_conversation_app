@@ -1,7 +1,7 @@
 # Feature: local ambient context
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-31
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -198,7 +198,7 @@ credentials, a cloud session, a microphone, a simulator, or robot hardware.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_hybrid_runtime.py`, `tests/test_gemini_live.py`, `tests/test_main.py` | Strategy A/B activation ordering, dinner-context injection, wake routing, application wiring, and zero ambient cloud bytes. |
+| `tests/test_hybrid_runtime.py`, `tests/test_gemini_live.py`, `tests/test_main.py` | Strategy A/B activation ordering, Gemini ordered initial-history seeding, addressed-text-before-PCM ordering, seed failure/cancellation/shutdown cleanup, wake routing, application wiring, and zero ambient cloud bytes. |
 
 ### Simulator / end-to-end tests
 
@@ -219,6 +219,11 @@ Phase 3–5 implementation suite passed 195 tests. After final integration, the
 repository gate passed all 649 tests; the live Strategy A/B benchmark is
 recorded separately in the plan.
 
+The 2026-08-31 provider-handoff correction passed 108 focused Gemini/runtime
+tests and the full repository gate passed 736 tests with one explicit native
+skip, plus Ruff, formatting, strict mypy, lock consistency, JavaScript syntax,
+and `git diff --check`.
+
 ## Changelog
 
 | Date | Change |
@@ -229,3 +234,4 @@ recorded separately in the plan.
 | 2026-08-29 | Replaced uncancellable default-thread dispatch with a processor-owned bounded executor. Sync timeout/cancellation now retains admission and frame ownership until the worker exits; close reports still-running work honestly, with deterministic blocking VAD/STT regressions. |
 | 2026-08-29 | Rejected reordered partial updates after the same transcript sequence was finalized, preventing late partials from reopening or duplicating final context. |
 | 2026-08-30 | Recorded the current inline capture/VAD await boundary and its possible capture-drop impact; concurrency remains a measured performance follow-up. |
+| 2026-08-31 | A live Strategy A run produced 96 local context characters from three completed segments but Gemini asked for context. Corrected the provider handoff to ordered initial history and serialized the addressed question before bounded live PCM; live response-quality retest remains pending. |

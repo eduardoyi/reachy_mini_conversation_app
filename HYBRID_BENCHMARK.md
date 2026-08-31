@@ -110,7 +110,7 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Hybrid interruption flush | Accepted Phase 2 run | 1.0–1.3 ms local flush samples |
 | Hybrid session duration | Accepted Phase 2 run | 167.511 s |
 | First response audio | Provider instrumentation | not measured; event ordering can make a sample explicitly unavailable/reordered |
-| Strategy A dinner context | Automated integration | correct ordered text injection; live latency/quality not measured |
+| Strategy A dinner context | Automated integration plus one live run | Local STT completed all three segments and prepared 96 context characters with zero ambient cloud bytes, but Gemini asked for missing context. Context now uses ordered Live initial history and addressed text is serialized before bounded PCM; 108 focused tests and the 736-pass full gate are green, while live response-quality retest remains pending |
 | Strategy B dinner context | Automated integration | acknowledgment precedes local STT, which precedes provider construction; live latency not measured |
 | Wake activation latency | Automated deterministic clock plus one live path | live numeric value not measured |
 | Wake false positives / misses | One live configured wake-word check | `LOCAL_WAKE_WORD=computer` reached the final-STT detector; default `Reachy` produced no action because no exact matching token reached the detector; rates remain not measured |

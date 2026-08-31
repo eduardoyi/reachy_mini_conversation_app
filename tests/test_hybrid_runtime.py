@@ -822,6 +822,39 @@ async def test_activation_text_failure_is_private_and_keeps_session_usable(caplo
 
 
 @pytest.mark.asyncio
+async def test_addressed_text_completes_before_queued_postactivation_audio() -> None:
+    """A post-connected frame queues promptly until the addressed turn completes."""
+    handler = FakeHandler(drop_unready_frames=True)
+    say_started = asyncio.Event()
+    release_say = asyncio.Event()
+    events: list[str] = []
+
+    async def blocked_say(text: str) -> None:
+        events.append(f"say_start:{text}")
+        say_started.set()
+        await release_say.wait()
+        events.append("say_done")
+
+    handler.say = blocked_say
+    runtime = HybridRuntime(lambda: handler)
+    runtime.set_capture_barrier_provider(lambda: 0)
+
+    assert await runtime.activate("wake_word", addressed_text="what do you think?")
+    await handler.started.wait()
+    handler.set_connected(True)
+    await say_started.wait()
+
+    await asyncio.wait_for(runtime.handle_frame(frame(7), capture_sequence=1), timeout=0.1)
+    assert handler.receive_frames == []
+
+    release_say.set()
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+    assert events == ["say_start:what do you think?", "say_done"]
+    assert int(handler.receive_frames[0][1][0]) == 7
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_deactivation_cancels_blocked_activation_text_send() -> None:
     """Session teardown cannot leave a locally derived text-send task behind."""
     handler = FakeHandler()

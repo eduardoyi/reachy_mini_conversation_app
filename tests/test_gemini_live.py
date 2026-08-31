@@ -25,6 +25,7 @@ class FakeSession:
         """Initialize empty event and outbound-message queues."""
         self.events: asyncio.Queue[object] = asyncio.Queue()
         self.realtime_inputs: list[dict[str, object]] = []
+        self.client_contents: list[dict[str, object]] = []
         self.tool_responses: list[dict[str, object]] = []
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.closed = False
@@ -36,6 +37,13 @@ class FakeSession:
             raise RuntimeError("session closed")
         self.realtime_inputs.append(kwargs)
         self.calls.append(("realtime_input", kwargs))
+
+    async def send_client_content(self, **kwargs: object) -> None:
+        """Record one ordered client-content call."""
+        if self.closed:
+            raise RuntimeError("session closed")
+        self.client_contents.append(kwargs)
+        self.calls.append(("client_content", kwargs))
 
     async def send_tool_response(self, **kwargs: object) -> None:
         """Record one function-response call."""
@@ -220,19 +228,21 @@ def test_build_session_config_declares_nonempty_tools(gemini_config, deps) -> No
     assert session_config.tools[0].function_declarations[0].name == "move_head"
 
 
-def test_build_session_config_includes_local_context_as_untrusted_background(gemini_config, deps) -> None:
-    """Derived ambient text is session context, not a provider-visible audio replay."""
+def test_build_session_config_uses_initial_history_for_local_context(gemini_config, deps) -> None:
+    """Derived ambient text uses Gemini's initial client-content history mode."""
     handler = build_handler(deps)
     handler.set_initial_context("We should stay indoors tomorrow. Maybe the aquarium.")
 
     session_config = handler._build_session_config([])
 
+    assert session_config.history_config is not None
+    assert session_config.history_config.initial_history_in_client_content is True
     assert session_config.system_instruction is not None
     instruction = session_config.system_instruction.parts[0].text
     assert instruction is not None
     assert "untrusted conversational background" in instruction
-    assert "We should stay indoors tomorrow. Maybe the aquarium." in instruction
-    assert "JSON-encoded text" in instruction
+    assert "We should stay indoors tomorrow. Maybe the aquarium." not in instruction
+    assert "JSON-encoded text" not in instruction
 
 
 def test_build_session_config_omits_empty_local_context_wrapper(gemini_config, deps) -> None:
@@ -242,10 +252,12 @@ def test_build_session_config_omits_empty_local_context_wrapper(gemini_config, d
 
     session_config = handler._build_session_config([])
 
+    assert session_config.history_config is None
     assert session_config.system_instruction is not None
     instruction = session_config.system_instruction.parts[0].text
     assert instruction is not None
     assert "JSON-encoded text" not in instruction
+    assert "untrusted conversational background" not in instruction
 
 
 @pytest.mark.asyncio
@@ -269,12 +281,151 @@ async def test_startup_uses_client_injection_and_closes_idempotently(gemini_conf
 
     await handler.start_up()
     assert client.aio.live.model == "fake-live-model"
+    assert client.aio.live.config is not None
+    assert client.aio.live.config.history_config is None
+    assert session.client_contents == []
     assert handler.connection is None
     await handler.shutdown()
     await handler.shutdown()
 
     assert client.aio.aclose_count == 1
     assert session.close_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_startup_seeds_initial_context_before_connected_without_model_turn(gemini_config, deps, caplog) -> None:
+    """Initial context is one ordered user content message before readiness is announced."""
+    sentinel = "We should stay indoors tomorrow. Maybe the aquarium."
+    session = FakeSession()
+    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    handler.set_initial_context(sentinel)
+    connection_states: list[bool] = []
+    handler.set_connection_observer(connection_states.append)
+    caplog.set_level("DEBUG", logger=gemini_live.logger.name)
+
+    await handler.start_up()
+
+    assert [kind for kind, _ in session.calls] == ["client_content"]
+    assert len(session.client_contents) == 1
+    content = session.client_contents[0]["turns"]
+    assert isinstance(content, types.Content)
+    assert content.role == "user"
+    assert content.parts is not None
+    assert [part.text for part in content.parts] == [sentinel]
+    assert session.client_contents[0]["turn_complete"] is True
+    assert connection_states == [True]
+    assert handler.output_queue.empty()
+    assert sentinel not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_initial_context_seed_is_bounded(gemini_config, deps) -> None:
+    """The provider boundary enforces the configured context character bound."""
+    session = FakeSession()
+    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    oversized_context = "x" * (config.LOCAL_CONTEXT_MAX_CHARS + 1)
+    handler.set_initial_context(oversized_context)
+
+    await handler.start_up()
+
+    content = session.client_contents[0]["turns"]
+    assert isinstance(content, types.Content)
+    assert content.parts is not None
+    assert content.parts[0].text == oversized_context[: config.LOCAL_CONTEXT_MAX_CHARS]
+
+
+@pytest.mark.asyncio
+async def test_initial_context_seed_failure_cleans_up_before_connected(gemini_config, deps, monkeypatch) -> None:
+    """A seed transport failure closes setup without reporting a connected session."""
+    session = FakeSession()
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    handler.set_initial_context("private context")
+    connection_states: list[bool] = []
+    handler.set_connection_observer(connection_states.append)
+
+    async def fail_seed(**_kwargs: object) -> None:
+        raise RuntimeError("seed transport unavailable")
+
+    monkeypatch.setattr(session, "send_client_content", fail_seed)
+
+    with pytest.raises(RuntimeError, match="seed transport unavailable"):
+        await handler.start_up()
+
+    assert handler.connection is None
+    assert not handler._is_connected()
+    assert connection_states == []
+    assert session.closed
+    assert client.aio.live.exit_count == 1
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_initial_context_seed_cancellation_cleans_up_before_connected(gemini_config, deps, monkeypatch) -> None:
+    """Cancellation while seeding closes setup without leaking a connected state."""
+    session = FakeSession()
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    handler.set_initial_context("private context")
+    connection_states: list[bool] = []
+    handler.set_connection_observer(connection_states.append)
+    seed_started = asyncio.Event()
+
+    async def block_seed(**_kwargs: object) -> None:
+        seed_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(session, "send_client_content", block_seed)
+    startup = asyncio.create_task(handler.start_up())
+
+    await asyncio.wait_for(seed_started.wait(), timeout=1.0)
+    startup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+
+    assert handler.connection is None
+    assert not handler._is_connected()
+    assert connection_states == []
+    assert session.closed
+    assert client.aio.live.exit_count == 1
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_racing_initial_context_seed_never_reports_connected(gemini_config, deps, monkeypatch) -> None:
+    """Shutdown winning a blocked seed cannot be followed by a stale connected event."""
+    session = FakeSession()
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    handler.set_initial_context("private context")
+    connection_states: list[bool] = []
+    handler.set_connection_observer(connection_states.append)
+    seed_started = asyncio.Event()
+    release_seed = asyncio.Event()
+
+    async def block_seed(**_kwargs: object) -> None:
+        seed_started.set()
+        await release_seed.wait()
+
+    monkeypatch.setattr(session, "send_client_content", block_seed)
+    startup = asyncio.create_task(handler.start_up())
+
+    await asyncio.wait_for(seed_started.wait(), timeout=1.0)
+    await handler.shutdown()
+    release_seed.set()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+
+    assert handler.connection is None
+    assert not handler._is_connected()
+    assert connection_states == []
+    assert session.closed
+    assert client.aio.live.exit_count == 1
+    await handler.shutdown()
 
 
 @pytest.mark.asyncio

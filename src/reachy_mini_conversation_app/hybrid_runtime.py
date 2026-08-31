@@ -969,8 +969,6 @@ class HybridRuntime:
                     self._pending_activation_text = None
                 else:
                     pending_activation_text = None
-            if should_flush:
-                self._schedule_postactivation_flush(handler, generation)
             if pending_activation_text is not None:
                 task = asyncio.create_task(
                     self._send_activation_text(handler, generation, pending_activation_text[1]),
@@ -978,6 +976,8 @@ class HybridRuntime:
                 )
                 with self._lifecycle_lock:
                     self._activation_text_task = task
+            elif should_flush:
+                self._schedule_postactivation_flush(handler, generation)
             return
         with self._lifecycle_lock:
             self._connection_ready = False
@@ -990,12 +990,19 @@ class HybridRuntime:
         """Submit the locally transcribed addressed turn after provider readiness."""
         current_task = asyncio.current_task()
         try:
-            if self._is_current_handler(handler, generation):
-                await handler.say(text)
+            async with self._provider_call_lock:
+                if not self._is_current_handler(handler, generation):
+                    return
+                try:
+                    await handler.say(text)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.warning("Hybrid activation text send failed: %s", type(error).__name__)
+                if self._is_current_handler(handler, generation):
+                    await self._flush_postactivation_locked(handler, generation)
         except asyncio.CancelledError:
             raise
-        except Exception as error:
-            logger.warning("Hybrid activation text send failed: %s", type(error).__name__)
         finally:
             with self._lifecycle_lock:
                 if self._activation_text_task is current_task:
@@ -1158,6 +1165,18 @@ class HybridRuntime:
                 await self._enqueue_local_frame(copied_frame, wait_for_completion=wait_for_local_processing)
             return
         if handler is None:
+            return
+
+        with self._lifecycle_lock:
+            activation_text_task = self._activation_text_task
+            queue_behind_activation_text = (
+                activation_text_task is not None
+                and not activation_text_task.done()
+                and self._active_handler is handler
+                and self._generation == generation
+            )
+        if queue_behind_activation_text:
+            self._enqueue_postactivation(copied_frame, capture_sequence)
             return
 
         async with self._provider_call_lock:

@@ -1,7 +1,7 @@
 # Feature: Gemini Live provider
 
 - Status: `in-progress`
-- Last updated: 2026-08-29
+- Last updated: 2026-08-31
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -202,6 +202,14 @@ bytes/frames to be counted at the transport boundary. The runtime calls
 trigger an unrelated automatic greeting; the existing `start_up()` signature and
 direct-provider behavior are unchanged.
 
+Nonempty locally derived context uses Gemini Live's ordered initial-history
+protocol, not mutable `system_instruction` text. Session setup enables
+`initial_history_in_client_content`, sends one bounded untrusted user-content
+seed with `turn_complete=True`, and reports connected only after that seed
+succeeds. Empty-context sessions retain the ordinary setup path. Seed failure,
+cancellation, or concurrent shutdown closes setup without a stale connected
+event; transcript content is never logged.
+
 This document describes the Gemini provider slice. The composed local ambient,
 local command, and cloud conversation states are documented in
 [`hybrid-runtime.md`](hybrid-runtime.md); they remain opt-in and must not be
@@ -214,7 +222,7 @@ inferred from the provider selector alone.
 | Configuration | `src/reachy_mini_conversation_app/config.py` | Normalize and validate `REALTIME_PROVIDER`; expose `get_realtime_provider()`, `has_realtime_target()`, and `get_realtime_missing_config_message()`. |
 | Provider constants | `src/reachy_mini_conversation_app/config.py` | Keep `HF_BACKEND="huggingface"`, `GEMINI_BACKEND="gemini"`, and Gemini env/default constants available to callers. |
 | Handler factory | `src/reachy_mini_conversation_app/main.py` | Build exactly the selected handler and reject unknown values before starting either backend. |
-| Gemini adapter | `src/reachy_mini_conversation_app/gemini_live.py` | Implement `ConversationHandler` for Gemini Live audio, events, transcripts, interruptions, tools, camera results, reconnect, and shutdown. |
+| Gemini adapter | `src/reachy_mini_conversation_app/gemini_live.py` | Implement `ConversationHandler` for Gemini Live audio, ordered initial-history context, events, transcripts, interruptions, tools, camera results, reconnect, and shutdown. |
 | Shared media loop | `src/reachy_mini_conversation_app/console.py` | Record the SDK input frame, emit handler output, resample output for the selected speaker boundary, expose settings, and supervise reconnects. The bounded capture worker isolates synchronous SDK pulls from asyncio. |
 | Audio conversion | `src/reachy_mini_conversation_app/streaming.py` | Provide the generic mono-float32 resampler used when provider and SDK rates differ. |
 | Latency diagnostics | `src/reachy_mini_conversation_app/gemini_live.py` | Expose bounded `GeminiLatencySnapshot` numeric samples (maximum 32 per sample list) and marker-order diagnostics without retaining payloads. |
@@ -437,10 +445,17 @@ records current evidence and marks missing values explicitly; do not infer live
 conversation quality or end-to-end latency from automated results or isolated
 connection samples.
 
+The 2026-08-31 initial-history correction passed 108 focused Gemini/runtime
+tests and the full dotenv-isolated repository gate: Ruff, formatting, strict
+mypy across 59 source files, 736 tests passed with one explicit native skip,
+lock consistency, both JavaScript syntax checks, and `git diff --check`. Live
+dinner response quality remains a separate acceptance check.
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-08-31 | Moved bounded ambient transcript text from `system_instruction` to Gemini Live ordered initial history. Context seeding now completes before the connected callback, fails closed across transport errors/cancellation/shutdown, and remains payload-free in logs. |
 | 2026-08-29 | Documented the Phase 1 provider selector, Gemini configuration and audio boundary, shared tools/profiles/settings behavior, privacy constraints, test inventory, and pending benchmark validation. |
 | 2026-08-29 | Recorded the verified focused/full gate, bounded latency diagnostics, 15-second setup-only timeout, ordered tool/cancellation behavior, camera send ordering, SDK dependency review, and the still-pending real Gemini benchmark. |
 | 2026-08-29 | Recorded the optional MuJoCo 3.3.0 simulator group, historical interim 378-test gate evidence, and expanded privacy sentinel coverage while retaining the pending live benchmark. |
