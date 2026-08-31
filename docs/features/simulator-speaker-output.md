@@ -184,8 +184,14 @@ old 500 ms limits retained only 5 of 20 rapidly supplied 100 ms buffers while
 non-blocking and leaky but raises both native stages to a 30-second time/byte
 bound. The revised native child retains all 20 uniquely marked buffers in
 order, verifies contiguous 100 ms PTS/duration metadata, then confirms two
-post-flush frames restart correctly. Audible acceptance remains pending a fresh
-process restart and human headphone retest.
+post-flush frames restart correctly. A fresh restarted Gemini session passed
+human audible acceptance with headphones on 2026-08-31.
+
+The app-owned simulator sink is outside the SDK playback path used as the echo
+canceller's reverse reference. Laptop-speaker output can therefore return
+through the Mac microphone and make Gemini interrupt its own response. Use
+headphones for current simulator testing; this limitation does not establish
+the behavior of Reachy Mini's physical audio hardware.
 
 Commands run:
 
@@ -232,4 +238,4 @@ the revised opt-in native child passed independently. Ruff,
 formatting, and strict mypy across 59 source files were clean. Final root
 verification passed all 730 tests with one explicit native skip, lock
 consistency, both JavaScript syntax checks, and `git diff --check`. Human
-audible retest remains pending.
+headphone playback then passed in a fresh live Gemini session.

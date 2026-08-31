@@ -1,7 +1,7 @@
 # Reachy Hybrid Household Companion — Implementation Plan
 
 - Status: `in-progress`
-- Active phase: `Audible playback retest after native burst-retention fix`
+- Active phase: `Dinner demo and remaining live acceptance`
 - Owner: Reachy project
 - Created: 2026-08-29
 - Last updated: 2026-08-31
@@ -682,14 +682,16 @@ live validation; the durable fix still belongs upstream.
 | 2026-08-30 | Final automated gate | The exact gate passed Ruff, formatting, strict mypy across 59 source files, all 726 tests with one explicit native skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. The opt-in native speaker child passed separately in 1.15 seconds. A post-close frame race found during root review was fixed with a regression so closed runtimes no longer perform local observation. |
 | 2026-08-30 | Phase 5 live acceptance | Human speech `computer, look left` reached local Whisper (HTTP 200), transitioned `LOCAL_AMBIENT` → `LOCAL_COMMAND`, executed the existing `move_head`/`look_left` action, and returned to `LOCAL_AMBIENT`. No Gemini handler was constructed or connected, so the command-path privacy acceptance passed. Local execution followed the STT response by about 14 ms. End-to-end speech latency, the other four commands, and sustained local-processing drop rates remain pending. |
 | 2026-08-31 | Native playback quality blocker | Human headphone acceptance remained choppy/fast-forwarded after the sample-clock correction. Native reproduction proved the two former eight-buffer/500 ms downstream-leaky queues silently deleted burst audio: only 5 of 20 100 ms buffers survived while `push-buffer` still returned success. Replaced buffer-count limits with a bounded 30-second byte/time contract while preserving non-blocking pushes, downstream leaking beyond the bound, and immediate generation-safe flush; incompatible appsrc versions now fail closed instead of silently becoming unbounded. The revised native child retains 20/20 uniquely marked buffers in order with contiguous timing and verifies a two-frame post-flush restart; the focused suite and opt-in native child pass. Final root verification passed Ruff, formatting, strict mypy across 59 source files, all 730 tests with one explicit native skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. Fresh human audible retest remains pending. |
+| 2026-08-31 | Native playback live acceptance | A fresh restarted run with headphones produced normal Gemini playback. The same run proved `computer, look right` executed locally and silently, returning to `LOCAL_AMBIENT` without constructing Gemini; a later unsupported addressed utterance separately escalated and connected Gemini in 516.6 ms. Ambient cloud bytes remained zero. Speaker playback without headphones can feed the app-owned output back into the Mac microphone because that bypass is outside the SDK echo-cancellation reference, causing Gemini to interrupt its own output; headphones are required for current simulator acceptance. |
 
 ## Next steps
 
-1. Run one short human headphone check with
-   `AUDIO_OUTPUT_BACKEND=gstreamer` to judge audible cadence, then speak the
-   wake phrase and all five local commands to measure real microphone/STT
-   behavior. The automated live tier already covered fresh sessions, tools,
-   interruption, inactivity close, privacy counters, and process survival.
+1. Run the dinner-demo ambient-context script and record context correctness,
+   activation/first-audio latency, CPU, and RSS while using headphones.
+2. Speak the remaining exact local commands to measure microphone/STT behavior,
+   false activations, misses, and end-to-end latency. The automated live tier
+   already covered fresh sessions, tools, interruption, inactivity close,
+   privacy counters, and process survival.
 2. Repeat the short direct Phase 1 LOCAL benchmark with corrected first-audio
    instrumentation; retain unavailable/reordered counts instead of inventing a
    latency when provider events arrive out of order.

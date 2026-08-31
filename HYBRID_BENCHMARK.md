@@ -119,7 +119,7 @@ Strategy B, change `LOCAL_CONTEXT_STRATEGY=activation`; activate by keyboard.
 | Local STT backend | Loopback endpoint and live request | Transformers Serve with `openai/whisper-small` returned HTTP 200 for the live request; transcript quality and sustained resource use remain not measured |
 | Split-final wake follow-up | Deterministic hybrid-runtime/capture tests | Exact follow-up stays cloud-free; uncertain follow-up and timeout preserve the FIFO for cloud; live latency/resource value not measured |
 | Local capture pressure | Deterministic LocalStream/runtime burst test | Slow local observation no longer holds the capture handoff; admitted local frames remain ordered, capture-worker drops stay zero, and sustained live drop rate is not measured |
-| App-owned speaker timing | Deterministic timing/flush tests, native child, and live Gemini smoke | Human playback remained choppy after the timestamp fix; the old 500 ms queues retained only 5/20 burst buffers. A bounded 30-second replacement now retains 20/20 with contiguous timing, but audible retest is pending |
+| App-owned speaker timing | Deterministic timing/flush tests, native child, and live Gemini smoke | The old 500 ms queues retained only 5/20 burst buffers; the bounded 30-second replacement retains 20/20 marked buffers in order, and fresh headphone playback passed. Laptop-speaker playback can feed back through the Mac microphone and trigger Gemini interruptions because the bypass is outside the SDK echo-cancellation reference |
 
 The direct Phase 1 saved-log rerun and all Phase 3–5 live measurements remain
 required before this report can be marked complete.
@@ -261,8 +261,10 @@ bytes. Phase 3–5 must repeat this proof with the real local STT endpoint runni
   by bytes/time; incompatible appsrc versions fail closed rather than buffering
   without a bound. The revised native regression retains 20/20 uniquely marked
   buffers in order and verifies playback after a flush. The full repository
-  gate passes 730 tests with one explicit native skip. A
-  fresh human headphone retest is still required.
+  gate passes 730 tests with one explicit native skip. A fresh restarted Gemini
+  session passed human audible acceptance with headphones. Without headphones,
+  the app-owned simulator sink is outside the SDK echo-cancellation reference,
+  so laptop-speaker feedback can cause Gemini to interrupt its own response.
 - MLX Audio's current STT server explicitly bridges inference through a file in
   `/tmp`, so it was rejected for this RAM-only ambient path. The selected
   Transformers candidate decodes uploaded bytes through `BytesIO`; the live run
