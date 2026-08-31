@@ -1,7 +1,7 @@
 # Feature: deterministic local intents
 
 - Status: `in-progress`
-- Last updated: 2026-08-30
+- Last updated: 2026-08-31
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -14,11 +14,10 @@ neither class opens a provider or persists the utterance.
 
 The modules are intentionally small so `HybridRuntime` can route only an exact
 addressed suffix while in `LOCAL_COMMAND`. Automated integration is complete.
-A live simulator run with the configured wake phrase `computer` reached local
-activation, but `look left` escalated to Gemini and Gemini performed the
-movement. It therefore did not satisfy local-command acceptance. The same path
-with `Reachy` remains blocked because no exact matching final transcript token
-reached the detector.
+Live simulator runs with the configured wake phrase `computer` now cover all
+five allowlisted actions without provider construction or cloud audio. The same
+path with `Reachy` remains blocked because no exact matching final transcript
+token reached the detector.
 
 If local STT emits the wake and command as separate final segments, the runtime
 waits briefly for one follow-up and routes its exact stripped text through the
@@ -193,12 +192,14 @@ mypy --pretty --show-error-codes
 
 Validated on 2026-08-29: the focused router/action suites, integration tests,
 Ruff, formatting, and strict mypy passed. After final integration, the full
-repository gate passed all 649 tests. On 2026-08-30, a live simulator run with
-`LOCAL_WAKE_WORD=computer` confirmed final STT → wake detector → local
-activation, but the command escalated to Gemini and Gemini called `MoveHead`.
-A `Reachy` wake was not accepted because no exact matching final transcript
-token reached the detector. Live local-command acceptance, false-positive/miss
-rates, latency, and the remaining commands still require measurement.
+repository gate passed all 649 tests. Subsequent live simulator runs with
+`LOCAL_WAKE_WORD=computer` accepted `stop`, `be quiet`, `look left`, `look
+right`, and `look at me` locally. The final three-command run reported three
+executions, zero failures/escalations, zero ambient/cloud audio bytes, and no
+provider connection. It also recorded 12 dropped local-processing frames, so
+sustained-overload behavior and full speech-to-action latency remain open. A
+`Reachy` wake was not accepted because no exact matching final transcript token
+reached the detector.
 
 The split-final integration regressions additionally cover exact follow-up
 success without provider construction, uncertain/timeout cloud escalation with
@@ -222,3 +223,4 @@ fuzzy matching.
 | 2026-08-30 | Added the configurable two-second one-shot split-final follow-up path and deterministic tests for local success, cloud escalation, timeout, FIFO, cancellation, and privacy. Live STT segmentation and latency remain pending. |
 | 2026-08-30 | Added metadata-only routing outcomes/reasons and counters for router rejection, split-final timeout, and executor failure. The exact fail-closed allowlist is unchanged. |
 | 2026-08-30 | Live simulator acceptance passed for `computer, look left`: local Whisper returned HTTP 200, the runtime entered `LOCAL_COMMAND`, the existing `move_head` tool executed `look_left`, and the runtime returned to `LOCAL_AMBIENT`. No Gemini handler was constructed or connected. Execution followed the STT response by about 14 ms; full speech-to-action latency and the other four commands remain unmeasured. |
+| 2026-08-31 | Live acceptance now covers all five actions. A clean run executed `computer, stop`, `computer, be quiet`, and `computer, look at me` locally with three executions, zero failures/escalations, zero cloud audio, and no provider connection; earlier accepted runs cover both look directions. The same run counted 12 dropped local-processing frames, retained as a performance follow-up. |
