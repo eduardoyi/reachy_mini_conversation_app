@@ -65,15 +65,39 @@ HF_AVAILABLE_VOICES: list[str] = [
 
 HF_BACKEND = "huggingface"
 GEMINI_BACKEND = "gemini"
+OPENAI_LIVE_BACKEND = "openai_live"
 REALTIME_PROVIDER_ENV = "REALTIME_PROVIDER"
 REALTIME_PROVIDER_HUGGINGFACE = HF_BACKEND
 REALTIME_PROVIDER_GEMINI = GEMINI_BACKEND
+REALTIME_PROVIDER_OPENAI_LIVE = OPENAI_LIVE_BACKEND
 DEFAULT_REALTIME_PROVIDER = REALTIME_PROVIDER_HUGGINGFACE
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 GEMINI_LIVE_MODEL_ENV = "GEMINI_LIVE_MODEL"
 GEMINI_VOICE_ENV = "GEMINI_VOICE"
 DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_GEMINI_VOICE = "Puck"
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+OPENAI_LIVE_MODEL_ENV = "OPENAI_LIVE_MODEL"
+OPENAI_LIVE_BACKEND_MODEL_ENV = "OPENAI_LIVE_BACKEND_MODEL"
+OPENAI_LIVE_VOICE_ENV = "OPENAI_LIVE_VOICE"
+DEFAULT_OPENAI_LIVE_MODEL = "gpt-live-1"
+DEFAULT_OPENAI_LIVE_BACKEND_MODEL = "gpt-5.6-luna"
+DEFAULT_OPENAI_LIVE_VOICE = "marin"
+OPENAI_LIVE_AVAILABLE_VOICES: tuple[str, ...] = (
+    "quartz",
+    "ripple",
+    "vesper",
+    "willow",
+    "stone",
+    "gleam",
+    "meridian",
+    "bossa",
+    "tempo",
+    "beacon",
+    "delta",
+    "cinder",
+    "marin",
+)
 HYBRID_RUNTIME_ENABLED_ENV = "HYBRID_RUNTIME_ENABLED"
 HYBRID_CLOUD_INACTIVITY_SECONDS_ENV = "HYBRID_CLOUD_INACTIVITY_SECONDS"
 HYBRID_AMBIENT_BUFFER_SECONDS_ENV = "HYBRID_AMBIENT_BUFFER_SECONDS"
@@ -211,10 +235,18 @@ def _normalize_realtime_provider(value: str | None) -> str:
     if not candidate:
         return DEFAULT_REALTIME_PROVIDER
 
-    if candidate not in {REALTIME_PROVIDER_HUGGINGFACE, REALTIME_PROVIDER_GEMINI}:
+    if candidate == "openai-live":
+        candidate = REALTIME_PROVIDER_OPENAI_LIVE
+
+    if candidate not in {
+        REALTIME_PROVIDER_HUGGINGFACE,
+        REALTIME_PROVIDER_GEMINI,
+        REALTIME_PROVIDER_OPENAI_LIVE,
+    }:
         raise ValueError(
             f"Invalid {REALTIME_PROVIDER_ENV}={value!r}. Expected "
-            f"{REALTIME_PROVIDER_HUGGINGFACE!r} or {REALTIME_PROVIDER_GEMINI!r}."
+            f"{REALTIME_PROVIDER_HUGGINGFACE!r}, {REALTIME_PROVIDER_GEMINI!r}, or "
+            f"{REALTIME_PROVIDER_OPENAI_LIVE!r}."
         )
     return candidate
 
@@ -516,6 +548,12 @@ class Config:
     GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
     GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
     GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
+    OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
+    OPENAI_LIVE_BACKEND_MODEL = (
+        os.getenv(OPENAI_LIVE_BACKEND_MODEL_ENV) or ""
+    ).strip() or DEFAULT_OPENAI_LIVE_BACKEND_MODEL
+    OPENAI_LIVE_VOICE = (os.getenv(OPENAI_LIVE_VOICE_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_VOICE
     HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
     HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
     HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
@@ -656,6 +694,12 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
     config.GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
     config.GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    config.OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
+    config.OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
+    config.OPENAI_LIVE_BACKEND_MODEL = (
+        os.getenv(OPENAI_LIVE_BACKEND_MODEL_ENV) or ""
+    ).strip() or DEFAULT_OPENAI_LIVE_BACKEND_MODEL
+    config.OPENAI_LIVE_VOICE = (os.getenv(OPENAI_LIVE_VOICE_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_VOICE
     config.HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
     config.HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
     config.HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
@@ -754,6 +798,8 @@ def has_realtime_target() -> bool:
     """Return whether the selected provider has its required connection target."""
     if get_realtime_provider() == GEMINI_BACKEND:
         return bool((config.GEMINI_API_KEY or "").strip())
+    if get_realtime_provider() == OPENAI_LIVE_BACKEND:
+        return bool((config.OPENAI_API_KEY or "").strip())
     return has_hf_realtime_target()
 
 
@@ -761,6 +807,8 @@ def get_realtime_missing_config_message() -> str:
     """Return the configuration message for the selected provider's missing target."""
     if get_realtime_provider() == GEMINI_BACKEND:
         return f"{GEMINI_API_KEY_ENV} is not configured."
+    if get_realtime_provider() == OPENAI_LIVE_BACKEND:
+        return f"{OPENAI_API_KEY_ENV} is not configured."
     return f"{HF_REALTIME_WS_URL_ENV} is not configured."
 
 

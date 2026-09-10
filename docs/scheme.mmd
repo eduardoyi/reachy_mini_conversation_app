@@ -9,7 +9,7 @@ flowchart TB
       -- audio stream -->
     UI@{ label: "<span style='font-size:16px;font-weight:bold;'>UI Layer</span><br><span style='font-size:13px;color:#0277bd;'>Web UI / Console</span>" }
 
-    Config@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Provider Config</span><br><span style='font-size:12px;color:#f57f17;'>REALTIME_PROVIDER<br/>Hugging Face default / Gemini Live opt-in</span>" }
+    Config@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Provider Config</span><br><span style='font-size:12px;color:#f57f17;'>REALTIME_PROVIDER<br/>Hugging Face default / Gemini or GPT Live opt-in</span>" }
 
     UI -- provider settings -->
     Config
@@ -25,7 +25,7 @@ flowchart TB
 
     LocalAudio -- bounded text context --> Hybrid
 
-    Hybrid -- activated live audio --> Backend@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Provider</span><br><span style='font-size:12px; color:#7b1fa2;'>Hugging Face (default) or Gemini Live<br/>one on-demand session + tools + vision</span>" }
+    Hybrid -- activated live audio --> Backend@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Provider</span><br><span style='font-size:12px; color:#7b1fa2;'>Hugging Face / Gemini / GPT Live<br/>one on-demand speech session</span>" }
 
     Config -. selects provider .-> Backend
 
@@ -39,7 +39,12 @@ flowchart TB
 
     Speaker -- audible response --> User
 
-    Backend -- tool calls -->
+    Backend -- GPT Live delegation --> Luna["Luna Responses<br/>reasoning, tools and requested images"]
+    Luna -- short result --> Backend
+    Luna -- tool calls --> Handlers
+    Handlers -- requested image/result --> Luna
+
+    Backend -- HF/Gemini tool calls -->
     Handlers@{ label: "<span style='font-size:16px;font-weight:bold;'>Tool Layer</span><br><span style='font-size:12px;color:#f9a825;'>Built-in + external tools<br/>+ MCP Tool Spaces</span>" }
 
     Profiles@{ label: "<span style='font-size:16px;font-weight:bold;'>Selected Profile</span><br><span style='font-size:12px;color:#6a1b9a;'>profile.md<br/>+ instance-local tool access</span>" }
@@ -51,7 +56,7 @@ flowchart TB
 
     LocalActions -- existing tools / movement boundary --> Motion
 
-    Handlers -. image for
+    Handlers -. HF/Gemini image for
     analysis .-> Backend
 
     Robot@{ label: "<span style='font-size:16px;font-weight:bold;'>reachy_mini</span><br><span style='font-size:13px;color:#c62828;'>Robot Control Library</span>" }

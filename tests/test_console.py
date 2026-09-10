@@ -1228,6 +1228,31 @@ def test_status_reports_ready_gemini_without_exposing_credentials(
     assert secret not in repr(status)
 
 
+def test_status_reports_ready_openai_live_without_exposing_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI Live readiness is provider-specific and status never includes its key."""
+    secret = "openai-status-secret"
+    _patch_provider_status(monkeypatch, "openai_live", True, "OPENAI_API_KEY is not configured.")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", secret, raising=False)
+    handler = MagicMock()
+    handler._is_connected.return_value = True
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert status["backend"] == "openai_live"
+    assert status["realtime_provider"] == "openai_live"
+    assert status["has_realtime_target"] is True
+    assert status["can_proceed"] is True
+    assert status["can_proceed_with_openai_live"] is True
+    assert status["backend_connected"] is True
+    assert secret not in repr(status)
+
+
 def test_status_redacts_gemini_key_from_backend_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1236,6 +1261,27 @@ def test_status_redacts_gemini_key_from_backend_errors(
     secret = "gemini-error-secret"
     _patch_provider_status(monkeypatch, "gemini", True, "GEMINI_API_KEY is not configured.")
     monkeypatch.setattr(config, "GEMINI_API_KEY", secret, raising=False)
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._set_backend_connection_state("disconnected", RuntimeError(f"authentication failed for {secret}"))
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert secret not in repr(status)
+    assert status["backend_error"] == "RuntimeError: authentication failed for [redacted]"
+
+
+def test_status_redacts_openai_key_from_backend_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider errors must not echo a configured OpenAI API credential to the UI."""
+    secret = "openai-error-secret"
+    _patch_provider_status(monkeypatch, "openai_live", True, "OPENAI_API_KEY is not configured.")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", secret, raising=False)
     handler = MagicMock()
     handler._is_connected.return_value = False
     app = FastAPI()
@@ -1271,6 +1317,30 @@ def test_status_reports_missing_gemini_key_without_hf_controls(
     assert status["missing_config"] == "GEMINI_API_KEY is not configured."
     assert status["has_hf_connection"] is False
     assert "GEMINI_API_KEY" in status["backend_error"]
+
+
+def test_status_reports_missing_openai_key_without_hf_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing OpenAI Live configuration remains visible without claiming HF controls apply."""
+    _patch_provider_status(monkeypatch, "openai_live", False, "OPENAI_API_KEY is not configured.")
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    stream._set_backend_connection_state("waiting_for_config", "OPENAI_API_KEY is not configured.")
+    stream._init_settings_ui_if_needed()
+
+    status = _rpc_call(app, "conversation.status")["result"]
+
+    assert status["backend"] == "openai_live"
+    assert status["has_realtime_target"] is False
+    assert status["can_proceed"] is False
+    assert status["can_proceed_with_openai_live"] is False
+    assert status["missing_config"] == "OPENAI_API_KEY is not configured."
+    assert status["has_hf_connection"] is False
+    assert "OPENAI_API_KEY" in status["backend_error"]
 
 
 @pytest.mark.asyncio
@@ -2136,7 +2206,7 @@ def test_backend_config_can_select_gemini_without_accepting_a_key(
     handler._is_connected.return_value = False
     app = FastAPI()
     stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
-    stream._persist_realtime_provider = captured_providers.append  # type: ignore[method-assign]
+    monkeypatch.setattr(stream, "_persist_realtime_provider", captured_providers.append)
     stream._init_settings_ui_if_needed()
 
     selected = _rpc_call(app, "backend.config", {"provider": "gemini"})
@@ -2148,6 +2218,37 @@ def test_backend_config_can_select_gemini_without_accepting_a_key(
     rejected = _rpc_call(app, "backend.config", {"provider": "gemini", "gemini_api_key": "browser-secret"})
 
     assert rejected["error"]["data"]["reason"] == "gemini_key_not_editable"
+    assert "browser-secret" not in repr(rejected)
+    assert not (tmp_path / ".env").exists()
+
+
+def test_backend_config_can_select_openai_live_without_accepting_a_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider selection may be persisted, but browser-supplied OpenAI keys are rejected."""
+    _patch_provider_status(monkeypatch, "huggingface", True, "OPENAI_API_KEY is not configured.")
+    captured_providers: list[str] = []
+    monkeypatch.setattr(
+        console_mod, "get_realtime_provider", lambda: "openai_live" if captured_providers else "huggingface"
+    )
+
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app, instance_path=str(tmp_path))
+    monkeypatch.setattr(stream, "_persist_realtime_provider", captured_providers.append)
+    stream._init_settings_ui_if_needed()
+
+    selected = _rpc_call(app, "backend.config", {"provider": "openai_live"})
+
+    assert selected["result"]["backend"] == "openai_live"
+    assert captured_providers == ["openai_live"]
+    assert not (tmp_path / ".env").exists()
+
+    rejected = _rpc_call(app, "backend.config", {"provider": "openai_live", "openai_api_key": "browser-secret"})
+
+    assert rejected["error"]["data"]["reason"] == "openai_key_not_editable"
     assert "browser-secret" not in repr(rejected)
     assert not (tmp_path / ".env").exists()
 

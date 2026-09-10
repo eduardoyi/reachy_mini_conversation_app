@@ -26,6 +26,7 @@ from reachy_mini_conversation_app.config import (
     HF_BACKEND,
     GEMINI_BACKEND,
     LOCKED_PROFILE,
+    OPENAI_LIVE_BACKEND,
     REALTIME_PROVIDER_ENV,
     HF_REALTIME_WS_URL_ENV,
     AUDIO_OUTPUT_BACKEND_SDK,
@@ -723,9 +724,9 @@ class LocalStream:
         else:
             detail = str(error).strip()
             message = f"{type(error).__name__}: {detail}" if detail else type(error).__name__
-        configured_gemini_key = getattr(config, "GEMINI_API_KEY", None)
-        if isinstance(configured_gemini_key, str) and configured_gemini_key.strip():
-            message = message.replace(configured_gemini_key.strip(), "[redacted]")
+        for configured_key in (config.GEMINI_API_KEY, config.OPENAI_API_KEY):
+            if isinstance(configured_key, str) and configured_key.strip():
+                message = message.replace(configured_key.strip(), "[redacted]")
         return message
 
     def _set_backend_connection_state(self, state: str, error: BaseException | str | None = None) -> None:
@@ -1081,6 +1082,9 @@ class LocalStream:
                 "can_proceed_with_gemini": has_active_provider_target
                 if realtime_provider == GEMINI_BACKEND
                 else False,
+                "can_proceed_with_openai_live": has_active_provider_target
+                if realtime_provider == OPENAI_LIVE_BACKEND
+                else False,
                 "missing_config": None
                 if hybrid_enabled or has_active_provider_target
                 else get_realtime_missing_config_message(),
@@ -1184,23 +1188,30 @@ class LocalStream:
 
         @rpc.method("backend.config")  # type: ignore[untyped-decorator]
         def _rpc_backend_config(params: dict[str, object]) -> dict[str, object]:
-            if "gemini_api_key" in params or "GEMINI_API_KEY" in params:
+            if any(
+                name in params for name in ("gemini_api_key", "GEMINI_API_KEY", "openai_api_key", "OPENAI_API_KEY")
+            ):
+                key_provider = (
+                    "OpenAI Live" if any(name in params for name in ("openai_api_key", "OPENAI_API_KEY")) else "Gemini"
+                )
                 raise JsonRpcError(
-                    "Gemini API keys must be configured in the app environment.",
-                    reason="gemini_key_not_editable",
+                    f"{key_provider} API keys must be configured in the app environment.",
+                    reason="openai_key_not_editable" if key_provider == "OpenAI Live" else "gemini_key_not_editable",
                     code=-32602,
                 )
 
             configured_provider = get_realtime_provider()
             requested_provider = params.get("provider")
             provider = str(requested_provider or configured_provider).strip().lower()
-            if provider not in {HF_BACKEND, GEMINI_BACKEND}:
+            if provider == "openai-live":
+                provider = OPENAI_LIVE_BACKEND
+            if provider not in {HF_BACKEND, GEMINI_BACKEND, OPENAI_LIVE_BACKEND}:
                 raise JsonRpcError("invalid realtime provider", reason="invalid_provider", code=-32602)
 
-            if provider == GEMINI_BACKEND:
+            if provider in {GEMINI_BACKEND, OPENAI_LIVE_BACKEND}:
                 if any(name in params for name in ("hf_mode", "hf_host", "hf_port")):
                     raise JsonRpcError(
-                        "Hugging Face connection settings are unavailable while Gemini is selected.",
+                        "Hugging Face connection settings are unavailable while a cloud provider is selected.",
                         reason="hf_settings_unavailable",
                         code=-32602,
                     )

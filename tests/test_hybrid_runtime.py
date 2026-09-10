@@ -9,6 +9,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
+from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
@@ -330,6 +331,49 @@ async def test_ambient_soak_stays_local_without_factory_or_cloud_traffic() -> No
     assert runtime.metrics.cloud_video_frames_sent == 0
     assert runtime.metrics.ambient_audio_seconds_buffered == pytest.approx(20)
     await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_openai_live_provider_stays_closed_until_activation_and_rebuilds_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI Live remains local until activation and each cloud generation is fresh."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.REALTIME_PROVIDER_OPENAI_LIVE)
+    handlers = [FakeHandler(), FakeHandler()]
+    factory_calls = 0
+
+    def factory() -> FakeHandler:
+        nonlocal factory_calls
+        factory_calls += 1
+        return handlers.pop(0)
+
+    runtime = HybridRuntime(factory, ambient_buffer=AmbientAudioBuffer(max_seconds=1, sample_rate=1_000))
+    await runtime.handle_frame(frame(1_000, sample_rate=1_000))
+
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert factory_calls == 0
+    assert runtime.metrics.cloud_audio_bytes_sent == 0
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+
+    assert await runtime.activate("keyboard")
+    first = runtime.active_handler
+    assert first is not None
+    await first.started.wait()
+    assert factory_calls == 1
+
+    await runtime.deactivate_cloud("reconnect")
+    assert first.shutdown_calls == 1
+    assert runtime.active_handler is None
+
+    assert await runtime.activate("keyboard")
+    second = runtime.active_handler
+    assert second is not None and second is not first
+    await second.started.wait()
+    assert factory_calls == 2
+
+    await runtime.close()
+    await runtime.close()
+    assert second.shutdown_calls == 1
 
 
 @pytest.mark.asyncio

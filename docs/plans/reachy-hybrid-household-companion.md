@@ -10,6 +10,10 @@
 
 ## Supervised headless MVP accepted — 2026-09-10
 
+Follow-on work: [GPT Live migration](openai-live-migration.md) adds GPT Live speech
+with Luna tool/image delegation while preserving the accepted Gemini path.
+That provider has separate validation gates; it does not reopen wake training.
+
 User reports ordinary conversation did not wake Reachy, saying Reachy activated
 it, silence returned it to standby, further ordinary speech did not activate it,
 and a later addressed question woke it again. Together with the earlier live
@@ -1283,3 +1287,16 @@ value scan of 48 changed/new files found no matches; no private media/models
 are included. Existing graphical/AEC/hardware limits and pending generated
 architecture SVG remain documented. No GPT-Live implementation or default
 provider switch is part of this checkpoint.
+
+
+## GPT Live simulator checkpoint — 2026-09-10
+
+Implemented `openai_live`: GPT Live speech with Luna Responses delegation for
+existing tools and requested camera images. Preserved local acoustic wake and
+ambient privacy, with Gemini available as fallback. The user accepted live
+conversation and automatic return to standby after the quiet-output timer fix.
+Real API synthetic silence also verified automatic close; full local gate passed
+967 tests with 2 skips. Individual GPT Live tool/interruption/reactivation checks,
+physical hardware performance and generated architecture SVG remain outstanding.
+See [GPT Live migration](openai-live-migration.md) and the
+[provider feature record](../features/openai-live-provider.md) for evidence.

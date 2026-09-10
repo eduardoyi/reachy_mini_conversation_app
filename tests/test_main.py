@@ -130,6 +130,8 @@ def test_build_conversation_handler_uses_huggingface_for_default_provider(monkey
 
 def test_build_conversation_handler_uses_gemini_only_when_selected(monkeypatch) -> None:
     """Selecting Gemini uses its local import and preserves the startup voice contract."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.config.REALTIME_PROVIDER)
+    monkeypatch.setattr(config.config, "GEMINI_API_KEY", config.config.GEMINI_API_KEY)
     monkeypatch.setenv(config.REALTIME_PROVIDER_ENV, config.GEMINI_BACKEND)
     config.refresh_runtime_config_from_env()
     handler_constructor = _install_fake_handler_module(
@@ -153,6 +155,31 @@ def test_build_conversation_handler_uses_gemini_only_when_selected(monkeypatch) 
     assert handler is handler_constructor.return_value
     handler_constructor.assert_called_once_with(deps, instance_path="instance", startup_voice="Aiden")
     assert secret not in str(logger.info.call_args_list)
+
+
+def test_build_conversation_handler_uses_openai_live_only_when_selected(monkeypatch) -> None:
+    """Selecting OpenAI Live imports and constructs only its lazy provider branch."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.config.REALTIME_PROVIDER)
+    monkeypatch.setenv(config.REALTIME_PROVIDER_ENV, config.REALTIME_PROVIDER_OPENAI_LIVE)
+    config.refresh_runtime_config_from_env()
+    handler_constructor = _install_fake_handler_module(
+        monkeypatch,
+        "reachy_mini_conversation_app.openai_live",
+        "OpenAILiveHandler",
+    )
+    logger = MagicMock()
+    deps = object()
+
+    handler = main_mod._build_conversation_handler(
+        deps,
+        config.get_realtime_provider(),
+        instance_path="instance",
+        startup_voice="marin",
+        logger=logger,
+    )
+
+    assert handler is handler_constructor.return_value
+    handler_constructor.assert_called_once_with(deps, instance_path="instance", startup_voice="marin")
 
 
 def test_build_conversation_handler_rejects_unknown_provider_before_importing_backend(monkeypatch) -> None:
@@ -182,8 +209,13 @@ def test_build_conversation_handler_rejects_unknown_provider_before_importing_ba
 
 
 @pytest.mark.parametrize("acoustic_enabled", [False, True])
-def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch, acoustic_enabled) -> None:
+@pytest.mark.parametrize(
+    "realtime_provider",
+    [config.REALTIME_PROVIDER_HUGGINGFACE, config.REALTIME_PROVIDER_OPENAI_LIVE],
+)
+def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch, acoustic_enabled, realtime_provider) -> None:
     """Hybrid startup constructs only the local runtime, even without cloud config."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", realtime_provider)
     monkeypatch.setattr(config.config, "HYBRID_RUNTIME_ENABLED", True)
     monkeypatch.setattr(config.config, "LOCAL_STT_BASE_URL", None)
     monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_ENABLED", acoustic_enabled)

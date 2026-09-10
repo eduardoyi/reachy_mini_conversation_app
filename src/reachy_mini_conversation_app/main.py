@@ -77,6 +77,7 @@ def _build_conversation_handler(
         HF_LOCAL_CONNECTION_MODE,
         REALTIME_PROVIDER_GEMINI,
         REALTIME_PROVIDER_HUGGINGFACE,
+        REALTIME_PROVIDER_OPENAI_LIVE,
         get_hf_connection_selection,
     )
 
@@ -85,6 +86,16 @@ def _build_conversation_handler(
 
         logger.info("Using Gemini Live realtime handler")
         return GeminiLiveHandler(
+            deps,
+            instance_path=instance_path,
+            startup_voice=startup_voice,
+        )
+
+    if realtime_provider == REALTIME_PROVIDER_OPENAI_LIVE:
+        from reachy_mini_conversation_app.openai_live import OpenAILiveHandler
+
+        logger.info("Using OpenAI Live realtime handler")
+        return OpenAILiveHandler(
             deps,
             instance_path=instance_path,
             startup_voice=startup_voice,
@@ -136,6 +147,7 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         REALTIME_PROVIDER_GEMINI,
+        REALTIME_PROVIDER_OPENAI_LIVE,
         config,
         set_instance_path,
         get_realtime_provider,
@@ -184,6 +196,8 @@ def run(
     realtime_provider = get_realtime_provider()
     if realtime_provider == REALTIME_PROVIDER_GEMINI:
         logger.info("Configured Gemini Live realtime backend")
+    elif realtime_provider == REALTIME_PROVIDER_OPENAI_LIVE:
+        logger.info("Configured OpenAI Live realtime backend")
     else:
         logger.info(
             "Configured Hugging Face realtime backend, connection mode: %s",

@@ -34,7 +34,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 
 ## Overview
 
-- Realtime audio conversation through the selected backend. Hugging Face remains the default; Gemini Live is opt-in.
+- Realtime audio conversation through the selected backend. Hugging Face remains the default; Gemini Live and GPT Live are opt-in.
 - Optional hybrid mode keeps audio processing local until activation, supplies recent locally derived context, and handles exact movement commands without cloud.
 - Vision is handled by the realtime backend when the `camera` tool is used.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble.
@@ -100,7 +100,7 @@ pip install -e .[dev]                   # Development tools
 
 The default setup uses the Hugging Face backend and does not require a Gemini API key.
 
-Copy `.env.example` to a local, ignored `.env` when you want to select Gemini or
+Copy `.env.example` to a local, ignored `.env` when you want to select Gemini/GPT Live or
 point Hugging Face at your own local endpoint. Never commit `.env` or put a
 credential in the web UI.
 
@@ -112,10 +112,14 @@ values. This keeps one-off commands such as
 
 | Variable | Description |
 |----------|-------------|
-| `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default) or `gemini`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
+| `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default), `gemini`, or `openai_live`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
 | `GEMINI_API_KEY` | Required only when `REALTIME_PROVIDER=gemini`. Configure it in the local app environment; it is not accepted by settings RPC and is never logged. |
 | `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. |
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
+| `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
+| `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
+| `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |
+| `OPENAI_LIVE_VOICE` | GPT Live voice, default `marin`. |
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
@@ -154,7 +158,15 @@ GEMINI_API_KEY=<configure locally; never commit>
 # GEMINI_VOICE=Puck
 ```
 
-The Phase 1 audio path is direct: 16 kHz microphone PCM → Gemini Live → 24 kHz
+To use GPT Live, set `REALTIME_PROVIDER=openai_live` and add `OPENAI_API_KEY`
+to the ignored `.env`. GPT Live handles speech; Luna executes existing tools
+(including Spotify), searches the web when needed, and receives requested camera images.
+The app resamples microphone input to 24 kHz; GPT Live returns 24 kHz PCM. Standby remains local
+when hybrid mode is enabled. Gemini stays available by selecting `gemini`.
+See [GPT Live provider](docs/features/openai-live-provider.md) for validation
+status, session limits and the separate voice/backend billing boundary.
+
+The Gemini Phase 1 audio path is direct: 16 kHz microphone PCM → Gemini Live → 24 kHz
 assistant PCM → the generic local resampler already used by `LocalStream` → the
 Reachy Mini speaker. The provider choice does not create a second tool or
 movement loop. Existing tools, profiles, memory, simulated movement, speech
@@ -170,13 +182,14 @@ weather results, while flight status and fare lookups still need a dedicated
 flight-data integration.
 
 In the Settings view, Connection selects the provider. Hugging Face endpoint
-controls are shown only for Hugging Face. Gemini's key is environment-only, so
+controls are shown only for Hugging Face. Gemini and OpenAI keys are environment-only, so
 the page cannot enter or display it. If the selected provider is missing its
 required target, the app keeps the settings surface available and reports what
 is missing instead of starting a backend with incomplete configuration. Saving
 a provider change writes the selector to the instance `.env` and requests an
 in-process backend rebuild/reconnect when the runtime can do so. Profile and
-voice changes use the same reconnect path.
+voice changes normally use the same reconnect path. GPT Live voice changes are
+saved for its next session; the current session keeps its original voice.
 
 The Gemini adapter, provider-neutral runtime wiring, shared resampler, bounded
 daemon-capture worker, and automated tests have passed the repository gate. The
@@ -261,8 +274,9 @@ Provider readiness can take time after activation. Postactivation frames are
 held in a bounded 20-second FIFO until the provider is ready; overflow drops
 oldest frames and increments the diagnostic `postactivation_frames_dropped`.
 Cloud inactivity starts once the provider reports connected and pauses while
-the user is speaking; ambient capture alone does not keep the cloud session
-alive.
+the provider reports user speech; ambient capture alone does not keep the cloud
+session alive. GPT Live ignores quiet output packets for inactivity, while
+non-whitespace transcripts and louder output refresh the timer.
 
 Keyboard activation remains available through the browser UI and the
 `conversation.activate` JSON-RPC method; headless runs do not start a blocking

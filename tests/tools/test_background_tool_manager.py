@@ -228,6 +228,46 @@ class TestRunToolLifecycle:
         assert notification.status == ToolState.COMPLETED
 
     @pytest.mark.asyncio
+    async def test_non_retained_completion_discards_result_and_notification(
+        self,
+        manager: BackgroundToolManager,
+    ) -> None:
+        """Discard synchronous delegation results after their caller consumes them."""
+        routine = _make_routine("private_camera", result={"b64_im": "private"})
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False, retain=False)
+        assert bg._task is not None
+
+        await bg._task
+
+        assert manager.get_tool(bg.tool_id) is None
+        assert manager._notification_queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_finalizes_retained_tool(
+        self,
+        manager: BackgroundToolManager,
+    ) -> None:
+        """Mark a retained tool failed when its routine unexpectedly raises."""
+        routine = MagicMock(spec=ToolCallRoutine)
+        routine.tool_name = "unexpected"
+
+        async def raise_unexpected(_manager: BackgroundToolManager) -> dict[str, Any]:
+            raise RuntimeError("private detail")
+
+        routine.side_effect = raise_unexpected
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False)
+        assert bg._task is not None
+
+        with pytest.raises(RuntimeError, match="private detail"):
+            await bg._task
+
+        assert bg.status == ToolState.FAILED
+        assert bg.error == "RuntimeError: tool execution failed"
+        notification = manager._notification_queue.get_nowait()
+        assert notification.status == ToolState.FAILED
+        assert notification.error == "RuntimeError: tool execution failed"
+
+    @pytest.mark.asyncio
     async def test_tool_failure(self, manager: BackgroundToolManager) -> None:
         """Mark a tool as FAILED when it raises an exception."""
         routine = _make_routine("bad_tool", error=ValueError("boom"))

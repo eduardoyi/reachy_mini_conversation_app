@@ -9,6 +9,7 @@ the implementation.
 
 | Feature | Document | Status |
 |---------|----------|--------|
+| GPT Live provider | [openai-live-provider.md](openai-live-provider.md) | conversation + standby accepted |
 | Gemini Live provider | [gemini-live-provider.md](gemini-live-provider.md) | in-progress |
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |

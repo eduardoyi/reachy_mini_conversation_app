@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [GPT Live migration](openai-live-migration.md) | `conversation + standby accepted` | 2026-09-10 | GPT Live speech and Luna tool/image delegation |
 | [Spotify playback control](reachy-spotify-control.md) | `complete: Mac playback and search/play/queue accepted` | 2026-09-10 | Optional Mac playback voice controls |
 | [Reachy hybrid household companion](reachy-hybrid-household-companion.md) | `in-progress: headless MVP accepted; hardware validation pending` | 2026-09-10 | Phases 0–5 |
 | [Custom multilingual Reachy openWakeWord training](custom-reachy-openwakeword-training.md) | `Official33 supervised headless MVP accepted; training paused` | 2026-09-10 | Phase 4 custom acoustic wake detector |

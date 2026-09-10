@@ -96,6 +96,8 @@ def test_audio_output_rejects_unknown_values(monkeypatch) -> None:
     [
         ("gemini", config.REALTIME_PROVIDER_GEMINI),
         ("  GeMiNi  ", config.REALTIME_PROVIDER_GEMINI),
+        ("openai_live", config.REALTIME_PROVIDER_OPENAI_LIVE),
+        ("  OPENAI-LIVE  ", config.REALTIME_PROVIDER_OPENAI_LIVE),
         ("  HUGGINGFACE  ", config.REALTIME_PROVIDER_HUGGINGFACE),
         ("  ", config.REALTIME_PROVIDER_HUGGINGFACE),
     ],
@@ -139,8 +141,35 @@ def test_gemini_defaults_and_runtime_overrides_are_loaded(monkeypatch) -> None:
     assert config.config.GEMINI_VOICE == "Aoede"
 
 
+def test_openai_live_defaults_and_runtime_overrides_are_loaded(monkeypatch) -> None:
+    """OpenAI Live model and voice use documented defaults and trim explicit overrides."""
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_MODEL", config.config.OPENAI_LIVE_MODEL)
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_BACKEND_MODEL", config.config.OPENAI_LIVE_BACKEND_MODEL)
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_VOICE", config.config.OPENAI_LIVE_VOICE)
+    monkeypatch.delenv(config.OPENAI_LIVE_MODEL_ENV, raising=False)
+    monkeypatch.delenv(config.OPENAI_LIVE_BACKEND_MODEL_ENV, raising=False)
+    monkeypatch.delenv(config.OPENAI_LIVE_VOICE_ENV, raising=False)
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.OPENAI_LIVE_MODEL == config.DEFAULT_OPENAI_LIVE_MODEL
+    assert config.config.OPENAI_LIVE_BACKEND_MODEL == config.DEFAULT_OPENAI_LIVE_BACKEND_MODEL
+    assert config.config.OPENAI_LIVE_VOICE == config.DEFAULT_OPENAI_LIVE_VOICE
+    assert config.DEFAULT_OPENAI_LIVE_VOICE in config.OPENAI_LIVE_AVAILABLE_VOICES
+
+    monkeypatch.setenv(config.OPENAI_LIVE_MODEL_ENV, "  custom-live-model  ")
+    monkeypatch.setenv(config.OPENAI_LIVE_BACKEND_MODEL_ENV, "  custom-backend-model  ")
+    monkeypatch.setenv(config.OPENAI_LIVE_VOICE_ENV, "  quartz  ")
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.OPENAI_LIVE_MODEL == "custom-live-model"
+    assert config.config.OPENAI_LIVE_BACKEND_MODEL == "custom-backend-model"
+    assert config.config.OPENAI_LIVE_VOICE == "quartz"
+
+
 def test_realtime_target_uses_gemini_api_key(monkeypatch) -> None:
     """The provider-neutral target check requires a Gemini key only for Gemini."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.config.REALTIME_PROVIDER)
+    monkeypatch.setattr(config.config, "GEMINI_API_KEY", config.config.GEMINI_API_KEY)
     monkeypatch.setenv(config.REALTIME_PROVIDER_ENV, config.GEMINI_BACKEND)
     monkeypatch.delenv(config.GEMINI_API_KEY_ENV, raising=False)
     config.refresh_runtime_config_from_env()
@@ -149,6 +178,23 @@ def test_realtime_target_uses_gemini_api_key(monkeypatch) -> None:
 
     monkeypatch.setenv(config.GEMINI_API_KEY_ENV, "test-key")
     config.refresh_runtime_config_from_env()
+    assert config.has_realtime_target()
+
+
+def test_realtime_target_uses_openai_api_key(monkeypatch) -> None:
+    """The OpenAI Live target check requires only its environment key."""
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.config.REALTIME_PROVIDER)
+    monkeypatch.setattr(config.config, "OPENAI_API_KEY", config.config.OPENAI_API_KEY)
+    monkeypatch.setenv(config.REALTIME_PROVIDER_ENV, config.REALTIME_PROVIDER_OPENAI_LIVE)
+    monkeypatch.delenv(config.OPENAI_API_KEY_ENV, raising=False)
+    config.refresh_runtime_config_from_env()
+
+    assert not config.has_realtime_target()
+    assert config.get_realtime_missing_config_message() == "OPENAI_API_KEY is not configured."
+
+    monkeypatch.setenv(config.OPENAI_API_KEY_ENV, "test-key")
+    config.refresh_runtime_config_from_env()
+
     assert config.has_realtime_target()
 
 

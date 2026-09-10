@@ -18,6 +18,8 @@ dependencies = [
 
     #OpenAI (used by the Hugging Face backend)
     "openai==2.28.0",
+    # Public GPT Live WebSocket transport; already used transitively by the SDK.
+    "websockets>=15,<16",
 
     #Google Gemini Live (used by the Gemini backend)
     "google-genai==2.19.0",

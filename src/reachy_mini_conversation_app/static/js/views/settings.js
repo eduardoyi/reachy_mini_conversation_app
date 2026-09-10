@@ -19,11 +19,26 @@ const HF_CONNECTION_MODES = Object.freeze({
 const REALTIME_PROVIDERS = Object.freeze({
   HUGGINGFACE: "huggingface",
   GEMINI: "gemini",
+  OPENAI_LIVE: "openai_live",
 });
 
 const PROVIDER_LABELS = Object.freeze({
   [REALTIME_PROVIDERS.HUGGINGFACE]: "Hugging Face",
   [REALTIME_PROVIDERS.GEMINI]: "Gemini Live",
+  [REALTIME_PROVIDERS.OPENAI_LIVE]: "OpenAI Live",
+});
+
+const CLOUD_PROVIDER_INFO = Object.freeze({
+  [REALTIME_PROVIDERS.GEMINI]: Object.freeze({
+    keyName: "GEMINI_API_KEY",
+    legacyReadyField: "can_proceed_with_gemini",
+    configurationLabel: "Gemini configuration",
+  }),
+  [REALTIME_PROVIDERS.OPENAI_LIVE]: Object.freeze({
+    keyName: "OPENAI_API_KEY",
+    legacyReadyField: "can_proceed_with_openai_live",
+    configurationLabel: "OpenAI Live configuration",
+  }),
 });
 
 const DEFAULT_HF_HOST = "localhost";
@@ -71,7 +86,8 @@ function buildConnectionSection({ onSaved } = {}) {
     "select",
     { class: "settings-select", name: "provider" },
     h("option", { value: REALTIME_PROVIDERS.HUGGINGFACE }, PROVIDER_LABELS[REALTIME_PROVIDERS.HUGGINGFACE]),
-    h("option", { value: REALTIME_PROVIDERS.GEMINI }, PROVIDER_LABELS[REALTIME_PROVIDERS.GEMINI])
+    h("option", { value: REALTIME_PROVIDERS.GEMINI }, PROVIDER_LABELS[REALTIME_PROVIDERS.GEMINI]),
+    h("option", { value: REALTIME_PROVIDERS.OPENAI_LIVE }, PROVIDER_LABELS[REALTIME_PROVIDERS.OPENAI_LIVE])
   );
   const hfModeSelect = h(
     "select",
@@ -159,7 +175,8 @@ function buildConnectionSection({ onSaved } = {}) {
       hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
     } else {
       submitButton.textContent = "Save provider";
-      hint.textContent = "Gemini Live is selected. Configure GEMINI_API_KEY in the app environment; this page never handles credentials.";
+      const keyName = CLOUD_PROVIDER_INFO[providerSelect.value]?.keyName || "GEMINI_API_KEY";
+      hint.textContent = `${PROVIDER_LABELS[providerSelect.value]} is selected. Configure ${keyName} in the app environment; this page never handles credentials.`;
     }
   }
 
@@ -346,12 +363,13 @@ function buildStatusSection() {
             payload.has_hf_connection ? "ok" : "warn"
           )
         );
-      } else if (provider === REALTIME_PROVIDERS.GEMINI) {
-        const ready = payload.has_realtime_target ?? payload.can_proceed_with_gemini;
+      } else if (CLOUD_PROVIDER_INFO[provider]) {
+        const providerInfo = CLOUD_PROVIDER_INFO[provider];
+        const ready = payload.has_realtime_target ?? payload[providerInfo.legacyReadyField];
         list.appendChild(
           statusRow(
-            "Gemini configuration",
-            ready ? "Configured" : payload.missing_config || "Missing GEMINI_API_KEY",
+            providerInfo.configurationLabel,
+            ready ? "Configured" : payload.missing_config || `Missing ${providerInfo.keyName}`,
             ready ? "ok" : "warn"
           )
         );

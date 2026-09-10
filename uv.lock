@@ -14,7 +14,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-02T20:37:33.41255Z"
+exclude-newer = "2026-09-03T19:17:41.960524Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -2841,6 +2841,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "reachy-mini" },
     { name = "reachy-mini-dances-library" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -2876,6 +2877,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "reachy-mini", specifier = ">=1.10.0rc5" },
     { name = "reachy-mini-dances-library" },
+    { name = "websockets", specifier = ">=15,<16" },
 ]
 
 [package.metadata.requires-dev]
