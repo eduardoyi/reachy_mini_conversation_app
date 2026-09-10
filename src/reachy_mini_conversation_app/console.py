@@ -10,6 +10,7 @@ import time
 import queue
 import asyncio
 import logging
+import ipaddress
 import threading
 from typing import Any, List, TypeVar, Optional, Protocol
 from pathlib import Path
@@ -64,13 +65,15 @@ from reachy_mini_conversation_app.conversation_handler import ConversationHandle
 
 try:
     # FastAPI is provided by the Reachy Mini Apps runtime
-    from fastapi import FastAPI, Response
+    from fastapi import FastAPI, Request, Response
     from pydantic import BaseModel
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse
     from starlette.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - only loaded when settings_app is used
     FastAPI = object  # type: ignore
+    Request = object  # type: ignore
     FileResponse = object  # type: ignore
+    JSONResponse = object  # type: ignore
     StaticFiles = object  # type: ignore
     BaseModel = object  # type: ignore
 
@@ -123,6 +126,7 @@ CAPTURE_QUEUE_SIZE = 8
 CAPTURE_POLL_INTERVAL_SECONDS = 0.005
 CAPTURE_STOP_JOIN_TIMEOUT_SECONDS = 0.1
 HYBRID_ACTIVATION_TIMEOUT_SECONDS = 10.0
+LOCAL_TRANSCRIPT_PREVIEW_PATH = "/api/transcript-preview"
 
 
 class _HybridLoopUnavailable(RuntimeError):
@@ -397,6 +401,31 @@ class LocalStream:
         except asyncio.TimeoutError as error:
             future.cancel()
             raise _HybridActivationTimeout("hybrid activation timed out") from error
+
+    async def get_transcript_preview(self) -> dict[str, object]:
+        """Return the opt-in local transcript preview through the owner loop."""
+        enabled = bool(config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED)
+        unavailable: dict[str, object] = {"enabled": enabled, "available": False, "text": ""}
+        if not enabled:
+            return unavailable
+        runtime = self._hybrid_runtime
+        if runtime is None:
+            return unavailable
+        try:
+            text = await self._run_on_owner_loop(runtime.get_transcript_preview)
+        except _HybridLoopUnavailable:
+            return unavailable
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Local transcript preview unavailable: %s", type(error).__name__)
+            return unavailable
+        if text is None:
+            return unavailable
+        if not isinstance(text, str):
+            logger.warning("Local transcript preview returned an invalid value")
+            return unavailable
+        return {"enabled": True, "available": True, "text": text}
 
     async def _run_on_owner_loop(self, operation: Callable[[], Coroutine[Any, Any, ResultT]]) -> ResultT:
         """Run a control operation on LocalStream's loop, or fail if it is unavailable."""
@@ -1059,6 +1088,23 @@ class LocalStream:
                 **hybrid_status,
                 **backend_connection,
             }
+
+        @settings_app.get(LOCAL_TRANSCRIPT_PREVIEW_PATH)
+        async def _transcript_preview(request: Request) -> Response:
+            client_host = request.client.host if request.client is not None else ""
+            try:
+                client_address = ipaddress.ip_address(client_host)
+            except ValueError:
+                client_address = None
+            is_loopback = (isinstance(client_address, ipaddress.IPv4Address) and client_address.is_loopback) or (
+                client_address == ipaddress.IPv6Address("::1")
+            )
+            if not is_loopback:
+                return Response(status_code=403, headers={"Cache-Control": "no-store"})
+            return JSONResponse(
+                content=await self.get_transcript_preview(),
+                headers={"Cache-Control": "no-store"},
+            )
 
         # GET / -> index.html
         @settings_app.get("/")

@@ -1,12 +1,63 @@
 # Reachy Hybrid Household Companion — Implementation Plan
 
 - Status: `in-progress`
-- Active phase: `Dinner demo and remaining live acceptance`
+- Active phase: `Supervised headless MVP accepted; hardware and broader validation pending`
 - Owner: Reachy project
 - Created: 2026-08-29
-- Last updated: 2026-08-31
+- Last updated: 2026-09-10
 - Scope: Phases 0–5
 - Required final report: [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) at the repository root
+
+## Supervised headless MVP accepted — 2026-09-10
+
+User reports ordinary conversation did not wake Reachy, saying Reachy activated
+it, silence returned it to standby, further ordinary speech did not activate it,
+and a later addressed question woke it again. Together with the earlier live
+conversation/shutdown log, this completes the agreed practical supervised
+headless MVP checks. This is user-reported acceptance, not a quantified false-wake
+rate or a new independent model benchmark. No further recording or training is
+required for this milestone; Official33 remains frozen and off by default.
+
+The user also reports a relevant answer about speech preceding the later wake.
+The prescribed acoustic trial disables local STT and does not replay prewake
+audio. Without the new session log/configuration, the source of that apparent
+context is unverified; do not count it as validation of ambient context capture
+or change the documented privacy contract.
+
+The broader plan remains in progress for hardware/Pi, graphical viewer reliability,
+audio drops, echo and outstanding resource/quality measurements. These do not
+reopen the accepted supervised headless milestone. Validation for this update:
+user report and documentation diff check; no code/model changes or tests rerun.
+
+
+## Current status — 2026-09-09
+
+The local checkout has the main companion loop implemented. Hardware has not
+arrived, so production/Pi claims remain out of scope. Earlier live simulator
+acceptance is recorded below; this update does not repeat or expand those claims.
+
+| Area | Current evidence | Remaining work |
+|---|---|---|
+| Phase 0: SDK/simulator baseline | Prior movement, audio, tools/camera and lifecycle acceptance | Real robot bring-up |
+| Phase 1: Gemini Live | Prior headphone conversation, tools and interruption accepted | Exact first-audio timing; laptop-speaker echo/AEC |
+| Phase 2: local/cloud privacy runtime | Prior ambient soak, manual activation, interruption, timeout-close; automated byte/cancellation gates | Sustained target-hardware resource measurements |
+| Phase 3: recent local context | Both English dinner-context strategies accepted; continuous local STT preferred | Multilingual quality and CPU/RAM/latency characterization |
+| Phase 4: Reachy wake | Official33 integrated as an off-by-default supervised simulator MVP; real adapter parity 17/20; headless SDK/movement and real microphone wiring pass | Headless human conversation accepted Sept 10; inactivity rearm, viewer and hardware checks remain |
+| Phase 5: local commands | Five exact commands previously accepted with no Gemini construction/cloud audio | Full speech-to-action latency and sustained drop metrics |
+
+Stop wake training for now. Keep official33 as the low-false-wake MVP and retain
+baseline27+verifier32/parallel35 as documented alternatives. The
+[model catalog](reachy-wake-model-catalog.md) records artifacts and trade-offs.
+The acoustic MVP deliberately uses wake → normal cloud conversation; existing
+transcript-based exact local commands remain a separate available mode. The app
+has manual activation and inactivity return to listening. No automatic parallel
+ensemble is installed. A failed offline quality gate is not erased by trial
+selection; this is a user-approved supervised exception.
+
+Next: finish a human-spoken simulator session, then use it normally before
+spending on more training. Hardware arrival adds a separate microphone/Pi/AEC
+and resource-validation step. Richer memory, home automation, recognition and
+proactivity remain outside the original phases 0–5.
 
 ## Goal
 
@@ -28,7 +79,7 @@ provider must not own persistent memory.
 
 ## Current repository versus target
 
-### Current main (what exists now)
+### Starting baseline (2026-08-29)
 
 The official app is a realtime Hugging Face application. `main.py` builds one
 `HuggingFaceRealtimeHandler`, injects it into `console.LocalStream`, and shares
@@ -158,7 +209,7 @@ raw pre-wake ambient audio.
 
 ### Activation and command policy
 
-The initial wake phrase is “Reachy”. Keyboard activation is required first so
+The wake phrase is “Reachy”. Keyboard activation remains available so
 voice UX can be tested independently of wake-word quality. Activation must
 locally acknowledge immediately, then open Gemini and provide context.
 
@@ -254,7 +305,7 @@ became ready, so no claim is made about pre-mute ambient bytes.
 **Gate:** stop implementation if the unchanged upstream app cannot run
 reliably in simulation and on the development machine.
 
-### Phase 1 — direct Gemini Live benchmark (`in-progress`)
+### Phase 1 — direct Gemini Live benchmark
 
 Purpose: establish cloud performance before adding local layers.
 
@@ -272,30 +323,37 @@ Purpose: establish cloud performance before adding local layers.
   preserving simulated Reachy motion, existing tools, transcripts,
   interruptions, and camera-on-demand behavior. Provider-neutral runtime
   handling and the shared linear resampler are complete.
+- [x] Enable Gemini Live's managed `google_search` alongside application
+  function declarations. Retain the dedicated Pollen MCP search, weather, and
+  time tools for profile-managed lookups.
 - [x] Complete fake-session tests for every Gemini event and failure path,
   provider-neutral runtime tests, resampler tests, and the automated repository
   gates.
-- [ ] Measure activation/start to connection, end-of-speech to first response
-  audio, tool-call latency, and interruption latency.
-- [ ] Run the benchmark with both Mac speakers and headphones, recording the
+- [x] Benchmark activation/start to connection, end-of-speech to first response
+  audio, tool-call latency, and interruption latency. Gemini supplied no usable
+  speech-end marker, so exact first-audio latency is explicitly unavailable.
+- [x] Run the benchmark with both Mac speakers and headphones, recording the
   input/output devices and condition for every sample; use headphones as the
   immediate control for the observed acoustic feedback.
-- [ ] Observe and record assistant-to-microphone echo loops, repeated
+- [x] Observe and record assistant-to-microphone echo loops, repeated
   transcripts, and barge-in flush counts in each output condition. Verify
   process/event liveness separately so an echo/AEC failure is not classified as
   a frozen process.
 
-**Acceptance (pending benchmark):** natural conversation should be compared with
-the reference Google demo, and the existing HF provider must continue to pass
-its tests. User-observed qualitative conversation evidence is not a substitute
-for reproducible instrumented first-audio, interruption, or end-to-end latency
-measurements; those remain required before acceptance.
+**Acceptance:** direct headphone conversation was natural and responsive,
+movement/tool use worked, and both requested interruptions stopped output. The
+Mac-speaker control immediately fed assistant output back into the microphone
+and is not accepted for simulator use. First-audio latency is explicitly
+unavailable because the provider emitted no usable speech-end marker; no value
+is fabricated.
 
-**Phase 1 implementation status:** configuration, the provider factory, Gemini
-adapter, provider-neutral runtime behavior, shared resampler, and automated
-tests are complete. The real simulator/Gemini session benchmark remains in
-progress; no reproducible quantitative first-audio, interruption, or end-to-end
-latency claim is made.
+**Phase 1 status: complete with a measured simulator limitation.** The accepted
+headphone run connected in 637.5 ms, executed visible head movement with a
+2.6 ms provider tool-result interval, and flushed two successful interruptions
+in 1.4 ms and 3.8 ms. The Mac-speaker control connected in 455.6 ms but produced
+six self-triggered interruption flushes in about 18 seconds. Both processes
+remained live and exited without traceback; headphones are required for this
+app-owned simulator output path.
 
 **User-observed Phase 1 qualitative evidence (2026-08-29):** before the later
 native-audio wedge, a user manually completed one long, responsive Gemini
@@ -405,10 +463,9 @@ follow-up rather than hidden.
 Purpose: answer using recent local context without prior cloud connectivity.
 
 **Implementation note (2026-08-29):** Phases 3–5 are being integrated as one
-milestone at the user's request. The Phase 1 saved-log rerun remains pending
-manual evidence, but it is not blocking local-only implementation or automated
-privacy tests. Acceptance statuses remain separate: no phase is marked complete
-without its own live measurements.
+milestone at the user's request. Phase 1 was later accepted through saved-log
+headphone and speaker runs. Acceptance statuses remain separate: no phase is
+marked complete without its own live measurements.
 
 - [x] Add bounded background local STT behind a replaceable interface.
 - [x] Implement Strategy A continuous rolling transcript.
@@ -424,10 +481,13 @@ without its own live measurements.
 produces context-aware behavior; no pre-activation audio is uploaded; the
 added latency feels conversational; resource usage is recorded.
 
-**Phase 3 status: implementation complete; live acceptance pending.** Both
-strategies, bounded context injection, local-only snapshot handling, and the
-dinner-demo fake-provider path are tested. Real local-STT quality, latency, and
-resource measurements remain required.
+**Phase 3 status: both dinner-demo strategies passed; final quantitative gaps
+remain.** Strategy A retained accurate local context before activation and
+produced a contextual answer. Strategy B transcribed the 20-second RAM snapshot
+only after activation and also produced a contextual answer, but added about
+6.0 seconds of local STT and reached Gemini ready after about 7.2 seconds.
+Ambient cloud bytes remained zero in both runs. Peak CPU and first-audio timing
+remain unavailable; multilingual household STT is separate new scope.
 
 ### Phase 4 — local wake word
 
@@ -449,24 +509,41 @@ Purpose: replace keyboard-only activation while retaining a reliable fallback.
 
 **Phase 4 status: implementation complete; live acceptance partial.** Wake
 detection has no network/provider path and is integrated only with continuous
-local STT. A live run with `LOCAL_WAKE_WORD=computer` reached the final-STT
-detector path, while the default `Reachy` phrase produced no action because no
-exact matching final transcript token reached the detector. Microphone
-false-positive/miss and latency measurements remain required before selecting
-this V0 approach over an acoustic detector; no alias was added.
+local STT. `LOCAL_WAKE_WORD=computer` successfully activated the accepted
+dinner demo and cloud-free local commands. An earlier transcript-based
+`Reachy` attempt did not pass because no exact matching final transcript token
+reached the detector; this is historical STT evidence, not an acoustic Reachy
+quality result. Microphone false-positive/miss and latency measurements remain
+required before selecting a production acoustic detector; no fuzzy transcript
+alias was added.
 
-Ready-made acoustic research found no upstream Reachy model that is ready to
-adopt without validation. The 16 kHz ONNX candidate in
+The 16 kHz ONNX model in
 [`andyjmorgan/reachy-wake-word`](https://github.com/andyjmorgan/reachy-wake-word)
-is the closest fit for the existing normalized audio seam, but it targets
-phonetic `reechy` and its pretrained model is CC BY-NC-SA 4.0. The
+matches the existing normalized audio seam, but it targets phonetic `reechy`
+and its pretrained model is CC BY-NC-SA 4.0. The
 [`Hey Reachy` Edge Impulse candidate](https://huggingface.co/spaces/luisomoreau/hey_reachy_wake_word_detection)
-is closer to the desired phrase and has Mac ARM64/Linux AARCH64 artifacts, but
-expects 24 kHz/1.5-second windows, the example owns its microphone, and the
-Space's application license is unclear. [`openWakeWord`](https://github.com/dscripka/openWakeWord)
-provides a suitable local adapter framework, but no Reachy model; its code is
-Apache-2.0 while bundled pretrained models are non-commercial. Benchmark these
-as candidates only; no model or dependency has been added.
+targets a longer phrase. Its Mac ARM64/Linux AARCH64 packaging is useful
+reference material, but the example owns its microphone and the Space's
+application license is unclear. The open-vocabulary sherpa fixture benchmark
+now compares explicit `Reachy`, `Richie`, `Ritchie`, `Richi`, and `Ricci`
+acoustic spellings under one canonical `@reachy` event. No spelling becomes a
+production wake candidate until live recordings establish that it improves
+recall without unacceptable false activations, and redistribution terms are
+cleared. The first real positive-fixture screen rejected the reviewed Spanish
+checkpoint: it detected 0/30 wakes at documented settings and only 2/30 at an
+overly aggressive setting. The negative set was therefore not collected.
+The existing community `reechy` openWakeWord model was the next positive
+screen. It detected only 6/30 at its documented threshold, and gain
+normalization did not help, so it is also rejected before negative testing.
+The approved next step is the
+[custom multilingual openWakeWord training plan](custom-reachy-openwakeword-training.md):
+use synthetic multilingual speech for training, preserve the 30 private clips
+as an untouched holdout, and collect negative exposure only after a candidate
+reaches the positive gate. The public/synthetic Mac/Linux ARM64 check now passes with 668 identical
+scores, and an isolated English CPU pipeline smoke exports and loads correctly.
+Neither result establishes household quality or Linux x86/GPU behavior. Adapt the saintpete toolkit only in an isolated trainer, with
+multilingual voice review, verified ONNX export, and tested budget/Pod-stop
+controls. The report does not establish the cause of the previous misses.
 
 ### Phase 5 — first local commands
 
@@ -489,14 +566,15 @@ Purpose: make common physical requests instant and cloud-free.
 **Acceptance:** local commands execute without opening Gemini, uncertain input
 escalates, and all required behavior, privacy, latency, and resource tests pass.
 
-**Phase 5 status: implementation complete; live acceptance partial.** Exact
-commands, failure escalation, and split-final wake follow-up behavior are
-covered through fake provider/tool/movement and capture-boundary tests. A live
-run with `LOCAL_WAKE_WORD=computer` reached local activation but then escalated
-to Gemini; Gemini performed the movement, so this was not a live local-command
-acceptance. The default `Reachy` end-to-end command remains blocked at the
-exact final-transcript match boundary. Simulator local-command acceptance,
-latency, all-command coverage, and movement measurements remain required.
+**Phase 5 status: functional live acceptance passed; quantitative completion
+partial.** Exact commands, failure escalation, and split-final wake follow-up
+behavior are covered through fake provider/tool/movement and capture-boundary
+tests. All five allowlisted commands then executed locally in live simulator
+runs using `LOCAL_WAKE_WORD=computer`, with no Gemini provider construction or
+cloud audio for the accepted actions. End-to-end speech latency, sustained
+local-processing drops, and the current `Reachy` acoustic wake remain benchmark
+follow-ups; the earlier transcript and `computer` runs are retained as
+historical controls.
 
 ## Test and benchmark matrix
 
@@ -506,7 +584,7 @@ increase line coverage.
 
 | Area | Required evidence |
 |------|-------------------|
-| Provider adapter | Unit/integration tests for connection lifecycle, event decoding, transcripts, audio output, tools, camera frames, errors, reconnect, and barge-in. |
+| Provider adapter | Unit/integration tests for connection lifecycle, managed Google Search and application-tool configuration, event decoding, transcripts, audio output, tools, camera frames, errors, reconnect, and barge-in. |
 | State machine | All valid transitions, invalid transitions, activation, inactivity close, cancellation, restart, and error recovery. |
 | Ambient ring | Fixed 20-second bound, overwrite behavior, sample ordering, snapshot consistency, SDK float32 stereo-to-mono normalization, no file creation, and empty/short input. |
 | VAD/STT interfaces | Fake backends for speech boundaries, partial/final transcripts, failures, delays, cancellation, and resource metrics. |
@@ -563,8 +641,9 @@ and a measured—not speculative—assessment of Raspberry Pi 5 8GB plausibility
 | Immediate activation versus local commands | Give deterministic local routing the smallest measured decision window; otherwise escalate/open Gemini. Buffer only the minimum live audio needed. |
 | Ambient privacy | Gemini is closed while idle. Only derived bounded local text may be injected after activation; raw pre-wake audio is never uploaded. |
 | Provider greeting | Existing handlers may greet on connect. Hybrid activation should suppress an unnecessary automatic greeting and let the user’s address drive the response. |
+| Product wake name | Use written/default `Reachy`. Keep transcript matching exact and preserve keyboard activation. Benchmark only the explicit acoustic spellings `Reachy`, `Richie`, `Ritchie`, `Richi`, and `Ricci`, all mapped to one canonical event; enable only variants that pass live quality testing. Retain `Tito` and `computer` runs as historical evidence, not aliases. |
 | Local VAD/STT reuse | Keep the protocol compatible with Hugging Face speech-to-speech's modular VAD/STT ideas rather than adopting its full VAD→STT→LLM→TTS stack. The first sidecar benchmark uses the official Transformers Serve transcription API. MLX Audio's current server is excluded because its STT inference path writes raw input to a temporary file. Preserve a CPU/Linux path and benchmark before selecting models. |
-| Wake-word reuse | Hugging Face speech-to-speech does not provide a wake-word stage. The 16 kHz ONNX [`andyjmorgan/reachy-wake-word`](https://github.com/andyjmorgan/reachy-wake-word) model is the best fit for the current acoustic seam, but targets phonetic `reechy` and is CC BY-NC-SA 4.0. The 24 kHz/1.5-second [`Hey Reachy` Edge Impulse candidate](https://huggingface.co/spaces/luisomoreau/hey_reachy_wake_word_detection) needs resampling/windowing and a shared-stream adapter; its Space license is unclear. [`openWakeWord`](https://github.com/dscripka/openWakeWord) is Apache-2.0 code with no Reachy model, and bundled models are non-commercial. The official [Conversation App PR #514](https://github.com/pollen-robotics/reachy_mini_conversation_app/pull/514) and SDK [issue #1253](https://github.com/pollen-robotics/reachy_mini/issues/1253) remain unresolved. Treat all community artifacts as benchmark candidates until source, model, license, platform support, false accepts, and missed activations are measured. No model or dependency is selected. |
+| Wake-word reuse | Hugging Face speech-to-speech does not provide a wake-word stage, and its tutorial demonstrates fixed-label classification rather than an arbitrary multilingual name. Use the established sherpa open-vocabulary engine only as a fixture benchmark for Reachy spellings. Existing Reachy models remain references with phrase/license caveats; no production acoustic adapter is selected until live quality and licensing gates pass. |
 | Local AI scope | Use interfaces for VAD/STT and `LocalDecisionModel`, but do not install or run the complete HF stack, a local LLM, or another agent framework yet. |
 | Tools and movement | Reuse `Tool`, `ToolDependencies`, and `MovementManager`; LLMs and local routers never issue raw motor commands. |
 | Documentation location | The user explicitly overrides upstream’s no-Markdown-under-`docs/` preference. App-specific plans/features/testing docs stay here. Do not alter SDK instructions. |
@@ -686,33 +765,69 @@ live validation; the durable fix still belongs upstream.
 | 2026-08-31 | Phase 5 live command acceptance | Live simulator coverage now includes all five allowlisted actions. A clean run executed `computer, stop`, `computer, be quiet`, and `computer, look at me` locally with three executions, zero failures/escalations, zero cloud audio, and no provider connection; prior accepted runs cover `look left` and `look right`. The run counted 12 dropped local-processing frames, so sustained local overload and full speech-to-action latency remain performance follow-ups. |
 | 2026-08-31 | Phase 3 live dinner failure | The first live Strategy A dinner run failed context-aware response: Gemini asked what specifically the user meant. Local evidence isolated the provider handoff: all three STT segments completed and were accepted, 96 context characters were ready with no pending/failing STT, Gemini connected in 421.5 ms, and ambient cloud audio remained zero. Review found the derived transcript was embedded in `system_instruction` instead of Gemini Live's ordered initial-history protocol, while addressed text and postactivation PCM were scheduled independently. Fix initial-history seeding and question-before-audio ordering before repeating acceptance. |
 | 2026-08-31 | Phase 3 provider-handoff correction | Moved bounded derived context into Gemini Live's official initial-history client content, retained static untrusted-context guidance, and delayed the connected callback until seeding succeeds. The runtime now queues new microphone frames without blocking capture and releases them only after the addressed text send completes. Regressions cover context bounds, empty sessions, transport failure, cancellation, concurrent shutdown, payload-free logs, and context → question → audio ordering. Independent re-review found no remaining P0/P1 issue. The 108-test focused suite and final gate pass: Ruff, formatting, strict mypy across 59 source files, 736 tests with one explicit native skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. Live dinner response-quality retest remains pending. |
+| 2026-08-31 | Phase 3 live-failure hardening | Fenced seeded context strictly before the wake sequence, preserving earlier ambient text while excluding all post-wake finals accepted before provider setup. Decoupled the 60-second text-only `LOCAL_CONTEXT_WINDOW_SECONDS` from the fixed 20-second continuous-STT PCM cap, including safe oversized-frame tail trimming. Split-final follow-up remains five seconds by default and is bounded to 15 seconds for both environment and direct runtime configuration. Hardened intentional Gemini voice/profile reconnects across setup and initial-history races and drained stale output. Added deterministic context metadata, long/oversized STT, processor-backed delayed-final, post-deadline, reconnect, cancellation, and configuration regressions. The 217-test focused integration suite passed; independent adversarial review found no remaining P0/P1 blocker. The final dotenv-isolated gate passed Ruff, formatting, strict mypy across 59 source files, and 761 tests with one explicit native-audio skip. Live response-quality retest remains pending. |
+| 2026-08-31 | Phase 3 transcript-quality diagnostic | A second live dinner run completed four local STT segments and retained 105 characters with no STT failure, timeout, drop, or pending result; ordered context seeding completed and ambient cloud bytes remained zero, but the spoken reply was unrelated. An isolated live Gemini history probe using the same model and history protocol correctly recalled the synthetic `aquarium` fact, making local transcript quality the leading unverified boundary. Add an explicitly opt-in, default-off RAM-only transcript preview through a dedicated loopback-only HTTP endpoint and local UI. The preview must never enter `conversation.status`, logs, disk, or persistent browser storage; preview retrieval/display must add no cloud traffic, while normal activation may send bounded derived context to the provider. |
+| 2026-08-31 | Phase 3 transcript preview diagnostic | Added `LOCAL_TRANSCRIPT_PREVIEW_ENABLED=0`, a loopback-only no-store `GET /api/transcript-preview` endpoint, and a small non-persistent Talk-view panel. Disabled, non-loopback, missing-processor, closed, empty, Strategy B, and bounded behavior is covered without exposing text through `conversation.status` or logs. The focused config/console/runtime/static suite passed 212 tests. Final root verification passed Ruff, formatting, strict mypy across 59 source files, 782 tests with one explicit opt-in native-audio skip, lock consistency, both JavaScript syntax checks, and `git diff --check`. Independent adversarial review found no remaining P0/P1 blocker. |
+| 2026-08-31 | Phase 3 live preview diagnosis | The first live preview run exposed no text because VAD classified every frame as silence: after 207 seconds of local audio it reported zero speech frames, zero STT requests, and zero accepted transcript segments while the loopback preview endpoint remained enabled and available. A payload-free 20-second level probe measured a displayed peak of `0.043`; after the UI's `6x` meter gain this is about 235 PCM RMS, below the configured default threshold of 500. Retest this Mac microphone with `LOCAL_VAD_RMS_THRESHOLD=100`, then use the preview to evaluate transcript quality. Ambient cloud bytes remained zero. |
+| 2026-08-31 | Phase 3 live preview STT timeout | Retesting at `LOCAL_VAD_RMS_THRESHOLD=100` detected 257 speech frames and started local STT, proving the earlier VAD diagnosis, but the first request hit the configured timeout at exactly 5.00 seconds before producing a segment. The loopback Whisper server remained healthy, and a synthetic one-second silent WAV probe completed successfully in 2.06 seconds after warm-up. Use `LOCAL_STT_TIMEOUT_SECONDS=15` for the next Mac simulator run and measure the real utterance latency before changing the cross-platform default. |
+| 2026-08-31 | Phase 3 live transcript-quality result | With the calibrated VAD and 15-second timeout, the preview displayed a completed local transcript. It materially misrecognized both context-bearing terms in the dinner sentence, explaining why Gemini's answer was unrelated even though the ordered context handoff worked. Do not retain the sensitive transcript payload. Next compare the same spoken sentence with the drop-in English-only `openai/whisper-small.en` model before increasing model size; record accuracy and latency for each backend. |
+| 2026-08-31 | Phase 3 Strategy A live acceptance | Repeating the dinner demo with `openai/whisper-small.en`, `LOCAL_VAD_RMS_THRESHOLD=100`, and a 15-second STT timeout produced an accurate bounded local transcript and a context-aware Gemini answer. The post-run runtime was back in `LOCAL_AMBIENT` with Gemini closed, two accepted/completed STT segments, 68 context characters, zero STT failures/timeouts/drops, zero ambient audio bytes sent to cloud, zero cloud video frames, and a completed 86.445-second Gemini session. Local STT totaled 11.171 seconds across the two requests with a 9.227-second maximum; context snapshot construction took 0.058 ms. The Transformers Serve process had a measured 3.4 GB current/peak macOS physical footprint after the run; peak CPU and full activation-to-first-audio remain unmeasured. Phase 3 Strategy A dinner-context acceptance passes. |
+| 2026-08-31 | Multilingual household STT follow-up | The household needs Spanish, English, Portuguese, and Italian. English-only Whisper is accepted for the Phase 3 architecture proof but is not the final product backend. Add a separate multilingual model/backend benchmark using the same preview, sentence-level accuracy, latency, memory, and privacy tests; do not regress the accepted English baseline or make cloud wake detection a fallback. |
+| 2026-08-31 | Phase 1 benchmark setup | The first direct benchmark utterance received no reply. The sanitized startup log showed one local-processing queue drop and repeated `LocalSTTError` warnings; the one-off `HYBRID_RUNTIME_ENABLED=0` was overwritten by project `.env` loading with `override=True`, so the app entered hybrid/local-STT mode. Project dotenv loading now preserves explicit process values and fills only unset values, with a regression for both paths. No transcript, audio, or credential payload was retained; the direct benchmark must be rerun. |
+| 2026-08-31 | Phase 1 direct headphone acceptance | The corrected direct Gemini run connected in 637.5 ms. Five turns sounded smooth; both requested barge-ins worked; `move_head(left)` executed visibly and its provider result was accepted in 2.6 ms. Interruption flushes measured 1.4 ms and 3.8 ms (P50 2.6 ms). The process exited without crash or traceback. No usable speech-end marker or first-audio sample was emitted, so exact first-audio latency remains explicitly unavailable. The controlled Mac-speaker condition and repeated connection samples remain. |
+| 2026-08-31 | Phase 1 direct speaker acceptance | The controlled Mac-speaker run connected in 455.6 ms and immediately entered acoustic feedback, producing six self-triggered interruption flushes between 0.3 ms and 1.1 ms in about 18 seconds while the user stayed silent. The process remained live and exited without traceback. Combined with the smooth headphone run, this closes Phase 1 with headphones required and exact first-audio latency unavailable rather than fabricated. |
+| 2026-08-31 | Phase 3 Strategy B live acceptance | With `openai/whisper-small.en`, keyboard activation transcribed the 20-second RAM-only snapshot once and produced 68 context characters; Gemini answered the dinner question contextually. Local STT took 6.015 seconds, context preparation took 6.017 seconds, Gemini connection took 472.6 ms, and activation to Gemini ready was approximately 7.228 seconds. The runtime returned to `LOCAL_AMBIENT` after a 70.574-second session with Gemini closed, zero pre-activation ambient cloud bytes, zero cloud video frames, and no STT failure, timeout, or drop. Post-run macOS physical footprints were 2.5 GB for Transformers Serve and 185.7 MB for the app; peak CPU and first-audio remain unmeasured. Capture-worker warnings reached 200 dropped frames during the run and remain a performance limitation to investigate. |
+
+| 2026-09-01 | Phase 1 native search | Added managed `google_search` to every Gemini Live session alongside profile-selected application functions. The focused fake-session suite passed 52 tests; the full repository gate passed Ruff, formatting, strict mypy across 60 source files, all 833 tests with one explicit native-audio skip, lock consistency, JavaScript syntax checks, and `git diff --check`. No live search, flight-data quality, or billing measurement was claimed. |
+
+## Backlog
+
+### Restore laptop-speaker simulator testing and AEC
+
+The app-owned GStreamer output is a containment workaround introduced after
+repeatable SDK LOCAL `audiomixer` crashes. It bypasses the SDK playback path and
+therefore sits outside the SDK echo-reference path; laptop-speaker output can
+return through the Mac microphone and make Gemini interrupt its own response.
+Headphones are the current reliable simulator control.
+
+Scope the future fix to a supported full-duplex/shared echo-reference path or
+an upstream SDK solution. Do not monkey-patch SDK or GStreamer internals. The
+acceptance plan must include automated contract tests, the opt-in native
+pipeline smoke, and live simulator/Gemini speaker and headphone echo/
+interruption tests, including process liveness and clean shutdown. Keep the
+app-owned bypass opt-in until that evidence exists.
 
 ## Next steps
 
-1. Run the dinner-demo ambient-context script and record context correctness,
-   activation/first-audio latency, CPU, and RSS while using headphones.
-2. Speak the remaining exact local commands to measure microphone/STT behavior,
-   false activations, misses, and end-to-end latency. The automated live tier
-   already covered fresh sessions, tools, interruption, inactivity close,
-   privacy counters, and process survival.
-2. Repeat the short direct Phase 1 LOCAL benchmark with corrected first-audio
-   instrumentation; retain unavailable/reordered counts instead of inventing a
-   latency when provider events arrive out of order.
-3. Start the loopback local STT endpoint and run Strategy A and Strategy B dinner
-   demos with headphones, recording the report's latency, transcript quality,
-   CPU, and RSS fields.
-4. Run a labelled transcript-wake baseline and, without adding a runtime
-   dependency, benchmark the 16 kHz `andyjmorgan` ONNX candidate through the
-   existing acoustic seam; record false positives, misses, activation latency,
-   CPU, and RSS. Compare the 24 kHz/1.5-second Edge candidate only after its
-   license and shared-stream adapter are reviewed.
-5. Run all five local commands in the simulator; record first-word retention,
-   movement behavior, local-command latency, and whether each command stays
-   cloud-free.
-6. Update this plan, the feature documents, and
+1. Follow the [custom multilingual openWakeWord training
+   plan](custom-reachy-openwakeword-training.md). Reuse the 30 private positive
+   fixtures as an untouched holdout, use synthetic multilingual training data,
+   and keep the initial rented-GPU budget at $10 unless the user explicitly
+   approves more. Do not make the user rerecord the current positive screen,
+   and collect negative exposure only after a model clears the positive-recall
+   gate.
+2. If a standalone result passes, add a replaceable acoustic detector adapter
+   that consumes the existing normalized 16 kHz stream without owning the
+   microphone. Preserve the transcript detector as fallback, keyboard
+   activation, zero ambient cloud traffic, and comprehensive unit/integration/
+   privacy/error tests. Keep Picovoice Porcupine as a separately reviewed
+   proprietary fallback, not a prerequisite for the custom-model experiment.
+3. Complete Phase 5 quantitative evidence with ten trials per local command and
+   a 15–30-minute paced run. Record end-to-end speech-to-action P50/P95, action
+   success, provider construction, cloud bytes, return to ambient, and local
+   processing drops; preserve the already accepted functional result.
+4. Treat Spanish/English/Portuguese/Italian STT as the next scoped requirement,
+   not a blocker for closing the original English Phase 0–5 experiment.
+5. Update this plan, the feature documents, and
    [`HYBRID_BENCHMARK.md`](../../HYBRID_BENCHMARK.md) after each accepted live
-   result. Regenerate the architecture SVG from [`docs/scheme.mmd`](../scheme.mmd)
-   through the existing workflow when available.
+   result, run the complete gate, perform adversarial review, commit the finished
+   milestone, and give a measured Pi 5 assessment without claiming unmeasured
+   performance. Regenerate the architecture SVG from
+   [`docs/scheme.mmd`](../scheme.mmd) through the existing workflow when
+   available.
+6. Revisit the [laptop-speaker/AEC backlog](#restore-laptop-speaker-simulator-testing-and-aec)
+   only after a supported full-duplex/shared echo-reference path or upstream
+   SDK solution is available.
 
 ## Changelog
 
@@ -734,3 +849,437 @@ live validation; the durable fix still belongs upstream.
 | 2026-08-30 | Added the explicit simulator speaker-output containment after three repeatable SDK mixer crashes; default SDK behavior is unchanged, adversarial review and the complete automated gate passed, and live effectiveness is not yet claimed. |
 | 2026-08-30 | Prioritized an autonomous smoke harness before correcting the newly observed non-exact local route and app-owned playback clock, reducing future human testing to microphone acoustics, perceived quality, and hardware acceptance. |
 | 2026-08-30 | Closed the HybridRuntime post-close frame race: late frames are dropped before local observation, while open-runtime direct processing remains covered. Focused hybrid tests and the full dotenv-isolated suite pass. |
+| 2026-08-31 | Selected `Tito` (Spanish pronunciation) as the product name and default wake phrase; updated the household profile identity and exact-match default coverage, retained `Reachy`/`computer` as historical controls, and recorded that the reviewed acoustic models target Reachy rather than Tito. Added a scoped laptop-speaker/AEC restoration backlog requiring a supported full-duplex/shared echo-reference or upstream SDK solution plus automated/native/live echo and interruption tests. |
+| 2026-09-01 | Phase 4 Tito transcript-wake baseline | The first controlled `Tito, look left` run produced three accepted final local transcripts from four STT requests but zero exact wake detections, zero local commands, and zero cloud activation/audio. One STT request timed out; the three completed requests totaled 54.045 seconds with a 15.084-second maximum, while 861 local-processing frames were dropped and the SDK reported downstream capture pressure. Rapid repeated utterances amplified the backlog. This is a failed English-Whisper transcript-wake baseline, not a microphone or privacy failure. Enable the default-off loopback RAM preview for one paced utterance to identify the model's spelling without logging or persisting it before choosing the next detector/model step. |
+| 2026-09-01 | Phase 4 Tito paced-preview result | The single-utterance preview diagnostic observed 93.384 seconds of local audio and 80 speech frames, but both STT requests timed out at the temporary 20-second limit. No transcript segment or wake event existed to preview. The runtime remained in `LOCAL_AMBIENT`, Gemini stayed closed, and ambient cloud bytes remained zero, while local-processing drops reached 3,269 and the SDK reported downstream capture pressure. Continuous Whisper is therefore rejected as the product wake detector on this Mac baseline; retain it for ambient-context experiments and move Phase 4 to a purpose-built local acoustic Tito detector after model/training-data/license review. |
+| 2026-09-01 | Phase 4 acoustic-wake research | Official Hugging Face guidance provides fixed-label Speech Commands classification rather than arbitrary custom wake phrases, and HF speech-to-speech provides VAD/STT but no wake stage. Selected the community Spanish `jguerrisi/sherpa-onnx-kws-zipformer-es-3M-2026-08-08` checkpoint for a standalone first benchmark with the established sherpa-onnx open-vocabulary engine: it accepts runtime-configured `Tito`, 16 kHz shared-stream audio, and needs no phrase-model training. No dependency/model was added. Quality, CPU/RSS, false positives/misses, Mac/Pi deployment, and model-data/voice redistribution terms remain unverified. Picovoice Porcupine is the proprietary AccessKey-based fallback; openWakeWord requires custom training. |
+| 2026-09-01 | Phase 4 fixture benchmark foundation | Added the optional `wake-benchmark` group with exact `sherpa-onnx==1.13.6`, required `sherpa-onnx-core==1.13.6`, and undeclared tokenizer runtimes `sentencepiece==0.2.2` and `pypinyin==0.55.0`, plus a standalone CLI for caller-owned model assets and WAV/raw PCM16 fixtures. Deterministic tests cover model/token validation, exact `tito`/`@tito` filtering, TP/FN/TN/FP classification, bounds, per-fixture latency, real-time factor, trailing blanks, cleanup, privacy, errors, and CLI behavior. No model is bundled or downloaded by the tool, no production adapter was added, and the required live quality/resource run remains pending. No `click` pin was needed because the CLI uses standard `argparse`; tokenizer assets from reviewed revision `b55eae785857eba4af1e24b200104354be23a975` generated `▁ti to @tito`, but no model-weight decoder or live acoustic benchmark was run. |
+| 2026-09-01 | Phase 4 benchmark hardening | Added a total decode-step bound across input and tail draining, explicit offline fixture-start-to-result timing fields with positive-only aggregate timing, negative audio exposure/event-based false positives per hour, fixture-level recall, path-free model SHA-256 fingerprint, installed sherpa/tokenizer versions, UTC start time, sample rate, and privacy-safe platform identity. Invalid fixtures abort; offline mode reports no queue/drop metric and collects no hostname, username, CPU model, or paths. The reviewed source revision `b55eae785857eba4af1e24b200104354be23a975` produced `▁ti to @tito`; no live model quality/resource claim follows. |
+| 2026-09-01 | Phase 4 benchmark clean-failure hardening | Pinned `sherpa-onnx-core==1.13.6` because clean-install metadata requires it; bounded detection inside input/tail decode loops, wrapped tokenizer/model `AssertionError` setup failures without path leakage, rejected empty/truncated decoded WAV payloads and boolean integer knobs, and expanded the focused deterministic suite to 47 passing tests. No live quality/resource claim follows. |
+| 2026-09-01 | Phase 4 benchmark timing protocol | Per-fixture and positive-only aggregate offline timing now use only the first exact `tito`/`@tito` detection; duplicate exact events remain detection/false-positive counts without event-weighting latency. Added deterministic duplicate-result coverage; the focused suite passes 48 tests. Positive fixtures must contain exactly one intended wake, and no live quality/resource claim follows. |
+| 2026-09-01 | Phase 1 native search | Added managed `google_search` to every Gemini Live session alongside profile-selected application functions. The focused fake-session suite passed 52 tests; the full repository gate passed Ruff, formatting, strict mypy across 60 source files, all 833 tests with one explicit native-audio skip, lock consistency, JavaScript syntax checks, and `git diff --check`. No live search, flight-data quality, or billing measurement was claimed. |
+| 2026-09-03 | Restored `Reachy` as the product/default name while preserving the exact transcript boundary. Generalized the fixture-only sherpa benchmark so the explicit spellings `Reachy`, `Richie`, `Ritchie`, `Richi`, and `Ricci` can map to one canonical `@reachy` event with token-sequence deduplication, exact caller-vocabulary validation, canonical-tag collision/marker-like OOV rejection, and unsafe tokenizer-token rejection. The focused benchmark suite passes 74 deterministic tests and the complete repository gate passes 863 tests with one explicit native-audio skip; no model weights, microphone, production detector, or live quality claim is included. Historical Tito records and the explicit app override remain, while the new Reachy benchmark intentionally rejects Tito. |
+| 2026-09-07 | Ran the Spanish sherpa checkpoint against 30 private, technically valid Mac-microphone positive fixtures. Documented settings detected 0/30; the best aggressive setting detected only 2/30, and individual spelling candidates did not rescue recall. Rejected the checkpoint before collecting the negative set. Offline processing measured about 0.015 real-time factor, 167 MiB peak process RSS, and 350% multi-core process CPU on this Mac; these are not production activation or Pi measurements. The private fixtures remain outside the repository for the next candidate. |
+| 2026-09-07 | Ran the existing `andyjmorgan` `reechy` openWakeWord ONNX model against the same 30 private fixtures at its pinned upstream commit/hash. It detected 6/30 at the documented 0.5 threshold and only 7/30 at 0.2; 2x/4x gain and peak normalization remained 6/30. Rejected it before negative testing. Offline Mac measurements were 0.036 real-time factor, about 98% process CPU, 188.9 MiB peak RSS, and 0.112-second model load; these are not production activation or Pi evidence. Next action is the linked custom multilingual openWakeWord training plan; Porcupine remains a separately reviewed proprietary fallback. |
+| 2026-09-07 | Custom wake training preparation: backed up all 30 private positives outside the repository at the approved location, verified SHA-256 equality and WAV headers, and made the backup read-only. Per-clip pronunciation/language labels remain unknown. Runpod connection verified without creating compute; training, licensing review, CPU dry run, and automatic-stop validation remain pending. No application tests were run for this backup/documentation-only milestone. |
+| 2026-09-07 | Updated the custom training plan with saintpete toolkit reference review, a no-cost Mac/Linux public/synthetic inference preflight, multilingual pronunciation checks, isolated compatibility handling, feature/export recovery checks, and Runpod budget/stop verification. No runtime behavior or acceptance thresholds changed; all new execution evidence remains pending. |
+| 2026-09-07 | Custom wake preparation: completed local Mac/Linux ARM64 reference comparison (668 identical scores), an English synthetic CPU training/export smoke, and independent exported-model loading on both systems. User corrected the private set to two speakers; pronunciation groups remain unknown. No household evaluation or GPU rental occurred. Full gate passed 863 tests with one optional native-speaker skip; focused wake suites passed 100. Multilingual assets/recipe, CLI authentication, and budget/stop validation remain pending. |
+
+| 2026-09-07 | Runpod CLI setup verified: $10 balance and $0/hour spend; user confirmed automatic top-up disabled. Paid training still awaits completed asset/recipe checks and tested automatic Pod stop. |
+
+| 2026-09-07 | User accepted wake pronunciation previews 1, 2 and 5 and rejected 3 and 4. Added the isolated phonetic candidate recipe, 48-positive/128-negative CPU smoke, independent Mac/Linux export loading, synthetic streaming rejection gate, and nine recovery/stop tests. App gate: 863 passed, one skipped. First paid RTX 4090 shutdown smoke is downloading its image under a 30-minute cutoff; full training and acoustic acceptance remain pending. |
+
+| 2026-09-07 | Custom wake GPU verification blocked after successful dependency installation and verified shutdown controls; stopped hosts refused restart. All experiment Pods/storage terminated, $9.53 remains and $0/hour. Accepted sounds 1/2/5 retained; no full candidate or private screen. Ten guard/cache tests passed; app gate 863 passed, one skipped. See custom training plan for the next isolated GPU diagnostic. |
+
+| 2026-09-07 | Resumed custom wake work: fixed CUDA library lookup, verified GPU feature execution, completed full training and downloaded/hash-checked the synthetic corpus. All Pods/storage deleted; approximately $1.16 spent, $8.84 remains, $0/hour. Candidates 1 and 2 failed synthetic false-activation gates (9.88% and 3.35%); third bounded candidate is training locally with missing accented near-word negatives. Private audio remains unevaluated by custom models; app integration stays gated. Full app gate: 863 passed, one optional skip. |
+
+| 2026-09-07 | Custom candidate 3 detected 400/400 synthetic positives but activated on 36/3,168 negatives (1.136%, above the unchanged 1% gate). All three full attempts are exhausted; further local training requires scope extension. No custom model has screened household audio or entered the app. All rental resources remain deleted; approximately $1.16 spent, $0/hour. No fresh user recordings are needed until the synthetic gate passes. |
+
+| 2026-09-07 | User authorized a fourth local custom-wake attempt, requiring no new rental or originals. It completed 24,000 CPU steps but failed the unchanged synthetic gate: 400/400 positives, 106/3,168 negative activations (3.35%), all Italian-voice recipe phrases. Candidate 3 remains best but rejected; four attempts and 88,000 full steps are used. No private screen or integration. Current app gate: 863 passed, one optional skip, 26.09 seconds. Review training-voice coverage before proposing further models; no new user recordings or Runpod funds are needed now. |
+
+| 2026-09-07 | User authorized an exploratory synthetic-gate exception for custom candidate 3. Frozen Mac/Linux synthetic event counts matched on 3,568 fixtures (maximum score difference 1.55e-6). One network-denied local private screen detected 19/30 positives (17/25 and 2/5 by speaker), failing 27/30; no duplicates. Audio stayed local and out of training. No threshold sweep, negative collection or app integration. Candidate remains rejected; no new rental cost. |
+
+| 2026-09-07 | Authorized local miss/hit diagnosis: all 11 private misses are name-first phrases (6/17 detected versus 13/13 other placements). Loudness ranges overlap; quiet-frame levels match. No private detector replay or training. Paired synthetic concatenation detected 59/60 name-first versus 60/60 alone/name-last, so simple placement does not reproduce the real deficit. Natural connected-phrase coverage is a development hypothesis; a fifth model remains unauthorized and future acceptance needs fresh recordings. No additional rental. |
+
+| 2026-09-07 | Authorized name-isolation diagnostic on 11 private misses: estimated name-only cuts detect 3/11 versus 0/11 full sentences; ±40 ms cuts/fade detect 2–4/11 with zero detections stable across every variant. Automatic-boundary uncertainty prevents a clear causal claim. Original recall remains 19/30; no training or threshold change. Originals/evaluation hashes unchanged, temporary audio deleted, networking denied. Two focused tests and full gate passed (863 passed, one optional skip, 17.90 seconds). |
+
+
+### 2026-09-07 — Custom wake training target passed
+
+Selected candidate 18 detects 27/30 original recordings, all 400 older
+synthetic positives, and only 1/3,168 older negatives (0.032%). New
+speaker-disjoint checks are 178/180 positive and 0/60 negative. Training stopped
+at the unchanged threshold of 0.5. The original 30 remain local and excluded
+from training but are now development data; fresh household positive and
+long-negative acceptance still gates installation. No app integration or new
+hardware validation was performed.
+
+Starter credits remaining: 16,061. Runpod balance: $8.7798144967, $0/hour, no
+pods/volumes and no rental added in this continuation. Full gate passed with
+863 tests and one optional skip. The [custom training plan](custom-reachy-openwakeword-training.md)
+records every recipe, failure and the selected artifact.
+
+
+Fresh household screen update (2026-09-07): frozen candidate 18 detected 27/30
+new recordings (speakers 13/15 and 14/15; EN 7/8, ES 6/8, PT 7/7, IT 7/7),
+with zero duplicates and networking denied. The initial screen passes, but
+final household acceptance remains unmet. Review missed clips 01/08/23 before
+further collection. New recordings remain evaluation-only; no training,
+threshold change, long-negative collection or app enablement was performed.
+
+
+Corrected fresh-screen update (2026-09-07): the user identified original clips
+01/08 as inaudible and supplied two replacements, both detected by frozen
+candidate 18. Originals and the original report remain preserved. Corrected
+result: 29/30 (96.7%), zero duplicates; speakers 15/15 and 14/15; EN 8/8,
+ES 7/8, PT 7/7, IT 7/7. Clip 23 remains a genuine connected-speech miss.
+Final acceptance still needs the prescribed multi-session, labeled-stratum
+coverage and improved Spanish evidence (currently 87.5%). No negative run,
+training, threshold adjustment or app enablement followed. Replacement
+evaluation ran with OS networking denied; app tests were not rerun for this
+recording-only check. The custom training plan contains the audit details.
+
+
+Spanish follow-up (2026-09-07): candidate 18 detected 8/10 new speaker-1
+recordings with a delayed speaking cue and playback confirmation, zero
+duplicates. Missed clips 01/03 were name-first (3/5 name-first, 5/5 name-later).
+Audio format/duration/sample checks passed; missed-clip levels were comparable
+to detected clips. The descriptive pattern does not establish causation. This
+80% session fails the 90% stratum target and stays separate from the earlier
+corrected 29/30 result. Final acceptance and enablement remain unmet; investigate
+the misses before more household collection. Frozen threshold/model, local
+network-denied evaluation, no audio edits or training. Application tests were
+not rerun for this recording-only check; see the training plan for evidence.
+
+
+Connected-speech diagnosis (2026-09-08): inserting a 200 ms gap after the
+same wake audio robustly rescues Spanish clip 03 and earlier fresh clip 23,
+supporting interference from following speech. Clip 01 remains unresolved;
+gain/startup controls did not rescue either Spanish miss. Passing clip 09
+fails under some 20–60 ms onset shifts, exposing timing sensitivity. These
+are temporary local diagnostics, not acceptance improvements: Spanish remains
+8/10 and corrected earlier fresh remains 29/30. No training or enablement.
+See the custom training plan for controls, private reports, and full gate
+results (863 passed, 1 skipped; lint/format/type checks passed).
+
+
+Connected-speech refinement (2026-09-08): candidate 19, trained locally on
+synthetic-only additions, detects 30/30 original and 30/30 corrected later
+development recordings. Spanish remains 8/10 (01/03 missed); clip 09 now
+survives all four timing phases and earlier clip 23 detects. Synthetic gates
+pass, but older negative activations increase from 1 to 7/3,168 and prior
+speaker-validation positives drop from 178 to 177/180. Candidate 19 is a
+promising development alternative, not accepted or enabled; candidate 18
+remains preserved. Cost: 4,269 ElevenLabs credits, $0 additional Runpod.
+No more recording needed for this experiment. See the custom training plan
+for exact protocols, caveats, reports and validation (863 passed, 1 skipped;
+lint/format/type checks passed).
+
+
+Timing diagnosis (2026-09-08): both remaining candidate-19 Spanish misses
+pass when locally time-stretched to 80% or 90% speed across all four tested
+onset phases. Clip 01 also passes at 110%, so a simple speech-speed limit
+is not supported. Gain controls do not rescue either miss; synthetic Spanish
+stays 36/36 under all tested speed/gain controls. This points to temporal/
+context sensitivity and an insufficiently challenging synthetic test set.
+Actual Spanish remains 8/10; diagnostic transforms do not improve acceptance.
+Next proposed experiment is pitch-preserving timing augmentation with synthetic
+stress cases that fail the frozen candidate. No training, spending or runtime
+change occurred. Full gate: 863 passed, 1 skipped; details in the training plan.
+
+
+Pitch-preserving refinement (2026-09-08): candidate 20 improves Spanish
+from 8/10 to 9/10 at original timing and all three shifted phases; clip 01
+now detects, clip 03 still misses. Both earlier development sets remain
+30/30. Timing stress validation is 216/216 positives, 0/72 negatives;
+older synthetic negatives rise to 13/3,168 (0.410%), an explicit regression.
+Candidate 20 is a preferred development alternative, not enabled or accepted.
+Fresh independent household acceptance is the next stage; reused development
+sets do not establish it. No provider spending or app code change. Full gate:
+863 passed, 1 skipped; detailed commands and evidence in the training plan.
+
+
+Fresh Spanish acceptance (2026-09-08): frozen candidate 20 detected 8/10
+new speaker-1 recordings at approximately 40 cm, with zero duplicates.
+Misses 02/09; format/hash/duration checks passed, no clipping, missed-file
+levels within the detected range. This fails the 90% Spanish target; keep
+separate from development results. No training, threshold change, negative
+acceptance or enablement. Local network-denied evaluation; reports stay private.
+See the custom training plan for evidence and next investigation step.
+
+
+Acceptance-miss diagnosis (2026-09-08): candidate 20 detects both missed
+clips after only a 20 ms leading-silence shift, but that shift loses clip 07.
+This confirms streaming phase sensitivity; a fixed delay is not a general fix.
+Gain does not rescue either miss, and slower tempo rescues only clip 09.
+Next proposed synthetic-only experiment: multiple timing alignments with shared
+cooldown, testing false activations and CPU/latency before runtime changes.
+Original fresh acceptance remains 8/10; diagnostic union is not acceptance.
+No spending, training or enablement; full evidence in the custom training plan.
+
+
+Dual-alignment result (2026-09-08): reject the offline 0/20 ms maximum-score
+combination. Synthetic negative activations increase from 13 to 48/3,168
+(1.515%), and tempo negatives from 0 to 2/72 (2.778%), exceeding the 1% gate.
+Positive detections are unchanged and shared cooldown prevents duplicate
+positive events in this corpus. Predict cost roughly doubles on this Mac,
+but stays below real time in the small synthetic benchmark. No private dual
+screen, app integration, spending or enablement. Single-lane fresh acceptance
+remains 8/10. See the custom training plan for exact protocol and limitations.
+
+
+Stricter alignment rules (2026-09-08): all four fixed confidence/persistence
+rules rejected on synthetic-only evidence. The best negative count is 24
+with >=0.9, versus the current single lane's 13; it also loses one positive
+and exceeds 1% on tempo negatives. Same-lane consecutive evidence still
+produces 42 negative activations. No rule selected or tested on private audio;
+no app integration, spending or enablement. Fresh acceptance remains 8/10.
+Details, delay tradeoffs and full gate results are in the custom training plan.
+
+
+Explicitly authorized household adaptation (2026-09-08):80 existing usable
+recordings now belong to training, with all variants kept together; previous
+reports remain historical and new independent validation is required.
+Candidates21/22 both detect80/80 training originals, including all former
+misses, but both fail the tempo-negative gate at1/72. Synthetic positive
+counts remain400/400,216/216,72/72 and177/180 across existing sets. Prefer21
+only for further investigation (23 vs24 old negative activations); neither
+is accepted or enabled. Models/features stay in private household-adaptation21,
+never the cloud-training directory. No provider spending. Docker hit a
+read-only filesystem error; correction finished natively without restarting
+Docker. See the training plan for exact evidence and dependency/runtime details.
+
+2026-09-08: candidate23's focused training-negative refinement did not meet
+the synthetic gate (tempo1/72, old25/3168); household training fit80/80 is not
+acceptance. Candidate21 remains the investigation artifact, not enabled.
+Need harder training-side negative coverage before fresh acceptance. Docker
+restarted by user and verified; isolated local work, zero provider spending.
+Full gate863 passed,1 skipped; details in custom wake-word training plan.
+
+2026-09-08: harder acoustic training negatives produced candidate24, passing
+all fixed synthetic gates with unchanged positive detections and reduced false
+activations (old14/3168, all three other sets0). Household80/80 remains training
+fit. Freeze24 at0.5 for fresh multi-speaker/session acceptance, not runtime
+activation. Private local training, no spending; full gate863 passed,1 skipped.
+
+2026-09-08: frozen wake candidate24 fresh Eduardo Spanish batch9/10, zero
+duplicates; clip02 miss. Positive acceptance unmet; lunch20m56s audited but
+unscored. New batches remain private/evaluation-only; no runtime change.
+
+2026-09-08: candidate24 fresh miss diagnosis confirms streaming timing
+sensitivity (40ms leading silence rescues unchanged audio). Keep original9/10
+acceptance result, no fixed-delay workaround or negative scoring. Next proposed
+work: training-side positive timing coverage while retaining hard negatives.
+
+2026-09-08: candidate25 completed after disk recovery. Synthetic gates pass;
+Spanish development10/10, training80/80. Tradeoffs: old false activations14 to25/3168
+and one training duplicate. Review duplicate before fresh acceptance; not enabled.
+Local/private, zero spending; full gate863 passed,1 skipped. See training plan.
+
+2026-09-08: candidate25 duplicate localized to quiet opening audio at1.40s;
+first2s alone reproduces it, digital silence does not. Main event follows after
+cooldown. No runtime fix or retraining; verified training-negative segments
+are the next proposed refinement. Exact sound identity remains unverified.
+
+2026-09-08: candidate26 fixes duplicate, retains training80/80 and development10/10.
+Synthetic gates pass: old negatives24/3168, others0. Freeze26 at0.5/3s cooldown
+for new independent acceptance; not enabled. Private/local, zero spending;
+full gate863 passed,1 skipped. See custom training plan for labeling caveats.
+
+2026-09-08: frozen candidate26 passes genuinely fresh Eduardo Spanish10/10,
+zero duplicates at about40cm. Remaining speaker/session/language acceptance
+pending; lunch unscored, model not enabled. No training or spending.
+
+2026-09-08: candidate26 fresh Adriana Spanish10/10, zero duplicates; combined
+fresh adults20/20. One session each; remaining coverage pending, not enabled.
+Optional child benchmark separate and non-gating. Speaker override documented.
+
+2026-09-08: Eduardo multilingual session2:11/12 (EN3/4,PT4/4,IT4/4), no
+duplicates. Miss01; combined fresh adults31/32. English stratum/coverage
+not accepted; model frozen, no tuning/enablement/lunch scoring.
+
+2026-09-08: English miss diagnosis:tempo0.8 rescues; gain/small phase changes
+do not. Preserve original3/4 English, continue planned independent coverage
+with26 frozen; no immediate retraining or acceptance claim.
+
+2026-09-08: Adriana session2 passes12/12 (EN/PT/IT4/4 each), zero duplicates.
+Combined fresh adults43/44; one earlier Eduardo English miss. Two sessions each,
+remaining coverage pending;26 unchanged, no spending or enablement.
+
+2026-09-08: authorized provisional lunch screen found22 candidate false wakes
+in20m56s (~63/hour observed, pending accidental-wake-phrase review). Do not
+enable26; private excerpts prepared, lunch remains outside training.
+
+2026-09-08: lunch confirmed entirely non-wake. Model20/24/25/26 false events
+13/12/28/22. Confidence0.99 still8 under26; persistence3 still12. No candidate
+ready for enablement. Need conversational training negatives and independent
+validation; no lunch fitting or runtime change in this diagnosis.
+
+2026-09-08: authorized lunch-trained27:training replay22->1 false wake; synthetic
+negatives24->7, adult development43/44 maintained, older Spanish development
+10/10->9/10. Freeze for untouched family-negative test, not enabled. Lunch now
+training-only; all private/local, zero spend. Full gate863 passed,1 skipped.
+
+2026-09-08: candidate27 untouched family26m17s yields1 trigger at7:07.4.
+Review excerpt pending label; no training/tuning or enablement. Local/private,
+zero spending; full gate863 passed,1 skipped.
+
+2026-09-08:27 untouched dinner26m38s yields11 triggers pending labels; prior
+family single event confirmed false.12 events/52m55s across independent
+recordings; no enablement, no fitting/tuning. Private excerpts saved.
+
+2026-09-08:28 rejected: lunch/dinner training0 false wakes, excluded family
+still1; adult development43/44->41/44 and older Spanish9/10->8/10. Preserve27
+baseline, none enabled. Stop fine-tuning loop; assess separate local verifier
+on existing material before more recordings. Full gate863 passed,1 skipped.
+
+2026-09-08: cached local Whisper-small verifier rejected:blocks13/13 false
+triggers but positive52/54->31/54, median1.536s compute+1s audio wait. Full-clip
+control rescues4/21 rejects only. No integration, spending or further recording
+request for this recipe. Full gate863 passed,1 skipped.
+
+Pipeline review (2026-09-08): no accepted acoustic model. Confirmed missing
+keyword-location supervision/scoring and limited independent negative coverage.
+Bounded streaming extraction comparison matched335 frames exactly; original
+feature extraction settings reproduced the checked bag. Next design is
+localized supervision and timing-aware evaluation before another training run;
+see the custom openWakeWord plan. No recordings, provider spend or runtime
+changes. Repository gate863 passed,1 skipped; Ruff/format/mypy passed.
+
+Localization implementation (2026-09-08): timing scorer passes16 focused tests;
+134 draft alignment records produced locally (88 proposals,46 unresolved). No
+independently reviewed intervals exist, so no localized training ran and no
+new model was enabled. Boundary review of existing audio is the next dependency.
+Full gate863 passed,1 skipped; see custom training plan for private artifacts
+and the local-review browser verification limitation.
+
+Automatic localization (2026-09-08):73/80 training clips pass consistency
+heuristics;7 excluded. Bulk manual-labeling handoff replaced by eight short
+listening checks covering four languages/two speakers. Automatic candidates
+remain unverified; no training or enablement. See custom plan for evidence.
+
+Four-arm localization comparison completed (2026-09-08): user accepted the eight
+alignment spot-checks;73 automatic pseudo-label sources used equally across all
+arms. Twelve checkpoints evaluated locally against baseline27. Three retain
+52/54 development detections with zero duplicates, but every checkpoint retains
+the excluded-family false wake. Best recall-preserving results: lunch1, family1,
+dinner3 versus baseline1/1/11. Lunch/dinner are training replays, so this is not
+proof of generalization. All checkpoints rejected by the predeclared rule; no
+further synthetic screen or runtime enablement. No provider cost or audio upload.
+Full gate863 passed/1 skipped;20 private timing/mask/aggregation tests passed.
+Detailed matrix, artifacts, memory fix and limitations are in the active custom
+wake-word training plan. No new independent acceptance or hardware test.
+
+Diagnostic30 complete (2026-09-08): current features can reject the persistent
+family frame, but the prototype is not acceptable. Exploratory past-only1s
+confirmation keeps52/54 development detections and reduces conversation events
+13→1 (remaining lunch training replay). Full4192 synthetic regression fails:
+diverse-voice detections177/180→134/180; other positive groups unchanged and old
+negative activations7→5/3168. All4192 baseline fixture counts reproduce exactly.
+No runtime enablement or spending. Next hypothesis, not started: broaden the
+confirmation classifier TRAINING coverage using existing synthetic training
+voices and training negatives; keep all development/validation sources excluded.
+Full gate863 passed/1 skipped;4 causal tests and54 per-clip streaming parity checks
+passed. Full artifacts, metrics and limitations are in the custom training plan.
+
+Broadened confirmation31 completed (2026-09-08): one fixed fit with existing
+synthetic training voices and broader lunch/dinner negatives. Household49/54
+versus baseline52/54; lunch/family/dinner false events1/1/0. Diverse synthetic
+voices improve134/180→150/180 versus prototype30, but remain below baseline
+177/180; older/tempo/connected positives regress to375/400,197/216,66/72.
+Rejected: no runtime enablement or further automatic fit. All57 household and
+4192 synthetic baseline counts reproduce; all4192 validation WAV hashes checked
+with zero training intersection. Full gate863 passed/1 skipped and4 private
+causal tests passed. No spending, uploads or fresh acceptance. Full matrix and
+provenance caveats are in the active custom wake-word training plan.
+
+Exact-event verifier32 completed (2026-09-08): scores only the current baseline
+trigger features, with no independent verifier history or timer. Reused household
+calls 51/54 versus baseline 52/54; lunch/family/dinner false events all zero versus
+1/1/11. Older/tempo/connected synthetic positives unchanged; diverse voices
+176/180 versus 177/180, with Portuguese variant2 at 13/15 below the 90% gate.
+Not promoted: one extra household miss and failed synthetic stratum. Negative
+fit examples represent only two recordings. All 57 household and 4,192 synthetic
+baseline event counts reproduce; all validation WAVs rehashed with zero fitting
+overlap. Full gate 863 passed/1 skipped; 2 private event tests passed. No runtime
+change, spending or independent acceptance. Full evidence is in the custom plan.
+
+Fresh32 Eduardo screen (2026-09-09): 9/10 detections with no duplicates at roughly
+40 cm. Baseline27 also 9/10; clip02 had no baseline event. ES3/4, EN/PT/IT2/2 each.
+Accepted sources validated and scored with frozen hashes under OS network denial;
+retakes excluded, no fitting or runtime enablement. Adriana and fresh negative
+conversation remain pending. Full receipt and status are in the custom plan.
+
+
+Fresh32 Adriana screen (2026-09-09): baseline27 and frozen verifier32 both detect
+9/10, zero duplicates, at approximately 40 cm. Clip04 produced no baseline event.
+ES 3/4; EN, PT and IT each 2/2. Combined fresh adult batches: 18/20, zero
+duplicates; Spanish 6/8 and other languages each 4/4. Network denied during local
+evaluation, no training overlap or parameter changes. Model remains disabled;
+earlier preservation failures remain. Only the planned fresh conversation remains
+for this assessment. No additional call batches or automatic retakes requested.
+
+
+Frozen32 fresh assessment complete (2026-09-09): the confirmed no-Reachy
+fresh32-conversation-z4o6tgyc recording lasts 2969.9093125s (49.50 minutes).
+Baseline27 produces 14 false activation events; verifier32 accepts 3, rejecting
+11/14. Observed final false activation rate: 3.6365/hour, above the provisional
+maximum 1/hour. This single exposure is not a long-term rate guarantee.
+Fresh adult calls remain 18/20 (90%), Spanish 6/8 (75%), each speaker 9/10,
+EN/PT/IT each 4/4, zero duplicate positive triggers. The 95% aggregate and 90%
+language recall targets are unmet, and earlier preservation failures remain.
+Decision: reject frozen32 for runtime admission; keep disabled and stop this
+assessment. No further recordings requested, no automatic fits or threshold
+sweeps. Any different design is a separate experiment with scope agreed upfront.
+All scoring used frozen hashes, threshold 0.5 and baseline cooldown 3s under OS
+network denial. Conversation hash has no verifier training-source overlap;
+private frozen32-started.json and frozen32-results.json preserve the receipts.
+No uploads, provider spend, training, or runtime changes.
+
+
+2026-09-09 frozen32 error diagnosis: both fresh misses have extremely low baseline
+maxima (Eduardo 0.00754, Adriana 0.000151 against 0.5); modest sensitivity changes
+cannot recover them. False-event verifier scores are 0.735–0.862. Training negative
+coverage is only two conversations. Recommend separate-data main-detector coverage
+and negative-diversity improvements, not threshold tuning on these evaluation
+sources or independent use of the current event-only verifier. No changes to
+models/runtime; diagnosis and limitations recorded in the custom training plan.
+
+2026-09-09: official33 stock DNN/auto_train baseline completed locally without a
+verifier. Fresh replay: Eduardo 10/10, Adriana 7/10; latest 49.5-minute conversation
+1 false wake. Older calls 50/54 and synthetic preservation gates fail. Rejected
+for runtime; no new recordings, tuning or spend. Uses cached features, not a full
+stock synthesis/augmentation rerun. Full provenance and limits are in the custom
+training plan; official baseline is complete and the architecture comparison deferred.
+
+### Official34 aligned ElevenLabs baseline — 2026-09-09
+
+Completed and rejected. One stock openWakeWord DNN/auto_train fit added locally
+aligned ElevenLabs TRAIN speech with upstream augmentation; no verifier. Latest
+call replay: Eduardo 10/10, Adriana 6/10, combined 16/20, zero duplicates. Spanish
+6/8, English 2/4, Portuguese and Italian 4/4 each. The 49.50-minute confirmed
+negative conversation produced 7 false events (8.4851/hour observed), versus 1
+for official33. Older household calls: 46/54, versus official33's 50/54 and
+candidate27's 52/54. Lunch/first-family/dinner false events: 8/1/8.
+
+Synthetic recall improved over official33: old 400/400, tempo 204/216, connected
+71/72, diverse 164/180. Negative events: old 138, diverse 1, tempo/connected 0.
+This does not compensate for household recall and false-wake regressions. No
+runtime admission, extra fit, threshold sweep, new recording request or paid call.
+Protected evaluation audio remained outside training; replayed sources are now
+design-informed regression evidence, not independent acceptance. No hardware,
+SDK integration or latency validation occurred.
+
+Private `official34` preserves alignment/source/augmentation receipts, input
+checks, training/export hashes, complete replay scores, per-language/voice/variant
+strata, decision and artifact checksums. Export parity passed 256 examples
+(max absolute error 1.228e-5; identical threshold decisions). Adapter tests: 2
+passed. Full gate: Ruff check/format and mypy passed; pytest 863 passed, 1 skipped
+in 13.19s. See the custom training plan for preparation counts and limitations.
+
+
+### Human headless conversation acceptance — 2026-09-10
+
+User reports the headless trial worked well: a conversation followed by an
+explicit request to shut down. The supplied log confirms acoustic activation
+at 17:04:44, Gemini readiness, responses/tool calls and interruption flushes,
+then go_to_sleep at 17:06:21 and Shutdown complete at 17:06:27. The daemon
+stop-current-app request returned HTTP 400, but local cleanup completed and
+the shell prompt returned. Capture drops still reached 100 in this run; do not
+claim drop-free performance or that headless mode fully resolves overload.
+This accepts the supervised headless wake/conversation/shutdown path. It does
+not verify inactivity rearm or ordinary-chatter false wakes in this session,
+visible viewer reliability, or physical hardware. Training remains paused.
+Validation: user report and supplied log review only; documentation-only update,
+no code or model changes and no test suite rerun.
+
+## Pre-GPT-Live checkpoint — 2026-09-10
+
+User requested a local commit of the accepted Gemini/headless companion and
+Spotify milestones before any GPT-Live migration. Full gate passed: Ruff check
+and format, mypy (62 source files), pytest (916 passed, 2 native opt-in skips,
+19.85s), uv lock check, JavaScript syntax checks and git diff check. Credential
+value scan of 48 changed/new files found no matches; no private media/models
+are included. Existing graphical/AEC/hardware limits and pending generated
+architecture SVG remain documented. No GPT-Live implementation or default
+provider switch is part of this checkpoint.

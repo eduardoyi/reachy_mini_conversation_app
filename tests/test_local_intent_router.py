@@ -19,6 +19,11 @@ def router() -> LocalIntentRouter:
     return LocalIntentRouter()
 
 
+def test_default_wake_word_is_reachy(router: LocalIntentRouter) -> None:
+    """The router uses the written product wake phrase unless overridden."""
+    assert router.wake_word == "reachy"
+
+
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
@@ -166,6 +171,14 @@ def test_custom_wake_word_is_normalized_but_commands_remain_strict() -> None:
 
     assert router.wake_word == "johnny"
     assert decision.action is LocalIntent.LOOK_RIGHT
+
+
+def test_historical_tito_requires_explicit_router_override() -> None:
+    """The default Reachy router does not silently retain the historical Tito wake."""
+    assert LocalIntentRouter().route_wake_prefixed("Tito, stop").reason is IntentDecisionReason.WAKE_WORD_MISSING
+
+    historical_router = LocalIntentRouter(wake_word="Tito")
+    assert historical_router.route_wake_prefixed("Tito, stop").action is LocalIntent.STOP
 
 
 def test_empty_wake_word_is_rejected() -> None:

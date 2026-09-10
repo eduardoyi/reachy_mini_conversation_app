@@ -104,6 +104,12 @@ Copy `.env.example` to a local, ignored `.env` when you want to select Gemini or
 point Hugging Face at your own local endpoint. Never commit `.env` or put a
 credential in the web UI.
 
+At the initial project configuration load, values already present in the
+process environment take precedence over `.env`; `.env` fills only unset
+values. This keeps one-off commands such as
+`HYBRID_RUNTIME_ENABLED=0 ...` effective while allowing unset values such as
+`GEMINI_API_KEY` to remain in the ignored `.env`.
+
 | Variable | Description |
 |----------|-------------|
 | `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default) or `gemini`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
@@ -118,16 +124,20 @@ credential in the web UI.
 | `HYBRID_RUNTIME_ENABLED` | Opt into local ambient mode. Defaults to `0`, preserving the direct provider path. |
 | `HYBRID_CLOUD_INACTIVITY_SECONDS` | Seconds without cloud conversation activity before the provider closes and ambient mode resumes. Defaults to `60`; `0` disables this close. |
 | `HYBRID_AMBIENT_BUFFER_SECONDS` | RAM-only ambient PCM ring duration, capped at 20 seconds and defaulting to `20`. |
+| `LOCAL_CONTEXT_WINDOW_SECONDS` | Seconds of finalized local transcript retained as text-only context. Independent from the raw PCM ring and defaults to `60`. |
 | `LOCAL_CONTEXT_STRATEGY` | `continuous` (default) transcribes completed local speech segments and enables transcript wake/local commands; `activation` transcribes the RAM snapshot only after keyboard activation. |
 | `LOCAL_STT_BASE_URL` | Optional OpenAI-compatible transcription base URL. Only explicit loopback hosts are accepted; when unset, hybrid mode retains keyboard activation and the RAM ring without local STT. |
 | `LOCAL_STT_MODEL` | Model name sent to the local endpoint. Defaults to `whisper-1`. |
 | `LOCAL_STT_TIMEOUT_SECONDS` | Per-request local STT timeout. Defaults to `5`. |
 | `LOCAL_VAD_RMS_THRESHOLD` | PCM RMS speech threshold for the initial lightweight VAD. Defaults to `500`. |
 | `LOCAL_VAD_SILENCE_SECONDS` | Silence needed to close a local speech segment. Defaults to `0.6`. |
-| `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`. |
+| `LOCAL_ACOUSTIC_WAKE_ENABLED` | `0` (off). Opt into the supervised official33 acoustic trial; requires hybrid mode. Replaces transcript wake while enabled. |
+| `LOCAL_ACOUSTIC_WAKE_MODEL_DIR` | Private directory containing the frozen official33 ONNX model and both verified backbone files. No automatic downloads. |
+| `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`; matching remains exact and caller-configured. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
-| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | Seconds to wait for one next final local command after a wake-only transcript. Defaults to `2`; timeout opens the normal cloud path. |
+| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | Seconds to wait for one next final local command after a wake-only transcript. Defaults to `5`, with a `15`-second maximum; timeout opens the normal cloud path. |
 | `LOCAL_CONTEXT_MAX_CHARS` | Maximum rolling context sent as text when a cloud session opens. Defaults to `2000`; valid range is 128–8000. |
+| `LOCAL_TRANSCRIPT_PREVIEW_ENABLED` | Opt-in browser diagnostic preview of the bounded local transcript. Defaults to `0`; preview retrieval/display adds no cloud traffic and is never included in `conversation.status`, logs, browser storage, or disk. Normal activation may still send bounded derived context to the provider. |
 | `AUDIO_OUTPUT_BACKEND` | `sdk` (default) uses Reachy Mini playback. `gstreamer` explicitly selects the experimental app-owned speaker path used to work around the macOS simulator SDK mixer crash. Invalid values stop startup. |
 
 ### Realtime provider selection
@@ -151,6 +161,13 @@ movement loop. Existing tools, profiles, memory, simulated movement, speech
 movement, transcripts, interruptions, and reconnect handling remain shared.
 The `camera` tool captures a frame only when the assistant requests that tool;
 camera frames are not sent merely because a camera is available.
+
+Gemini Live sessions also enable Google's managed `google_search` capability for
+current web information. It is sent alongside the profile's application
+function tools and handled server-side by Gemini; it is not a per-profile Tool
+access setting. The dedicated weather MCP tool remains available for structured
+weather results, while flight status and fare lookups still need a dedicated
+flight-data integration.
 
 In the Settings view, Connection selects the provider. Hugging Face endpoint
 controls are shown only for Hugging Face. Gemini's key is environment-only, so
@@ -176,21 +193,24 @@ free, and the Python runtime was rebuilt for arm64. The earlier 545.7 ms and
 The Phase 1 root gate passed 392 tests in 7.64 s; Ruff was clean, formatting left
 81 files unchanged, and strict mypy was clean across 46 source files.
 
-Before the later native-audio wedge, a user manually completed one long,
-responsive Phase 1 Gemini conversation over the SDK LOCAL backend, including a
-successful barge-in/interruption. This is user-observed qualitative evidence,
-not an instrumented first-audio or interruption-latency result; reproducible
-quantitative benchmark evidence remains incomplete. The Phase 0 `Exacto!`
-feedback loop is a separate baseline speaker-to-microphone echo observation and
-must not be conflated with this Phase 1 LOCAL success. WebRTC was a later
-fallback, and its `not-negotiated (-4)` failure does not invalidate the earlier
-LOCAL conversation.
+The accepted direct Phase 1 headphone run connected Gemini in 637.5 ms, sounded
+smooth for five turns, executed visible head movement, and flushed two audible
+interruptions in 1.4 ms and 3.8 ms. Gemini emitted no usable speech-end marker,
+so exact first-audio latency remains unavailable rather than fabricated. A
+controlled Mac-speaker run immediately fed assistant output into the microphone
+and produced six self-triggered interruption flushes in about 18 seconds while
+the user stayed silent. The process remained live; this is acoustic feedback,
+not a freeze. Use headphones for simulator conversation.
 
 The Phase 0 speaker echo loop remains a Mac speaker/headphone benchmark item,
 separate from the successful Phase 1 LOCAL conversation. Use headphones for
 repeatable testing. WebRTC remains unvalidated on this Mac; use the SDK LOCAL
 media backend for the simulator path. Quantitative Phase 1 first-audio evidence
-and live Phase 3–5 measurements remain pending. The source diagram in
+and remaining quantitative Phase 3–5 measurements remain pending. Both live
+English dinner-context strategies passed with zero ambient cloud bytes;
+Strategy B added about 7.2 seconds before Gemini was ready, so Strategy A is the
+current latency preference. Multilingual local STT remains separate follow-up
+scope. The source diagram in
 [`docs/scheme.mmd`](docs/scheme.mmd) includes the provider choice; the generated
 SVG is not hand-edited and still needs regeneration.
 
@@ -214,15 +234,28 @@ uncertain escalates to one fresh selected provider handler in
 conversational inactivity returns to ambient mode.
 
 If local STT emits the wake and command as two final segments, Reachy waits up
-to `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` (default two seconds) for exactly one
-next final segment. An exact command stays local; an uncertain follow-up is
-sent as the addressed cloud turn, and a timeout opens the normal cloud path.
+to `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` (default five seconds, maximum fifteen)
+for exactly one next final segment. An exact command stays local; an uncertain
+follow-up is sent as the addressed cloud turn, and a timeout opens the normal
+cloud path. Context seeding uses an exclusive wake-sequence fence, so later
+ambient finals cannot be included as background history.
 The wait is bounded and is released during shutdown or cancellation.
 
 For an addressed question captured before cloud startup, the rolling transcript
 is added as untrusted background and the bounded wake-stripped question is sent
 as the first user text turn after provider readiness. Raw pre-wake audio is not
 replayed or uploaded.
+
+For a short-lived local STT diagnostic, set `LOCAL_TRANSCRIPT_PREVIEW_ENABLED=1`.
+The Talk view then shows the current bounded continuous transcript in a small
+diagnostic panel and refreshes it through the separate
+loopback-only `GET /api/transcript-preview` endpoint with `Cache-Control:
+no-store`. The default is off; the text is never included in
+`conversation.status`, logs, browser storage, or disk, and preview retrieval
+itself adds no cloud traffic. Normal activation can still send bounded derived
+context to the selected provider. Non-loopback clients receive `403`; the
+panel reports unavailable when hybrid local processing is not running or has
+closed.
 
 Provider readiness can take time after activation. Postactivation frames are
 held in a bounded 20-second FIFO until the provider is ready; overflow drops
@@ -262,9 +295,9 @@ required local transcription endpoint:
 /opt/homebrew/bin/uv tool install --python 3.12 --force \
   "transformers[serving]" --with librosa --with python-multipart
 
-# Terminal 3; the Reachy daemon already uses port 8000.
+# Local STT terminal; the Reachy daemon already uses port 8000.
 transformers serve --host 127.0.0.1 --port 8766 \
-  openai/whisper-small
+  openai/whisper-small.en
 ```
 
 Then add this to the ignored `.env`:
@@ -273,7 +306,9 @@ Then add this to the ignored `.env`:
 HYBRID_RUNTIME_ENABLED=1
 LOCAL_CONTEXT_STRATEGY=continuous
 LOCAL_STT_BASE_URL=http://127.0.0.1:8766/v1
-LOCAL_STT_MODEL=openai/whisper-small
+LOCAL_STT_MODEL=openai/whisper-small.en
+LOCAL_STT_TIMEOUT_SECONDS=15
+LOCAL_VAD_RMS_THRESHOLD=100
 REACHY_MINI_CUSTOM_PROFILE=household_companion
 ```
 
@@ -288,8 +323,32 @@ its STT execution path writes a temporary audio file. Strategy A (`continuous`)
 is the full dinner-demo path. Strategy B
 (`activation`) keeps only the raw RAM ring until Space/Enter is pressed; voice
 wake and local voice commands are intentionally unavailable in that strategy.
+The English-only model and calibrated threshold above are the accepted settings
+for the current Mac microphone. They are not the final household backend:
+Spanish, English, Portuguese, and Italian accuracy require a separate
+multilingual benchmark before production selection.
 See [`docs/features/local-audio-backends.md`](docs/features/local-audio-backends.md)
 for its contracts and limitations.
+
+#### Optional acoustic wake benchmark
+
+The fixture-only `wake-benchmark` command is separate from the production
+runtime. Install it with `uv sync --group wake-benchmark`, then pass a
+caller-owned extracted Spanish sherpa-onnx model directory and one or more
+bounded WAV/raw PCM16 fixtures to `wake-benchmark --model-dir ... --positive
+... --negative ...`. It pins `sherpa-onnx==1.13.6` with its required
+`sherpa-onnx-core==1.13.6` wheel and `sentencepiece==0.2.2` plus
+`pypinyin==0.55.0`, does not download or bundle
+weights, has no network, simulator, robot, or microphone mode, and emits
+metadata without paths, samples, result tags, or transcripts. Its offline
+fixture-start-to-result timing is not acoustic activation latency. The default
+acoustic keyword is `Reachy`; repeat `--keyword` to benchmark the bounded
+candidate spellings `Reachy`, `Richie`, `Ritchie`, `Richi`, and `Ricci`.
+Candidates are benchmark inputs only, not automatic production aliases, and
+all exact acoustic detections are reported with the metadata-only canonical
+tag `@reachy`. See
+[`docs/features/wake-word.md`](docs/features/wake-word.md) for the complete
+command and the deterministic-only acceptance status.
 
 ### Hugging Face Connection Modes
 
@@ -344,6 +403,49 @@ reachy-mini-conversation-app
 > Make sure the Reachy Mini daemon is running before launching the app. If you see a `TimeoutError`, it means the daemon isn't started. See [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/) for setup instructions.
 
 The app runs in console mode. Add `--ui` to serve the web interface at http://127.0.0.1:7860/.
+
+### Supervised Reachy wake trial
+
+Official33 is the current simulator MVP: fewer false wakes than our parallel
+pair, with known missed calls. See the [retained model catalog](docs/plans/reachy-wake-model-catalog.md)
+for exact artifacts and results. No model is bundled or approved for production.
+The private bundle has been prepared on this Mac at
+`~/Documents/Reachy/private-wakeword/simulator-official33`.
+
+```bash
+uv sync --frozen --group dev --group sim --group wake-runtime --group wake-benchmark
+```
+
+Start the simulator as described below (keep the Mac unlocked). Then launch:
+
+```bash
+REALTIME_PROVIDER=gemini HYBRID_RUNTIME_ENABLED=1 \
+LOCAL_ACOUSTIC_WAKE_ENABLED=1 \
+LOCAL_ACOUSTIC_WAKE_MODEL_DIR="$HOME/Documents/Reachy/private-wakeword/simulator-official33" \
+LOCAL_STT_BASE_URL= AUDIO_OUTPUT_BACKEND=gstreamer \
+HYBRID_CLOUD_INACTIVITY_SECONDS=30 \
+.venv/bin/reachy-mini-conversation-app --media-backend local --ui
+```
+
+Use headphones. Say **Reachy**, wait for the acknowledgment nod, then speak your
+request. The wake frame and earlier audio stay local; follow-on live speech uses
+the normal cloud conversation. This trial does not recover a command spoken
+inside the same microphone frame as the wake. The cloud closes after 30 seconds
+of conversational inactivity and listening resumes. Manual console/browser
+activation remains available. Stop with Ctrl-C; set `LOCAL_ACOUSTIC_WAKE_ENABLED=0`
+to launch with acoustic wake disabled. These process settings do not modify `.env`.
+
+This acoustic trial opens the normal conversation directly. The existing
+transcript-based exact local-command/follow-up flow remains available with
+acoustic wake disabled and continuous local STT configured. The trial command
+leaves local STT off to isolate the acoustic detector.
+
+If the graphical viewer is unavailable, add `--headless` to the daemon command.
+Do **not** add `--no-media` for microphone testing: the SDK then disables client
+microphone initialization too. Headless mode has no visible simulated robot.
+The 2026-09-09 graphical attempt crashed in GLFW display setup while the Mac was
+locked; headless model-to-runtime-to-SDK testing passed. A human-spoken graphical
+wake/conversation session and Pi performance remain unverified.
 
 ### Simulator development
 
@@ -446,6 +548,10 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web and return a short list of results. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
 | `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place: current conditions, high and low temperature, and rain chance. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
 | `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
+
+When `REALTIME_PROVIDER=gemini`, the provider additionally enables Google's
+managed `google_search` tool for every Live session. It is separate from the
+profile-managed MCP tools above and is unavailable on the Hugging Face backend.
 
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
@@ -650,3 +756,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [`AGENTS
 ## License
 
 Apache 2.0
+
+### Spotify on the companion
+
+The household profile includes optional `spotify_control`: ask to resume Spotify,
+pause, skip, report what is playing, search and play tracks/artists/albums/playlists/
+podcast episodes, or append a track/episode to the queue. Queue does not guarantee
+immediate next playback.
+Open Spotify on the configured computer and start a song there first, then test
+with headphones using the normal headless simulator command. Restart the app
+after setup to load its new tool selection and environment.
+
+Set `SPOTIFY_CREDENTIALS_FILE` to a private OAuth credential JSON outside this
+repository and `SPOTIFY_DEVICE_ID` to the authorized computer's exact Connect ID.
+Both are already configured in this Mac's ignored `.env`. No other playback device
+is selected automatically. Remove those settings or disable the profile tool to
+turn the integration off; revoke Reachy Home in Spotify account settings to
+remove account access. See [Spotify control](docs/features/spotify-control.md)
+for authentication, privacy, limitations and tests.

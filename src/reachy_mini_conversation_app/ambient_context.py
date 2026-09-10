@@ -28,6 +28,7 @@ STTResult: TypeAlias = str | Awaitable[str]
 TranscriptObserver: TypeAlias = Callable[["TranscriptSegment"], None]
 LocalBackendCall: TypeAlias = Callable[[AudioFrame], object]
 LocalBackendKind: TypeAlias = Literal["stt", "vad"]
+MAX_CONTINUOUS_STT_SECONDS = 20.0
 
 
 class _LocalWorkBusy(RuntimeError):
@@ -232,15 +233,35 @@ class RollingTranscript:
         self._trim()
         return True
 
-    def text(self, *, now: float | None = None) -> str:
-        """Return bounded chronological final text without transcript metadata."""
+    def text(
+        self,
+        *,
+        now: float | None = None,
+        before_sequence: int | None = None,
+    ) -> str:
+        """Return bounded chronological final text before an optional sequence fence."""
         if now is not None and not math.isfinite(now):
             return ""
         if now is not None:
             cutoff = now - self.max_seconds
             while self._entries and self._entries[0].ended_at < cutoff:
                 self._entries.popleft()
-        return _bound_text("\n".join(entry.text for entry in self._entries), self.max_chars)
+        if before_sequence is not None and before_sequence <= 0:
+            return ""
+        return _bound_text(
+            "\n".join(
+                entry.text for entry in self._entries if before_sequence is None or entry.sequence < before_sequence
+            ),
+            self.max_chars,
+        )
+
+    def clear(self) -> None:
+        """Discard all retained transcript text and ordering state."""
+        self._entries.clear()
+        self._highest_sequence = 0
+        self._latest_final_sequence = 0
+        self._latest_final_ended_at = float("-inf")
+        self._pending_partial = None
 
     def _trim(self) -> None:
         """Trim by the newest segment's time and then by text size."""
@@ -328,6 +349,12 @@ class AmbientContextProcessor:
         """Return the local rolling transcript store."""
         return self._transcript
 
+    def get_transcript_preview(self, *, now: float | None = None) -> str | None:
+        """Return bounded continuous transcript text while this processor is open."""
+        if self._closed or self.config.strategy is not AmbientContextStrategy.CONTINUOUS_TRANSCRIPT:
+            return None
+        return self._transcript.text(now=now)
+
     @property
     def metrics(self) -> AmbientContextMetrics:
         """Return immutable local processing metrics."""
@@ -406,8 +433,9 @@ class AmbientContextProcessor:
         snapshot: AudioFrame | None = None,
         *,
         strategy: AmbientContextStrategy | None = None,
+        before_sequence: int | None = None,
     ) -> AmbientContext:
-        """Return only bounded derived text for a new cloud session."""
+        """Return bounded derived text before an optional wake sequence fence."""
         if self._closed:
             raise RuntimeError("Ambient context processor is closed")
         selected_strategy = strategy or self.config.strategy
@@ -418,12 +446,19 @@ class AmbientContextProcessor:
                     continuous_stt_pending_at_activation=self._metrics.continuous_stt_pending_at_activation
                     + len(self._transcription_tasks)
                 )
+            text = self._transcript.text(now=generated_at, before_sequence=before_sequence)
+            segments = (
+                segment
+                for segment in self._transcript.segments
+                if before_sequence is None or segment.sequence < before_sequence
+            )
+            retained_segments = tuple(segments)
             return AmbientContext(
-                text=self._transcript.text(now=generated_at),
+                text=text,
                 strategy=selected_strategy,
                 generated_at=generated_at,
-                source_ended_at=self._transcript.segments[-1].ended_at if self._transcript.segments else None,
-                source_sequence=self._transcript.segments[-1].sequence if self._transcript.segments else None,
+                source_ended_at=retained_segments[-1].ended_at if retained_segments else None,
+                source_sequence=retained_segments[-1].sequence if retained_segments else None,
             )
         if snapshot is None:
             return AmbientContext(text="", strategy=selected_strategy, generated_at=generated_at)
@@ -468,6 +503,7 @@ class AmbientContextProcessor:
         if self._closed:
             return
         self._closed = True
+        self._transcript.clear()
         self._speech = None
         transcription_tasks = tuple(self._transcription_tasks)
         for task in transcription_tasks:
@@ -487,6 +523,11 @@ class AmbientContextProcessor:
         """Append a defensive mono frame to the bounded current segment."""
         frame_start = self._audio_cursor_end if self._audio_cursor_end is not None else self._clock()
         frame_end = self._frame_end_time(duration)
+        max_samples = max(1, round(MAX_CONTINUOUS_STT_SECONDS * sample_rate))
+        if audio.size > max_samples:
+            audio = audio[-max_samples:]
+            frame_start = frame_end - audio.size / sample_rate
+        retained_duration = audio.size / sample_rate
         speech = self._speech
         if speech is None or speech.sample_rate != sample_rate:
             if speech is not None:
@@ -506,14 +547,22 @@ class AmbientContextProcessor:
             self._speech = speech
         speech.frames.append((sample_rate, audio.copy()))
         speech.sample_count += audio.size
-        speech.speech_seconds += duration
+        speech.speech_seconds += retained_duration
         speech.silence_seconds = 0.0
         speech.ended_at = frame_end
-        max_samples = max(1, round(self.config.transcript_window_seconds * sample_rate))
         while speech.sample_count > max_samples and speech.frames:
-            oldest_rate, oldest_audio = speech.frames.pop(0)
-            speech.sample_count -= oldest_audio.size
-            speech.started_at += oldest_audio.size / oldest_rate
+            excess_samples = speech.sample_count - max_samples
+            oldest_rate, oldest_audio = speech.frames[0]
+            if oldest_audio.size <= excess_samples:
+                speech.frames.pop(0)
+                speech.sample_count -= oldest_audio.size
+                speech.speech_seconds -= oldest_audio.size / oldest_rate
+                speech.started_at += oldest_audio.size / oldest_rate
+                continue
+            speech.frames[0] = (oldest_rate, oldest_audio[excess_samples:].copy())
+            speech.sample_count -= excess_samples
+            speech.speech_seconds -= excess_samples / oldest_rate
+            speech.started_at += excess_samples / oldest_rate
 
     def _schedule_continuous_transcription(self, speech: _SpeechAccumulator) -> None:
         """Schedule one ordered local STT operation without exposing PCM."""
@@ -532,7 +581,11 @@ class AmbientContextProcessor:
             self._discard_continuous_sequence(speech.sequence)
             logger.warning("Continuous local STT backend busy; dropped newest segment")
             return
-        audio = np.concatenate(tuple(frame[1] for frame in speech.frames)).astype(np.int16, copy=True)
+        audio_parts = tuple(frame[1] for frame in speech.frames if frame[1].size)
+        if not audio_parts:
+            self._discard_continuous_sequence(speech.sequence)
+            return
+        audio = np.concatenate(audio_parts).astype(np.int16, copy=True)
         segment = (speech.sample_rate, audio)
         backend_task = self._start_local_work(self._stt.transcribe, segment, "stt")
         if backend_task is None:
@@ -758,6 +811,7 @@ __all__ = [
     "AmbientContextStrategy",
     "LocalSTT",
     "LocalVAD",
+    "MAX_CONTINUOUS_STT_SECONDS",
     "RollingTranscript",
     "TranscriptSegment",
 ]

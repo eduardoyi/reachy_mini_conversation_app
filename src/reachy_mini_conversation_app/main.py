@@ -20,6 +20,7 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     log_connection_troubleshooting,
 )
+from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 
 
 if TYPE_CHECKING:
@@ -169,6 +170,17 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
+    acoustic_wake_detector: OpenWakeWordDetector | None = None
+    if config.LOCAL_ACOUSTIC_WAKE_ENABLED:
+        if not config.HYBRID_RUNTIME_ENABLED:
+            raise ValueError("Acoustic wake requires HYBRID_RUNTIME_ENABLED=1")
+        if not config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR:
+            raise ValueError("Acoustic wake requires LOCAL_ACOUSTIC_WAKE_MODEL_DIR")
+        acoustic_wake_detector = OpenWakeWordDetector.from_directory(
+            Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser()
+        )
+        logger.info("Supervised official33 acoustic wake enabled; threshold=0.5 cooldown=3s")
+
     realtime_provider = get_realtime_provider()
     if realtime_provider == REALTIME_PROVIDER_GEMINI:
         logger.info("Configured Gemini Live realtime backend")
@@ -282,7 +294,7 @@ def run(
                 stt=local_stt,
                 config=AmbientContextConfig(
                     strategy=context_strategy,
-                    transcript_window_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS,
+                    transcript_window_seconds=config.LOCAL_CONTEXT_WINDOW_SECONDS,
                     max_transcript_chars=config.LOCAL_CONTEXT_MAX_CHARS,
                     min_silence_seconds=config.LOCAL_VAD_SILENCE_SECONDS,
                     stt_timeout_seconds=config.LOCAL_STT_TIMEOUT_SECONDS,
@@ -290,10 +302,11 @@ def run(
             )
             if context_strategy is AmbientContextStrategy.CONTINUOUS_TRANSCRIPT:
                 local_processor = context_processor
-                wake_detector = TranscriptWakeWordDetector(
-                    config.LOCAL_WAKE_WORD,
-                    cooldown_seconds=config.LOCAL_WAKE_COOLDOWN_SECONDS,
-                )
+                if acoustic_wake_detector is None:
+                    wake_detector = TranscriptWakeWordDetector(
+                        config.LOCAL_WAKE_WORD,
+                        cooldown_seconds=config.LOCAL_WAKE_COOLDOWN_SECONDS,
+                    )
                 intent_router = LocalIntentRouter(wake_word=config.LOCAL_WAKE_WORD)
                 action_executor = LocalActionExecutor(
                     deps,
@@ -302,14 +315,14 @@ def run(
                 )
             else:
                 logger.info(
-                    "Activation-buffer context selected; voice wake remains disabled and keyboard stays available"
+                    "Activation-buffer context selected; transcript wake disabled and keyboard stays available"
                 )
             logger.info(
                 "Local ambient processing enabled strategy=%s endpoint=loopback",
                 context_strategy.value,
             )
         else:
-            logger.info("Local STT endpoint not configured; keyboard activation and RAM audio ring remain available")
+            logger.info("Local STT endpoint not configured; keyboard/acoustic activation needs no STT")
 
         hybrid_runtime = HybridRuntime(
             build_hybrid_handler,
@@ -317,6 +330,7 @@ def run(
             local_processor=local_processor,
             context_processor=context_processor,
             wake_detector=wake_detector,
+            acoustic_wake_detector=acoustic_wake_detector,
             intent_router=intent_router,
             action_executor=action_executor,
             local_processing_close_callback=context_processor.close if context_processor is not None else None,

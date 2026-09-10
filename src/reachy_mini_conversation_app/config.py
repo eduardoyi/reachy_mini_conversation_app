@@ -10,6 +10,8 @@ from importlib.resources import files
 
 from dotenv import find_dotenv, load_dotenv
 
+from .wake_word import DEFAULT_LOCAL_WAKE_WORD
+
 
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
 # to that profile and disable all profile switching. Leave as None for normal behavior.
@@ -81,10 +83,14 @@ LOCAL_STT_MODEL_ENV = "LOCAL_STT_MODEL"
 LOCAL_STT_TIMEOUT_SECONDS_ENV = "LOCAL_STT_TIMEOUT_SECONDS"
 LOCAL_VAD_RMS_THRESHOLD_ENV = "LOCAL_VAD_RMS_THRESHOLD"
 LOCAL_VAD_SILENCE_SECONDS_ENV = "LOCAL_VAD_SILENCE_SECONDS"
+LOCAL_ACOUSTIC_WAKE_ENABLED_ENV = "LOCAL_ACOUSTIC_WAKE_ENABLED"
+LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV = "LOCAL_ACOUSTIC_WAKE_MODEL_DIR"
 LOCAL_WAKE_WORD_ENV = "LOCAL_WAKE_WORD"
 LOCAL_WAKE_COOLDOWN_SECONDS_ENV = "LOCAL_WAKE_COOLDOWN_SECONDS"
 LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV = "LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS"
+LOCAL_CONTEXT_WINDOW_SECONDS_ENV = "LOCAL_CONTEXT_WINDOW_SECONDS"
 LOCAL_CONTEXT_MAX_CHARS_ENV = "LOCAL_CONTEXT_MAX_CHARS"
+LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV = "LOCAL_TRANSCRIPT_PREVIEW_ENABLED"
 AUDIO_OUTPUT_BACKEND_ENV = "AUDIO_OUTPUT_BACKEND"
 AUDIO_OUTPUT_BACKEND_SDK = "sdk"
 AUDIO_OUTPUT_BACKEND_GSTREAMER = "gstreamer"
@@ -100,10 +106,12 @@ DEFAULT_LOCAL_STT_MODEL = "whisper-1"
 DEFAULT_LOCAL_STT_TIMEOUT_SECONDS = 5.0
 DEFAULT_LOCAL_VAD_RMS_THRESHOLD = 500.0
 DEFAULT_LOCAL_VAD_SILENCE_SECONDS = 0.6
-DEFAULT_LOCAL_WAKE_WORD = "Reachy"
 DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS = 2.0
-DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = 2.0
+DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = 5.0
+MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = 15.0
+DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS = 60.0
 DEFAULT_LOCAL_CONTEXT_MAX_CHARS = 2_000
+DEFAULT_LOCAL_TRANSCRIPT_PREVIEW_ENABLED = False
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
@@ -269,6 +277,11 @@ def is_hybrid_runtime_enabled() -> bool:
     return _env_flag(HYBRID_RUNTIME_ENABLED_ENV, default=DEFAULT_HYBRID_RUNTIME_ENABLED)
 
 
+def is_local_transcript_preview_enabled() -> bool:
+    """Return whether the opt-in local transcript preview is enabled."""
+    return _env_flag(LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, default=DEFAULT_LOCAL_TRANSCRIPT_PREVIEW_ENABLED)
+
+
 def resolve_local_context_strategy() -> str:
     """Return the configured ambient transcription strategy."""
     candidate = (os.getenv(LOCAL_CONTEXT_STRATEGY_ENV) or "").strip().lower()
@@ -310,6 +323,22 @@ def resolve_local_processing_seconds(env_name: str, default: float) -> float:
     """Return a positive finite local-processing duration setting."""
     value = _resolve_non_negative_seconds(env_name, default, allow_zero=False)
     return default if value is None else value
+
+
+def resolve_local_wake_followup_timeout_seconds() -> float:
+    """Return the bounded wait for a split wake-word follow-up segment."""
+    value = resolve_local_processing_seconds(
+        LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV,
+        DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+    )
+    if value > MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS:
+        logger.warning(
+            "Ignoring %s above the %.1f-second bound; using default.",
+            LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV,
+            MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+        )
+        return DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
+    return value
 
 
 def resolve_local_vad_rms_threshold() -> float:
@@ -448,6 +477,21 @@ def _raise_on_name_collisions(
     )
 
 
+def _load_dotenv_configuration() -> None:
+    """Load local configuration without overriding explicit process values."""
+    if _env_flag("REACHY_MINI_SKIP_DOTENV", default=False):
+        logger.info("Skipping .env loading because REACHY_MINI_SKIP_DOTENV is set")
+        return
+
+    # Explicit process/terminal variables must win over local defaults.
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+        logger.info("Configuration loaded from %s", dotenv_path)
+    else:
+        logger.warning("No .env file found, using environment variables")
+
+
 # Validate LOCKED_PROFILE at startup
 if LOCKED_PROFILE is not None:
     _profiles_dir = DEFAULT_PROFILES_DIRECTORY
@@ -460,20 +504,7 @@ if LOCKED_PROFILE is not None:
         logger.critical("LOCKED_PROFILE %r has no profile definition", LOCKED_PROFILE)
         sys.exit(1)
 
-_skip_dotenv = _env_flag("REACHY_MINI_SKIP_DOTENV", default=False)
-
-if _skip_dotenv:
-    logger.info("Skipping .env loading because REACHY_MINI_SKIP_DOTENV is set")
-else:
-    # Locate .env file (search upward from current working directory)
-    dotenv_path = find_dotenv(usecwd=True)
-
-    if dotenv_path:
-        # Load .env and override environment variables
-        load_dotenv(dotenv_path=dotenv_path, override=True)
-        logger.info(f"Configuration loaded from {dotenv_path}")
-    else:
-        logger.warning("No .env file found, using environment variables")
+_load_dotenv_configuration()
 
 _warn_on_obsolete_backend_env()
 
@@ -498,14 +529,18 @@ class Config:
     LOCAL_VAD_SILENCE_SECONDS = resolve_local_processing_seconds(
         LOCAL_VAD_SILENCE_SECONDS_ENV, DEFAULT_LOCAL_VAD_SILENCE_SECONDS
     )
+    LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
+    LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
     LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
     )
-    LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = resolve_local_processing_seconds(
-        LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
+    LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = resolve_local_wake_followup_timeout_seconds()
+    LOCAL_CONTEXT_WINDOW_SECONDS = resolve_local_processing_seconds(
+        LOCAL_CONTEXT_WINDOW_SECONDS_ENV, DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS
     )
     LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
+    LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -634,14 +669,18 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_VAD_SILENCE_SECONDS = resolve_local_processing_seconds(
         LOCAL_VAD_SILENCE_SECONDS_ENV, DEFAULT_LOCAL_VAD_SILENCE_SECONDS
     )
+    config.LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
+    config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
     config.LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     config.LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
     )
-    config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = resolve_local_processing_seconds(
-        LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
+    config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = resolve_local_wake_followup_timeout_seconds()
+    config.LOCAL_CONTEXT_WINDOW_SECONDS = resolve_local_processing_seconds(
+        LOCAL_CONTEXT_WINDOW_SECONDS_ENV, DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS
     )
     config.LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
+    config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

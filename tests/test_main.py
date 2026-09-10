@@ -181,10 +181,16 @@ def test_build_conversation_handler_rejects_unknown_provider_before_importing_ba
     gemini_constructor.assert_not_called()
 
 
-def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch) -> None:
+@pytest.mark.parametrize("acoustic_enabled", [False, True])
+def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch, acoustic_enabled) -> None:
     """Hybrid startup constructs only the local runtime, even without cloud config."""
     monkeypatch.setattr(config.config, "HYBRID_RUNTIME_ENABLED", True)
     monkeypatch.setattr(config.config, "LOCAL_STT_BASE_URL", None)
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_ENABLED", acoustic_enabled)
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_MODEL_DIR", "/private/models")
+    acoustic_loader = MagicMock()
+    monkeypatch.setattr(main_mod.OpenWakeWordDetector, "from_directory", acoustic_loader)
+
     monkeypatch.setattr(main_mod.app_lifecycle, "wake_up_if_sleeping", lambda *_args: False)
     monkeypatch.setattr(main_mod.app_lifecycle, "initialize_tools_with_default_fallback", lambda *_args: None)
     monkeypatch.setattr(config, "resolve_app_timeout_minutes", lambda: None)
@@ -214,6 +220,7 @@ def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch) -> Non
 
         def __init__(self, factory: object, **_kwargs: object) -> None:
             self.factory = factory
+            assert _kwargs["acoustic_wake_detector"] is (acoustic_loader.return_value if acoustic_enabled else None)
 
     class FakeLocalStream:
         def __init__(self, handler: object, _robot: object, **_kwargs: object) -> None:
@@ -240,6 +247,7 @@ def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch) -> Non
     main_mod.run(args, robot=robot)
 
     build_handler.assert_not_called()
+    assert acoustic_loader.call_count == int(acoustic_enabled)
 
 
 @pytest.mark.parametrize(("strategy", "voice_wake_enabled"), [("continuous", True), ("activation", False)])
@@ -252,6 +260,7 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
     monkeypatch.setattr(config.config, "LOCAL_CONTEXT_STRATEGY", strategy)
     monkeypatch.setattr(config.config, "LOCAL_STT_MODEL", "local-asr")
     monkeypatch.setattr(config.config, "LOCAL_STT_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(config.config, "LOCAL_CONTEXT_WINDOW_SECONDS", 60.0)
     monkeypatch.setattr(config.config, "LOCAL_CONTEXT_MAX_CHARS", 2_000)
     monkeypatch.setattr(config.config, "LOCAL_VAD_RMS_THRESHOLD", 500.0)
     monkeypatch.setattr(config.config, "LOCAL_VAD_SILENCE_SECONDS", 0.6)
@@ -330,6 +339,7 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
         assert runtime.kwargs["intent_router"] is None
         assert runtime.kwargs["action_executor"] is None
     assert runtime.kwargs["local_processing_close_callback"] is not None
+    assert runtime.kwargs["context_processor"].config.transcript_window_seconds == 60.0
     assert runtime.kwargs["wake_followup_timeout_s"] == 2.0
     build_handler.assert_not_called()
 
@@ -367,3 +377,18 @@ def test_inactivity_timeout_thread_closes_stream_manager_without_sleep_callback(
     thread.join(timeout=1.0)
     assert not thread.is_alive()
     stream_manager.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "hybrid, directory, error", [(False, "/private/models", "HYBRID_RUNTIME"), (True, "", "MODEL_DIR")]
+)
+def test_acoustic_startup_requires_explicit_hybrid_and_assets(monkeypatch, hybrid, directory, error) -> None:
+    """Acoustic startup fails before media initialization without explicit prerequisites."""
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_ENABLED", True)
+    monkeypatch.setattr(config.config, "HYBRID_RUNTIME_ENABLED", hybrid)
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_MODEL_DIR", directory)
+    loader = MagicMock()
+    monkeypatch.setattr(main_mod.OpenWakeWordDetector, "from_directory", loader)
+    with pytest.raises(ValueError, match=error):
+        main_mod.run(SimpleNamespace(debug=False))
+    loader.assert_not_called()

@@ -55,6 +55,10 @@ _INITIAL_CONTEXT_SECURITY_GUIDANCE: Final[str] = (
 )
 
 
+class _IntentionalReconnect(Exception):
+    """Signal that a stale setup operation should rotate to a new session."""
+
+
 @dataclass(frozen=True)
 class GeminiLatencySnapshot:
     """Bounded privacy-safe Gemini latency samples in milliseconds."""
@@ -137,6 +141,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._client_closed = False
         self._shutdown_requested = False
+        self._reconnect_requested = False
         self._connection_observer_connected = False
         self._connection_ready_samples: deque[float] = deque(maxlen=_LATENCY_SAMPLE_LIMIT)
         self._first_audio_samples: deque[float] = deque(maxlen=_LATENCY_SAMPLE_LIMIT)
@@ -273,18 +278,19 @@ class GeminiLiveHandler(ConversationHandler):
         return self.connection is session and self._active_generation == generation
 
     def _build_tool_config(self, tool_specs: list[ToolSpec]) -> list[dict[str, object]]:
-        """Convert application tool specifications to Gemini declarations."""
-        if not tool_specs:
-            return []
-        declarations = [
-            {
-                "name": spec["name"],
-                "description": spec["description"],
-                "parameters_json_schema": spec["parameters"],
-            }
-            for spec in tool_specs
-        ]
-        return [{"function_declarations": declarations}]
+        """Build Gemini's managed search and application function tools."""
+        tools: list[dict[str, object]] = [{"google_search": {}}]
+        if tool_specs:
+            declarations = [
+                {
+                    "name": spec["name"],
+                    "description": spec["description"],
+                    "parameters_json_schema": spec["parameters"],
+                }
+                for spec in tool_specs
+            ]
+            tools.append({"function_declarations": declarations})
+        return tools
 
     def _build_initial_context_content(self) -> types.Content | None:
         """Build one bounded user content message from the local context."""
@@ -340,10 +346,12 @@ class GeminiLiveHandler(ConversationHandler):
 
     async def _clear_playback_for_interrupt(self) -> None:
         """Flush local playback when Gemini reports an interrupted turn."""
+        self._clear_output_queue()
         if self._clear_queue is not None:
-            self._clear_queue()
-        else:
-            self._clear_output_queue()
+            try:
+                self._clear_queue()
+            except Exception as error:
+                logger.warning("Gemini playback clear failed: %s", type(error).__name__)
         self.deps.movement_manager.set_speaking(False)
 
     async def _send_realtime_input(
@@ -415,9 +423,17 @@ class GeminiLiveHandler(ConversationHandler):
             return
         async with self._send_lock:
             if not self._is_current_session(session, generation):
+                if self._shutdown_requested:
+                    raise asyncio.CancelledError
+                if self._reconnect_requested:
+                    raise _IntentionalReconnect
                 raise asyncio.CancelledError
             await session.send_client_content(turns=initial_context, turn_complete=True)
             if not self._is_current_session(session, generation):
+                if self._shutdown_requested:
+                    raise asyncio.CancelledError
+                if self._reconnect_requested:
+                    raise _IntentionalReconnect
                 raise asyncio.CancelledError
 
     async def _ensure_client(self) -> genai.Client:
@@ -473,6 +489,22 @@ class GeminiLiveHandler(ConversationHandler):
         """Connect to Gemini Live and process server messages until the session ends."""
         self._shutdown_requested = False
         client = await self._ensure_client()
+        while not self._shutdown_requested:
+            self._reconnect_requested = False
+            try:
+                await self._run_session(client)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not self._reconnect_requested or self._shutdown_requested:
+                    raise
+                logger.info("Gemini Live session ended for a requested reconnect")
+            if not self._reconnect_requested or self._shutdown_requested:
+                return
+            self._reconnect_requested = False
+
+    async def _run_session(self, client: genai.Client) -> None:
+        """Run one Gemini session generation, including its cleanup boundary."""
         tool_specs = get_tool_specs()
         session_config = self._build_session_config(tool_specs)
         self._session_generation += 1
@@ -492,13 +524,21 @@ class GeminiLiveHandler(ConversationHandler):
         self._completed_tool_call_ids.clear()
         self._tool_received_at.clear()
 
-        logger.info("Connecting Gemini Live model=%s tools=%d", self._model, len(tool_specs))
+        logger.info(
+            "Connecting Gemini Live model=%s application_tools=%d native_search=true",
+            self._model,
+            len(tool_specs),
+        )
         connection_started_at = time.perf_counter()
         active_session: AsyncSession | None = None
         try:
             async with self._connect_with_timeout(client, session_config) as session:
                 active_session = session
                 self.connection = session
+                if self._shutdown_requested:
+                    raise asyncio.CancelledError
+                if self._reconnect_requested:
+                    return
                 await self._seed_initial_context(session, generation)
                 self._connection_observer_connected = True
                 self._emit_connection_state(True)
@@ -524,6 +564,19 @@ class GeminiLiveHandler(ConversationHandler):
                             break
                     if self._is_current_session(session, generation):
                         await asyncio.sleep(0)
+        except _IntentionalReconnect:
+            logger.info("Gemini Live setup ended for a requested reconnect")
+        except asyncio.CancelledError:
+            current_task = asyncio.current_task()
+            if not (
+                self._reconnect_requested
+                and not self._shutdown_requested
+                and active_session is not None
+                and self.connection is not active_session
+                and (current_task is None or current_task.cancelling() == 0)
+            ):
+                raise
+            logger.info("Gemini Live session ended for a requested reconnect")
         finally:
             self._clear_first_audio_markers(reason="session_closed")
             if self.connection is active_session:
@@ -1025,11 +1078,17 @@ class GeminiLiveHandler(ConversationHandler):
 
     async def _close_active_session(self, reason: str) -> None:
         """Close the current session so the supervisor reconnects with new config."""
+        if self._active_generation is not None:
+            self._reconnect_requested = True
+        await self._clear_playback_for_interrupt()
         session = self.connection
         if session is None:
             return
         logger.info("Closing Gemini Live session for %s", reason)
         self.connection = None
+        if self._connection_observer_connected:
+            self._connection_observer_connected = False
+            self._emit_connection_state(False)
         try:
             await session.close()
         except Exception as exc:

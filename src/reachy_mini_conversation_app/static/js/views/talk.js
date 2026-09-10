@@ -8,6 +8,7 @@ import {
   activateConversation,
   applyPersonality,
   getStatus,
+  getTranscriptPreview,
   getMicState,
   listPersonalities,
   setMicMuted,
@@ -39,6 +40,7 @@ export async function mountTalkView({ outlet, signal }) {
     console.warn("Failed to load hybrid runtime status", error);
     return null;
   });
+  const transcriptPreviewPromise = getTranscriptPreview().catch(() => null);
   let muted = false;
   let micReady = false;
   let togglePending = false;
@@ -46,6 +48,8 @@ export async function mountTalkView({ outlet, signal }) {
   let hybridEnabled = false;
   let activePersonality = null;
   let subscription = null;
+  let transcriptPreviewTimer = null;
+  let transcriptPreviewRequestPending = false;
 
   const caption = h(
     "p",
@@ -67,13 +71,27 @@ export async function mountTalkView({ outlet, signal }) {
   orb.root.addEventListener("click", onMicTap);
   syncMicAria();
 
+  const transcriptPreviewText = h(
+    "p",
+    { class: "talk__transcript-preview-text", "aria-live": "polite" },
+    ""
+  );
+  const transcriptPreview = h(
+    "section",
+    { class: "talk__transcript-preview", hidden: true, "aria-label": "Local transcript preview" },
+    h("h2", { class: "talk__transcript-preview-title" }, "Local transcript preview"),
+    h("p", { class: "talk__transcript-preview-hint" }, "Diagnostic preview; not logged or saved."),
+    transcriptPreviewText
+  );
+
   signal.addEventListener("abort", cleanup, { once: true });
 
   const view = h(
     "section",
     { class: "view view--talk" },
     h("div", { class: "talk__orb-wrap" }, orb.root),
-    caption
+    caption,
+    transcriptPreview
   );
   outlet.replaceChildren(view);
 
@@ -96,10 +114,17 @@ export async function mountTalkView({ outlet, signal }) {
     void refreshPersonalityState();
   }
 
-  const [micState, runtimeStatus] = await Promise.all([micStatePromise, runtimeStatusPromise]);
+  const [micState, runtimeStatus, transcriptPreviewState] = await Promise.all([
+    micStatePromise,
+    runtimeStatusPromise,
+    transcriptPreviewPromise,
+  ]);
   if (micState) muted = Boolean(micState.muted);
   hybridEnabled = runtimeStatus?.hybrid_runtime_enabled === true;
   if (signal.aborted) return;
+  if (renderTranscriptPreview(transcriptPreviewState)) {
+    transcriptPreviewTimer = window.setInterval(() => void refreshTranscriptPreview(), 1000);
+  }
   micReady = true;
   orb.root.disabled = false;
   syncMicAria();
@@ -152,10 +177,50 @@ export async function mountTalkView({ outlet, signal }) {
   function cleanup() {
     subscription?.close();
     orb.dispose();
+    if (transcriptPreviewTimer !== null) {
+      window.clearInterval(transcriptPreviewTimer);
+      transcriptPreviewTimer = null;
+    }
+    transcriptPreviewText.textContent = "";
     document.removeEventListener("keydown", onActivationKey);
     if (defaultAction) {
       defaultAction.hidden = true;
       defaultAction.removeEventListener("click", onSetDefault);
+    }
+  }
+
+  function renderTranscriptPreview(result) {
+    if (result?.enabled !== true) {
+      transcriptPreview.hidden = true;
+      transcriptPreviewText.textContent = "";
+      return false;
+    }
+    transcriptPreview.hidden = false;
+    if (result.available !== true) {
+      transcriptPreviewText.textContent = "Unavailable";
+    } else {
+      transcriptPreviewText.textContent = result.text || "No local transcript yet.";
+    }
+    return true;
+  }
+
+  async function refreshTranscriptPreview() {
+    if (signal.aborted || transcriptPreviewRequestPending) return;
+    transcriptPreviewRequestPending = true;
+    try {
+      const result = await getTranscriptPreview();
+      if (signal.aborted) return;
+      if (!renderTranscriptPreview(result) && transcriptPreviewTimer !== null) {
+        window.clearInterval(transcriptPreviewTimer);
+        transcriptPreviewTimer = null;
+      }
+    } catch {
+      if (!signal.aborted) {
+        transcriptPreview.hidden = true;
+        transcriptPreviewText.textContent = "";
+      }
+    } finally {
+      transcriptPreviewRequestPending = false;
     }
   }
 

@@ -13,6 +13,7 @@ from google.genai import types
 
 from reachy_mini_conversation_app import gemini_live
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolNotification
@@ -124,6 +125,60 @@ class FakeClient:
         self.aio = FakeAio(session, enter_delay=enter_delay)
 
 
+class RotatingLive:
+    """Fake Live resource that returns a fresh session for each connect."""
+
+    def __init__(self, sessions: list[FakeSession]) -> None:
+        """Initialize the ordered session list."""
+        self.sessions = sessions
+        self.connect_count = 0
+        self.entered = [asyncio.Event() for _ in sessions]
+        self.enter_gates = [asyncio.Event() for _ in sessions]
+        for gate in self.enter_gates:
+            gate.set()
+        self.configs: list[object] = []
+
+    def connect(self, *, model: str, config: object):
+        """Return a context around the next session."""
+        del model
+        index = self.connect_count
+        self.connect_count += 1
+        self.configs.append(config)
+        live = self
+
+        class SessionContext:
+            async def __aenter__(self) -> FakeSession:
+                live.entered[index].set()
+                await live.enter_gates[index].wait()
+                return live.sessions[index]
+
+            async def __aexit__(self, *_args: object) -> None:
+                await live.sessions[index].close()
+
+        return SessionContext()
+
+
+class RotatingAio:
+    """Fake async client surface for reconnect tests."""
+
+    def __init__(self, sessions: list[FakeSession]) -> None:
+        """Initialize the rotating Live resource."""
+        self.live = RotatingLive(sessions)
+        self.aclose_count = 0
+
+    async def aclose(self) -> None:
+        """Record client shutdown."""
+        self.aclose_count += 1
+
+
+class RotatingClient:
+    """Fake GenAI client that exposes rotating sessions."""
+
+    def __init__(self, sessions: list[FakeSession]) -> None:
+        """Initialize the fake client."""
+        self.aio = RotatingAio(sessions)
+
+
 class FakeClock:
     """Controllable monotonic clock for provider latency tests."""
 
@@ -156,7 +211,10 @@ def deps() -> ToolDependencies:
     return ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
 
 
-def build_handler(deps: ToolDependencies, client: FakeClient | None = None) -> gemini_live.GeminiLiveHandler:
+def build_handler(
+    deps: ToolDependencies,
+    client: FakeClient | RotatingClient | None = None,
+) -> gemini_live.GeminiLiveHandler:
     """Build a handler with a fake client and deterministic voice."""
     return gemini_live.GeminiLiveHandler(deps, startup_voice="Kore", client=client)
 
@@ -193,7 +251,7 @@ def audio_event(sample: int = 1) -> types.LiveServerMessage:
 
 
 def test_build_session_config_uses_audio_transcription_voice_and_tools(gemini_config, deps) -> None:
-    """The setup uses Gemini's audio modality and maps shared tool schemas."""
+    """The setup enables managed search even without application functions."""
     handler = build_handler(deps)
 
     session_config = handler._build_session_config([])
@@ -207,11 +265,13 @@ def test_build_session_config_uses_audio_transcription_voice_and_tools(gemini_co
     assert session_config.input_audio_transcription.language_codes == ["en-US"]
     assert session_config.output_audio_transcription is not None
     assert session_config.system_instruction is not None
-    assert session_config.tools == []
+    assert session_config.tools is not None
+    assert len(session_config.tools) == 1
+    assert session_config.tools[0].google_search is not None
 
 
 def test_build_session_config_declares_nonempty_tools(gemini_config, deps) -> None:
-    """A non-empty shared tool registry becomes one Gemini declaration group."""
+    """Managed search and shared tools are sent as separate Gemini tool groups."""
     handler = build_handler(deps)
     tool_spec = {
         "type": "function",
@@ -223,9 +283,10 @@ def test_build_session_config_declares_nonempty_tools(gemini_config, deps) -> No
     session_config = handler._build_session_config([tool_spec])
 
     assert session_config.tools is not None
-    assert len(session_config.tools) == 1
-    assert session_config.tools[0].function_declarations is not None
-    assert session_config.tools[0].function_declarations[0].name == "move_head"
+    assert len(session_config.tools) == 2
+    assert session_config.tools[0].google_search is not None
+    assert session_config.tools[1].function_declarations is not None
+    assert session_config.tools[1].function_declarations[0].name == "move_head"
 
 
 def test_build_session_config_uses_initial_history_for_local_context(gemini_config, deps) -> None:
@@ -1611,6 +1672,9 @@ async def test_change_voice_closes_active_session_for_reconnect(gemini_config, d
     session = FakeSession()
     handler = build_handler(deps)
     activate_session(handler, session)
+    handler.output_queue.put_nowait((24_000, np.array([1], dtype=np.int16)))
+    clear_queue = MagicMock()
+    handler._clear_queue = clear_queue
 
     result = await handler.change_voice("Fenrir")
 
@@ -1618,6 +1682,134 @@ async def test_change_voice_closes_active_session_for_reconnect(gemini_config, d
     assert handler.get_current_voice() == "Fenrir"
     assert session.closed
     assert handler.connection is None
+    assert handler.output_queue.empty()
+    clear_queue.assert_called_once_with()
+    deps.movement_manager.set_speaking.assert_called_with(False)
+
+
+@pytest.mark.asyncio
+async def test_change_voice_reconnects_without_ending_live_handler(gemini_config, deps) -> None:
+    """Changing voice keeps the provider task alive while a fresh session connects."""
+    first_session = FakeSession()
+    second_session = FakeSession()
+    client = RotatingClient([first_session, second_session])
+    handler = build_handler(deps, client)
+    connection_states: list[bool] = []
+    first_connected = asyncio.Event()
+    second_connected = asyncio.Event()
+
+    def observe_connection(connected: bool) -> None:
+        connection_states.append(connected)
+        if connected and not first_connected.is_set():
+            first_connected.set()
+        elif connected:
+            second_connected.set()
+
+    handler.set_connection_observer(observe_connection)
+    startup = asyncio.create_task(handler.start_up())
+
+    await asyncio.wait_for(client.aio.live.entered[0].wait(), timeout=1.0)
+    await asyncio.wait_for(first_connected.wait(), timeout=1.0)
+    result = await handler.change_voice("Fenrir")
+    await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+    await asyncio.wait_for(second_connected.wait(), timeout=1.0)
+
+    assert result == "Voice changed to Fenrir. Reconnecting Gemini Live session."
+    assert not startup.done()
+    assert connection_states[:3] == [True, False, True]
+    assert client.aio.live.configs[1].speech_config.voice_config.prebuilt_voice_config.voice_name == "Fenrir"
+
+    await handler.shutdown()
+    await asyncio.wait_for(startup, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_change_voice_during_initial_context_seed_rotates_after_seed_unblocks(gemini_config, deps) -> None:
+    """A voice change during context seeding rotates instead of cancelling startup."""
+    first_session = FakeSession()
+    second_session = FakeSession()
+    client = RotatingClient([first_session, second_session])
+    handler = build_handler(deps, client)
+    handler.set_initial_context("private context")
+    seed_started = asyncio.Event()
+    release_seed = asyncio.Event()
+
+    async def block_first_seed(**_kwargs: object) -> None:
+        seed_started.set()
+        await release_seed.wait()
+
+    first_session.send_client_content = block_first_seed
+    startup = asyncio.create_task(handler.start_up())
+
+    await asyncio.wait_for(seed_started.wait(), timeout=1.0)
+    result = await handler.change_voice("Fenrir")
+    release_seed.set()
+    await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+
+    assert result == "Voice changed to Fenrir. Reconnecting Gemini Live session."
+    assert not startup.done()
+    assert client.aio.live.configs[1].speech_config.voice_config.prebuilt_voice_config.voice_name == "Fenrir"
+
+    await handler.shutdown()
+    await asyncio.wait_for(startup, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_change_voice_during_connect_is_applied_to_next_session(gemini_config, deps) -> None:
+    """A voice change before setup assigns a session is retained for the replacement."""
+    first_session = FakeSession()
+    second_session = FakeSession()
+    client = RotatingClient([first_session, second_session])
+    client.aio.live.enter_gates[0].clear()
+    handler = build_handler(deps, client)
+    startup = asyncio.create_task(handler.start_up())
+
+    await asyncio.wait_for(client.aio.live.entered[0].wait(), timeout=1.0)
+    result = await handler.change_voice("Fenrir")
+    client.aio.live.enter_gates[0].set()
+    await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+
+    assert result == "Voice changed to Fenrir. Reconnecting Gemini Live session."
+    assert not startup.done()
+    assert client.aio.live.configs[1].speech_config.voice_config.prebuilt_voice_config.voice_name == "Fenrir"
+
+    await handler.shutdown()
+    await asyncio.wait_for(startup, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_hybrid_voice_change_reconnects_without_provider_failure(gemini_config, deps) -> None:
+    """Hybrid mode stays cloud-active across the controlled voice reconnect."""
+    first_session = FakeSession()
+    second_session = FakeSession()
+    client = RotatingClient([first_session, second_session])
+    handler = build_handler(deps, client)
+    transitions: list[tuple[RuntimeMode, str, int]] = []
+    runtime = HybridRuntime(
+        lambda: handler, state_observer=lambda mode, reason, generation: transitions.append((mode, reason, generation))
+    )
+
+    assert await runtime.activate("keyboard")
+    await asyncio.wait_for(client.aio.live.entered[0].wait(), timeout=1.0)
+    for _ in range(100):
+        if runtime.status.connected:
+            break
+        await asyncio.sleep(0)
+    else:
+        raise AssertionError("first Gemini session did not become ready")
+    await handler.change_voice("Fenrir")
+    await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+    for _ in range(100):
+        if runtime.status.connected:
+            break
+        await asyncio.sleep(0)
+    else:
+        raise AssertionError("reconnected Gemini session did not become ready")
+
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    assert runtime.status.connected
+    assert all(reason != "provider_failed" for _, reason, _ in transitions)
+    await runtime.close()
 
 
 @pytest.mark.asyncio

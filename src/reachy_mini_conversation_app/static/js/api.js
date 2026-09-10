@@ -126,6 +126,11 @@ export async function untilReady(requestFn, signal, onRetry) {
 }
 
 export const getStatus = () => rpcCall("conversation.status");
+export async function getTranscriptPreview() {
+  const response = await fetch("/api/transcript-preview", { cache: "no-store" });
+  if (!response.ok) throw new Error(`transcript preview unavailable (${response.status})`);
+  return response.json();
+}
 
 export const listPersonalities = () => rpcCall("personalities.list");
 export const loadPersonality = (name) => rpcCall("personalities.load", { name });

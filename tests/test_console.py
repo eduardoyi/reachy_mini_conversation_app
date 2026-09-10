@@ -1,6 +1,7 @@
 """Tests for the headless console stream."""
 
 import sys
+import time
 import asyncio
 import logging
 import threading
@@ -23,7 +24,7 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
-from reachy_mini_conversation_app.console import LocalStream, _AudioCaptureWorker
+from reachy_mini_conversation_app.console import LOCAL_TRANSCRIPT_PREVIEW_PATH, LocalStream, _AudioCaptureWorker
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.hybrid_runtime import (
     RuntimeMode,
@@ -31,6 +32,12 @@ from reachy_mini_conversation_app.hybrid_runtime import (
     LocalCommandOutcome,
     RuntimeStatusSnapshot,
     TrafficMetricsSnapshot,
+)
+from reachy_mini_conversation_app.ambient_context import (
+    TranscriptSegment,
+    AmbientContextConfig,
+    AmbientContextStrategy,
+    AmbientContextProcessor,
 )
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
@@ -51,6 +58,12 @@ def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
             response = ws.receive_json()
             if response.get("id") == "1":
                 return response
+
+
+def _transcript_preview_get(app: FastAPI, client_host: str = "127.0.0.1") -> Any:
+    """GET the local-only preview endpoint from a chosen client address."""
+    with TestClient(app, client=(client_host, 50000)) as client:
+        return client.get(LOCAL_TRANSCRIPT_PREVIEW_PATH)
 
 
 async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
@@ -2161,6 +2174,157 @@ def test_rpc_status_and_mic_over_websocket() -> None:
         resp = ws.receive_json()
         assert resp["result"] == {"muted": True}
     assert stream._mic_muted is True
+
+
+def test_transcript_preview_is_not_exposed_over_shared_rpc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local preview cannot be relayed through the shared WebRTC RPC surface."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", True)
+    runtime = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    result = _rpc_call(app, "conversation.transcript_preview")
+
+    assert "error" in result
+    runtime.get_transcript_preview.assert_not_called()
+
+
+def test_transcript_preview_http_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disabled preview requests return no text and do not touch the runtime."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", False)
+    runtime = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    response = _transcript_preview_get(app)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"enabled": False, "available": False, "text": ""}
+    runtime.get_transcript_preview.assert_not_called()
+
+
+def test_transcript_preview_http_reports_unavailable_without_processor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt-in preview remains safe when hybrid local STT was not configured."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", True)
+    runtime = HybridRuntime(lambda: MagicMock())
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    response = _transcript_preview_get(app)
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": True, "available": False, "text": ""}
+
+
+def test_transcript_preview_http_denies_non_loopback_without_runtime_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote clients receive an empty 403 before preview retrieval is scheduled."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", True)
+    runtime = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._init_settings_ui_if_needed()
+
+    response = _transcript_preview_get(app, client_host="192.0.2.10")
+
+    assert response.status_code == 403
+    assert response.content == b""
+    assert response.headers["cache-control"] == "no-store"
+    runtime.get_transcript_preview.assert_not_called()
+
+
+def test_transcript_preview_http_reads_bounded_text_on_owner_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled preview reads the existing bounded transcript on LocalStream's loop."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", True)
+    target_loop = asyncio.new_event_loop()
+    thread, _ = _run_loop_in_thread(target_loop)
+    processor = AmbientContextProcessor(
+        vad=MagicMock(),
+        stt=MagicMock(),
+        config=AmbientContextConfig(
+            strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT,
+            max_transcript_chars=8,
+        ),
+    )
+    sentinel = "diagnostic transcript"
+    now = time.monotonic()
+    runtime = HybridRuntime(lambda: MagicMock(), context_processor=processor)
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._asyncio_loop = target_loop
+    stream._init_settings_ui_if_needed()
+
+    try:
+        for loopback_host in ("127.0.0.1", "127.255.255.254", "::1"):
+            empty_response = _transcript_preview_get(app, client_host=loopback_host)
+            assert empty_response.status_code == 200
+            assert empty_response.headers["cache-control"] == "no-store"
+            assert empty_response.json() == {"enabled": True, "available": True, "text": ""}
+
+        processor.transcript.add(TranscriptSegment(sentinel, now - 1.0, now, 1))
+        response = _transcript_preview_get(app)
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"enabled": True, "available": True, "text": "anscript"}
+        assert runtime._owner_loop is target_loop
+        status = _rpc_call(app, "conversation.status")["result"]
+        assert sentinel not in repr(status)
+        assert "transcript_preview" not in repr(status)
+
+        processor_close_future = asyncio.run_coroutine_threadsafe(processor.close(), target_loop)
+        processor_close_future.result(timeout=2.0)
+        closed_response = _transcript_preview_get(app)
+        assert closed_response.status_code == 200
+        assert closed_response.headers["cache-control"] == "no-store"
+        assert closed_response.json() == {"enabled": True, "available": False, "text": ""}
+        assert sentinel not in closed_response.text
+    finally:
+        close_future = asyncio.run_coroutine_threadsafe(runtime.close(), target_loop)
+        close_future.result(timeout=2.0)
+        processor_close_future = asyncio.run_coroutine_threadsafe(processor.close(), target_loop)
+        processor_close_future.result(timeout=2.0)
+        target_loop.call_soon_threadsafe(target_loop.stop)
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+
+def test_transcript_preview_http_runtime_error_is_safe_and_payload_free(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A preview read failure returns unavailable without logging transcript content."""
+    monkeypatch.setattr(config, "LOCAL_TRANSCRIPT_PREVIEW_ENABLED", True)
+    target_loop = asyncio.new_event_loop()
+    thread, _ = _run_loop_in_thread(target_loop)
+    runtime = HybridRuntime(lambda: MagicMock())
+
+    async def fail_preview() -> str | None:
+        raise RuntimeError("preview-sensitive transcript")
+
+    setattr(runtime, "get_transcript_preview", fail_preview)
+    app = FastAPI()
+    stream = LocalStream(runtime, _rpc_robot(), settings_app=app, hybrid_runtime=runtime)
+    stream._asyncio_loop = target_loop
+    stream._init_settings_ui_if_needed()
+
+    try:
+        with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+            response = _transcript_preview_get(app)
+
+        assert response.status_code == 200
+        assert response.json() == {"enabled": True, "available": False, "text": ""}
+        assert "preview-sensitive transcript" not in caplog.text
+    finally:
+        close_future = asyncio.run_coroutine_threadsafe(runtime.close(), target_loop)
+        close_future.result(timeout=2.0)
+        target_loop.call_soon_threadsafe(target_loop.stop)
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
 
 
 def test_hybrid_status_exposes_postactivation_drop_diagnostic() -> None:

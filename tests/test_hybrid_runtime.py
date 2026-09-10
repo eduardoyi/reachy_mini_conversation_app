@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 from unittest.mock import AsyncMock, MagicMock
 from collections.abc import Callable
 
@@ -20,6 +21,7 @@ from reachy_mini_conversation_app.ambient_context import (
     AmbientContextProcessor,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, HandlerOutput, ConversationHandler
 
@@ -182,6 +184,66 @@ def frame(value: int, *, sample_rate: int = 16_000) -> AudioFrame:
     return sample_rate, np.array([value], dtype=np.int16)
 
 
+@pytest.mark.asyncio
+async def test_transcript_preview_becomes_unavailable_after_processor_close() -> None:
+    """Independent processor shutdown clears preview text before runtime shutdown."""
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(
+            strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT,
+            transcript_window_seconds=10.0,
+            max_transcript_chars=14,
+        ),
+    )
+    processor.transcript.add(TranscriptSegment("old context", 0.0, 1.0, 1))
+    processor.transcript.add(TranscriptSegment("newest context", 2.0, 3.0, 2))
+    runtime = HybridRuntime(lambda: FakeHandler(), context_processor=processor, clock=lambda: 3.0)
+
+    assert await runtime.get_transcript_preview() == "newest context"
+
+    await processor.close()
+    assert processor.transcript.segments == ()
+    assert processor.transcript.text(now=3.0) == ""
+    assert processor.get_transcript_preview(now=3.0) is None
+    assert await runtime.get_transcript_preview() is None
+
+    await runtime.close()
+    assert await runtime.get_transcript_preview() is None
+
+
+@pytest.mark.asyncio
+async def test_transcript_preview_returns_empty_for_empty_continuous_context() -> None:
+    """An enabled continuous processor with no final segments has empty text."""
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+    )
+    runtime = HybridRuntime(lambda: FakeHandler(), context_processor=processor)
+
+    assert await runtime.get_transcript_preview() == ""
+
+    await runtime.close()
+    await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_transcript_preview_is_unavailable_for_activation_buffer_strategy() -> None:
+    """Strategy B does not retain a rolling transcript for diagnostic preview."""
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.ACTIVATION_BUFFER),
+    )
+    runtime = HybridRuntime(lambda: FakeHandler(), context_processor=processor)
+
+    assert await runtime.get_transcript_preview() is None
+
+    await runtime.close()
+    await processor.close()
+
+
 class SilentVAD:
     """Mark every integration-test frame as silence."""
 
@@ -206,6 +268,39 @@ class RecordingSTT:
         if self.events is not None:
             self.events.append("stt")
         return self.text
+
+
+class ScriptedVAD:
+    """Return a fixed speech/silence sequence for processor-backed wake tests."""
+
+    def __init__(self, labels: list[bool]) -> None:
+        """Initialize the local speech boundary script."""
+        self.labels = labels
+
+    def is_speech(self, frame: AudioFrame) -> bool:
+        """Return the next scripted local VAD result."""
+        del frame
+        return self.labels.pop(0)
+
+
+class DeferredFinalSTT:
+    """Complete the wake immediately and defer the next local final until released."""
+
+    def __init__(self) -> None:
+        """Initialize per-segment start events and the deferred-final release."""
+        self.started: list[asyncio.Event] = []
+        self.release_followup = asyncio.Event()
+
+    async def transcribe(self, audio: AudioFrame) -> str:
+        """Return a wake, then hold the follow-up final at the local STT boundary."""
+        del audio
+        started = asyncio.Event()
+        self.started.append(started)
+        started.set()
+        if len(self.started) == 1:
+            return "Reachy"
+        await self.release_followup.wait()
+        return "stop"
 
 
 @pytest.mark.asyncio
@@ -325,6 +420,227 @@ async def test_strategy_a_injects_completed_dinner_context_without_replaying_aud
     assert runtime.status.local_context_strategy == "continuous_transcript"
     assert runtime.status.local_audio_seconds_observed == pytest.approx(0.1)
     await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_strategy_a_excludes_current_wake_question_from_seeded_context() -> None:
+    """A live wake question is sent once as the addressed turn, not as background history."""
+    clock = FakeClock()
+    clock.value = 4.0
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+        clock=clock,
+    )
+    assert processor.transcript.add(TranscriptSegment("Earlier dinner context.", 1, 2, 1))
+    assert processor.transcript.add(TranscriptSegment("Reachy, what do you think?", 3, 4, 2))
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        clock=clock,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, what do you think?", 3, 4, 2))
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+    assert handler.get_initial_context() == "Earlier dinner context."
+    assert handler.say_texts == ["what do you think?"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_strategy_a_excludes_split_wake_and_followup_from_seeded_context() -> None:
+    """Split-final handoff keeps prior context while omitting both current segments."""
+    clock = FakeClock()
+    clock.value = 6.0
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+        clock=clock,
+    )
+    assert processor.transcript.add(TranscriptSegment("Earlier dinner context.", 1, 2, 1))
+    assert processor.transcript.add(TranscriptSegment("Reachy", 3, 4, 2))
+    assert processor.transcript.add(TranscriptSegment("What do you think?", 5, 6, 3))
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        wake_followup_timeout_s=0.2,
+        clock=clock,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 3, 4, 2))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    runtime.observe_local_transcript(TranscriptSegment("What do you think?", 5, 6, 3))
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+    assert handler.get_initial_context() == "Earlier dinner context."
+    assert handler.say_texts == ["What do you think?"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_followup_ignores_stale_final_segment() -> None:
+    """A final segment from before the wake cannot become its follow-up command."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.01,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 2, 3, 2))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+    runtime.observe_local_transcript(TranscriptSegment("stop", 1, 2, 1))
+    await asyncio.wait_for(handler.started.wait(), timeout=1.0)
+
+    assert runtime.status.local_commands_executed == 0
+    assert handler.say_texts == []
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_split_followup_allows_local_stt_finalization_delay_without_cloud_audio() -> None:
+    """A delayed next final still reaches the exact local route without uploading ambient PCM."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20, sample_rate=16_000),
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.05,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    await runtime.handle_frame((16_000, np.array([123], dtype=np.int16)), capture_sequence=1)
+    runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 2))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+
+    await asyncio.sleep(0.01)
+    runtime.observe_local_transcript(TranscriptSegment("stop", 3, 4, 3))
+    await wait_until(lambda: runtime.status.local_commands_executed > 0 or handler.started.is_set(), attempts=500)
+
+    assert runtime.status.local_commands_executed == 1
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    assert handler.shutdown_calls == 0
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_processor_backed_split_followup_waits_for_deferred_local_final() -> None:
+    """A deferred local STT final can arrive within the five-second waiter without cloud."""
+    handler_factory = MagicMock(side_effect=AssertionError("cloud must remain closed"))
+    stt = DeferredFinalSTT()
+    processor = AmbientContextProcessor(
+        vad=ScriptedVAD([True, False, True, False]),
+        stt=stt,
+        config=AmbientContextConfig(
+            strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT,
+            min_speech_seconds=0.0,
+            min_silence_seconds=0.0,
+            vad_timeout_seconds=0.2,
+            stt_timeout_seconds=1.0,
+        ),
+    )
+    runtime = HybridRuntime(
+        handler_factory,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20, sample_rate=16_000),
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+    )
+    processor.set_transcript_observer(runtime.observe_local_transcript)
+
+    try:
+        await runtime.handle_frame(frame(1))
+        await runtime.handle_frame(frame(2))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+
+        await runtime.handle_frame(frame(3))
+        await runtime.handle_frame(frame(4))
+        await wait_until(lambda: len(stt.started) >= 2)
+        await stt.started[1].wait()
+        assert runtime.status.local_commands_executed == 0
+        assert handler_factory.call_count == 0
+
+        stt.release_followup.set()
+        await wait_until(lambda: runtime.status.local_commands_executed == 1)
+
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+        handler_factory.assert_not_called()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_processor_backed_split_followup_after_deadline_is_not_local_command() -> None:
+    """A local final completing after the waiter deadline cannot execute a command."""
+    handler = FakeHandler()
+    stt = DeferredFinalSTT()
+    processor = AmbientContextProcessor(
+        vad=ScriptedVAD([True, False, True, False]),
+        stt=stt,
+        config=AmbientContextConfig(
+            strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT,
+            min_speech_seconds=0.0,
+            min_silence_seconds=0.0,
+            vad_timeout_seconds=0.2,
+            stt_timeout_seconds=1.0,
+        ),
+    )
+    runtime = HybridRuntime(
+        lambda: handler,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=20, sample_rate=16_000),
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
+        wake_followup_timeout_s=0.01,
+    )
+    processor.set_transcript_observer(runtime.observe_local_transcript)
+
+    try:
+        await runtime.handle_frame(frame(1))
+        await runtime.handle_frame(frame(2))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+
+        await runtime.handle_frame(frame(3))
+        await runtime.handle_frame(frame(4))
+        await wait_until(lambda: len(stt.started) >= 2)
+        await stt.started[1].wait()
+        await handler.started.wait()
+
+        stt.release_followup.set()
+        await processor.drain()
+        await asyncio.sleep(0)
+
+        assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+        assert runtime.status.local_commands_executed == 0
+        assert handler.say_texts == []
+        assert runtime.status.local_command_followup_timeouts == 1
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.asyncio
@@ -553,7 +869,7 @@ async def test_split_wake_followup_cancellation_releases_waiter() -> None:
         wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
         intent_router=LocalIntentRouter(),
         action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
-        wake_followup_timeout_s=30,
+        wake_followup_timeout_s=15,
     )
 
     runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
@@ -579,7 +895,7 @@ async def test_split_wake_followup_close_before_activation_starts_releases_waite
         wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
         intent_router=LocalIntentRouter(),
         action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())),
-        wake_followup_timeout_s=30,
+        wake_followup_timeout_s=15,
     )
 
     runtime.observe_local_transcript(TranscriptSegment("Reachy", 1, 2, 1))
@@ -691,8 +1007,8 @@ async def test_split_wake_followup_late_segment_after_timeout_is_not_reused() ->
     await runtime.close()
 
 
-@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
-def test_wake_followup_timeout_must_be_finite_and_positive(timeout: float) -> None:
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf"), 15.1])
+def test_wake_followup_timeout_must_be_finite_positive_and_bounded(timeout: float) -> None:
     """Wake follow-up waits cannot be disabled or made unbounded accidentally."""
     with pytest.raises(ValueError, match="Wake follow-up timeout"):
         HybridRuntime(lambda: FakeHandler(), wake_followup_timeout_s=timeout)
@@ -1584,3 +1900,137 @@ def test_invalid_transition_is_rejected_and_logs_metadata_only(caplog: pytest.Lo
     assert "LOCAL_AMBIENT" in caplog.text
     assert "LOCAL_COMMAND" in caplog.text
     assert "CLOUD_CONVERSATION" not in caplog.text
+
+
+class AcousticScoreModel:
+    """Recognize one synthetic marker without accessing a model or microphone."""
+
+    def __init__(self) -> None:
+        """Initialize observed inference counts."""
+        self.resets = 0
+        self.frames = 0
+
+    def reset(self) -> None:
+        """Count each new listening stream."""
+        self.resets += 1
+
+    def predict(self, audio):
+        """Score the test marker."""
+        self.frames += 1
+        return {"reachy": float(np.max(audio) == 222)}
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_uses_existing_barrier_and_returns_to_listening() -> None:
+    """Acoustic activation keeps captured wake audio local and rearms after timeout."""
+    model = AcousticScoreModel()
+    detector = OpenWakeWordDetector(model)
+    handlers = []
+
+    def factory():
+        handler = FakeHandler()
+        handlers.append(handler)
+        return handler
+
+    clock = FakeClock()
+    acknowledgements = []
+    runtime = HybridRuntime(
+        factory,
+        acoustic_wake_detector=detector,
+        clock=clock,
+        inactivity_timeout_s=5,
+        acknowledgement_callback=acknowledgements.append,
+    )
+    runtime.set_capture_barrier_provider(lambda: 2)
+    await runtime.handle_frame((16000, np.zeros(1280, dtype=np.int16)), capture_sequence=1)
+    assert not handlers
+    await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+    await handlers[0].started.wait()
+    handlers[0].set_connected(True)
+    assert acknowledgements == ["acoustic_wake"]
+    assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
+    assert not handlers[0].receive_frames
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    await runtime.handle_frame(frame(333), capture_sequence=3)
+    assert handlers[0].receive_frames[0][1].tolist() == [333]
+    assert model.frames == 2
+    clock.advance(5)
+    assert await runtime.check_inactivity()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=4)
+    assert len(handlers) == 2 and model.resets == 2
+    assert runtime.status_snapshot().acoustic_wake_enabled
+    assert runtime.status_snapshot().wake_detections == 2
+    await runtime.close()
+    await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)))
+    assert len(handlers) == 2
+
+
+@pytest.mark.asyncio
+async def test_acoustic_failure_keeps_manual_activation_available(caplog) -> None:
+    """Inference failure disables acoustic wake without disabling manual activation."""
+    detector = OpenWakeWordDetector(AcousticScoreModel())
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, acoustic_wake_detector=detector)
+    with caplog.at_level(logging.WARNING):
+        await runtime.handle_frame((0, np.zeros(1280, dtype=np.int16)))
+    assert not runtime.status_snapshot().acoustic_wake_enabled
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert "manual activation remains available" in caplog.text
+    assert await runtime.activate()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_result_after_manual_activation_cannot_start_another_session() -> None:
+    """A result from an old ambient epoch cannot duplicate manual activation."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowModel(AcousticScoreModel):
+        def predict(self, audio):
+            entered.set()
+            assert release.wait(2)
+            return {"reachy": 1.0}
+
+    factory = MagicMock(side_effect=lambda: FakeHandler())
+    runtime = HybridRuntime(factory, acoustic_wake_detector=OpenWakeWordDetector(SlowModel()))
+    pending = asyncio.create_task(runtime.handle_frame((16000, np.zeros(1280, dtype=np.int16))))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        assert await runtime.activate()
+        assert await runtime.deactivate_cloud()
+        release.set()
+        await pending
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert factory.call_count == 1
+    finally:
+        release.set()
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_close_discards_late_acoustic_detection() -> None:
+    """Closing never waits indefinitely for inference or acts on its late result."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowModel(AcousticScoreModel):
+        def predict(self, audio):
+            entered.set()
+            assert release.wait(2)
+            return {"reachy": 1.0}
+
+    factory = MagicMock()
+    runtime = HybridRuntime(factory, acoustic_wake_detector=OpenWakeWordDetector(SlowModel()))
+    pending = asyncio.create_task(runtime.handle_frame((16000, np.zeros(1280, dtype=np.int16))))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        await asyncio.wait_for(runtime.close(), 1)
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        assert runtime.status_snapshot().closed
+        factory.assert_not_called()
+    finally:
+        release.set()
+        await runtime.close()

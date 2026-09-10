@@ -19,7 +19,7 @@ flowchart TB
 
     Stream --> Hybrid@{ label: "<span style='font-size:16px;font-weight:bold;'>HybridRuntime</span><br><span style='font-size:12px;color:#0277bd;'>LOCAL_AMBIENT / LOCAL_COMMAND / CLOUD_CONVERSATION</span>" }
 
-    Hybrid -- ambient PCM stays local --> LocalAudio@{ label: "<span style='font-size:16px;font-weight:bold;'>Local Ambient Processing</span><br><span style='font-size:12px;color:#2e7d32;'>20 s RAM ring + VAD + local STT<br/>rolling transcript + Reachy wake</span>" }
+    Hybrid -- ambient PCM stays local --> LocalAudio@{ label: "<span style='font-size:16px;font-weight:bold;'>Local Ambient Processing</span><br><span style='font-size:12px;color:#2e7d32;'>20 s RAM ring + VAD + local STT<br/>transcript wake / opt-in acoustic Reachy wake</span>" }
 
     LocalAudio -- exact allowlist --> LocalActions@{ label: "<span style='font-size:16px;font-weight:bold;'>Local Intent Router</span><br><span style='font-size:12px;color:#2e7d32;'>stop / quiet / look<br/>uncertain means cloud</span>" }
 

@@ -38,7 +38,7 @@ def test_detects_case_insensitive_punctuation_and_retains_command_text() -> None
 
 @pytest.mark.parametrize(
     "transcript",
-    ["preachy", "Reachy2", "xReachy", "Reachying", "outreachy"],
+    ["reachyo", "Reachy2", "xReachy", "Reachying", "outreachy"],
 )
 def test_requires_word_boundaries(transcript: str) -> None:
     """A substring inside another word cannot activate the robot."""
@@ -63,8 +63,8 @@ def test_detects_phrase_split_across_delta_partials() -> None:
     """Short delta partials can form the wake word without cloud transcription."""
     detector = TranscriptWakeWordDetector()
 
-    assert detector.process_transcript("Re") is None
-    detection = detector.process_transcript("achy stop")
+    assert detector.process_transcript("Rea") is None
+    detection = detector.process_transcript("chy stop")
 
     assert detection is not None
     assert detection.remaining_text == "stop"
@@ -75,7 +75,7 @@ def test_detects_cumulative_partial_without_duplicate_final_event() -> None:
     """Cumulative STT updates emit once and do not repeat when finalized."""
     detector = TranscriptWakeWordDetector()
 
-    assert detector.process_transcript("Reach") is None
+    assert detector.process_transcript("Rea") is None
     detection = detector.process_transcript("Reachy look")
     final_detection = detector.process_transcript("Reachy look", is_final=True)
 
@@ -152,8 +152,8 @@ def test_reset_clears_cooldown_and_partial_state_but_preserves_metrics() -> None
     clock = FakeClock()
     detector = TranscriptWakeWordDetector(cooldown_seconds=10, clock=clock)
 
-    assert detector.process_transcript("Re") is None
-    assert detector.process_transcript("achy", is_final=True) is not None
+    assert detector.process_transcript("Rea") is None
+    assert detector.process_transcript("chy", is_final=True) is not None
     detector.reset()
 
     assert detector.process_transcript("Reachy", is_final=True) is not None
@@ -223,6 +223,21 @@ def test_invalid_configuration_is_rejected() -> None:
         TranscriptWakeWordDetector(wake_word="...")
     with pytest.raises(ValueError):
         TranscriptWakeWordDetector(cooldown_seconds=-1)
+
+
+def test_default_does_not_accept_historical_tito_transcript() -> None:
+    """The written Reachy default does not add a fuzzy or legacy transcript alias."""
+    detector = TranscriptWakeWordDetector()
+
+    assert detector.process_transcript("Tito", is_final=True) is None
+
+
+def test_explicit_historical_tito_override_remains_supported() -> None:
+    """A caller can intentionally retain the historical Tito configuration."""
+    detector = TranscriptWakeWordDetector(wake_word=" Tito ")
+
+    assert detector.wake_word == "tito"
+    assert detector.process_transcript("Tito", is_final=True) is not None
 
 
 def test_metrics_can_be_cleared_independently_of_detector_state() -> None:

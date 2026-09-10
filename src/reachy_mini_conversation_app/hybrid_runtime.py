@@ -13,10 +13,18 @@ from collections import deque
 from dataclasses import dataclass
 from collections.abc import Callable, Awaitable
 
+from reachy_mini_conversation_app.config import (
+    MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+    DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+)
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
-from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.streaming import audio_to_mono_int16
+from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
-from reachy_mini_conversation_app.ambient_context import TranscriptSegment, AmbientContextProcessor
+from reachy_mini_conversation_app.ambient_context import (
+    TranscriptSegment,
+    AmbientContextProcessor,
+)
 from reachy_mini_conversation_app.local_processing import (
     LocalProcessingBackend,
     NullLocalProcessingBackend,
@@ -59,7 +67,7 @@ StateObserver: TypeAlias = Callable[[RuntimeMode, str, int], None]
 CaptureBarrierProvider: TypeAlias = Callable[[], int | None]
 Clock: TypeAlias = Callable[[], float]
 PostActivationFrame: TypeAlias = tuple[int | None, AudioFrame]
-LocalProcessingItem: TypeAlias = tuple[AudioFrame, asyncio.Future[None]]
+LocalProcessingItem: TypeAlias = tuple[AudioFrame, asyncio.Future[None], int]
 LocalProcessingCloseCallback: TypeAlias = Callable[[], CallbackResult]
 
 
@@ -93,6 +101,7 @@ class RuntimeStatusSnapshot:
     postactivation_frames_dropped: int = 0
     local_context_chars: int = 0
     transcript_segments_accepted: int = 0
+    acoustic_wake_enabled: bool = False
     wake_detections: int = 0
     wake_cooldown_suppressed: int = 0
     wake_final_update_count: int = 0
@@ -150,6 +159,7 @@ class RuntimeStatusSnapshot:
             "postactivation_frames_dropped": self.postactivation_frames_dropped,
             "local_context_chars": self.local_context_chars,
             "transcript_segments_accepted": self.transcript_segments_accepted,
+            "acoustic_wake_enabled": self.acoustic_wake_enabled,
             "wake_detections": self.wake_detections,
             "wake_cooldown_suppressed": self.wake_cooldown_suppressed,
             "wake_final_update_count": self.wake_final_update_count,
@@ -220,21 +230,29 @@ class HybridRuntime:
         local_processor: LocalProcessingBackend | None = None,
         context_processor: AmbientContextProcessor | None = None,
         wake_detector: TranscriptWakeWordDetector | None = None,
+        acoustic_wake_detector: AcousticWakeWordDetector | None = None,
         intent_router: LocalIntentRouter | None = None,
         action_executor: LocalActionExecutor | None = None,
         local_processing_close_callback: LocalProcessingCloseCallback | None = None,
         acknowledgement_callback: AcknowledgementCallback | None = None,
         state_observer: StateObserver | None = None,
         inactivity_timeout_s: float = 0.0,
-        wake_followup_timeout_s: float = 2.0,
+        wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         clock: Clock = time.monotonic,
         monitor_interval_s: float = 0.1,
     ) -> None:
         """Initialize an idle runtime without constructing a provider handler."""
         if inactivity_timeout_s < 0:
             raise ValueError("Inactivity timeout must not be negative")
-        if wake_followup_timeout_s <= 0 or not math.isfinite(wake_followup_timeout_s):
-            raise ValueError("Wake follow-up timeout must be finite and positive")
+        if (
+            wake_followup_timeout_s <= 0
+            or not math.isfinite(wake_followup_timeout_s)
+            or wake_followup_timeout_s > MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
+        ):
+            raise ValueError(
+                "Wake follow-up timeout must be finite, positive, and no greater than "
+                f"{MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS:g} seconds"
+            )
         if monitor_interval_s <= 0:
             raise ValueError("Inactivity monitor interval must be positive")
 
@@ -242,7 +260,12 @@ class HybridRuntime:
         self._ambient_buffer = ambient_buffer if ambient_buffer is not None else AmbientAudioBuffer()
         self._local_processor = local_processor if local_processor is not None else NullLocalProcessingBackend()
         self._context_processor = context_processor
+        if wake_detector is not None and acoustic_wake_detector is not None:
+            raise ValueError("Select one wake detector for the supervised trial")
         self._wake_detector = wake_detector
+        self._acoustic_wake_detector = acoustic_wake_detector
+        self._acoustic_epoch = 0
+        self._acoustic_stream_epoch: int | None = None
         self._intent_router = intent_router
         self._action_executor = action_executor
         self._local_processing_close_callback = local_processing_close_callback
@@ -265,7 +288,8 @@ class HybridRuntime:
         self._provider_task: asyncio.Task[None] | None = None
         self._inactivity_task: asyncio.Task[None] | None = None
         self._activation_task: asyncio.Task[bool] | None = None
-        self._wake_followup_future: asyncio.Future[str] | None = None
+        self._wake_followup_future: asyncio.Future[TranscriptSegment] | None = None
+        self._wake_followup_after_sequence: int | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
         self._last_conversation_activity = self._clock()
@@ -335,6 +359,17 @@ class HybridRuntime:
         """Return the configured cloud inactivity threshold."""
         return self._inactivity_timeout_s
 
+    async def get_transcript_preview(self) -> str | None:
+        """Return the bounded local transcript, or ``None`` when unavailable."""
+        self._assert_owner_loop()
+        with self._lifecycle_lock:
+            if self._closed:
+                return None
+        processor = self._context_processor
+        if processor is None:
+            return None
+        return processor.get_transcript_preview(now=self._clock())
+
     @property
     def status(self) -> RuntimeStatusSnapshot:
         """Return an immutable runtime status snapshot."""
@@ -364,6 +399,8 @@ class HybridRuntime:
             postactivation_frames_dropped = self._postactivation_frames_dropped
         metrics = self.metrics_snapshot()
         wake_metrics = self._wake_detector.metrics_snapshot() if self._wake_detector is not None else None
+        if self._acoustic_wake_detector is not None:
+            wake_metrics = self._acoustic_wake_detector.metrics_snapshot()
         context_metrics = self._context_processor.metrics if self._context_processor is not None else None
         with self._metrics_lock:
             local_context_chars = self._local_context_chars
@@ -397,6 +434,7 @@ class HybridRuntime:
             transcript_segments_accepted=(
                 context_metrics.transcript_segments_accepted if context_metrics is not None else 0
             ),
+            acoustic_wake_enabled=self._acoustic_wake_detector is not None,
             wake_detections=wake_metrics.detection_count if wake_metrics is not None else 0,
             wake_cooldown_suppressed=wake_metrics.cooldown_suppressed_count if wake_metrics is not None else 0,
             wake_final_update_count=wake_metrics.final_update_count if wake_metrics is not None else 0,
@@ -546,6 +584,7 @@ class HybridRuntime:
             if new_mode not in self._VALID_TRANSITIONS[old_mode]:
                 raise ValueError(f"Invalid runtime transition: {old_mode.value} -> {new_mode.value}")
             self._mode = new_mode
+            self._acoustic_epoch += 1
             generation = self._generation
             self._output_wakeup_event.set()
         logger.info(
@@ -562,7 +601,13 @@ class HybridRuntime:
             except Exception as error:
                 logger.warning("Runtime state observer failed: %s", type(error).__name__)
 
-    async def activate(self, reason: str = "keyboard", *, addressed_text: str = "") -> bool:
+    async def activate(
+        self,
+        reason: str = "keyboard",
+        *,
+        addressed_text: str = "",
+        wake_sequence: int | None = None,
+    ) -> bool:
         """Acknowledge locally, then create and start one cloud generation."""
         self._assert_owner_loop()
         addressed_text = addressed_text.strip()[: self._MAX_ADDRESSED_TEXT_CHARS]
@@ -575,7 +620,12 @@ class HybridRuntime:
 
         if activation_task is None or activation_task.done():
             activation_task = asyncio.create_task(
-                self._run_activation(reason, addressed_text=addressed_text), name="hybrid-activation"
+                self._run_activation(
+                    reason,
+                    addressed_text=addressed_text,
+                    wake_sequence=wake_sequence,
+                ),
+                name="hybrid-activation",
             )
             with self._lifecycle_lock:
                 self._activation_task = activation_task
@@ -597,8 +647,19 @@ class HybridRuntime:
                 and not followup.done()
                 and not self._closed
                 and mode is not RuntimeMode.CLOUD_CONVERSATION
+                and (
+                    self._wake_followup_after_sequence is None or segment.sequence > self._wake_followup_after_sequence
+                )
             ):
-                followup.set_result(segment.text[: self._MAX_ADDRESSED_TEXT_CHARS])
+                followup.set_result(
+                    TranscriptSegment(
+                        text=segment.text[: self._MAX_ADDRESSED_TEXT_CHARS],
+                        started_at=segment.started_at,
+                        ended_at=segment.ended_at,
+                        sequence=segment.sequence,
+                        final=segment.final,
+                    )
+                )
                 return
             if detector is None or self._closed or mode is not RuntimeMode.LOCAL_AMBIENT:
                 return
@@ -615,7 +676,7 @@ class HybridRuntime:
         if detection is None:
             return
         detector.consume_detection()
-        followup_waiter: asyncio.Future[str] | None = None
+        followup_waiter: asyncio.Future[TranscriptSegment] | None = None
         if not detection.remaining_text:
             try:
                 followup_waiter = asyncio.get_running_loop().create_future()
@@ -626,9 +687,14 @@ class HybridRuntime:
                 if self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
                     return
                 self._wake_followup_future = followup_waiter
+                self._wake_followup_after_sequence = segment.sequence
         try:
             task = asyncio.create_task(
-                self.activate("wake_word", addressed_text=detection.remaining_text),
+                self.activate(
+                    "wake_word",
+                    addressed_text=detection.remaining_text,
+                    wake_sequence=segment.sequence,
+                ),
                 name="hybrid-wake-activation",
             )
         except RuntimeError:
@@ -639,26 +705,28 @@ class HybridRuntime:
         self._local_event_tasks.add(task)
         task.add_done_callback(self._local_event_tasks.discard)
 
-    def _clear_wake_followup_waiter(self, waiter: asyncio.Future[str] | None = None) -> None:
+    def _clear_wake_followup_waiter(self, waiter: asyncio.Future[TranscriptSegment] | None = None) -> None:
         """Release the pending one-shot wake follow-up without retaining text."""
         with self._lifecycle_lock:
             current = self._wake_followup_future
             if current is None or (waiter is not None and current is not waiter):
                 return
             self._wake_followup_future = None
+            self._wake_followup_after_sequence = None
             if not current.done():
                 current.cancel()
 
-    async def _wait_for_wake_followup(self) -> str | None:
+    async def _wait_for_wake_followup(self) -> tuple[TranscriptSegment | None, int | None]:
         """Wait briefly for one final transcript after a wake-only segment."""
         with self._lifecycle_lock:
             waiter = self._wake_followup_future
+            wake_sequence = self._wake_followup_after_sequence
         if waiter is None:
-            return None
+            return None, wake_sequence
         try:
-            return await asyncio.wait_for(asyncio.shield(waiter), timeout=self._wake_followup_timeout_s)
+            return await asyncio.wait_for(asyncio.shield(waiter), timeout=self._wake_followup_timeout_s), wake_sequence
         except asyncio.TimeoutError:
-            return None
+            return None, wake_sequence
         finally:
             self._clear_wake_followup_waiter(waiter)
 
@@ -679,7 +747,13 @@ class HybridRuntime:
         """Close local processing and any active cloud generation."""
         await self.close()
 
-    async def _run_activation(self, reason: str, *, addressed_text: str) -> bool:
+    async def _run_activation(
+        self,
+        reason: str,
+        *,
+        addressed_text: str,
+        wake_sequence: int | None,
+    ) -> bool:
         handler: ConversationHandler | None = None
         generation = 0
         try:
@@ -701,9 +775,11 @@ class HybridRuntime:
                 raise asyncio.CancelledError
 
             if reason == "wake_word" and not addressed_text:
-                followup_text = await self._wait_for_wake_followup()
-                if followup_text is not None:
-                    addressed_text = followup_text
+                followup_segment, waited_wake_sequence = await self._wait_for_wake_followup()
+                if waited_wake_sequence is not None:
+                    wake_sequence = waited_wake_sequence
+                if followup_segment is not None:
+                    addressed_text = followup_segment.text[: self._MAX_ADDRESSED_TEXT_CHARS]
                 else:
                     self._record_local_command_outcome(LocalCommandOutcome.FOLLOWUP_TIMEOUT)
 
@@ -719,7 +795,7 @@ class HybridRuntime:
                         self._transition(RuntimeMode.LOCAL_AMBIENT, "local_command_completed")
                 return True
 
-            initial_context = await self._context_for_activation()
+            initial_context = await self._context_for_activation(before_sequence=wake_sequence)
 
             produced_handler = self._handler_factory()
             handler = await produced_handler if inspect.isawaitable(produced_handler) else produced_handler
@@ -853,7 +929,7 @@ class HybridRuntime:
             elif outcome is LocalCommandOutcome.FOLLOWUP_TIMEOUT:
                 self._local_command_followup_timeouts += 1
 
-    async def _context_for_activation(self) -> str:
+    async def _context_for_activation(self, *, before_sequence: int | None = None) -> str:
         """Build bounded text context while keeping the ambient PCM snapshot local."""
         processor = self._context_processor
         if processor is None:
@@ -861,7 +937,7 @@ class HybridRuntime:
         snapshot = self._ambient_buffer.snapshot()
         started_at = self._clock()
         try:
-            context = await processor.context_for_activation(snapshot)
+            context = await processor.context_for_activation(snapshot, before_sequence=before_sequence)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -1215,9 +1291,10 @@ class HybridRuntime:
 
         completed = asyncio.get_running_loop().create_future()
         try:
-            queue.put_nowait((frame, completed))
+            queue.put_nowait((frame, completed, self._acoustic_epoch))
         except asyncio.QueueFull:
             completed.cancel()
+            self._acoustic_epoch += 1
             with self._metrics_lock:
                 self._local_processing_frames_dropped += 1
                 dropped_frames = self._local_processing_frames_dropped
@@ -1230,9 +1307,10 @@ class HybridRuntime:
     async def _run_local_processing(self, queue: asyncio.Queue[LocalProcessingItem]) -> None:
         """Run local observation sequentially so VAD/STT retains capture order."""
         while True:
-            frame, completed = await queue.get()
+            frame, completed, acoustic_epoch = await queue.get()
             try:
                 try:
+                    await self._observe_acoustic_frame(frame, acoustic_epoch)
                     result = self._local_processor.observe_frame(frame)
                     if inspect.isawaitable(result):
                         await result
@@ -1249,6 +1327,35 @@ class HybridRuntime:
             finally:
                 queue.task_done()
 
+    async def _observe_acoustic_frame(self, frame: AudioFrame, epoch: int) -> None:
+        detector = self._acoustic_wake_detector
+        if detector is None or self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
+            return
+        if epoch != self._acoustic_epoch:
+            return
+        try:
+            if self._acoustic_stream_epoch != epoch:
+                await asyncio.to_thread(detector.reset)
+                self._acoustic_stream_epoch = epoch
+            pcm = audio_to_mono_int16(frame[1]).astype("<i2", copy=False).tobytes()
+            detection = await asyncio.to_thread(detector.process_audio, pcm, frame[0])
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._acoustic_wake_detector = None
+            logger.warning(
+                "Acoustic wake disabled after inference failure: %s; manual activation remains available",
+                type(error).__name__,
+            )
+            return
+        if (
+            detection is not None
+            and not self._closed
+            and self._mode is RuntimeMode.LOCAL_AMBIENT
+            and epoch == self._acoustic_epoch
+        ):
+            await self.activate("acoustic_wake")
+
     async def _stop_local_processing(self) -> None:
         """Cancel the local worker and release queued frame waiters during close."""
         with self._lifecycle_lock:
@@ -1263,7 +1370,7 @@ class HybridRuntime:
             return
         while True:
             try:
-                _, completed = queue.get_nowait()
+                _, completed, _ = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
             queue.task_done()

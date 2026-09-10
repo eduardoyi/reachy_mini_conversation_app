@@ -76,6 +76,7 @@ def test_household_companion_profile_loads_character_and_existing_tools() -> Non
         DEFAULT_PROFILES_DIRECTORY / "household_companion",
     )
 
+    assert "You are Reachy" in profile.instructions
     assert "curious little household companion" in profile.instructions
     assert "Comfortable silence" in profile.instructions
     assert "raw motor control" in profile.instructions

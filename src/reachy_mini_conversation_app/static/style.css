@@ -786,6 +786,42 @@ button {
   min-height: 1.4em;
 }
 
+.talk__transcript-preview {
+  width: min(100%, 560px);
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+
+.talk__transcript-preview-title,
+.talk__transcript-preview-hint,
+.talk__transcript-preview-text {
+  margin: 0;
+}
+
+.talk__transcript-preview-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.talk__transcript-preview-hint {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.talk__transcript-preview-text {
+  max-height: 7.5em;
+  margin-top: 8px;
+  overflow-y: auto;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* 6. Settings and tools views */
 
 .view--settings,

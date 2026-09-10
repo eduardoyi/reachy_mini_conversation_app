@@ -5,6 +5,8 @@ import logging
 import pytest
 
 from reachy_mini_conversation_app import config
+from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter
 
 
 def test_realtime_provider_defaults_to_huggingface(monkeypatch) -> None:
@@ -16,6 +18,25 @@ def test_realtime_provider_defaults_to_huggingface(monkeypatch) -> None:
     assert config.get_realtime_provider() == config.REALTIME_PROVIDER_HUGGINGFACE
 
 
+def test_dotenv_preserves_process_values_and_loads_absent_values(monkeypatch, tmp_path) -> None:
+    """Local defaults fill unset values without replacing explicit process settings."""
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        f"{config.HYBRID_RUNTIME_ENABLED_ENV}=1\n{config.LOCAL_STT_MODEL_ENV}=dotenv-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("REACHY_MINI_SKIP_DOTENV", raising=False)
+    monkeypatch.setenv(config.HYBRID_RUNTIME_ENABLED_ENV, "0")
+    monkeypatch.delenv(config.LOCAL_STT_MODEL_ENV, raising=False)
+    monkeypatch.setattr(config, "find_dotenv", lambda usecwd: str(dotenv_path))
+
+    config._load_dotenv_configuration()
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.HYBRID_RUNTIME_ENABLED is False
+    assert config.config.LOCAL_STT_MODEL == "dotenv-model"
+
+
 def test_audio_output_defaults_to_sdk(monkeypatch) -> None:
     """Speaker routing remains on the official SDK path unless explicitly changed."""
     monkeypatch.delenv(config.AUDIO_OUTPUT_BACKEND_ENV, raising=False)
@@ -23,6 +44,33 @@ def test_audio_output_defaults_to_sdk(monkeypatch) -> None:
     config.refresh_runtime_config_from_env()
 
     assert config.get_audio_output_backend() == config.AUDIO_OUTPUT_BACKEND_SDK
+
+
+def test_wake_word_defaults_to_reachy(monkeypatch) -> None:
+    """The written product wake phrase is Reachy unless explicitly configured otherwise."""
+    monkeypatch.delenv(config.LOCAL_WAKE_WORD_ENV, raising=False)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.DEFAULT_LOCAL_WAKE_WORD == "Reachy"
+    assert config.config.LOCAL_WAKE_WORD == "Reachy"
+
+    assert LocalIntentRouter().wake_word == "reachy"
+    assert TranscriptWakeWordDetector().process_transcript("Reachy", is_final=True) is not None
+
+
+def test_historical_tito_config_override_remains_explicit(monkeypatch) -> None:
+    """The old Tito setting remains available only when a caller opts into it."""
+    monkeypatch.setenv(config.LOCAL_WAKE_WORD_ENV, " Tito ")
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.LOCAL_WAKE_WORD == "Tito"
+    assert LocalIntentRouter(wake_word=config.config.LOCAL_WAKE_WORD).wake_word == "tito"
+    assert (
+        TranscriptWakeWordDetector(wake_word=config.config.LOCAL_WAKE_WORD).process_transcript("Tito", is_final=True)
+        is not None
+    )
 
 
 @pytest.mark.parametrize("raw_value", ["gstreamer", " GSTREAMER "])
@@ -137,11 +185,81 @@ def test_hybrid_runtime_defaults_are_cloud_disabled_until_activation(monkeypatch
     monkeypatch.delenv(config.HYBRID_RUNTIME_ENABLED_ENV, raising=False)
     monkeypatch.delenv(config.HYBRID_CLOUD_INACTIVITY_SECONDS_ENV, raising=False)
     monkeypatch.delenv(config.HYBRID_AMBIENT_BUFFER_SECONDS_ENV, raising=False)
+    monkeypatch.delenv(config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV, raising=False)
     config.refresh_runtime_config_from_env()
 
     assert config.is_hybrid_runtime_enabled() is False
     assert config.resolve_hybrid_cloud_inactivity_seconds() == 60.0
     assert config.resolve_hybrid_ambient_buffer_seconds() == 20.0
+    assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == 60.0
+
+
+def test_local_transcript_preview_defaults_to_disabled(monkeypatch) -> None:
+    """The diagnostic transcript surface stays off unless explicitly enabled."""
+    monkeypatch.delenv(config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, raising=False)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.is_local_transcript_preview_enabled() is False
+    assert config.config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED is False
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("1", True),
+        (" true ", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+        ("unexpected", False),
+    ],
+)
+def test_local_transcript_preview_parses_boolean_environment(monkeypatch, raw_value: str, expected: bool) -> None:
+    """Preview configuration accepts the shared boolean syntax and fails closed."""
+    monkeypatch.setenv(config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.is_local_transcript_preview_enabled() is expected
+    assert config.config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED is expected
+
+
+def test_local_transcript_preview_refreshes_without_affecting_context_bounds(monkeypatch) -> None:
+    """Refreshing preview enablement leaves the bounded transcript settings intact."""
+    monkeypatch.setenv(config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, "1")
+    monkeypatch.setenv(config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV, "60")
+    monkeypatch.setenv(config.LOCAL_CONTEXT_MAX_CHARS_ENV, "2000")
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED is True
+    assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == 60.0
+    assert config.config.LOCAL_CONTEXT_MAX_CHARS == 2_000
+
+
+@pytest.mark.parametrize("raw_value", ["0", "-1", "nan", "inf", "not-a-duration"])
+def test_local_context_window_rejects_unusable_values(monkeypatch, raw_value: str) -> None:
+    """The derived transcript window stays finite and positive after env parsing."""
+    monkeypatch.setenv(config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == config.DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS
+
+
+def test_local_context_window_is_independent_from_raw_ring(monkeypatch) -> None:
+    """The transcript window can exceed the fixed raw PCM retention window."""
+    monkeypatch.setenv(config.HYBRID_AMBIENT_BUFFER_SECONDS_ENV, "20")
+    monkeypatch.setenv(config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV, "90")
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.HYBRID_AMBIENT_BUFFER_SECONDS == 20.0
+    assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == 90.0
 
 
 def test_hybrid_runtime_settings_parse_disable_and_cap(monkeypatch) -> None:
@@ -173,6 +291,7 @@ def test_local_processing_defaults_keep_endpoint_disabled(monkeypatch) -> None:
         config.LOCAL_STT_BASE_URL_ENV,
         config.LOCAL_STT_MODEL_ENV,
         config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV,
+        config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV,
         config.LOCAL_CONTEXT_MAX_CHARS_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
@@ -189,6 +308,16 @@ def test_local_processing_defaults_keep_endpoint_disabled(monkeypatch) -> None:
 @pytest.mark.parametrize("raw_value", ["0", "-1", "nan", "inf", "not-a-duration"])
 def test_wake_followup_timeout_rejects_unusable_values(monkeypatch, raw_value: str) -> None:
     """A follow-up wait always remains finite and positive after env parsing."""
+    monkeypatch.setenv(config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS == config.DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("raw_value", ["15.1", "60", "1000000"])
+def test_wake_followup_timeout_rejects_values_above_bound(monkeypatch, raw_value: str) -> None:
+    """A local follow-up wait cannot be expanded to the text-context window."""
     monkeypatch.setenv(config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, raw_value)
 
     config.refresh_runtime_config_from_env()
@@ -223,6 +352,7 @@ def test_local_processing_overrides_refresh_without_exposing_credentials(monkeyp
     monkeypatch.setenv(config.LOCAL_WAKE_WORD_ENV, " Johnny ")
     monkeypatch.setenv(config.LOCAL_WAKE_COOLDOWN_SECONDS_ENV, "4")
     monkeypatch.setenv(config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV, "0.75")
+    monkeypatch.setenv(config.LOCAL_CONTEXT_WINDOW_SECONDS_ENV, "90")
     monkeypatch.setenv(config.LOCAL_CONTEXT_MAX_CHARS_ENV, "4096")
 
     config.refresh_runtime_config_from_env()
@@ -235,4 +365,19 @@ def test_local_processing_overrides_refresh_without_exposing_credentials(monkeyp
     assert config.config.LOCAL_WAKE_WORD == "Johnny"
     assert config.config.LOCAL_WAKE_COOLDOWN_SECONDS == 4.0
     assert config.config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS == 0.75
+    assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == 90.0
     assert config.config.LOCAL_CONTEXT_MAX_CHARS == 4096
+
+
+@pytest.mark.parametrize("enabled, expected", [(None, False), ("0", False), ("1", True)])
+def test_acoustic_wake_is_opt_in_and_refreshes(monkeypatch, enabled, expected) -> None:
+    """Acoustic wake defaults off and respects refreshed process configuration."""
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_ENABLED", False)
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_MODEL_DIR", "")
+    monkeypatch.delenv(config.LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, raising=False)
+    if enabled is not None:
+        monkeypatch.setenv(config.LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, enabled)
+    monkeypatch.setenv(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV, " /private/models ")
+    config.refresh_runtime_config_from_env()
+    assert config.config.LOCAL_ACOUSTIC_WAKE_ENABLED is expected
+    assert config.config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR == "/private/models"

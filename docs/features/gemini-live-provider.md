@@ -1,7 +1,7 @@
 # Feature: Gemini Live provider
 
 - Status: `in-progress`
-- Last updated: 2026-08-31
+- Last updated: 2026-09-01
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -74,6 +74,18 @@ optional and defaults to `Puck`; the configured voice must be supported by the
 selected model. Provider values are trimmed and case-normalized. An unknown
 provider fails clearly rather than silently choosing another cloud service.
 
+Every Gemini Live session also enables Google's managed `google_search` tool.
+It is sent alongside profile-selected application function declarations, is
+executed by Gemini's service, and is not controlled by Tools → Tool access. The
+default Live model supports this capability. The existing Pollen MCP search,
+weather, and time tools remain available as profile-managed custom tools; the
+managed search tool is not a dedicated flight-status or fare API.
+
+The initial project `.env` load preserves explicit process/terminal values and
+fills only unset values. A direct benchmark can therefore override hybrid
+settings for one invocation while an unset Gemini key continues to load from
+the ignored `.env`.
+
 The Phase 1 direct audio contract is:
 
 ```text
@@ -119,8 +131,9 @@ REALTIME_PROVIDER=gemini .venv/bin/reachy-mini-conversation-app --media-backend 
 This is the console-only accepted simulator path. Add `--ui` only when port
 7860 is free. `no_media` disables usable conversation audio and is for
 headless/non-audio diagnostics. A separate WebRTC attempt failed its reverse
-audio chain and is not an accepted workaround. Phase 1 remains in progress for
-the retained quantitative rerun.
+audio chain and is not an accepted workaround. The direct Phase 1 benchmark is
+complete: headphones passed, while Mac speakers failed through measured
+assistant-to-microphone feedback.
 
 ### Tools, camera, profiles, and reconnects
 
@@ -129,6 +142,11 @@ Gemini uses the existing `ToolDependencies`, tool dispatcher, and
 Profiles continue to provide instructions, startup greeting, voice, and enabled
 tool access. Persistent remember/forget data remains local and is not owned by
 the provider.
+
+Native Google Search is available in every Gemini session, including sessions
+using the hybrid runtime, independently of the selected profile's custom tool
+access. Gemini handles that search server-side; only application function calls
+enter the shared local tool manager and require a client function response.
 
 The `camera` tool is on-demand. A camera frame is sent to Gemini only as the
 result of an explicit camera-tool call, not merely because a camera exists.
@@ -152,13 +170,23 @@ payload logging and does not send camera frames unless the camera tool is
 requested.
 
 Changing the active profile or voice requests a backend reconnect so the next
-session receives the new instructions or voice. The Settings view can select
-the provider and save the provider selector to the instance `.env`. While
-Gemini is selected, Hugging Face endpoint fields are unavailable. The Gemini
-key is intentionally environment-only: settings RPC rejects key fields, and
-the web page never receives the secret. If the selected provider has no target,
-the app exposes the missing-configuration state and waits rather than opening a
-partial session.
+session receives the new instructions or voice. An active Gemini handler marks
+that close as intentional and keeps its startup loop alive until the replacement
+session is ready; hybrid mode therefore remains in `CLOUD_CONVERSATION` instead
+of reporting a provider failure. A request made while setup is still waiting for
+the session assignment is retained and causes that just-opened session to be
+closed before seeding. A request that races the initial-history seed uses an
+internal reconnect signal, so it cannot be confused with task cancellation or
+shutdown cancellation. Intentional reconnects also drain provider output and
+invoke the playback clearer, preventing old-voice audio from playing after the
+readiness boundary. The connection observer sees the normal false/true
+readiness boundary, and frames arriving during setup remain in the existing
+bounded runtime queue. The Settings view can select the provider and save the
+provider selector to the instance `.env`. While Gemini is selected, Hugging Face
+endpoint fields are unavailable. The Gemini key is intentionally
+environment-only: settings RPC rejects key fields, and the web page never
+receives the secret. If the selected provider has no target, the app exposes the
+missing-configuration state and waits rather than opening a partial session.
 
 ## Current architecture and target changes
 
@@ -222,7 +250,7 @@ inferred from the provider selector alone.
 | Configuration | `src/reachy_mini_conversation_app/config.py` | Normalize and validate `REALTIME_PROVIDER`; expose `get_realtime_provider()`, `has_realtime_target()`, and `get_realtime_missing_config_message()`. |
 | Provider constants | `src/reachy_mini_conversation_app/config.py` | Keep `HF_BACKEND="huggingface"`, `GEMINI_BACKEND="gemini"`, and Gemini env/default constants available to callers. |
 | Handler factory | `src/reachy_mini_conversation_app/main.py` | Build exactly the selected handler and reject unknown values before starting either backend. |
-| Gemini adapter | `src/reachy_mini_conversation_app/gemini_live.py` | Implement `ConversationHandler` for Gemini Live audio, ordered initial-history context, events, transcripts, interruptions, tools, camera results, reconnect, and shutdown. |
+| Gemini adapter | `src/reachy_mini_conversation_app/gemini_live.py` | Implement `ConversationHandler` for Gemini Live audio, managed Google Search, ordered initial-history context, events, transcripts, interruptions, application tools, camera results, reconnect, and shutdown. |
 | Shared media loop | `src/reachy_mini_conversation_app/console.py` | Record the SDK input frame, emit handler output, resample output for the selected speaker boundary, expose settings, and supervise reconnects. The bounded capture worker isolates synchronous SDK pulls from asyncio. |
 | Audio conversion | `src/reachy_mini_conversation_app/streaming.py` | Provide the generic mono-float32 resampler used when provider and SDK rates differ. |
 | Latency diagnostics | `src/reachy_mini_conversation_app/gemini_live.py` | Expose bounded `GeminiLatencySnapshot` numeric samples (maximum 32 per sample list) and marker-order diagnostics without retaining payloads. |
@@ -240,9 +268,12 @@ media loop performs the final local conversion.
 The adapter limits only the Live session setup handshake to 15 seconds. Once a
 session is open, the receive loop remains event-driven and is closed by normal
 shutdown, cancellation, provider interruption, reconnect, or error handling.
-Tool batches preserve the provider's call order in the single function-response
-message. Camera bytes are sent as an image input before that function-response
-message, and transport-only base64 is removed from the model-visible JSON.
+The session tool list always includes managed `google_search`; application
+function declarations are added as a separate group when profile tools exist.
+Google handles managed search internally, while application tool batches
+preserve the provider's call order in the single function-response message.
+Camera bytes are sent as an image input before that function-response message,
+and transport-only base64 is removed from the model-visible JSON.
 
 ### Configuration contract
 
@@ -322,8 +353,9 @@ credentials.
   close the old session and let the supervisor retry or rebuild it. Stale
   callbacks must not write audio into a replacement session.
 - Audio and transcripts are sensitive. The adapter and tests must avoid raw
-  payload logging. Camera data is requested on demand and is not persisted by
-  this feature.
+  payload logging. Native search queries/results are handled within the Gemini
+  service during the active cloud session. Camera data is requested on demand
+  and is not persisted by this feature.
 - The direct cloud path is not the hybrid ambient privacy boundary. Those
   guarantees apply only when `HYBRID_RUNTIME_ENABLED=1` and are enforced by
   `HybridRuntime`, not by selecting Gemini alone.
@@ -388,7 +420,7 @@ diagnostic bounds are covered without live credentials.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_config.py` | Hugging Face default, provider normalization, invalid-provider failure, Gemini model/voice defaults and overrides, readiness, and missing-configuration messages. |
+| `tests/test_config.py` | Hugging Face default, provider normalization, invalid-provider failure, Gemini model/voice defaults and overrides, dotenv precedence, readiness, and missing-configuration messages. |
 | `tests/test_main.py` | Explicit Hugging Face and Gemini factory branches, constructor arguments, unknown-provider rejection, media-backend parsing/default/validation/forwarding, and injected-robot isolation. |
 | `tests/test_streaming.py` | Generic output resampling, rate validation, mono shape, empty frames, and audio conversion. |
 
@@ -396,7 +428,7 @@ diagnostic bounds are covered without live credentials.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_gemini_live.py` | Fake client/session lifecycle, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
+| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
 | `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
 
 ### Simulator / end-to-end tests
@@ -405,6 +437,8 @@ diagnostic bounds are covered without live credentials.
 |---------------------|-----------|
 | Reachy Mini simulator plus app | The optional `sim` group installs the locked `reachy-mini[mujoco]` extra with MuJoCo 3.3.0 via `uv sync --frozen --group dev --group sim`; the real MuJoCo-with-media daemon was healthy. Pending: reproducible direct Gemini conversation, movement/tool call, camera tool, interruption, clean reconnect/shutdown, and output-device capture. |
 | Phase 1 LOCAL qualitative observation | A user manually completed one long, responsive Gemini conversation over the SDK LOCAL backend with successful barge-in/interruption before the later native-audio wedge. This is qualitative user observation only, not instrumented latency; reproducible quantitative benchmark evidence remains incomplete. |
+| Accepted Phase 1 headphone rerun | A saved-log direct Gemini run connected in 637.5 ms, executed `move_head(left)` with a 2.6 ms provider tool-result interval, and flushed two audible interruptions in 1.4 ms and 3.8 ms. All five turns sounded smooth, both barge-ins worked, movement was visible, and shutdown produced no crash or traceback. Gemini emitted no usable speech-end/first-audio sample, so exact first-audio latency remains unavailable. |
+| Accepted Phase 1 speaker control | A direct Mac-speaker run connected in 455.6 ms but immediately fed assistant output into the microphone, producing six self-triggered interruption flushes in about 18 seconds while the user stayed silent. The process remained live and exited without traceback. This is measured acoustic feedback, not a freeze; headphones are required for the app-owned simulator output path. |
 | Mac speaker/headphone benchmark | The first WebRTC attempt hit a producer-registration `KeyError`; a retry initialized the bidirectional client with `connection_ready_ms=640.8` and greeting-tool timings of 231.6 ms and 230.9 ms, then the SDK reverse-audio send queue failed with `not-negotiated (-4)`. No complete WebRTC conversation, first-audio, interruption, echo-loop, repeated-transcript, barge-in, or shutdown benchmark was obtained. |
 
 ### Test commands
@@ -451,10 +485,27 @@ mypy across 59 source files, 736 tests passed with one explicit native skip,
 lock consistency, both JavaScript syntax checks, and `git diff --check`. Live
 dinner response quality remains a separate acceptance check.
 
+The follow-up reconnect and activation-fence hardening passed 52 focused Gemini
+tests and a 217-test ambient/config/Gemini/runtime/main suite. Final root
+verification passed Ruff, formatting, strict mypy across 59 source files, and
+761 tests with one explicit native-audio skip. Independent adversarial review
+found no remaining P0/P1 blocker. Live dinner response quality remains a
+separate acceptance check.
+
+The 2026-09-01 native-search change passed the focused Gemini suite with 52
+tests. The test asserts that managed `google_search` is present with and
+without profile application functions. The full repository gate then passed
+Ruff, formatting, strict mypy across 60 source files, all 833 tests with one
+explicit native-audio skip, lock consistency, JavaScript syntax checks, and
+`git diff --check`. No live search or flight-data quality test was run.
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-09-01 | Enabled Gemini Live's managed `google_search` tool alongside profile-selected application function declarations; retained the custom Pollen MCP search, weather, and time tools for dedicated application lookups. |
+| 2026-08-31 | Documented and tested project `.env` precedence: explicit process/terminal values win while unset Gemini configuration continues to load from the ignored `.env`. |
+| 2026-08-31 | Made profile and voice changes intentional reconnects across setup and initial-history races, drained stale provider/playback output, and preserved hybrid cloud state while the replacement session becomes ready. |
 | 2026-08-31 | Moved bounded ambient transcript text from `system_instruction` to Gemini Live ordered initial history. Context seeding now completes before the connected callback, fails closed across transport errors/cancellation/shutdown, and remains payload-free in logs. |
 | 2026-08-29 | Documented the Phase 1 provider selector, Gemini configuration and audio boundary, shared tools/profiles/settings behavior, privacy constraints, test inventory, and pending benchmark validation. |
 | 2026-08-29 | Recorded the verified focused/full gate, bounded latency diagnostics, 15-second setup-only timeout, ordered tool/cancellation behavior, camera send ordering, SDK dependency review, and the still-pending real Gemini benchmark. |

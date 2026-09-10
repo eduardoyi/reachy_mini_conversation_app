@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-08-31
+- Last updated: 2026-09-03
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -18,6 +18,22 @@ failure return the runtime to ambient mode.
 The existing direct provider path remains unchanged when
 `HYBRID_RUNTIME_ENABLED=0` (the default).
 
+The initial project `.env` load preserves values already supplied in the
+process environment and fills only unset values. This makes one-off direct
+benchmark commands such as `HYBRID_RUNTIME_ENABLED=0 ...` reliable while
+allowing unset configuration, including a locally stored Gemini key, to load
+from the ignored `.env`.
+
+Set `LOCAL_TRANSCRIPT_PREVIEW_ENABLED=1` only for a short-lived local STT
+diagnostic. The Talk view then polls the loopback-only
+`GET /api/transcript-preview` endpoint with `Cache-Control: no-store` and shows
+the current bounded continuous transcript with a diagnostic notice. The preview
+is default-off, never appears in `conversation.status`, logs, browser storage,
+or disk; preview retrieval itself adds no cloud traffic. Normal activation may
+still send bounded derived context to the selected provider, and the preview
+reports unavailable when local processing is absent or closed. Non-loopback
+clients receive `403` without a runtime read.
+
 ## User-visible behavior
 
 Enable the mode in the ignored instance `.env`:
@@ -31,9 +47,9 @@ LOCAL_STT_BASE_URL=http://127.0.0.1:8766/v1
 
 Ambient capture does not require `GEMINI_API_KEY` and does not construct or
 connect a cloud handler. Press Space or Enter in the web conversation view to
-call `conversation.activate`; Reachy queues a small movement acknowledgment,
-then opens the selected provider. With continuous local STT, “Reachy” takes the
-same local acknowledgment path. Exact `stop`, `be quiet`, `look left`, `look
+call `conversation.activate`; the runtime queues a small movement
+acknowledgment, then opens the selected provider. With continuous local STT,
+“Reachy” takes the same local acknowledgment path. Exact `stop`, `be quiet`, `look
 right`, and `look at me` suffixes use existing local movement/tool boundaries
 and return to ambient without constructing a provider. The browser keyboard
 action remains separate from microphone mute. Each cloud activation gets a
@@ -41,24 +57,26 @@ fresh provider handler.
 
 When a completed local transcript contains both the wake phrase and a question,
 the bounded wake-stripped suffix is submitted through `ConversationHandler.say`
-only after the new provider reports ready. The rolling transcript remains
-untrusted background context; the suffix is the actual user turn that asks the
-provider to respond. Failure is metadata-only and does not crash the session;
-deactivation cancels a blocked submission. Provider readiness now means any
-provider-owned initial-history seed has completed. While the addressed text is
-being submitted, new microphone frames enter the existing bounded
-postactivation FIFO without blocking capture; they flush only after `say()`
-finishes. The resulting order is context history, addressed text, then live
-audio.
+only after the new provider reports ready. The current wake/question sequence is
+excluded from seeded background history, so it appears once as the addressed
+turn while earlier ambient transcript remains available. Failure is metadata-only
+and does not crash the session; deactivation cancels a blocked submission.
+Provider readiness now means any provider-owned initial-history seed has
+completed. While the addressed text is being submitted, new microphone frames
+enter the existing bounded postactivation FIFO without blocking capture; they
+flush only after `say()` finishes. The resulting order is context history,
+addressed text, then live audio.
 
 If local STT emits a wake-only final followed by a separate final command, the
 runtime enters `LOCAL_COMMAND`, acknowledges immediately, and waits for exactly
-one next final segment for the configured short timeout. Exact local commands
-execute without provider construction and return to ambient mode. An uncertain
-follow-up is preserved as the addressed text for the normal cloud activation;
-timeout also follows the normal cloud path. While this waiter is active,
-post-barrier frames are both retained in the bounded cloud FIFO and observed by
-the local processor. Local success clears that FIFO; timeout or escalation
+one next final segment for the configured bounded timeout (five seconds by
+default). Sequence metadata prevents an older delayed final from being adopted
+as the follow-up. Exact local commands execute without provider construction and
+return to ambient mode. An uncertain follow-up is preserved as the addressed
+text for the normal cloud activation; timeout also follows the normal cloud
+path. While this waiter is active, post-barrier frames are both retained in the
+bounded cloud FIFO and observed by the local processor; pre-wake frames never
+cross the cloud boundary. Local success clears that FIFO; timeout or escalation
 leaves it intact for provider readiness. Shutdown and cancellation release the
 waiter without retaining its text.
 
@@ -127,17 +145,19 @@ Configuration is defined in `config.py`:
 |---|---:|---|
 | `HYBRID_RUNTIME_ENABLED` | `0` | Opt into the local ambient runtime. |
 | `HYBRID_CLOUD_INACTIVITY_SECONDS` | `60` | Close an inactive cloud session; `0` disables this close. |
-| `HYBRID_AMBIENT_BUFFER_SECONDS` | `20` | RAM ring duration, capped at 20 seconds. |
+| `HYBRID_AMBIENT_BUFFER_SECONDS` | `20` | Raw PCM RAM ring duration, capped at 20 seconds. |
+| `LOCAL_CONTEXT_WINDOW_SECONDS` | `60` | Finalized local transcript retention in seconds; text-only and independent from the PCM ring. |
 | `LOCAL_CONTEXT_STRATEGY` | `continuous` | Use a rolling local transcript, or `activation` to transcribe the RAM snapshot after keyboard activation. |
 | `LOCAL_STT_BASE_URL` | unset | Loopback-only OpenAI-compatible local transcription endpoint. |
 | `LOCAL_STT_MODEL` | `whisper-1` | Local endpoint model name. |
 | `LOCAL_STT_TIMEOUT_SECONDS` | `5` | Bound each local transcription request. |
 | `LOCAL_VAD_RMS_THRESHOLD` | `500` | Initial amplitude-based VAD threshold. |
 | `LOCAL_VAD_SILENCE_SECONDS` | `0.6` | Silence used to close a speech segment. |
-| `LOCAL_WAKE_WORD` | `Reachy` | Transcript wake phrase in continuous mode. |
+| `LOCAL_WAKE_WORD` | `Reachy` | Exact transcript wake phrase in continuous mode. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | `2` | Duplicate wake suppression window. |
-| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | `2` | Short wait for one next final command when wake and command arrive as separate local STT segments. Timeout opens the normal cloud path. |
+| `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | `5` (maximum `15`) | Bounded wait for one next final command when wake and command arrive as separate local STT segments. Values above 15 fall back to the 5-second default; timeout opens the normal cloud path. |
 | `LOCAL_CONTEXT_MAX_CHARS` | `2000` | Bound retained/injected derived text. |
+| `LOCAL_TRANSCRIPT_PREVIEW_ENABLED` | `0` | Opt into the loopback-only browser preview at `GET /api/transcript-preview`; retrieval/display adds no cloud traffic and is never included in `conversation.status`. Normal activation may still send bounded derived context to the provider. |
 
 The `conversation.status` JSON-RPC result includes these exact counters:
 
@@ -206,6 +226,12 @@ LLM routing into this boundary.
   oldest frames and increments `postactivation_frames_dropped`.
 - RAM-only application storage does not prevent operating-system swapping; no
   application audio files or raw payload logs are created.
+- The transcript preview is an explicitly opt-in diagnostic. Its loopback-only
+  HTTP read is marshalled through LocalStream's owner loop, uses the existing
+  bounded rolling store, and returns empty/unavailable metadata when disabled,
+  closed, or not backed by a local continuous-transcript processor; non-loopback
+  clients are denied before a runtime read; normal activation context remains a
+  separate, bounded provider input.
 - Strategy A never waits for an in-flight continuous STT result during
   activation. Strategy B waits only for its bounded local STT timeout and uses
   keyboard activation because it has no continuous transcript to detect wake.
@@ -218,11 +244,11 @@ LLM routing into this boundary.
 - An addressed transcript suffix is capped at 512 characters and sent only
   after cloud activation; it is never logged. Exact local commands consume the
   suffix locally and never submit it to a provider.
-- Strategy A currently keeps the activation segment in the rolling transcript,
-  so Gemini initial history may contain the addressed question before the same
-  stripped suffix is submitted as the live turn. This bounded duplication is a
-  known follow-up; live response-quality testing determines whether it must be
-  removed from the provider-neutral context snapshot.
+- Strategy A keeps finalized context in text for 60 seconds by default, while
+  the raw PCM ring remains capped at 20 seconds and each continuous STT request
+  is independently capped at 20 seconds. Activation seeds only transcript
+  entries with sequence numbers strictly older than the wake sequence, so later
+  ambient text accepted before provider setup cannot become background history.
 - The initial RMS VAD is amplitude-based and must be replaced or tuned from
   microphone measurements; it does not solve echo cancellation.
 - Generated architecture SVG regeneration is pending; `docs/scheme.mmd` is the
@@ -251,6 +277,14 @@ across:
 - `tests/test_hybrid_smoke.py`
 - `tests/audio/test_sample_timeline.py`
 - `tests/audio/test_gstreamer_contract.py`
+
+Transcript preview coverage also lives in `tests/test_console.py`,
+`tests/test_hybrid_runtime.py`, `tests/test_config.py`, and
+`tests/test_static_contract.py`: default-off parsing/refresh, loopback-only HTTP
+access, owner-loop routing, non-loopback denial, empty/bounded/closed results,
+payload-free status/logs, and the static Talk/API contract.
+`tests/test_config.py` also verifies that explicit process values take
+precedence over project `.env` values while unset settings still load.
 
 `tests/test_console.py` exercises the JSON-RPC activation path, owner-loop
 marshalling, capture worker, delayed provider readiness, the deterministic
@@ -309,9 +343,10 @@ strict mypy was clean across 54 source files, and all 649 tests passed in
 On 2026-08-30, live local STT returned HTTP 200 and a configured
 `LOCAL_WAKE_WORD=computer` reached the final-transcript detector and local
 activation. The request then escalated to Gemini, whose `MoveHead` tool call
-moved the simulator; this was not a live local-command pass. The default
+moved the simulator; this was not a live local-command pass. The former default
 `Reachy` phrase produced no local action because no exact matching final
-transcript token reached the detector;
+transcript token reached the detector; this remains historical evidence and is
+not a `Tito` quality result.
 the runtime status now exposes `local_stt_completed`,
 `transcript_segments_accepted`, `wake_final_update_count`, and the other
 metadata-only diagnostics needed to distinguish that boundary failure. No raw
@@ -371,10 +406,28 @@ tests. Final root verification passed Ruff, formatting, strict mypy across 59
 source files, 736 tests with one explicit native skip, lock consistency, both
 JavaScript syntax checks, and `git diff --check`.
 
+The activation-fence, delayed-local-STT, bounded follow-up, and Gemini reconnect
+hardening passed a 217-test focused suite. Final root verification passed Ruff,
+formatting, strict mypy across 59 source files, and 761 tests with one explicit
+native-audio skip. Independent adversarial review found no remaining P0/P1
+blocker. Live microphone dinner-context quality remains pending.
+
+The default-off transcript preview follow-up adds deterministic configuration,
+HTTP/runtime, lifecycle, payload-safety, and static UI coverage. The focused
+config/console/runtime/static suite passed 212 tests; Ruff, formatting, strict
+mypy for the four changed Python modules, both JavaScript syntax checks, and
+`git diff --check` also passed. Final root verification passed Ruff,
+formatting, strict mypy across 59 source files, and 782 tests with one explicit
+opt-in native-audio skip; `uv lock --check` also passed. Independent
+adversarial review found no remaining P0/P1 blocker.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-08-31 | Project `.env` loading now preserves explicit process/terminal values and fills only unset values; added regression coverage after the first direct Phase 1 benchmark command was unintentionally routed through hybrid mode. |
+| 2026-08-31 | Fenced seeded context strictly before the wake sequence, increased the bounded split-final wait to five seconds, kept text retention independent from raw audio, and hardened Gemini configuration reconnects. |
+| 2026-08-31 | Added the opt-in RAM-only transcript preview loopback-only HTTP endpoint and Talk-view panel, routed reads through the LocalStream owner loop, and kept status/log/cloud/persistence payloads clean. |
 | 2026-08-31 | Fixed the failed live dinner handoff: Gemini context now uses ordered initial history, and the runtime serializes addressed text before releasing bounded postactivation PCM. Added seed error/cancellation/shutdown and nonblocking ordering regressions; live context-quality retest remains pending. |
 | 2026-08-29 | Added Phase 2 runtime contract, privacy boundary, configuration, and validation inventory. |
 | 2026-08-29 | Recorded the clean 456-test repository gate and retained manual simulator/live-provider acceptance as pending. |
@@ -400,3 +453,18 @@ JavaScript syntax checks, and `git diff --check`.
 | 2026-08-30 | Added metadata-only local routing outcomes/reasons and counters, plus a bounded sequential local-processing FIFO. LocalStream now hands frames off without awaiting slow local observation; deterministic pressure, backpressure, cancellation, close, ordering, and privacy tests cover the new seam. Live microphone/STT timing and sustained-overload rates remain unmeasured. |
 | 2026-08-30 | Live `computer, look left` acceptance stayed local: Whisper returned HTTP 200, the runtime transitioned `LOCAL_AMBIENT` → `LOCAL_COMMAND`, executed the existing local movement action, and returned to `LOCAL_AMBIENT` with no Gemini handler construction or connection. One local-processing frame was dropped earlier in the run, so sustained-overload measurement remains pending. |
 | 2026-08-30 | Closed a lifecycle race where a late frame could bypass the cleared local queue and still reach the processor; late frames now drop without observation, with regression coverage. Open-runtime direct observation behavior remains covered. |
+| 2026-08-31 | Selected `Tito` as the product/default wake phrase. Historical `Reachy` and `computer` live checks remain recorded as prior evidence; the exact-match and no-prewake-cloud boundaries are unchanged. |
+
+### Optional acoustic activation — 2026-09-09
+
+HybridRuntime accepts one optional AcousticWakeWordDetector instead of transcript
+wake. Its ordered local worker performs inference off-loop and accepts results
+only in the matching ambient epoch. Queue drops and all mode transitions
+invalidate acoustic stream history. Accepted events call the existing activation
+path with reason acoustic_wake; the current capture barrier excludes wake/prior
+audio and normal postactivation FIFO/acknowledgment/inactivity/close applies.
+Inference failure disables acoustic wake while preserving manual activation.
+This MVP opens the normal conversation directly; it does not reuse the transcript
+local-command follow-up path. Status adds acoustic_wake_enabled and selected
+detector counters. See wake-word feature docs for config, privacy boundaries,
+model provenance and the892-pass/2-skip gate plus opt-in headless SDK test.

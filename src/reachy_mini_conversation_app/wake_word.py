@@ -11,10 +11,10 @@ from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
-WakeWordSource: TypeAlias = Literal["partial", "final"]
+WakeWordSource: TypeAlias = Literal["partial", "final", "acoustic"]
 MonotonicClock: TypeAlias = Callable[[], float]
 
-_DEFAULT_WAKE_WORD = "Reachy"
+DEFAULT_LOCAL_WAKE_WORD = "Reachy"
 _DEFAULT_COOLDOWN_SECONDS = 1.0
 _MAX_PARTIAL_TEXT_CHARS = 512
 _LEADING_COMMAND_PUNCTUATION = " \t\r\n,.;:!?-—–()[]{}\"'"
@@ -77,7 +77,7 @@ class WakeWordDetector(Protocol):
 
 
 class AcousticWakeWordDetector(Protocol):
-    """Define a dependency-free seam for a future local acoustic detector."""
+    """Define the local acoustic detector lifecycle and PCM boundary."""
 
     def process_audio(
         self,
@@ -100,7 +100,7 @@ class TranscriptWakeWordDetector:
 
     def __init__(
         self,
-        wake_word: str = _DEFAULT_WAKE_WORD,
+        wake_word: str = DEFAULT_LOCAL_WAKE_WORD,
         *,
         cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS,
         clock: MonotonicClock = time.monotonic,

@@ -1,7 +1,7 @@
 # Feature: deterministic local intents
 
 - Status: `in-progress`
-- Last updated: 2026-08-31
+- Last updated: 2026-09-03
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -15,9 +15,10 @@ neither class opens a provider or persists the utterance.
 The modules are intentionally small so `HybridRuntime` can route only an exact
 addressed suffix while in `LOCAL_COMMAND`. Automated integration is complete.
 Live simulator runs with the configured wake phrase `computer` now cover all
-five allowlisted actions without provider construction or cloud audio. The same
-path with `Reachy` remains blocked because no exact matching final transcript
-token reached the detector.
+five allowlisted actions without provider construction or cloud audio. The
+current default transcript wake phrase is `Reachy`; its exact matching remains
+independent from the fixture-only acoustic candidate benchmark, and live wake
+quality and latency still need measurement.
 
 If local STT emits the wake and command as separate final segments, the runtime
 waits briefly for one follow-up and routes its exact stripped text through the
@@ -224,3 +225,4 @@ fuzzy matching.
 | 2026-08-30 | Added metadata-only routing outcomes/reasons and counters for router rejection, split-final timeout, and executor failure. The exact fail-closed allowlist is unchanged. |
 | 2026-08-30 | Live simulator acceptance passed for `computer, look left`: local Whisper returned HTTP 200, the runtime entered `LOCAL_COMMAND`, the existing `move_head` tool executed `look_left`, and the runtime returned to `LOCAL_AMBIENT`. No Gemini handler was constructed or connected. Execution followed the STT response by about 14 ms; full speech-to-action latency and the other four commands remain unmeasured. |
 | 2026-08-31 | Live acceptance now covers all five actions. A clean run executed `computer, stop`, `computer, be quiet`, and `computer, look at me` locally with three executions, zero failures/escalations, zero cloud audio, and no provider connection; earlier accepted runs cover both look directions. The same run counted 12 dropped local-processing frames, retained as a performance follow-up. |
+| 2026-08-31 | Selected `Tito` as the product/default wake phrase; historical `Reachy` and `computer` live checks remain prior evidence, with exact allowlisting and escalation unchanged. |

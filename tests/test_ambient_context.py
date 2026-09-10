@@ -208,6 +208,58 @@ def test_rolling_transcript_rejects_partial_after_same_sequence_was_finalized() 
     assert transcript.text() == "final once"
 
 
+def test_rolling_transcript_uses_an_exclusive_activation_sequence_fence() -> None:
+    """Activation context keeps only entries that predate the wake sequence."""
+    transcript = RollingTranscript(max_seconds=20, max_chars=100)
+    assert transcript.add(TranscriptSegment("prior context", 1, 2, 1))
+    assert transcript.add(TranscriptSegment("Reachy", 3, 4, 2))
+    assert transcript.add(TranscriptSegment("late ambient", 5, 6, 3))
+    assert transcript.add(TranscriptSegment("later ambient", 7, 8, 4))
+
+    assert transcript.text(before_sequence=2) == "prior context"
+
+
+@pytest.mark.asyncio
+async def test_context_sequence_fence_matches_filtered_source_metadata() -> None:
+    """Later accepted ambient entries cannot leak into fenced text or metadata."""
+    processor = AmbientContextProcessor(
+        vad=SequenceVAD([]),
+        stt=MappingSTT([]),
+        config=processor_config(),
+        clock=lambda: 8.0,
+    )
+    assert processor.transcript.add(TranscriptSegment("Earlier dinner context.", 1, 2, 1))
+    assert processor.transcript.add(TranscriptSegment("Reachy", 3, 4, 2))
+    assert processor.transcript.add(TranscriptSegment("A later ambient sentence.", 5, 6, 3))
+    assert processor.transcript.add(TranscriptSegment("Another later sentence.", 7, 8, 4))
+
+    context = await processor.context_for_activation(before_sequence=2)
+
+    assert context.text == "Earlier dinner context."
+    assert context.source_sequence == 1
+    assert context.source_ended_at == 2
+    await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_context_metadata_matches_pruned_text() -> None:
+    """Expired transcript entries cannot survive only in activation metadata."""
+    processor = AmbientContextProcessor(
+        vad=SequenceVAD([]),
+        stt=MappingSTT([]),
+        config=processor_config(transcript_window_seconds=2.0),
+        clock=lambda: 10.0,
+    )
+    assert processor.transcript.add(TranscriptSegment("expired", 1, 2, 1))
+
+    context = await processor.context_for_activation()
+
+    assert context.text == ""
+    assert context.source_ended_at is None
+    assert context.source_sequence is None
+    await processor.close()
+
+
 @pytest.mark.parametrize("window_seconds", [2.0, 5.0, 10.0, 20.0])
 def test_rolling_transcript_honors_benchmark_window_sizes(window_seconds: float) -> None:
     """Every planned context window drops speech older than its own boundary."""
@@ -249,6 +301,50 @@ async def test_strategy_a_segments_speech_and_keeps_audio_local() -> None:
     assert processor.metrics.continuous_stt_requests == 1
     assert processor.metrics.continuous_stt_completed == 1
     assert processor.metrics.transcript_segments_accepted == 1
+    await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_continuous_stt_caps_long_speech_even_with_sixty_second_text_context() -> None:
+    """A long continuous segment sends at most twenty seconds of local PCM to STT."""
+    vad = SequenceVAD([True] * 210 + [False, False])
+    stt = MappingSTT(["long speech"])
+    processor = AmbientContextProcessor(
+        vad=vad,
+        stt=stt,
+        config=processor_config(transcript_window_seconds=60.0),
+    )
+
+    for value in range(212):
+        await processor.observe_frame(frame(value, sample_rate=100))
+    await processor.drain()
+
+    assert len(stt.audio) == 1
+    assert stt.audio[0][1].size == 20 * 100
+    assert processor.transcript.text() == "long speech"
+    await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_continuous_stt_trims_an_oversized_single_frame_without_empty_concat() -> None:
+    """One frame longer than the STT cap is trimmed safely before concatenation."""
+    vad = SequenceVAD([True, False, False])
+    stt = MappingSTT(["oversized frame"])
+    processor = AmbientContextProcessor(
+        vad=vad,
+        stt=stt,
+        config=processor_config(transcript_window_seconds=60.0),
+    )
+
+    await processor.observe_frame((100, np.arange(2_100, dtype=np.int16)))
+    await processor.observe_frame(frame(0, sample_rate=100))
+    await processor.observe_frame(frame(0, sample_rate=100))
+    await processor.drain()
+
+    assert len(stt.audio) == 1
+    assert stt.audio[0][1].size == 20 * 100
+    np.testing.assert_array_equal(stt.audio[0][1], np.arange(100, 2_100, dtype=np.int16))
+    assert processor.transcript.text() == "oversized frame"
     await processor.close()
 
 

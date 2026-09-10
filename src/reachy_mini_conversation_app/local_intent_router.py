@@ -6,6 +6,8 @@ from enum import Enum
 from typing import Literal, TypeAlias
 from dataclasses import dataclass
 
+from .wake_word import DEFAULT_LOCAL_WAKE_WORD
+
 
 InputMode: TypeAlias = Literal["wake_prefixed", "wake_stripped"]
 
@@ -87,7 +89,7 @@ def _normalize_text(value: str) -> str:
 class LocalIntentRouter:
     """Classify only exact, safe local commands and escalate everything else."""
 
-    def __init__(self, *, wake_word: str = "Reachy") -> None:
+    def __init__(self, *, wake_word: str = DEFAULT_LOCAL_WAKE_WORD) -> None:
         """Configure the wake word used by the prefixed input contract."""
         normalized_wake_word = _normalize_text(wake_word)
         if not normalized_wake_word:

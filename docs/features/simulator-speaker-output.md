@@ -113,6 +113,21 @@ robot path should remain on the SDK unless separately designed and measured.
   generated `docs/assets/conversation_app_arch.svg` remains pending regeneration
   through the repository's diagram workflow and is not hand-edited.
 
+## Backlog: restore laptop-speaker/AEC simulator path
+
+The app-owned GStreamer path was introduced after repeatable SDK LOCAL
+`audiomixer` crashes. Because it bypasses SDK playback, it sits outside the
+SDK echo-reference path; laptop-speaker output can return through the Mac
+microphone and cause Gemini to interrupt its own response. Headphones are the
+current reliable simulator control.
+
+Future work must use a supported full-duplex/shared echo-reference path or an
+upstream SDK solution, without monkey-patching SDK or GStreamer internals.
+Acceptance requires automated contract coverage, the native pipeline smoke,
+and live simulator/Gemini speaker and headphone echo/interruption tests with
+clean process liveness and shutdown. Keep this bypass opt-in until that work
+is complete.
+
 ## Test inventory and current evidence
 
 `tests/audio/test_speaker_output.py` covers selector/factory failures, frame
