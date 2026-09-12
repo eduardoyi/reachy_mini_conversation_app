@@ -108,6 +108,7 @@ class TranscriptTurn:
 
 
 TrafficObserver: TypeAlias = Callable[[TrafficKind, int], None]
+ContextGuard: TypeAlias = Callable[[], bool]
 
 
 class _ResponsesResource(Protocol):
@@ -161,6 +162,7 @@ class OpenAILiveDelegationBackend:
         tool_manager: BackgroundToolManager | None = None,
         instructions: str = "",
         traffic_observer: TrafficObserver | None = None,
+        context_guard: ContextGuard | None = None,
         max_rounds: int = DEFAULT_MAX_ROUNDS,
         max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
@@ -192,6 +194,7 @@ class OpenAILiveDelegationBackend:
         self.tool_manager = tool_manager if tool_manager is not None else BackgroundToolManager()
         self._instructions = instructions.strip()
         self._traffic_observer = traffic_observer
+        self._context_guard = context_guard
         self._max_rounds = max_rounds
         self._max_tool_calls = max_tool_calls
         self._max_output_tokens = max_output_tokens
@@ -259,7 +262,10 @@ class OpenAILiveDelegationBackend:
         if active_task is not None and active_task is not current_task:
             active_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await active_task
+                try:
+                    await asyncio.wait_for(asyncio.shield(active_task), timeout=_CANCEL_WAIT_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    logger.warning("OpenAI delegation run did not stop within the cancellation bound")
 
         async with self._close_lock:
             if self._client_closed:
@@ -415,6 +421,8 @@ class OpenAILiveDelegationBackend:
         tool_params: list[ToolParam],
     ) -> Response:
         self._ensure_generation(generation)
+        if self._context_guard is not None and not self._context_guard():
+            raise RuntimeError("delegation context is stale")
         response = await self._client.responses.create(
             model=self.model,
             input=input_items,
@@ -517,6 +525,8 @@ class OpenAILiveDelegationBackend:
 
     async def _run_tool(self, function_call: ResponseFunctionToolCall, generation: int) -> _PreparedToolResult:
         self._ensure_generation(generation)
+        if self._context_guard is not None and not self._context_guard():
+            raise RuntimeError("delegation context is stale")
         call_id = function_call.call_id.strip()
         tool_name = function_call.name.strip()
         if not call_id or not tool_name:

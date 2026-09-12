@@ -115,6 +115,8 @@ LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV = "LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS"
 LOCAL_CONTEXT_WINDOW_SECONDS_ENV = "LOCAL_CONTEXT_WINDOW_SECONDS"
 LOCAL_CONTEXT_MAX_CHARS_ENV = "LOCAL_CONTEXT_MAX_CHARS"
 LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV = "LOCAL_TRANSCRIPT_PREVIEW_ENABLED"
+HOUSEHOLD_MEMORY_ENABLED_ENV = "HOUSEHOLD_MEMORY_ENABLED"
+HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV = "HOUSEHOLD_MEMORY_CAPTURE_ENABLED"
 AUDIO_OUTPUT_BACKEND_ENV = "AUDIO_OUTPUT_BACKEND"
 AUDIO_OUTPUT_BACKEND_SDK = "sdk"
 AUDIO_OUTPUT_BACKEND_GSTREAMER = "gstreamer"
@@ -136,6 +138,7 @@ MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS = 15.0
 DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS = 60.0
 DEFAULT_LOCAL_CONTEXT_MAX_CHARS = 2_000
 DEFAULT_LOCAL_TRANSCRIPT_PREVIEW_ENABLED = False
+DEFAULT_HOUSEHOLD_MEMORY_ENABLED = False
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
@@ -312,6 +315,11 @@ def is_hybrid_runtime_enabled() -> bool:
 def is_local_transcript_preview_enabled() -> bool:
     """Return whether the opt-in local transcript preview is enabled."""
     return _env_flag(LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, default=DEFAULT_LOCAL_TRANSCRIPT_PREVIEW_ENABLED)
+
+
+def is_household_memory_enabled() -> bool:
+    """Return whether the opt-in household memory integration is enabled."""
+    return _env_flag(HOUSEHOLD_MEMORY_ENABLED_ENV, default=DEFAULT_HOUSEHOLD_MEMORY_ENABLED)
 
 
 def resolve_local_context_strategy() -> str:
@@ -579,6 +587,8 @@ class Config:
     )
     LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
     LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
+    HOUSEHOLD_MEMORY_ENABLED = is_household_memory_enabled()
+    HOUSEHOLD_MEMORY_CAPTURE_ENABLED = _env_flag(HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, default=False)
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -725,6 +735,8 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.LOCAL_CONTEXT_MAX_CHARS = resolve_local_context_max_chars()
     config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
+    config.HOUSEHOLD_MEMORY_ENABLED = is_household_memory_enabled()
+    config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED = _env_flag(HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, default=False)
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

@@ -190,3 +190,56 @@ Do not infer individual Spotify/camera tool, interruption, reactivation, physica
 robot, Raspberry Pi performance or echo-cancellation acceptance from this report.
 Generated architecture SVG regeneration remains outstanding. Gemini remains
 available as fallback; no private environment values or media belong in git.
+
+
+## Optional household memory capture
+
+With both `HOUSEHOLD_MEMORY_ENABLED` and `HOUSEHOLD_MEMORY_CAPTURE_ENABLED`, the
+provider starts a bounded silent extraction worker only after `session.started`.
+It receives active transcript deltas, not injected pre-wake context or audio.
+Standby/shutdown cancels it and clears its buffer without a final flush. Speech
+and action delegation remain separate from this tool-free Responses request.
+
+Corrections or deletion invalidate old Live/Luna context and end that conversation;
+routine additions enter the next activation's memory snapshot. The
+[household memory feature](household-memory.md) owns storage, configuration, costs,
+inspection and validation details. The architecture Mermaid source is updated;
+generated SVG regeneration remains outstanding.
+
+## Local movement — 2026-09-12
+
+Session readiness clears listening mode rather than holding it for the entire
+connection. This leaves local antenna motion, idle breathing, and idle-policy
+eligibility available; their existing activity guards still apply. GPT Live does
+not currently provide mapped user speech boundaries, so listening-specific
+antenna freezing is unavailable. Output speaking state still controls the existing
+face-tracking handoff; it does not generate animation.
+
+Speech-reactive head wobble remains the SDK's local playback behavior. Normal
+SDK output feeds it through `media.push_audio_sample`; the explicit simulator
+`AUDIO_OUTPUT_BACKEND=gstreamer` bypass does not. This repair does not switch
+audio backends or add Luna calls. Human movement and active-route acceptance
+remain pending; use the normal SDK route in a supervised trial where supported.
+Do not remove the simulator crash workaround without separately validating it.
+
+Regression: `tests/test_openai_live.py::test_connected_session_does_not_freeze_local_movement`
+failed before the correction (`set_listening(True)` at readiness). It covers
+readiness, user transcript, output speech, and shutdown with a fake transport.
+
+Validation on 2026-09-12:
+
+- `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_openai_live.py tests/test_openai_live_hybrid.py tests/test_moves.py tests/test_console.py tests/audio/test_speaker_output.py -q`: 120 passed.
+- `.venv/bin/ruff check . --fix`: passed.
+- `.venv/bin/ruff format .`: 131 files unchanged.
+- `.venv/bin/mypy --pretty --show-error-codes`: passed, 67 source files.
+- `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -v`: 1106 passed, 2 skipped.
+- `git diff --check`: passed.
+
+No live cloud, graphical simulator, physical hardware, latency, or human movement
+trial was run. The source/audio boundary tests use fakes; they do not establish
+visible speech wobble. Architecture and dependencies are unchanged.
+
+The two skipped checks were
+`test_official33_activates_simulator_without_ambient_cloud_audio` and
+`test_optional_native_speaker_subprocess_smoke`; optional native acceptance was
+not enabled for this deterministic gate.

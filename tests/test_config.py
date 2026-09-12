@@ -240,6 +240,31 @@ def test_hybrid_runtime_defaults_are_cloud_disabled_until_activation(monkeypatch
     assert config.config.LOCAL_CONTEXT_WINDOW_SECONDS == 60.0
 
 
+def test_household_memory_is_disabled_by_default_and_accepts_explicit_flag(monkeypatch) -> None:
+    """Household memory stays opt-in and parses the shared boolean flag."""
+    monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", config.config.HOUSEHOLD_MEMORY_ENABLED)
+    monkeypatch.delenv(config.HOUSEHOLD_MEMORY_ENABLED_ENV, raising=False)
+    config.refresh_runtime_config_from_env()
+    assert config.config.HOUSEHOLD_MEMORY_ENABLED is False
+    assert config.is_household_memory_enabled() is False
+
+    monkeypatch.setenv(config.HOUSEHOLD_MEMORY_ENABLED_ENV, " yes ")
+    config.refresh_runtime_config_from_env()
+    assert config.config.HOUSEHOLD_MEMORY_ENABLED is True
+    assert config.is_household_memory_enabled() is True
+
+
+def test_household_capture_is_separately_opt_in(monkeypatch) -> None:
+    """Enabling the notebook alone must not enable paid transcript processing."""
+    monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", False)
+    monkeypatch.delenv(config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, raising=False)
+    config.refresh_runtime_config_from_env()
+    assert config.config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED is False
+    monkeypatch.setenv(config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, "1")
+    config.refresh_runtime_config_from_env()
+    assert config.config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED is True
+
+
 def test_local_transcript_preview_defaults_to_disabled(monkeypatch) -> None:
     """The diagnostic transcript surface stays off unless explicitly enabled."""
     monkeypatch.delenv(config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV, raising=False)

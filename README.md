@@ -499,7 +499,9 @@ AUDIO_OUTPUT_BACKEND=gstreamer REALTIME_PROVIDER=gemini \
 
 This is an experimental simulator containment path, not an upstream SDK fix.
 It keeps SDK microphone capture, providers, tools, and normal movement, but the
-SDK audio-reactive wobbler does not receive assistant PCM. The SDK mixer still
+SDK audio-reactive wobbler does not receive assistant PCM. GPT Live session readiness
+does not freeze antennas or suppress local breathing; speech bobbing still
+requires the normal SDK playback route. The SDK mixer still
 exists for capture, so repeated live validation is required before the crash is
 considered contained. Unset the variable to restore the normal SDK output path.
 
@@ -559,6 +561,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Shared tool, enabled by default in the default profile. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
+| `update_memory` | Correct, reassign or resolve a memory by ID. | Opt-in household memory; available with default memory tools; custom Tool access selections must include it. |
 | `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web and return a short list of results. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
 | `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place: current conditions, high and low temperature, and rain chance. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
 | `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
@@ -569,6 +572,17 @@ profile-managed MCP tools above and is unavailable on the Hugging Face backend.
 
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
+
+Optional `HOUSEHOLD_MEMORY_ENABLED=1` adds person labels, temporary notes, dated
+plans and corrections. It is disabled by default and existing memory requires
+explicit migration. The filename stays `memory.v1.json`, with version 2 inside;
+switching the flag off does not restore an older copy. Add
+`HOUSEHOLD_MEMORY_CAPTURE_ENABLED=1` to collect notes quietly during active GPT Live
+conversations. Both flags default off. Capture is bounded and stops in standby;
+daily consolidation is not implemented. Settings → **What Reachy remembers**
+lets you inspect and forget notes locally. See [household memory](docs/features/household-memory.md)
+for migration, lifetimes, costs and current limitations. Stop the app before external
+memory maintenance. Corrections keep the current GPT Live conversation running. Spoken forgetting also keeps the conversation running and pauses automatic capture until the next wake. Settings Forget resets the conversation to clear active context.
 
 ## Creating and adding tools
 

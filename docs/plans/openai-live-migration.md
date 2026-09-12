@@ -136,3 +136,40 @@ Do not infer individual Spotify/camera tool, interruption, reactivation, physica
 robot, Raspberry Pi performance or echo-cancellation acceptance from this report.
 Generated architecture SVG regeneration remains outstanding. Gemini remains
 available as fallback; no private environment values or media belong in git.
+
+## Local movement repair — 2026-09-12
+
+User approved restoring/checking existing local movement after read-only diagnosis.
+Scope: remove the session-wide listening freeze; verify existing SDK audio routing.
+No extra Luna calls, dependencies, gesture policy changes, or audio-backend changes.
+The documented Live events do not establish user speech start/end, so readiness
+must not assert listening. Preserve speaking tracking handoff and shutdown cleanup.
+
+Implementation order: add a failing fake-session regression, correct readiness,
+run provider/movement/audio tests and the full repository gate, update provider
+documentation and README. Acceptance: session startup and output audio never hold
+listening on; SDK output still receives provider audio; standby privacy tests pass.
+Risks: listening-specific antenna freeze remains unavailable without reliable user
+speech boundaries; the simulator GStreamer bypass still cannot drive SDK wobble.
+Human movement acceptance and active launch-route verification remain pending.
+Existing uncommitted household-memory work is preserved in place. No PR is planned.
+
+Status: code and automated verification complete; human movement check pending.
+
+Validation on 2026-09-12:
+
+- `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_openai_live.py tests/test_openai_live_hybrid.py tests/test_moves.py tests/test_console.py tests/audio/test_speaker_output.py -q`: 120 passed.
+- `.venv/bin/ruff check . --fix`: passed.
+- `.venv/bin/ruff format .`: 131 files unchanged.
+- `.venv/bin/mypy --pretty --show-error-codes`: passed, 67 source files.
+- `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -v`: 1106 passed, 2 skipped.
+- `git diff --check`: passed.
+
+No live cloud, graphical simulator, physical hardware, latency, or human movement
+trial was run. The source/audio boundary tests use fakes; they do not establish
+visible speech wobble. Architecture and dependencies are unchanged.
+
+The two skipped checks were
+`test_official33_activates_simulator_without_ambient_cloud_audio` and
+`test_optional_native_speaker_subprocess_smoke`; optional native acceptance was
+not enabled for this deterministic gate.

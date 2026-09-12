@@ -171,6 +171,10 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         """Shut down the realtime handler."""
         ...
 
+    def stop_background_work(self) -> None:
+        """Stop provider work before the runtime leaves cloud mode."""
+        return
+
     @abstractmethod
     async def receive(self, frame: AudioFrame) -> None:
         """Receive an input audio frame."""

@@ -1477,8 +1477,13 @@ class HybridRuntime:
                     activation_task = self._activation_task
                     self._clear_postactivation_queue()
                 elif mode is RuntimeMode.CLOUD_CONVERSATION:
-                    self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
                     handler = active_handler
+                    if handler is not None:
+                        try:
+                            handler.stop_background_work()
+                        except Exception as error:
+                            logger.warning("Provider background-work stop failed: %s", type(error).__name__)
+                    self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
                     provider_task = self._provider_task
                     inactivity_task = self._inactivity_task
                     flush_task = self._postactivation_flush_task

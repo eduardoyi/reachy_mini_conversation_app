@@ -180,6 +180,29 @@ async def test_startup_waits_for_started_and_preserves_24khz_pcm(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_connected_session_does_not_freeze_local_movement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep antennas and breathing available throughout an active speech session."""
+    socket = FakeSocket()
+    handler = _handler(socket, monkeypatch=monkeypatch)
+    startup_task = await _start_ready(handler, socket)
+    try:
+        handler.deps.movement_manager.set_listening.assert_called_once_with(False)
+        await handler._handle_event({"type": "session.input_transcript.delta", "delta": "hello"})
+        await handler._handle_event(
+            {
+                "type": "session.output_audio.delta",
+                "delta": base64.b64encode(np.array([2_000, -2_000], dtype="<i2").tobytes()).decode("ascii"),
+            }
+        )
+        handler.deps.movement_manager.set_speaking.assert_called_with(True)
+        assert all(not invocation.args[0] for invocation in handler.deps.movement_manager.set_listening.call_args_list)
+    finally:
+        await _stop(handler, startup_task)
+    handler.deps.movement_manager.set_listening.assert_called_with(False)
+    handler.deps.movement_manager.set_speaking.assert_called_with(False)
+
+
+@pytest.mark.asyncio
 async def test_resampling_is_chunk_invariant(monkeypatch: pytest.MonkeyPatch) -> None:
     """Source buffering makes split microphone frames equal one combined frame."""
     whole_socket = FakeSocket()

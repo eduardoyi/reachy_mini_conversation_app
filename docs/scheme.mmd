@@ -51,6 +51,12 @@ flowchart TB
 
     Profiles -- defines enabled tools --> Handlers
 
+    Handlers -- memory tools --> Memory["Local household notebook<br/>person labels, lifetimes, revisions"]
+    Memory -- bounded startup snapshot --> Backend
+    Memory -- bounded startup snapshot --> Luna
+    Backend -- opt-in active transcript fragments --> Capture["Silent memory capture<br/>bounded tool-free Luna request"]
+    Capture -- validated revision-checked notes --> Memory
+
     Handlers -- movement
     requests --> Motion
 
@@ -79,6 +85,8 @@ flowchart TB
      Speaker:::uiStyle
      Profiles:::toolStyle
      Handlers:::toolStyle
+     Memory:::localStyle
+     Capture:::aiStyle
      Robot:::hardwareStyle
     classDef userStyle fill:#e1f5fe,stroke:#01579b,stroke-width:3px
     classDef uiStyle fill:#b3e5fc,stroke:#0277bd,stroke-width:2px

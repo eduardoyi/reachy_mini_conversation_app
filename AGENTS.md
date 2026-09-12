@@ -23,6 +23,16 @@ Everything below expands these.
 
 ---
 
+## Reachy product philosophy
+
+- **Aim for simple magic.** Choose the simplest elegant solution that delivers most of the companion experience: attentive, natural, useful and easy to live with. “90% of perfect” is a scope goal, never a reason to weaken privacy, correctness, reliability or required tests.
+- **Validate progressively.** Break features into small working milestones with observable user outcomes. Validate the current milestone before adding the next layer; do not build speculative infrastructure for hypothetical future needs.
+- **Keep complexity out of conversation.** Reachy should adapt to people, not require people to manage its internals or speak in special formats. Ask clarifying questions when they help the interaction, not merely to fill a schema. Quiet uncertainty or restraint can be better than a confident guess or interruption.
+- **Reuse when it actually simplifies.** Consider maintained open-source components, but compare integration, dependencies, latency, cost, privacy and ongoing maintenance with a small local implementation. Installing a framework is not automatically simpler. Add abstraction or infrastructure only for a concrete validated need.
+- **Measure the experience.** Prefer meaningful scenario tests and real user feedback over feature count. Record what remains uncertain, what is deferred, and the evidence that would justify more complexity. Preserve natural behavior and graceful failure as the system grows.
+
+---
+
 ## Engineering excellence
 
 The bar we hold, and the *why* behind the rules:

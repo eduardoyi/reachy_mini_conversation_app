@@ -1300,3 +1300,19 @@ Real API synthetic silence also verified automatic close; full local gate passed
 physical hardware performance and generated architecture SVG remain outstanding.
 See [GPT Live migration](openai-live-migration.md) and the
 [provider feature record](../features/openai-live-provider.md) for evidence.
+
+
+## Household memory follow-on — 2026-09-10
+
+The [household memory lifecycle plan](household-memory-lifecycle.md) records the
+next companion improvement: invisible notes, person attribution, temporal
+relevance and bounded daily consolidation. Milestone 1 was implemented on
+2026-09-11, with local storage/tools behind a default-off flag and 1013 tests
+passing (2 native opt-in skips). The user accepted M1 and authorized M2 invisible
+capture and local review on 2026-09-11. M2's spoken capture, Settings inspection
+and recall after standby passed a user simulator trial later that day. Correction
+and Settings deletion also passed subsequent user checks; the revised quiet-skip policy passed a subsequent spoken trial. Corrections now
+preserve the active conversation. Spoken forgetting also keeps it running, pausing
+automatic capture until the next wake; Settings Forget still resets it. Continuity
+has automated coverage and awaits a spoken check. Daily review remains gated; this does not expand
+phases 0–5 or enable background cloud work. Voice/face recognition remains deferred.

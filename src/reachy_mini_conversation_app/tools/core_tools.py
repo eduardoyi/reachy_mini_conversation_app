@@ -17,7 +17,7 @@ from reachy_mini_conversation_app.config import config, list_tool_module_names
 from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
-from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
+from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names, read_profile_tool_override
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -41,6 +41,7 @@ class ToolDependencies:
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
     instance_path: str | Path | None = None
+    on_memory_forgotten: Callable[[str], None] | None = None
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
@@ -90,7 +91,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -281,7 +282,7 @@ def _build_tool_registry(
     return {tool.name: tool for tool in tool_instances}
 
 
-def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None]:
+def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -289,6 +290,7 @@ def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str
         _normalize_signature_path(config.TOOLS_DIRECTORY),
         bool(config.AUTOLOAD_EXTERNAL_TOOLS),
         _normalize_signature_path(instance_path),
+        config.HOUSEHOLD_MEMORY_ENABLED,
     )
 
 
@@ -315,6 +317,16 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
                 len(extra_tools),
                 extra_tools,
             )
+
+    if not config.HOUSEHOLD_MEMORY_ENABLED:
+        tool_names = [name for name in tool_names if name != "update_memory"]
+    elif (
+        "remember" in tool_names
+        and "forget" in tool_names
+        and "update_memory" not in tool_names
+        and read_profile_tool_override(profile, instance_path) is None
+    ):
+        tool_names.append("update_memory")
 
     logger.info("Found %d tools to load: %s", len(tool_names), tool_names)
     return tool_names
@@ -456,8 +468,8 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
     try:
         parsed_args = json.loads(args_json or "{}")
         return parsed_args if isinstance(parsed_args, dict) else {}
-    except Exception:
-        logger.warning("bad args_json=%r", args_json)
+    except json.JSONDecodeError:
+        logger.warning("Tool arguments are not valid JSON")
         return {}
 
 

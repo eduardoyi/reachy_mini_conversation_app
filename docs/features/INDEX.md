@@ -10,6 +10,7 @@ the implementation.
 | Feature | Document | Status |
 |---------|----------|--------|
 | GPT Live provider | [openai-live-provider.md](openai-live-provider.md) | conversation + standby accepted |
+| Household memory | [household-memory.md](household-memory.md) | spoken capture/recall/correction/deletion passed; quiet unknown-person trial passed; spoken forgetting passed user retry, default off |
 | Gemini Live provider | [gemini-live-provider.md](gemini-live-provider.md) | in-progress |
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |

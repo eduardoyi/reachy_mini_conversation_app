@@ -59,6 +59,7 @@ export async function mountSettingsView({ outlet, signal }) {
   });
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
+  const memorySection = buildMemorySection(signal);
 
   const view = h(
     "section",
@@ -71,7 +72,8 @@ export async function mountSettingsView({ outlet, signal }) {
     ),
     connectionSection.element,
     voiceSection.element,
-    statusSection.element
+    statusSection.element,
+    memorySection
   );
   outlet.replaceChildren(view);
 
@@ -79,6 +81,56 @@ export async function mountSettingsView({ outlet, signal }) {
     refreshStatus({ statusSection, connectionSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
+}
+
+function buildMemorySection(signal) {
+  const message = h("p", { class: "settings-hint" }, "Show saved details to review or forget one. Relevant memories are used in conversations.");
+  const entries = h("div", {});
+  const show = h("button", { type: "button", class: "btn" }, "Show memories");
+  async function refresh() {
+    show.disabled = true;
+    try {
+      const response = await fetch("/api/memory", { cache: "no-store", signal });
+      if (response.status === 404) throw new Error("Memory is not enabled yet.");
+      if (response.status === 403) throw new Error("Open these settings on Reachy’s computer to review memory.");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Memory is unavailable.");
+      if (signal.aborted) return;
+      entries.replaceChildren();
+      message.textContent = result.entries.length ? "Only forget details you want removed." : "No saved memories.";
+      for (const entry of result.entries) {
+        const forget = h("button", { type: "button", class: "btn" }, "Forget");
+        const inactive = entry.status !== "current" || (entry.active_until && Date.parse(entry.active_until) <= Date.now());
+        const label = `${entry.subject || "Unassigned — not used in conversation"} · ${inactive ? "Older note" : entry.kind}${entry.certainty === "tentative" ? " · tentative" : ""}`;
+        entries.append(h("div", { class: "settings-section" }, h("small", {}, label), h("p", {}, entry.text), forget));
+        forget.addEventListener("click", async () => {
+          forget.disabled = true;
+          try {
+            const response = await fetch("/api/memory/forget", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ memory_id: entry.id }), signal,
+            });
+            if (!response.ok) throw new Error("Could not forget this detail. Please retry.");
+            await refresh();
+            if (!signal.aborted) message.textContent = "Forgotten. Start a new conversation to continue.";
+          } catch (error) {
+            if (!signal.aborted) message.textContent = error.message || "Memory is unavailable.";
+          } finally {
+            forget.disabled = false;
+          }
+        });
+      }
+    } catch (error) {
+      if (!signal.aborted) {
+        entries.replaceChildren();
+        message.textContent = error.message || "Memory is unavailable.";
+      }
+    } finally {
+      show.disabled = false;
+    }
+  }
+  show.addEventListener("click", refresh);
+  return h("section", { class: "settings-section" }, h("h2", { class: "settings-section-title" }, "What Reachy remembers"), message, show, entries);
 }
 
 function buildConnectionSection({ onSaved } = {}) {

@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-09-03
+- Last updated: 2026-09-11
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -201,6 +201,15 @@ startup-greeting controls. `MovementManager.acknowledge_activation()` is the
 only path used for activation acknowledgment; the runtime never calls robot
 motor APIs. The manager's worker captures its last commanded full-body pose,
 applies a relative nod, and returns to that exact pose.
+
+Before transitioning out of `CLOUD_CONVERSATION`, the runtime synchronously calls
+`ConversationHandler.stop_background_work()`. Providers with background cloud work
+must stop admitting fragments/requests and invalidate pending results there,
+without blocking or awaiting network cleanup. Async `shutdown()` then releases
+resources. GPT Live uses this hook for optional
+[household memory capture](household-memory.md); other providers inherit a no-op.
+`tests/test_openai_live_memory.py` verifies that the fence runs while the runtime
+is still in cloud mode, with separate real capture/store and late-result tests.
 
 `AmbientContextProcessor` is the replaceable local VAD/STT seam.
 `RmsEnergyVAD` and the loopback-only `OpenAICompatibleLocalSTT` are benchmark

@@ -6,6 +6,7 @@ selects the provider, and edits only the Hugging Face connection target.
 
 import os
 import sys
+import json
 import time
 import queue
 import asyncio
@@ -51,6 +52,11 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, resample_audio, audio_to_float32
 from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime
+from reachy_mini_conversation_app.household_memory import (
+    MemoryStoreError,
+    HouseholdMemoryStore,
+    MigrationRequiredError,
+)
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
@@ -79,6 +85,7 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
     BaseModel = object  # type: ignore
 
 logger = logging.getLogger(__name__)
+_MEMORY_SHUTDOWN_TIMEOUT_S = 20.0
 
 
 def _detach_framework_root_routes(app: "FastAPI") -> None:
@@ -1109,6 +1116,126 @@ class LocalStream:
                 content=await self.get_transcript_preview(),
                 headers={"Cache-Control": "no-store"},
             )
+
+        def _memory_access_denied(request: Request, *, mutation: bool = False) -> Response | None:
+            client_host = request.client.host if request.client is not None else ""
+            try:
+                local_client = ipaddress.ip_address(client_host).is_loopback
+            except ValueError:
+                local_client = False
+            if not local_client or request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                return Response(status_code=403, headers={"Cache-Control": "no-store"})
+            origin = request.headers.get("origin")
+            if (mutation or origin is not None) and origin != f"{request.url.scheme}://{request.url.netloc}":
+                return Response(status_code=403, headers={"Cache-Control": "no-store"})
+            if not config.HOUSEHOLD_MEMORY_ENABLED:
+                return Response(status_code=404, headers={"Cache-Control": "no-store"})
+            return None
+
+        @settings_app.get("/api/memory")
+        async def _memory_list(request: Request) -> Response:
+            denied = _memory_access_denied(request)
+            if denied is not None:
+                return denied
+            try:
+                entries = HouseholdMemoryStore(self._instance_path).list_entries(include_inactive=True)
+            except MigrationRequiredError:
+                return JSONResponse(
+                    {"error": "Explicit memory migration is required."},
+                    status_code=409,
+                    headers={"Cache-Control": "no-store"},
+                )
+            except MemoryStoreError:
+                logger.warning("Memory inspection unavailable")
+                return JSONResponse(
+                    {"error": "Memory is unavailable."}, status_code=503, headers={"Cache-Control": "no-store"}
+                )
+            return JSONResponse(
+                {
+                    "entries": [
+                        {
+                            "id": entry.id,
+                            "text": entry.text,
+                            "subject": entry.subject_id,
+                            "kind": entry.kind,
+                            "certainty": entry.certainty,
+                            "status": entry.status,
+                            "active_until": entry.active_until.isoformat() if entry.active_until else None,
+                        }
+                        for entry in entries
+                    ]
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+
+        @settings_app.post("/api/memory/forget")
+        async def _memory_forget(request: Request) -> Response:
+            denied = _memory_access_denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            if request.headers.get("content-type", "").split(";")[0] != "application/json":
+                return Response(status_code=415, headers={"Cache-Control": "no-store"})
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > 1_024:
+                    return Response(status_code=413, headers={"Cache-Control": "no-store"})
+            try:
+                payload: object = json.loads(body)
+            except (ValueError, UnicodeError):
+                return Response(status_code=400, headers={"Cache-Control": "no-store"})
+            if not isinstance(payload, dict) or set(payload) != {"memory_id"}:
+                return Response(status_code=400, headers={"Cache-Control": "no-store"})
+            memory_id = payload["memory_id"]
+            if not isinstance(memory_id, str) or not memory_id.strip() or len(memory_id) > 120:
+                return Response(status_code=400, headers={"Cache-Control": "no-store"})
+
+            request_active = threading.Event()
+            request_active.set()
+
+            async def _stop_and_forget() -> bool:
+                if self._hybrid_runtime is not None:
+                    active_handler = self._hybrid_runtime.active_handler
+                    if active_handler is not None:
+                        await active_handler.shutdown()
+                    await self._hybrid_runtime.deactivate_cloud("memory_changed")
+                else:
+                    await self.handler.shutdown()
+                if not request_active.is_set():
+                    raise asyncio.CancelledError
+                result = HouseholdMemoryStore(self._instance_path).forget(memory_id=memory_id)
+                self._restart_requested.set()
+                return result.removed is not None
+
+            operation: asyncio.Future[bool] | None = None
+            try:
+                loop = self._asyncio_loop
+                if loop is not None and loop.is_running() and loop is not asyncio.get_running_loop():
+                    coroutine = _stop_and_forget()
+                    try:
+                        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+                    except RuntimeError:
+                        coroutine.close()
+                        raise
+                    operation = asyncio.wrap_future(future)
+                else:
+                    operation = asyncio.create_task(_stop_and_forget())
+                completed, _ = await asyncio.wait({operation}, timeout=_MEMORY_SHUTDOWN_TIMEOUT_S)
+                if not completed:
+                    raise TimeoutError("memory shutdown timed out")
+                removed = operation.result()
+            except (MemoryStoreError, TimeoutError, RuntimeError, OSError):
+                logger.warning("Memory deletion unavailable")
+                return JSONResponse(
+                    {"error": "Memory could not be forgotten; retry locally."},
+                    status_code=503,
+                    headers={"Cache-Control": "no-store"},
+                )
+            finally:
+                request_active.clear()
+                if operation is not None and not operation.done():
+                    operation.cancel()
+            return JSONResponse({"removed": removed}, headers={"Cache-Control": "no-store"})
 
         # GET / -> index.html
         @settings_app.get("/")
