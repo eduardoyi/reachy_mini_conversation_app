@@ -45,6 +45,8 @@ export async function mountTalkView({ outlet, signal }) {
   let micReady = false;
   let togglePending = false;
   let activationPending = false;
+  let stopping = false;
+  let stoppingReason = "";
   let hybridEnabled = false;
   let activePersonality = null;
   let subscription = null;
@@ -122,6 +124,9 @@ export async function mountTalkView({ outlet, signal }) {
   if (micState) muted = Boolean(micState.muted);
   hybridEnabled = runtimeStatus?.hybrid_runtime_enabled === true;
   if (signal.aborted) return;
+  if (hybridEnabled && runtimeStatus?.hybrid_state === "STOPPING") {
+    setStoppingState(runtimeStatus.backend_error || "");
+  }
   if (renderTranscriptPreview(transcriptPreviewState)) {
     transcriptPreviewTimer = window.setInterval(() => void refreshTranscriptPreview(), 1000);
   }
@@ -141,30 +146,49 @@ export async function mountTalkView({ outlet, signal }) {
         }
       }
       if (signal.aborted) return;
+      await refreshHybridState();
+      if (signal.aborted) return;
+      if (stopping) {
+        orb.setState(ORB_STATES.CONNECTING);
+        caption.textContent = stoppingCaption(stoppingReason);
+        syncMicAria();
+        return;
+      }
       orb.setState(restingState());
       caption.textContent = CAPTION_BY_STATE[restingState()];
       syncMicAria();
     },
     onActivity: (reason) => {
-      if (muted) return;
+      if (stopping || muted) return;
       const next = mapActivityToState(reason);
       if (next == null) return;
       orb.setState(next);
     },
     onHybridState: (state, reason) => {
+      if (stopping && state !== "STOPPING" && state !== "LOCAL_AMBIENT") return;
       if (state === "LOCAL_COMMAND") {
+        stopping = false;
+        stoppingReason = "";
         activationPending = true;
         caption.textContent = "Activating…";
         orb.setState(ORB_STATES.CONNECTING);
         return;
       }
       if (state === "CLOUD_CONVERSATION") {
+        stopping = false;
+        stoppingReason = "";
         activationPending = false;
         caption.textContent = "Listening";
         orb.setState(ORB_STATES.LISTENING);
         return;
       }
+      if (state === "STOPPING") {
+        setStoppingState(reason);
+        return;
+      }
       if (state === "LOCAL_AMBIENT") {
+        stopping = false;
+        stoppingReason = "";
         activationPending = false;
         orb.setState(restingState());
         caption.textContent = /failed|cancelled|timeout/i.test(reason || "")
@@ -228,6 +252,37 @@ export async function mountTalkView({ outlet, signal }) {
     return muted ? ORB_STATES.MUTED : ORB_STATES.IDLE;
   }
 
+  function stoppingCaption(reason) {
+    return /failed|timeout|incomplete|error/i.test(reason || "")
+      ? "Cleanup unavailable"
+      : "Stopping…";
+  }
+
+  function setStoppingState(reason) {
+    stopping = true;
+    stoppingReason = reason || "";
+    activationPending = true;
+    orb.setState(ORB_STATES.CONNECTING);
+    caption.textContent = stoppingCaption(stoppingReason);
+  }
+
+  async function refreshHybridState() {
+    if (!hybridEnabled || signal.aborted) return;
+    try {
+      const status = await getStatus();
+      if (signal.aborted) return;
+      if (status?.hybrid_state === "STOPPING") {
+        setStoppingState(status.backend_error || "");
+      } else if (stopping && status?.hybrid_state === "LOCAL_AMBIENT") {
+        stopping = false;
+        stoppingReason = "";
+        activationPending = false;
+      }
+    } catch {
+      // Keep the last known lifecycle state until the event stream catches up.
+    }
+  }
+
   async function onMicTap() {
     if (!micReady || togglePending) return;
     togglePending = true;
@@ -235,7 +290,7 @@ export async function mountTalkView({ outlet, signal }) {
       const data = await setMicMuted(!muted);
       muted = Boolean(data?.muted);
     } catch (error) {
-      if (!signal.aborted) {
+      if (!signal.aborted && !stopping) {
         caption.textContent = `Failed to toggle the microphone: ${error?.message || error}`;
       }
       return;
@@ -243,6 +298,12 @@ export async function mountTalkView({ outlet, signal }) {
       togglePending = false;
     }
     if (signal.aborted) return;
+    if (stopping) {
+      orb.setState(ORB_STATES.CONNECTING);
+      caption.textContent = stoppingCaption(stoppingReason);
+      syncMicAria();
+      return;
+    }
     orb.setState(restingState());
     // setState skips unchanged states, so set the caption explicitly
     caption.textContent = CAPTION_BY_STATE[restingState()];
@@ -253,6 +314,7 @@ export async function mountTalkView({ outlet, signal }) {
     if (
       signal.aborted ||
       !hybridEnabled ||
+      stopping ||
       activationPending ||
       event.repeat ||
       event.defaultPrevented ||
@@ -278,7 +340,7 @@ export async function mountTalkView({ outlet, signal }) {
     caption.textContent = "Activating…";
     try {
       const result = await activateConversation();
-      if (signal.aborted) return;
+      if (signal.aborted || stopping) return;
       if (!result?.ok) {
         caption.textContent = result?.error || "Activation unavailable";
         return;
@@ -286,9 +348,9 @@ export async function mountTalkView({ outlet, signal }) {
       caption.textContent = "Listening";
       orb.setState(ORB_STATES.LISTENING);
     } catch (error) {
-      if (!signal.aborted) caption.textContent = `Activation failed: ${error?.message || error}`;
+      if (!signal.aborted && !stopping) caption.textContent = `Activation failed: ${error?.message || error}`;
     } finally {
-      activationPending = false;
+      activationPending = stopping;
     }
   }
 

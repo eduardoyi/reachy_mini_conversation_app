@@ -9,8 +9,10 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
-| [Household memory lifecycle](household-memory-lifecycle.md) | `in-progress` | 2026-09-11 | M1 accepted; M2 capture/recall/correction/deletion passed; quiet unknown-person trial passed; spoken forgetting passed user retry; daily review deferred |
-| [GPT Live migration](openai-live-migration.md) | `local movement fix; human check pending` | 2026-09-12 | GPT Live speech, Luna delegation, and local movement repair |
+| [Gemini 3.8 Live Extended Thinking migration](gemini-38-live-extended-thinking-migration.md) | `in-progress` | 2026-09-16 | Gemini async reasoning, shared memory and shutdown implemented; 1,247 tests passed; live transcript parity and rollout pending |
+| [Local audio dropout comparison](audio-dropout-comparison.md) | `Mac headphones and speakers accepted; SDK upstream/hardware pending` | 2026-09-13 | Audio diagnostics, SDK flush candidate and live audio acceptance |
+| [Household memory lifecycle](household-memory-lifecycle.md) | `in-progress` | 2026-09-13 | M1–M2 user accepted; M3 daily tidy-up implemented; synthetic Luna review passed; live follow-up pending |
+| [GPT Live migration](openai-live-migration.md) | `Mac speech movement and speakers accepted; hardware pending` | 2026-09-13 | GPT Live speech, Luna delegation, local movement repair; simulator echo/hearing follow-up |
 | [Spotify playback control](reachy-spotify-control.md) | `complete: Mac playback and search/play/queue accepted` | 2026-09-10 | Optional Mac playback voice controls |
 | [Reachy hybrid household companion](reachy-hybrid-household-companion.md) | `in-progress: headless MVP accepted; hardware validation pending` | 2026-09-10 | Phases 0–5 |
 | [Custom multilingual Reachy openWakeWord training](custom-reachy-openwakeword-training.md) | `Official33 supervised headless MVP accepted; training paused` | 2026-09-10 | Phase 4 custom acoustic wake detector |
@@ -22,7 +24,8 @@ The companion loop is implemented in the local checkout; phases 0–3 and functi
 phase 5 have prior simulator acceptance with documented limits. Official33 acoustic
 wake is now integrated behind an off-by-default setting. Native 20-call adapter
 parity and headless SDK/movement integration passed; human-spoken graphical
-acceptance, actual robot/Pi measurements, speaker echo and some latency/resource
+acceptance, actual robot/Pi measurements, speaker echo outside the accepted Mac
+SDK-candidate configuration and some latency/resource
 measurements remain open. Training is paused. See the main plan's current-status
 table and retained-model catalog before reading the historical execution notes.
 

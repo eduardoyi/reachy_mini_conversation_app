@@ -3,7 +3,7 @@
 - Status: `implemented; simulator conversation and standby accepted`
 - Owner: Reachy project
 - Created: 2026-09-10
-- Last updated: 2026-09-10
+- Last updated: 2026-09-13
 
 ## Scope and decisions
 
@@ -173,3 +173,24 @@ The two skipped checks were
 `test_official33_activates_simulator_without_ambient_cloud_audio` and
 `test_optional_native_speaker_subprocess_smoke`; optional native acceptance was
 not enabled for this deterministic gate.
+
+## Simulator hearing follow-up — 2026-09-13
+
+Documented the user-reported SDK-output hearing regression, capture-drop logs,
+self-echo, historical mixer crashes, and the bypass's missing speech-wobble/AEC
+reference in [simulator speaker output](../features/simulator-speaker-output.md#speech-movement-hearing-and-echo-findings--2026-09-13).
+Installed SDK 1.10.0rc5 already contains upstream software AEC. No runtime repair
+or native acceptance is claimed. Next: controlled SDK playback/wobble comparison
+and event-loop stall diagnosis before choosing a shared audio-route repair.
+Preserve interruption, bounded buffering, ambient privacy, and SDK public APIs.
+Status: listening fix implemented; speaker echo and speech wobble unresolved.
+
+## September 13 audio acceptance update
+
+The user accepted speech movement and interruption in headphone trials, then
+confirmed good GPT Live operation through laptop speakers on the Mac simulator
+using the candidate SDK and opt-in interruption flags. Logs confirm software AEC
+and local onset-to-native-clear activity. This supersedes the earlier unresolved
+Mac speaker/speech-wobble status for this configuration. The bypass is unchanged;
+physical hardware, quantified AEC, residual frame drops and upstream SDK validation
+remain open. Current setup/evidence: [audio comparison](audio-dropout-comparison.md).

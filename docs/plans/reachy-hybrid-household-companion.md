@@ -1316,3 +1316,21 @@ preserve the active conversation. Spoken forgetting also keeps it running, pausi
 automatic capture until the next wake; Settings Forget still resets it. Continuity
 has automated coverage and awaits a spoken check. Daily review remains gated; this does not expand
 phases 0–5 or enable background cloud work. Voice/face recognition remains deferred.
+
+
+### Household memory daily tidy-up — 2026-09-13
+
+M1–M2 user trials passed. M3 now adds default-off active-session daily review:
+bounded keep/merge/promotion and retention cleanup, atomically checkpointed with
+revision fencing. No overnight service or ambient upload. Store/worker/provider
+scenario tests cover fake time, restart and deletion races; real model/user
+acceptance remains pending. M4 older recall remains deferred. See the
+[household memory plan](household-memory-lifecycle.md) for current validation.
+
+### Gemini Extended Thinking offline milestone — 2026-09-16
+
+Gemini async reasoning, shared memory lifecycle and STOPPING containment passed
+primary adversarial review and the full offline gate: 1,247 passed, 3 native
+opt-in checks skipped. See the [migration plan](gemini-38-live-extended-thinking-migration.md#final-offline-validation--2026-09-16)
+for commands and remaining live transcript, memory and audio acceptance. Existing
+hardware/phase acceptance and the active local provider are unchanged.

@@ -12,6 +12,7 @@ from reachy_mini_conversation_app.household_memory import (
     MemoryValidationError,
 )
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolSpec, ToolDependencies
+from reachy_mini_conversation_app.household_memory_receipts import MutationWriterContext, mutation_writer
 
 
 logger = logging.getLogger(__name__)
@@ -196,16 +197,19 @@ class Remember(Tool):
             event_start = _optional_date(kwargs.get("event_start"), "event_start")
             event_end = _optional_date(kwargs.get("event_end"), "event_end")
             source_ref = _optional_string(kwargs.get("source_ref"), "source_ref")
-            stored = HouseholdMemoryStore(deps.instance_path).remember(
-                text=fact,
-                subject_id=subject_id,
-                source_person_id=source_person_id,
-                kind=kind,
-                certainty=certainty,
-                event_start=event_start,
-                event_end=event_end,
-                source_ref=source_ref,
-            )
+            with mutation_writer(
+                MutationWriterContext("tool.remember", deps.memory_mutation_generation or "untrusted")
+            ):
+                stored = HouseholdMemoryStore(deps.instance_path).remember(
+                    text=fact,
+                    subject_id=subject_id,
+                    source_person_id=source_person_id,
+                    kind=kind,
+                    certainty=certainty,
+                    event_start=event_start,
+                    event_end=event_end,
+                    source_ref=source_ref,
+                )
         except (MemoryValidationError, ValueError):
             logger.warning("remember: invalid household memory input")
             return {"error": "invalid household memory input"}

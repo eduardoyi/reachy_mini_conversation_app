@@ -213,8 +213,12 @@ def test_build_conversation_handler_rejects_unknown_provider_before_importing_ba
     "realtime_provider",
     [config.REALTIME_PROVIDER_HUGGINGFACE, config.REALTIME_PROVIDER_OPENAI_LIVE],
 )
-def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch, acoustic_enabled, realtime_provider) -> None:
+@pytest.mark.parametrize("speech_wobble", [True, False])
+def test_hybrid_run_defers_provider_factory_until_activation(
+    monkeypatch, acoustic_enabled, realtime_provider, speech_wobble
+) -> None:
     """Hybrid startup constructs only the local runtime, even without cloud config."""
+    monkeypatch.setattr(config.config, "SPEECH_WOBBLE_ENABLED", speech_wobble)
     monkeypatch.setattr(config.config, "REALTIME_PROVIDER", realtime_provider)
     monkeypatch.setattr(config.config, "HYBRID_RUNTIME_ENABLED", True)
     monkeypatch.setattr(config.config, "LOCAL_STT_BASE_URL", None)
@@ -276,10 +280,21 @@ def test_hybrid_run_defers_provider_factory_until_activation(monkeypatch, acoust
     robot = MagicMock()
     args = SimpleNamespace(debug=False, robot_name=None, media_backend="default", no_camera=False, ui=False)
 
+    warm_import = MagicMock()
+    monkeypatch.setattr(main_mod, "importlib", SimpleNamespace(import_module=warm_import))
     main_mod.run(args, robot=robot)
 
+    if realtime_provider == config.REALTIME_PROVIDER_OPENAI_LIVE:
+        assert [call.args[0] for call in warm_import.call_args_list] == [
+            "reachy_mini_conversation_app.openai_live",
+            "openai.resources.responses",
+        ]
+    else:
+        warm_import.assert_not_called()
     build_handler.assert_not_called()
     assert acoustic_loader.call_count == int(acoustic_enabled)
+    assert robot.enable_wobbling.call_count == int(speech_wobble)
+    assert robot.disable_wobbling.call_count >= int(not speech_wobble)
 
 
 @pytest.mark.parametrize(("strategy", "voice_wake_enabled"), [("continuous", True), ("activation", False)])

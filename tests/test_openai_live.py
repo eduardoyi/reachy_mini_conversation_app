@@ -229,7 +229,8 @@ async def test_failed_backend_close_is_retried_on_next_shutdown(monkeypatch: pyt
     backend = FailOnceCloseBackend()
     handler = _handler(FakeSocket(), backend, monkeypatch=monkeypatch)
 
-    await handler.shutdown()
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await handler.shutdown()
     assert backend.close_calls == 1
     assert handler._backend_closed is False
 
@@ -586,3 +587,110 @@ async def test_shutdown_reader_consumes_session_closed(monkeypatch: pytest.Monke
     assert any(event.get("type") == "session.close" for event in socket.sent)
     assert socket.closed
     assert not handler._is_connected()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_local_barge_in_clears_once_and_preserves_microphone(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """Sustained microphone energy clears once, rearms on quiet, and preserves bytes."""
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", enabled)
+    monkeypatch.setattr(config.config, "LOCAL_VAD_RMS_THRESHOLD", 500)
+    socket = FakeSocket()
+    handler = _handler(socket, monkeypatch=monkeypatch)
+    handler.connection = socket
+    handler._session_ready = True
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    loud = np.full(960, 2000, dtype=np.int16)
+    quiet = np.zeros(960, dtype=np.int16)
+    frames = []
+    try:
+        await handler._handle_event({"type": "session.output_audio.delta", "delta": base64.b64encode(loud).decode()})
+        for frame in (loud, quiet, loud, loud):
+            frames.append(frame)
+            await handler.receive((24000, frame))
+        clearer.assert_not_called()
+        frames.append(loud)
+        await handler.receive((24000, loud))
+        assert clearer.call_count == int(enabled)
+        assert handler.output_queue.empty() is enabled
+        for _ in range(8):
+            frames.append(loud)
+            await handler.receive((24000, loud))
+        assert clearer.call_count == int(enabled)
+        await handler._handle_event({"type": "session.output_audio.delta", "delta": base64.b64encode(loud).decode()})
+        for frame in [quiet] * 10 + [loud] * 3:
+            frames.append(frame)
+            await handler.receive((24000, frame))
+        assert clearer.call_count == 2 * int(enabled)
+        sent = [
+            base64.b64decode(event["audio"]) for event in socket.sent if event["type"] == "session.input_audio.append"
+        ]
+        assert sent == [frame.tobytes() for frame in frames]
+    finally:
+        await handler._cancel_speaking_reset()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_does_not_clear_without_output_or_send_before_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local detection cannot bypass session readiness or clear a later answer."""
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    socket = FakeSocket()
+    handler = _handler(socket, monkeypatch=monkeypatch)
+    handler._clear_queue = MagicMock()
+    loud = np.full(4800, 2000, dtype=np.int16)
+    await handler.receive((24000, loud))
+    assert not socket.sent
+    handler.connection = socket
+    handler._session_ready = True
+    await handler.receive((24000, loud))
+    handler._clear_queue.assert_not_called()
+    try:
+        await handler._handle_event({"type": "session.output_audio.delta", "delta": base64.b64encode(loud).decode()})
+        await handler.receive((24000, loud))
+        handler._clear_queue.assert_not_called()
+    finally:
+        await handler._cancel_speaking_reset()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_flush_failure_does_not_drop_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed native clear is logged while the interrupting microphone bytes still go through."""
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    socket = FakeSocket()
+    handler = _handler(socket, monkeypatch=monkeypatch)
+    handler.connection = socket
+    handler._session_ready = True
+    handler._clear_queue = MagicMock(side_effect=RuntimeError("synthetic failure"))
+    loud = np.full(4800, 2000, dtype=np.int16)
+    try:
+        await handler._handle_event({"type": "session.output_audio.delta", "delta": base64.b64encode(loud).decode()})
+        await handler.receive((24000, loud))
+        handler._clear_queue.assert_called_once()
+        assert base64.b64decode(socket.sent[-1]["audio"]) == loud.tobytes()
+    finally:
+        await handler._cancel_speaking_reset()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_resets_on_fresh_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An earlier microphone latch cannot disable interruption in a new session."""
+    monkeypatch.setattr(config.config, "OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    socket = FakeSocket()
+    handler = _handler(socket, monkeypatch=monkeypatch)
+    handler._barge_in_latched = True
+    handler._barge_in_speech_samples = 2880
+    startup = await _start_ready(handler, socket)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    loud = np.full(4800, 2000, dtype=np.int16)
+    try:
+        await handler._handle_event({"type": "session.output_audio.delta", "delta": base64.b64encode(loud).decode()})
+        await handler.receive((24000, loud))
+        clearer.assert_called_once()
+    finally:
+        await _stop(handler, startup)

@@ -141,6 +141,47 @@ def test_gemini_defaults_and_runtime_overrides_are_loaded(monkeypatch) -> None:
     assert config.config.GEMINI_VOICE == "Aoede"
 
 
+@pytest.mark.parametrize("raw_value, expected", [(None, "medium"), (" LOW ", "low"), ("HIGH", "high")])
+def test_gemini_extended_thinking_level_is_model_scoped(monkeypatch, raw_value, expected) -> None:
+    """Extended Thinking defaults to medium and accepts only its three levels."""
+    monkeypatch.setenv(config.GEMINI_LIVE_MODEL_ENV, config.GEMINI_EXTENDED_THINKING_MODEL)
+    if raw_value is None:
+        monkeypatch.delenv(config.GEMINI_THINKING_LEVEL_ENV, raising=False)
+    else:
+        monkeypatch.setenv(config.GEMINI_THINKING_LEVEL_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.GEMINI_THINKING_LEVEL == expected
+
+
+@pytest.mark.parametrize("raw_value", ["minimal", "ultra", ""])
+def test_gemini_extended_thinking_level_rejects_invalid_values(monkeypatch, raw_value) -> None:
+    """Unsupported or blank explicit levels fail closed for Extended Thinking."""
+    monkeypatch.setenv(config.GEMINI_LIVE_MODEL_ENV, config.GEMINI_EXTENDED_THINKING_MODEL)
+    if raw_value:
+        monkeypatch.setenv(config.GEMINI_THINKING_LEVEL_ENV, raw_value)
+    else:
+        monkeypatch.setenv(config.GEMINI_THINKING_LEVEL_ENV, "minimal")
+
+    with pytest.raises(ValueError, match="GEMINI_THINKING_LEVEL"):
+        config.refresh_runtime_config_from_env()
+
+
+def test_gemini_thinking_level_is_rejected_for_legacy_model(monkeypatch) -> None:
+    """An explicit thinking level cannot silently change a legacy model setup."""
+    monkeypatch.setenv(config.GEMINI_LIVE_MODEL_ENV, config.DEFAULT_GEMINI_LIVE_MODEL)
+    monkeypatch.setenv(config.GEMINI_THINKING_LEVEL_ENV, "high")
+
+    with pytest.raises(ValueError, match="only for"):
+        config.refresh_runtime_config_from_env()
+
+
+def test_gemini_model_check_accepts_sdk_models_prefix() -> None:
+    """The SDK's optional models prefix still selects the Extended Thinking contract."""
+    assert config.is_gemini_extended_thinking_model(f"models/{config.GEMINI_EXTENDED_THINKING_MODEL}")
+
+
 def test_openai_live_defaults_and_runtime_overrides_are_loaded(monkeypatch) -> None:
     """OpenAI Live model and voice use documented defaults and trim explicit overrides."""
     monkeypatch.setattr(config.config, "OPENAI_LIVE_MODEL", config.config.OPENAI_LIVE_MODEL)
@@ -452,3 +493,36 @@ def test_acoustic_wake_is_opt_in_and_refreshes(monkeypatch, enabled, expected) -
     config.refresh_runtime_config_from_env()
     assert config.config.LOCAL_ACOUSTIC_WAKE_ENABLED is expected
     assert config.config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR == "/private/models"
+
+
+@pytest.mark.parametrize("enabled", ["0", "1"])
+def test_audio_comparison_flags_refresh(monkeypatch, enabled) -> None:
+    """Refresh both comparison switches without changing the output backend."""
+    monkeypatch.setenv("AUDIO_DIAGNOSTICS_ENABLED", enabled)
+    monkeypatch.setenv("SPEECH_WOBBLE_ENABLED", enabled)
+    config.refresh_runtime_config_from_env()
+    assert config.config.AUDIO_DIAGNOSTICS_ENABLED is (enabled == "1")
+    assert config.config.SPEECH_WOBBLE_ENABLED is (enabled == "1")
+
+
+def test_audio_comparison_defaults(monkeypatch) -> None:
+    """Normal startup keeps speech wobble and avoids diagnostic reports."""
+    monkeypatch.delenv("AUDIO_DIAGNOSTICS_ENABLED", raising=False)
+    monkeypatch.delenv("SPEECH_WOBBLE_ENABLED", raising=False)
+    config.refresh_runtime_config_from_env()
+    assert config.config.AUDIO_DIAGNOSTICS_ENABLED is False
+    assert config.config.SPEECH_WOBBLE_ENABLED is True
+
+
+@pytest.mark.parametrize("value", [None, "0", "1"])
+def test_local_interruption_flags_are_opt_in(monkeypatch, value) -> None:
+    """Experimental microphone clearing and native override stay off by default."""
+    for name in ("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", "MACOS_LOCAL_AUDIO_FLUSH_ENABLED"):
+        monkeypatch.setattr(config.config, name, False)
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    config.refresh_runtime_config_from_env()
+    assert config.config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED is (value == "1")
+    assert config.config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED is (value == "1")

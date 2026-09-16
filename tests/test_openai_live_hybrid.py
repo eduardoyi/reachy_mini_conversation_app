@@ -9,6 +9,7 @@ from collections.abc import Mapping, Callable
 import numpy as np
 import pytest
 
+import reachy_mini_conversation_app.openai_live as live_module
 from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.openai_live import OPENAI_LIVE_ENDPOINT, OpenAILiveHandler
@@ -63,6 +64,8 @@ class FakeSocket:
         self.sent_events.append(event)
         if event.get("type") == "session.start":
             self.session_start_sent.set()
+        elif event.get("type") == "session.close":
+            self.push({"type": "session.closed"})
 
     async def recv(self) -> str:
         """Wait for the next fake server event."""
@@ -128,6 +131,7 @@ async def test_openai_live_handler_preserves_hybrid_privacy_and_reconnects(
     monkeypatch.setattr(config.config, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(config.config, "OPENAI_LIVE_MODEL", "test-live-model")
     monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.REALTIME_PROVIDER_OPENAI_LIVE)
+    monkeypatch.setattr(live_module, "_SESSION_CLOSE_TIMEOUT_S", 0.01)
 
     dependencies = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     clock = FakeClock()
@@ -194,6 +198,8 @@ async def test_openai_live_handler_preserves_hybrid_privacy_and_reconnects(
     for _ in range(4):
         sockets[0].push({"type": "session.output_audio.delta", "delta": quiet_delta})
     await wait_until(lambda: sockets[0].received_server_events >= 5)
+    for _ in range(4):
+        assert await runtime.emit() is not None
     clock.advance(2)
     assert await runtime.check_inactivity()
     assert runtime.mode is RuntimeMode.LOCAL_AMBIENT

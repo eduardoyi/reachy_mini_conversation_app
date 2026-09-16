@@ -1,7 +1,7 @@
 # Feature: GPT Live provider
 
 - Status: `implemented; simulator conversation and standby accepted`
-- Last updated: 2026-09-10
+- Last updated: 2026-09-16
 - Plan: [GPT Live migration](../plans/openai-live-migration.md)
 
 ## Overview
@@ -200,11 +200,16 @@ It receives active transcript deltas, not injected pre-wake context or audio.
 Standby/shutdown cancels it and clears its buffer without a final flush. Speech
 and action delegation remain separate from this tool-free Responses request.
 
-Corrections or deletion invalidate old Live/Luna context and end that conversation;
-routine additions enter the next activation's memory snapshot. The
+External destructive changes invalidate old Live/Luna context and end that conversation.
+Spoken corrections remain in the current conversation; spoken forget deletes saved
+content and pauses capture/review for that activation. Routine additions enter
+the next activation's memory snapshot. The
 [household memory feature](household-memory.md) owns storage, configuration, costs,
 inspection and validation details. The architecture Mermaid source is updated;
-generated SVG regeneration remains outstanding.
+the generated SVG was regenerated on 2026-09-16. The
+[Gemini migration](../plans/gemini-38-live-extended-thinking-migration.md) extracted
+the shared memory lifecycle and strengthened shutdown containment. Offline
+regressions passed; its validation log separates these from pending Gemini live acceptance.
 
 ## Local movement — 2026-09-12
 
@@ -243,3 +248,59 @@ The two skipped checks were
 `test_official33_activates_simulator_without_ambient_cloud_audio` and
 `test_optional_native_speaker_subprocess_smoke`; optional native acceptance was
 not enabled for this deterministic gate.
+
+## Experimental local interruption clearing
+
+`OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED=1` enables an opt-in trial of local
+energy-based onset detection. The existing `RmsEnergyVAD` uses
+`LOCAL_VAD_RMS_THRESHOLD`. 120 ms of consecutive detected energy latches one onset;
+400 ms quiet rearms. A latched onset clears provider/native queued audio only if
+nonquiet assistant output arrived within the last second. This recent-output guard
+is a heuristic, not a measurement of speaker completion; it can miss longer tails.
+It does not reuse the movement timer, which can expire while sound remains queued.
+
+All microphone bytes continue through the same ready-session resampling/send path.
+No transcript, network speech-start event, server cancellation command, output mute,
+model, STT request or durable audio store is added. New server audio is still played;
+if GPT Live keeps generating old speech, local clearing alone cannot stop that.
+Loud noise/echo can trigger clearing, and quiet speech may be missed. This must not
+be enabled as a general speaker-mode fix. State resets on fresh session startup;
+failed native clears are logged and input forwarding continues.
+
+On macOS LOCAL, `MACOS_LOCAL_AUDIO_FLUSH_ENABLED=1` separately bypasses the old
+native-clear skip. Use it only with the reviewed SDK candidate described in
+[the comparison plan](../plans/audio-dropout-comparison.md). Neither flag changes
+the installed SDK; both default off and require a restarted process. The SDK
+candidate is selected for the trial by PYTHONPATH, not by patching SDK internals.
+
+Tests: local barge-in tests in tests/test_openai_live.py exercise sustained onset,
+brief noise, quiet rearm, default-off, readiness/privacy, no-output behavior,
+unchanged input bytes and clear failure. tests/test_console.py covers public native
+routing with the Mac override; tests/test_config.py covers opt-in defaults/refresh.
+Mac interruption and requested-word behavior passed the recorded user trials.
+Broader speech-understanding reliability, long-run crash behavior, physical head
+movement and quantitative AEC performance remain unverified.
+
+## September 13 Mac speaker acceptance
+
+User accepted the candidate SDK configuration with headphones and subsequently
+without headphones through laptop speakers. Logs show software AEC enabled and
+three local-onset events followed by native clear confirmations in the speaker
+trial. Headphones are no longer required for this tested configuration; they remain
+an optional diagnostic control and guidance for the separate GStreamer bypass.
+Earlier pending speaker/movement statements describe prior checkpoints.
+
+This is qualitative acceptance on one Mac, not quantified echo cancellation,
+physical robot validation or permission to enable trial flags by default. The
+speaker excerpt still has 21 additional capture drops and ends before shutdown.
+See [the comparison plan](../plans/audio-dropout-comparison.md) for exact results.
+
+## Shared migration validation — 2026-09-16
+
+The final full repository gate passed: **1,247 passed, 3 native opt-in checks
+skipped**, with two expected synthetic SDK warnings. Ruff, formatting, strict
+mypy, lock validation, JavaScript syntax and diff checks passed. The
+[final validation record](../plans/gemini-38-live-extended-thinking-migration.md#final-offline-validation--2026-09-16)
+lists exact commands, test inventory, skipped checks and the reproducible next
+live-validation step. Gemini spoken-memory parity and real audio/hardware
+acceptance remain unverified; the active provider was not switched.

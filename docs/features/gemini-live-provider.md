@@ -1,7 +1,7 @@
 # Feature: Gemini Live provider
 
 - Status: `in-progress`
-- Last updated: 2026-09-01
+- Last updated: 2026-09-16
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -48,6 +48,66 @@ feedback loop is a separate baseline speaker-to-microphone echo observation and
 must not be conflated with this Phase 1 LOCAL success. WebRTC was a later
 fallback, and its `not-negotiated (-4)` failure does not invalidate the earlier
 LOCAL conversation.
+
+## Gemini 3.8 Live Extended Thinking migration
+
+The local implementation passed offline validation under the
+[migration plan](../plans/gemini-38-live-extended-thinking-migration.md). The current
+local provider has not been switched and no new live/hardware acceptance is
+claimed. The legacy model remains the Gemini configuration default.
+
+The target model is `gemini-3.8-live-extended-thinking`, selected through
+`GEMINI_LIVE_MODEL` with `REALTIME_PROVIDER=gemini`. `GEMINI_THINKING_LEVEL`
+accepts low/medium/high (default medium for this model only). Voice, profile and
+managed Google Search remain on the existing Gemini path. Background reasoning
+uses the same live model, not GPT speech delegation. Optional memory capture and
+daily review still use the configured OpenAI Responses model and existing budgets;
+choosing Gemini speech does not remove those separately opted-in text requests.
+
+The protocol gate uses `google-genai==2.19.0` with explicit `v1alpha` transport.
+Google's [wire reference](https://ai.google.dev/api/live#BidiGenerateContentServerContent)
+places `interactionStatus` under `serverContent`. Some tutorial examples show a
+top-level variant which the SDK discards; the adapter must follow the typed schema.
+Synthetic public-receive fixtures pass on the pinned SDK. They establish
+parsing, not account access or the exact transcription framing of a real session.
+
+The adapter distinguishes speech utterance completion from interaction IDLE,
+returns non-blocking tool results independently by ID, and applies bounded interaction,
+tool and session lifetimes. It retains on-demand camera handling, interruption
+flushes and the existing local movement/audio integration. The plan records the
+exact deadlines and conservative image-session limit; human acceptance must include
+these limits, not just a successful greeting.
+
+Extended Thinking interactions have a fixed 120-second cap. Tools have at most
+30 seconds, shortened to leave two seconds before an interaction/session deadline.
+Audio-only sessions close after nine minutes. The first camera attempt imposes a
+110-second total session-age limit, including time already elapsed; a late camera
+request is rejected without taking/sending a frame. GoAway and expired limits close
+the session without automatic replay or resumption. A new activation starts fresh.
+These limits apply to the selected Extended Thinking model; the legacy Gemini model
+keeps its existing configuration.
+
+Memory integration uses the shared store and active-session lifecycle, including
+explicit spoken forget/correction semantics. Automatic saving of Gemini speech
+remains gated: the pinned SDK does not identify whether a finished transcript is
+the full utterance or its final chunk. Ambiguous spoken transcripts stay out of
+capture; accepted submitted text can be captured once. Explicit memory tools and
+the separately enabled daily review remain available. Live transcript validation
+is still required before claiming automatic spoken-memory parity.
+Standby must fence new work before cleanup and remain STOPPING until provider and
+auxiliary cleanup is contained. See the plan for mutation receipts, cancellation
+races, required regression suites and pending validation.
+
+Protocol milestone, primary verification on 2026-09-16:
+`REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_gemini_live.py tests/test_gemini_sdk_contract.py tests/test_config.py tests/tools/test_background_tool_manager.py -q`
+passed 195 tests. Two SDK warnings come from deliberately invalid status fixtures.
+Shared memory integration and the final combined gate subsequently passed; see the final validation below.
+
+Additional integration coverage lives in `tests/test_gemini_live_memory.py` and
+`tests/test_household_memory_session.py`. The shared lifecycle owns optional worker
+startup, exact mutation receipts and cleanup; keep provider transport/status handling
+in `gemini_live.py`. Do not send unverified transcript chunks to capture or add
+automatic provider fallback when extending this path.
 
 ## User-facing behavior
 
@@ -516,3 +576,13 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-08-29 | Recorded the WebRTC producer-registration `KeyError`, retry initialization with `connection_ready_ms=640.8` and greeting-tool timings of 231.6/230.9 ms, the SDK reverse-audio `not-negotiated (-4)` failure, the unchanged SDK send chain, and the stop recommendation pending a clean reboot/local retest versus a native macOS audio adapter/upstream SDK fix; Phase 1 remains in progress. |
 | 2026-08-29 | Corrected first-audio instrumentation for independent Gemini event ordering: marker-before-audio records a positive sample, audio-first records bounded unavailable/reordered diagnostics, and completed/interrupted turns cannot be rearmed by late or duplicate markers. Added partial-transcript and startup-greeting regression coverage. |
 | 2026-08-29 | Added explicit same-text/final-only ambiguity handling after adversarial review. Independent re-review found no P0/P1 blocker; 41 focused Gemini tests and the full 474-test repository gate pass. |
+
+## Shared migration validation — 2026-09-16
+
+The final full repository gate passed: **1,247 passed, 3 native opt-in checks
+skipped**, with two expected synthetic SDK warnings. Ruff, formatting, strict
+mypy, lock validation, JavaScript syntax and diff checks passed. The
+[final validation record](../plans/gemini-38-live-extended-thinking-migration.md#final-offline-validation--2026-09-16)
+lists exact commands, test inventory, skipped checks and the reproducible next
+live-validation step. Gemini spoken-memory parity and real audio/hardware
+acceptance remain unverified; the active provider was not switched.

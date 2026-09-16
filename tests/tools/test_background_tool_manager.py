@@ -300,6 +300,40 @@ class TestRunToolLifecycle:
         assert bg.error == "Tool cancelled"
         assert bg.completed_at is not None
 
+    @pytest.mark.asyncio
+    async def test_cancel_tool_and_wait_confirms_containment(self, manager: BackgroundToolManager) -> None:
+        """Report success only after the cancelled task has finished."""
+        routine = _make_routine("contained_tool", delay=10.0)
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False)
+        await asyncio.sleep(0.01)
+
+        assert await manager.cancel_tool_and_wait(bg.tool_id, timeout=0.2) is True
+        assert bg.status == ToolState.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_cancel_tool_and_wait_reports_resistant_task(self, manager: BackgroundToolManager) -> None:
+        """Report failure while a cancellation-resistant task remains running."""
+        release = asyncio.Event()
+        routine = MagicMock(spec=ToolCallRoutine)
+        routine.tool_name = "resistant_tool"
+        routine.args_json_str = "{}"
+
+        async def _call(_manager: BackgroundToolManager) -> dict[str, Any]:
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                await release.wait()
+            return {"ok": True}
+
+        routine.__call__ = _call  # type: ignore[method-assign]
+        routine.side_effect = _call
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False)
+        await asyncio.sleep(0.01)
+
+        assert await manager.cancel_tool_and_wait(bg.tool_id, timeout=0.01) is False
+        release.set()
+        await asyncio.sleep(0.01)
+
 
 class TestUpdateProgress:
     """Verify progress updates on running tools."""
@@ -575,6 +609,55 @@ class TestStartUp:
 
         assert cb1.call_count == 1
         assert cb2.call_count == 1
+
+
+class TestShutdown:
+    """Verify shutdown reports incomplete task containment."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_raises_when_tool_resists_cancellation(self, manager: BackgroundToolManager) -> None:
+        """Raise instead of reporting success while a tool task remains active."""
+        release = asyncio.Event()
+        routine = MagicMock(spec=ToolCallRoutine)
+        routine.tool_name = "resistant_shutdown"
+        routine.args_json_str = "{}"
+
+        async def _call(_manager: BackgroundToolManager) -> dict[str, Any]:
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                await release.wait()
+            return {"ok": True}
+
+        routine.__call__ = _call  # type: ignore[method-assign]
+        routine.side_effect = _call
+        background_tool = await manager.start_tool("shutdown-1", routine, is_idle_tool_call=False)
+        await asyncio.sleep(0.01)
+
+        with pytest.raises(RuntimeError, match="cleanup incomplete"):
+            await manager.shutdown()
+
+        release.set()
+        assert background_tool._task is not None
+        await background_tool._task
+        await manager.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_propagates_caller_cancellation(self, manager: BackgroundToolManager) -> None:
+        """Do not swallow cancellation delivered to the shutdown caller."""
+        release = asyncio.Event()
+        lifecycle_task = asyncio.create_task(release.wait())
+        manager._lifecycle_tasks = [lifecycle_task]
+        shutdown_task = asyncio.create_task(manager.shutdown())
+        await asyncio.sleep(0)
+        shutdown_task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await shutdown_task
+
+        assert lifecycle_task.cancelled()
+        with pytest.raises(asyncio.CancelledError):
+            await lifecycle_task
 
 
 class TestNotificationQueue:

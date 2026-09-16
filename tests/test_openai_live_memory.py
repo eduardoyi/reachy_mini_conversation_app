@@ -2,7 +2,6 @@
 
 import json
 import asyncio
-import logging
 from types import SimpleNamespace
 from pathlib import Path
 from datetime import datetime, timezone
@@ -33,6 +32,12 @@ from reachy_mini_conversation_app.household_memory import MemoryEntry, MemorySto
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.openai_live_backend import OpenAILiveDelegationBackend
 from reachy_mini_conversation_app.household_memory_capture import CaptureStats, CaptureClocks, MemoryCapture
+from reachy_mini_conversation_app.household_memory_session import (
+    MemorySession,
+    ReviewFactory,
+    CaptureFactory,
+    MemorySessionCloseError,
+)
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
@@ -45,6 +50,7 @@ class FakeCapture:
         self.fragments: list[tuple[str, str, int, int]] = []
         self.started = False
         self.closed = False
+        self.mutation_generation: str | None = None
         self.on_invalidate: Callable[[], None] | None = None
 
     @property
@@ -65,6 +71,10 @@ class FakeCapture:
         """Mark the worker active."""
         self.events.append("capture.start")
         self.started = True
+
+    def bind_mutation_generation(self, generation: str) -> None:
+        """Record the activation generation used for store writes."""
+        self.mutation_generation = generation
 
     def add_fragment(self, role: str, text: str, start_ms: int, end_ms: int) -> None:
         """Record one active-session fragment."""
@@ -142,9 +152,18 @@ class SnapshotStore:
 
     def snapshot(self) -> SimpleNamespace:
         """Return the current entry snapshot."""
-        entry_payload = {"id": "m_1", "text": self.text}
-        entry = SimpleNamespace(id="m_1", to_json=lambda: entry_payload)
+        entry_payload = {"id": "m_1", "text": self.text, "subject_id": "person:alex", "status": "current"}
+        entry = SimpleNamespace(
+            id="m_1",
+            subject_id="person:alex",
+            status="current",
+            to_json=lambda: entry_payload,
+        )
         return SimpleNamespace(revision=self.revision, entries=() if self.deleted else (entry,))
+
+    def active_snapshot(self) -> SimpleNamespace:
+        """Return the active entry snapshot used by MemorySession."""
+        return self.snapshot()
 
 
 def _memory_handler(
@@ -153,7 +172,8 @@ def _memory_handler(
     *,
     backend: FakeBackend | None = None,
     instance_path: str | None = None,
-    memory_capture_factory: Callable[[str | None], MemoryCapture] | None = None,
+    memory_capture_factory: CaptureFactory | None = None,
+    memory_review_factory: ReviewFactory | None = None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> OpenAILiveHandler:
     """Build one provider handler with a fake local capture worker."""
@@ -180,6 +200,7 @@ def _memory_handler(
         websocket_connect=connect,
         delegation_backend=backend,
         memory_capture_factory=memory_capture_factory or factory,
+        memory_review_factory=memory_review_factory,
     )
     handler.set_startup_greeting_enabled(False)
     return handler
@@ -274,6 +295,7 @@ async def test_hybrid_deactivation_fences_capture_before_ambient_mode(
     """Cloud teardown fences extraction before the runtime enters ambient mode."""
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", True)
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", True)
+    monkeypatch.setattr(live_module, "_SESSION_CLOSE_TIMEOUT_S", 0.01)
     events: list[str] = []
     capture = FakeCapture(events)
     socket = OrderedSocket(events)
@@ -297,8 +319,9 @@ async def test_hybrid_deactivation_fences_capture_before_ambient_mode(
 
     assert await runtime.deactivate_cloud("test")
     assert observed_modes
-    assert observed_modes[0] is RuntimeMode.CLOUD_CONVERSATION
+    assert observed_modes[0] is RuntimeMode.STOPPING
     assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert runtime.status.shutdown_error is None
     assert capture.closed
     await runtime.close()
 
@@ -314,10 +337,7 @@ async def test_memory_invalidation_drops_events_while_capture_closes(
     socket = OrderedSocket(events)
     capture = BlockingCloseCapture(events)
     handler = _memory_handler(socket, capture, instance_path=str(tmp_path), monkeypatch=monkeypatch)
-    handler.connection = socket
-    handler._session_ready = True
-    handler._memory_capture = capture
-    handler._memory_capture_closed = False
+    startup_task = await _start_ready(handler, socket)
 
     invalidation = asyncio.create_task(handler.invalidate_memory_context())
     await capture.close_started.wait()
@@ -325,6 +345,7 @@ async def test_memory_invalidation_drops_events_while_capture_closes(
     assert handler.output_queue.empty()
     capture.release_close.set()
     await invalidation
+    await startup_task
 
 
 @pytest.mark.asyncio
@@ -333,18 +354,20 @@ async def test_memory_capture_close_is_bounded(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", True)
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", True)
     monkeypatch.setattr(live_module, "_MEMORY_CAPTURE_CLOSE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(live_module, "_MEMORY_REVIEW_CLOSE_TIMEOUT_S", 0.01)
     events: list[str] = []
     socket = OrderedSocket(events)
     capture = BlockingCloseCapture(events)
     handler = _memory_handler(socket, capture, instance_path=str(tmp_path), monkeypatch=monkeypatch)
-    handler.connection = socket
-    handler._session_ready = True
-    handler._memory_capture = capture
-    handler._memory_capture_closed = False
+    startup_task = await _start_ready(handler, socket)
 
-    await asyncio.wait_for(handler.invalidate_memory_context(), timeout=0.5)
+    invalidation = asyncio.create_task(handler.invalidate_memory_context())
+    await capture.close_started.wait()
+    with pytest.raises(MemorySessionCloseError):
+        await asyncio.wait_for(invalidation, timeout=0.5)
     assert handler.connection is None
     capture.release_close.set()
+    await startup_task
 
 
 @pytest.mark.asyncio
@@ -360,7 +383,7 @@ async def test_memory_deletion_is_watched_when_capture_is_disabled(
     monkeypatch.setattr(live_module, "HouseholdMemoryStore", lambda _path: store)
     handler = _memory_handler(socket, None, instance_path=str(tmp_path), monkeypatch=monkeypatch)
     startup_task = await _start_ready(handler, socket)
-    assert handler._memory_watcher_task is not None
+    assert handler._memory_session.active
     store.revision = 2
     store.deleted = True
     assert await handler._check_memory_snapshot() is False
@@ -368,23 +391,27 @@ async def test_memory_deletion_is_watched_when_capture_is_disabled(
     assert handler.connection is None
 
 
-def test_corrupt_memory_snapshot_fails_closed_for_existing_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.asyncio
+async def test_memory_session_corrupt_snapshot_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A store read failure cannot leave an old memory context authorized."""
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", True)
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", False)
 
     class CorruptStore:
-        def snapshot(self) -> object:
+        path = tmp_path / "memory.json"
+
+        def active_snapshot(self) -> object:
             raise MemoryStoreError("corrupt")
 
-    monkeypatch.setattr(live_module, "HouseholdMemoryStore", lambda _path: CorruptStore())
-    handler = _memory_handler(FakeSocket(), None, instance_path=str(tmp_path), monkeypatch=monkeypatch)
-    handler._memory_snapshot = live_module._MemorySnapshot(1, {"m_1": "old"})
+    session = MemorySession(
+        str(tmp_path),
+        enabled=True,
+        store_factory=lambda _path: CorruptStore(),
+    )
+    session.prepare()
 
-    assert handler._memory_context_is_current() is False
-    assert handler._memory_stale_detected
+    assert session.context_is_current() is False
+    assert session.fenced
 
 
 @pytest.mark.asyncio
@@ -516,7 +543,7 @@ async def test_backend_guard_stops_second_tool_after_memory_tool_mutation(
 
 @pytest.mark.asyncio
 async def test_live_wires_real_capture_to_local_store_without_final_flush(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Active Live transcript deltas reach the real local capture/store boundary."""
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", True)
@@ -568,24 +595,20 @@ async def test_live_wires_real_capture_to_local_store_without_final_flush(
     assert entries[0].text == "Eduardo likes jazz"
     assert capture_client.close_count == 0
 
-    with caplog.at_level(logging.INFO, logger=live_module.__name__):
-        await handler.shutdown()
+    await handler.shutdown()
     await startup_task
     assert capture_client.close_count == 1
     await asyncio.sleep(0.02)
     assert len(capture_client.responses.calls) == 1
-    assert "Household memory capture summary" in caplog.text
-    assert "fragments_received=1" in caplog.text
-    assert "proposals_applied=1" in caplog.text
-    assert "Eduardo likes jazz" not in caplog.text
+    assert handler._memory_session.capture is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("capture_enabled", [False, True])
-async def test_memory_correction_keeps_live_conversation_open(
+async def test_external_memory_correction_closes_live_conversation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_enabled: bool
 ) -> None:
-    """Saving a correction preserves speech and subsequent deletion still closes context."""
+    """An unacknowledged same-ID correction fences the live memory context."""
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_ENABLED", True)
     monkeypatch.setattr(config.config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", capture_enabled)
     store = HouseholdMemoryStore(tmp_path)
@@ -595,16 +618,12 @@ async def test_memory_correction_keeps_live_conversation_open(
     startup_task = await _start_ready(handler, socket)
 
     store.update(entry.id, text="Alex likes coffee")
-    assert await handler._check_memory_snapshot() is True
-    assert handler._memory_context_is_current()
-    assert handler.connection is socket
-    await handler._handle_event({"type": "session.output_audio.delta", "delta": "AAE=", "start_ms": 1, "end_ms": 2})
-    assert not handler.output_queue.empty()
-
-    store.forget(memory_id=entry.id)
     assert await handler._check_memory_snapshot() is False
+    assert not handler._memory_context_is_current()
     await startup_task
     assert handler.connection is None
+    await handler._handle_event({"type": "session.output_audio.delta", "delta": "AAE=", "start_ms": 1, "end_ms": 2})
+    assert handler.output_queue.empty()
 
 
 @pytest.mark.asyncio

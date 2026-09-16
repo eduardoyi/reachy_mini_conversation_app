@@ -19,6 +19,7 @@ from reachy_mini_conversation_app.household_memory import (
     MemoryValidationError,
 )
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.household_memory_receipts import MutationWriterContext, mutation_writer
 
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,8 @@ class UpdateMemory(Tool):
             if not changes:
                 return {"error": "update requires at least one field"}
 
-            updated = HouseholdMemoryStore(deps.instance_path).update(memory_id, **changes)
+            with mutation_writer(MutationWriterContext("tool.update", deps.memory_mutation_generation or "untrusted")):
+                updated = HouseholdMemoryStore(deps.instance_path).update(memory_id, **changes)
         except (MemoryValidationError, ValueError):
             logger.warning("update_memory: invalid household memory input")
             return {"error": "invalid household memory input"}

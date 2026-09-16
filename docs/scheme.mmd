@@ -17,7 +17,7 @@ flowchart TB
     UI -- audio stream -->
     Stream@{ label: "<span style='font-size:16px;font-weight:bold;'>LocalStream</span><br><span style='font-size:12px;color:#0277bd;'>One microphone/speaker loop</span>" }
 
-    Stream --> Hybrid@{ label: "<span style='font-size:16px;font-weight:bold;'>HybridRuntime</span><br><span style='font-size:12px;color:#0277bd;'>LOCAL_AMBIENT / LOCAL_COMMAND / CLOUD_CONVERSATION</span>" }
+    Stream --> Hybrid@{ label: "<span style='font-size:16px;font-weight:bold;'>HybridRuntime</span><br><span style='font-size:12px;color:#0277bd;'>LOCAL_AMBIENT / LOCAL_COMMAND / CLOUD_CONVERSATION / STOPPING</span>" }
 
     Hybrid -- ambient PCM stays local --> LocalAudio@{ label: "<span style='font-size:16px;font-weight:bold;'>Local Ambient Processing</span><br><span style='font-size:12px;color:#2e7d32;'>20 s RAM ring + VAD + local STT<br/>transcript wake / opt-in acoustic Reachy wake</span>" }
 
@@ -54,8 +54,13 @@ flowchart TB
     Handlers -- memory tools --> Memory["Local household notebook<br/>person labels, lifetimes, revisions"]
     Memory -- bounded startup snapshot --> Backend
     Memory -- bounded startup snapshot --> Luna
-    Backend -- opt-in active transcript fragments --> Capture["Silent memory capture<br/>bounded tool-free Luna request"]
+    Backend -- opt-in active transcripts --> MemorySession["Shared memory session<br/>revision fences and bounded cleanup"]
+    MemorySession --> Capture["Silent memory capture<br/>bounded tool-free Luna request"]
     Capture -- validated revision-checked notes --> Memory
+    MemorySession -- opt-in active-session maintenance --> Review["Daily memory tidy-up<br/>bounded Luna request"]
+    Memory -- changed saved notes --> Review
+    Review -- atomic revision-checked review --> Memory
+    Memory -- ordered local mutation receipts --> MemorySession
 
     Handlers -- movement
     requests --> Motion
@@ -87,6 +92,7 @@ flowchart TB
      Handlers:::toolStyle
      Memory:::localStyle
      Capture:::aiStyle
+     Review:::aiStyle
      Robot:::hardwareStyle
     classDef userStyle fill:#e1f5fe,stroke:#01579b,stroke-width:3px
     classDef uiStyle fill:#b3e5fc,stroke:#0277bd,stroke-width:2px

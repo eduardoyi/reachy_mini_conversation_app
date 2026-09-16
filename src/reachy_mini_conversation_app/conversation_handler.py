@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import time
 import asyncio
 import logging
@@ -24,6 +25,7 @@ QueueItem: TypeAlias = AudioFrame | AdditionalOutputs
 TrafficKind: TypeAlias = Literal["audio", "video"]
 TrafficObserver: TypeAlias = Callable[[TrafficKind, int], None]
 ConnectionObserver: TypeAlias = Callable[[bool], None]
+InteractionBusyObserver: TypeAlias = Callable[[bool], None]
 
 
 class ConversationHandler(AsyncStreamHandler, ABC):
@@ -40,8 +42,11 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     _transcript_observer: Callable[[str, str, bool], None] | None = None
     _traffic_observer: TrafficObserver | None = None
     _connection_observer: ConnectionObserver | None = None
+    _interaction_busy_observer: InteractionBusyObserver | None = None
     _startup_greeting_enabled: bool = True
     _initial_context: str = ""
+    _interaction_busy: bool = False
+    _playback_until: float = 0.0
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
@@ -49,6 +54,8 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
         self._initial_context = ""
+        self._interaction_busy = False
+        self._playback_until = 0.0
 
     def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
         """Attach or detach an activity observer. Pass None to clear."""
@@ -65,6 +72,45 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_connection_observer(self, observer: ConnectionObserver | None) -> None:
         """Attach/detach an observer for provider session connection changes."""
         self._connection_observer = observer
+
+    def set_interaction_busy_observer(self, observer: InteractionBusyObserver | None) -> None:
+        """Attach/detach an observer for authoritative provider busy state."""
+        self._interaction_busy_observer = observer
+
+    @property
+    def interaction_busy(self) -> bool:
+        """Return the provider's authoritative interaction busy state."""
+        return self._interaction_busy
+
+    @property
+    def playback_active(self) -> bool:
+        """Return whether local playback is currently consuming provider output."""
+        return self._playback_until > time.monotonic()
+
+    def set_playback_active(self, active: bool) -> None:
+        """Set or clear an explicit local playback boundary."""
+        self._playback_until = math.inf if active else 0.0
+
+    def note_playback_queued(self, duration_s: float) -> None:
+        """Extend the estimate of queued local playback by one audio duration."""
+        if duration_s <= 0 or not math.isfinite(duration_s):
+            return
+        now = time.monotonic()
+        self._playback_until = max(self._playback_until, now) + duration_s
+
+    def _emit_interaction_busy(self, busy: bool) -> None:
+        """Publish authoritative provider busy state without changing deadlines."""
+        normalized_busy = bool(busy)
+        if self._interaction_busy == normalized_busy:
+            return
+        self._interaction_busy = normalized_busy
+        observer = self._interaction_busy_observer
+        if observer is None:
+            return
+        try:
+            observer(normalized_busy)
+        except Exception as error:
+            logger.warning("interaction busy observer failed: %s", type(error).__name__)
 
     def set_startup_greeting_enabled(self, enabled: bool) -> None:
         """Enable or suppress a provider's automatic startup greeting."""
@@ -130,6 +176,9 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             idle_duration > self.IDLE_BEHAVIOR_THRESHOLD_S
             and idle_behavior_duration > self.IDLE_BEHAVIOR_THRESHOLD_S
             and self._idle_behavior_ready()
+            and not self._interaction_busy
+            and not self.playback_active
+            and self.output_queue.empty()
             and self.deps.movement_manager.is_idle()
         ):
             try:

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from reachy_mini_conversation_app import console
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, RuntimeStatusSnapshot
 from reachy_mini_conversation_app.household_memory import HouseholdMemoryStore
 
 
@@ -192,12 +193,22 @@ def test_hybrid_forget_requires_successful_provider_shutdown(tmp_path: Path, mon
     monkeypatch.setattr(config, "AUDIO_OUTPUT_BACKEND", "sdk")
     app = FastAPI()
     handler = MagicMock()
-    handler.shutdown = AsyncMock(side_effect=RuntimeError("synthetic close failure"))
+    handler.shutdown = AsyncMock()
     stream = LocalStream(handler, MagicMock(), settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
     runtime = MagicMock()
     runtime.active_handler = handler
-    runtime.deactivate_cloud = AsyncMock(return_value=True)
+    runtime.deactivate_cloud = AsyncMock(return_value=False)
+    runtime.status = RuntimeStatusSnapshot(
+        mode=RuntimeMode.STOPPING,
+        generation=1,
+        active=False,
+        closed=False,
+        provider_task_running=True,
+        inactivity_monitor_running=False,
+        connected=False,
+        shutdown_error="provider_cleanup_timeout",
+    )
     stream._hybrid_runtime = runtime
     store = HouseholdMemoryStore(tmp_path)
     entry = store.remember("Synthetic hybrid note", subject_id="household")
@@ -207,5 +218,6 @@ def test_hybrid_forget_requires_successful_provider_shutdown(tmp_path: Path, mon
             "/api/memory/forget", json={"memory_id": entry.id}, headers={"Origin": "http://127.0.0.1"}
         )
     assert response.status_code == 503
-    runtime.deactivate_cloud.assert_not_awaited()
+    runtime.deactivate_cloud.assert_awaited_once_with("memory_changed")
+    handler.shutdown.assert_not_awaited()
     assert store.path.read_bytes() == before

@@ -83,6 +83,7 @@ class FakeHandler(ConversationHandler):
         fail_receive: bool = False,
         drop_unready_frames: bool = False,
         block_shutdown: bool = False,
+        fail_shutdown: bool = False,
     ) -> None:
         """Initialize a provider fake."""
         super().__init__()
@@ -96,6 +97,7 @@ class FakeHandler(ConversationHandler):
         self.fail_receive = fail_receive
         self.drop_unready_frames = drop_unready_frames
         self.block_shutdown = block_shutdown
+        self.fail_shutdown = fail_shutdown
         self.connected = False
         self.receive_frames: list[AudioFrame] = []
         self.shutdown_calls = 0
@@ -129,6 +131,8 @@ class FakeHandler(ConversationHandler):
         self.shutdown_started.set()
         if self.block_shutdown:
             await self.release_shutdown.wait()
+        if self.fail_shutdown:
+            raise RuntimeError("provider shutdown sentinel")
         self.stop_requested.set()
         self.set_connected(False)
 
@@ -1400,6 +1404,25 @@ async def test_provider_setup_failure_returns_to_ambient_and_shutdowns_once() ->
 
 
 @pytest.mark.asyncio
+async def test_failed_activation_cleanup_keeps_runtime_stopping() -> None:
+    """A constructed provider that cannot close remains fenced from ambient mode."""
+
+    class FailingConfigurationHandler(FakeHandler):
+        def set_initial_context(self, _context: str) -> None:
+            raise RuntimeError("provider configuration sentinel")
+
+    handler = FailingConfigurationHandler(fail_shutdown=True)
+    runtime = HybridRuntime(lambda: handler)
+
+    assert not await runtime.activate("failed_configuration")
+    assert runtime.mode is RuntimeMode.STOPPING
+    assert runtime.status.shutdown_error == "provider_cleanup_failed"
+    assert handler.shutdown_calls == 1
+    assert not await runtime.activate("blocked_failed_configuration")
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_provider_receive_failure_returns_to_ambient() -> None:
     """A provider receive error closes the generation and resumes local capture."""
     handler = FakeHandler(fail_receive=True)
@@ -1736,6 +1759,140 @@ async def test_cancellation_during_close_finishes_cleanup_before_propagating() -
     assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
     assert runtime.active_handler is None
     assert handler.shutdown_calls == 1
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_busy_and_estimated_playback_gate_inactivity() -> None:
+    """Provider busy state and queued playback suppress ordinary inactivity."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=5, clock=clock)
+
+    assert await runtime.activate()
+    handler.set_connected(True)
+    handler._emit_interaction_busy(True)
+    clock.advance(10)
+    assert runtime.status.interaction_busy is True
+    assert not await runtime.check_inactivity()
+
+    handler._emit_interaction_busy(False)
+    runtime.note_playback_queued(4)
+    clock.advance(3)
+    assert runtime.status.playback_active is True
+    assert not await runtime.check_inactivity()
+    clock.advance(1)
+    assert runtime.status.playback_active is False
+    assert await runtime.check_inactivity()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_timeout_fences_media_and_denies_reactivation_until_late_cleanup() -> None:
+    """A resistant provider keeps the runtime fenced until it confirms closure."""
+    processor = FakeLocalProcessor()
+    handler = FakeHandler(block_shutdown=True)
+    handler.output_queue.put_nowait(frame(99))
+    runtime = HybridRuntime(lambda: handler, local_processor=processor)
+    runtime._SHUTDOWN_TIMEOUT_S = 0.01
+
+    assert await runtime.activate()
+    handler.set_connected(True)
+    previous_generation = runtime.generation
+
+    assert not await runtime.deactivate_cloud("timeout_test")
+    assert runtime.mode is RuntimeMode.STOPPING
+    assert runtime.active_handler is None
+    assert runtime.generation == previous_generation + 1
+    assert runtime.status.shutdown_error == "provider_cleanup_timeout"
+    assert handler.output_queue.empty()
+    assert handler.deps.movement_manager.clear_move_queue.called
+    assert handler.deps.movement_manager.set_listening.called
+    assert handler.deps.movement_manager.set_speaking.called
+
+    await runtime.handle_frame(frame(1))
+    assert processor.frames == []
+    assert not await runtime.activate("blocked_while_stopping")
+
+    handler.release_shutdown.set()
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+    assert runtime.status.shutdown_error is None
+    assert await runtime.activate("after_confirmed_cleanup")
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_error_keeps_runtime_stopping_and_does_not_retry() -> None:
+    """A failed provider close is visible as a permanent reactivation fence."""
+    handler = FakeHandler(fail_shutdown=True)
+    runtime = HybridRuntime(lambda: handler)
+
+    assert await runtime.activate()
+    assert not await runtime.deactivate_cloud("shutdown_error_test")
+    assert runtime.mode is RuntimeMode.STOPPING
+    assert runtime.status.shutdown_error == "provider_cleanup_failed"
+    assert not await runtime.activate("retry_after_shutdown_error")
+    assert handler.shutdown_calls == 1
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_resistant_activation_factory_stays_stopping_until_orphan_handler_closes() -> None:
+    """A factory that ignores cancellation cannot reopen ambient mode early."""
+    release_factory = asyncio.Event()
+    handler = FakeHandler()
+
+    async def factory() -> FakeHandler:
+        try:
+            await release_factory.wait()
+        except asyncio.CancelledError:
+            await release_factory.wait()
+        return handler
+
+    runtime = HybridRuntime(factory)
+    runtime._SHUTDOWN_TIMEOUT_S = 0.01
+    activation = asyncio.create_task(runtime.activate("factory_race"))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+
+    assert not await runtime.deactivate_cloud("factory_race_stop")
+    assert runtime.mode is RuntimeMode.STOPPING
+    assert not await runtime.activate("blocked_factory_race")
+
+    release_factory.set()
+    with pytest.raises(asyncio.CancelledError):
+        await activation
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+    assert handler.shutdown_calls == 1
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_orphan_handler_shutdown_failure_keeps_activation_fence() -> None:
+    """An orphan provider that fails shutdown leaves STOPPING visible."""
+    release_factory = asyncio.Event()
+    handler = FakeHandler(fail_shutdown=True)
+
+    async def factory() -> FakeHandler:
+        try:
+            await release_factory.wait()
+        except asyncio.CancelledError:
+            await release_factory.wait()
+        return handler
+
+    runtime = HybridRuntime(factory)
+    activation = asyncio.create_task(runtime.activate("orphan_failure"))
+    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+
+    stop_task = asyncio.create_task(runtime.deactivate_cloud("orphan_failure_stop"))
+    await asyncio.sleep(0)
+    release_factory.set()
+    with pytest.raises(RuntimeError, match="provider shutdown sentinel"):
+        await activation
+    assert not await stop_task
+    assert runtime.mode is RuntimeMode.STOPPING
+    assert runtime.status.shutdown_error == "provider_cleanup_failed"
+    assert not await runtime.activate("blocked_orphan_failure")
     await runtime.close()
 
 

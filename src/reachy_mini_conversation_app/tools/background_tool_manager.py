@@ -275,6 +275,29 @@ class BackgroundToolManager(BaseModel):
 
         return False
 
+    async def cancel_tool_and_wait(self, tool_id: str, timeout: float = 1.0, log: bool = True) -> bool:
+        """Cancel one tool and confirm its task stopped within ``timeout`` seconds."""
+        tool = self._tools.get(tool_id)
+        if tool is None:
+            if log:
+                logger.warning("Cannot contain tool %s: not found", tool_id)
+            return False
+        task = tool._task
+        if task is None:
+            return False
+        if tool.status != ToolState.RUNNING:
+            return task.done()
+        await self.cancel_tool(tool_id, log=log)
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, timeout))
+        if not done:
+            return False
+        if not task.cancelled():
+            try:
+                task.exception()
+            except Exception as error:
+                logger.warning("Contained tool task failed while stopping: %s", type(error).__name__)
+        return True
+
     def start_up(self, tool_callbacks: list[Callable[[ToolNotification], Coroutine[Any, Any, None]]]) -> None:
         """Start the background tool manager.
 
@@ -314,19 +337,33 @@ class BackgroundToolManager(BaseModel):
         )
 
     async def shutdown(self) -> None:
-        """Cancel all background tasks (listener, cleanup) and running tools."""
-        for task in self._lifecycle_tasks:
+        """Cancel lifecycle and tool tasks, raising if any task remains running."""
+        contained = True
+        lifecycle_tasks = tuple(self._lifecycle_tasks)
+        for task in lifecycle_tasks:
             task.cancel()
-        for task in self._lifecycle_tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self._lifecycle_tasks.clear()
+        if lifecycle_tasks:
+            done, pending = await asyncio.wait(lifecycle_tasks, timeout=1.0)
+            self._lifecycle_tasks = list(pending)
+            if pending:
+                contained = False
+                logger.error("BackgroundToolManager shutdown left lifecycle tasks running")
+            for task in done:
+                if task.cancelled():
+                    continue
+                try:
+                    task.result()
+                except Exception as error:
+                    contained = False
+                    logger.warning("BackgroundToolManager lifecycle task failed: %s", type(error).__name__)
 
         for tool_id in list(self._tools):
-            await self.cancel_tool(tool_id, log=False)
+            if not await self.cancel_tool_and_wait(tool_id, log=False):
+                contained = False
 
+        if not contained:
+            logger.error("BackgroundToolManager shutdown left running tools")
+            raise RuntimeError("Background tool cleanup incomplete")
         logger.info("BackgroundToolManager shut down")
 
     async def timeout_tools(self) -> int:

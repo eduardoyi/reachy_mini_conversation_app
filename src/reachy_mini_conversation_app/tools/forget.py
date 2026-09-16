@@ -8,6 +8,7 @@ from reachy_mini_conversation_app.household_memory import (
     MemoryValidationError,
 )
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolSpec, ToolDependencies
+from reachy_mini_conversation_app.household_memory_receipts import MutationWriterContext, mutation_writer
 
 
 logger = logging.getLogger(__name__)
@@ -111,10 +112,11 @@ class Forget(Tool):
             return {"error": "memory_id must be a non-empty string"}
 
         try:
-            result = HouseholdMemoryStore(deps.instance_path).forget(
-                query=query if isinstance(query, str) else None,
-                memory_id=memory_id if isinstance(memory_id, str) else None,
-            )
+            with mutation_writer(MutationWriterContext("tool.forget", deps.memory_mutation_generation or "untrusted")):
+                result = HouseholdMemoryStore(deps.instance_path).forget(
+                    query=query if isinstance(query, str) else None,
+                    memory_id=memory_id if isinstance(memory_id, str) else None,
+                )
         except MemoryValidationError:
             logger.warning("forget: invalid household memory input")
             return {"error": "invalid household memory input"}

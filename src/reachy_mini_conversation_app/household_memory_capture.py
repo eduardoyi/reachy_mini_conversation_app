@@ -29,6 +29,7 @@ from reachy_mini_conversation_app.household_memory import (
     MemoryCertainty,
     MemoryStoreError,
 )
+from reachy_mini_conversation_app.household_memory_receipts import MutationWriterContext, mutation_writer
 
 
 logger = logging.getLogger(__name__)
@@ -339,6 +340,7 @@ class MemoryCapture:
         self._wake_event: asyncio.Event | None = None
         self._worker_task: asyncio.Task[None] | None = None
         self._request_task: asyncio.Task[Response | None] | None = None
+        self._provider_tasks: set[asyncio.Task[Response]] = set()
         self._attempt_batch_ids: tuple[str, ...] | None = None
         self._active = False
         self._closed = False
@@ -347,6 +349,7 @@ class MemoryCapture:
         self._client_close_task: asyncio.Task[None] | None = None
         self._client_close_cancel_requested = False
         self._generation = 0
+        self._mutation_generation = "untrusted"
         self._user_generation = 0
         self._last_attempt_user_generation: int | None = None
         self._buffer_store_revision: int | None = None
@@ -384,6 +387,12 @@ class MemoryCapture:
             budget_blocked=self._budget_blocked,
         )
 
+    def bind_mutation_generation(self, generation: str) -> None:
+        """Tag future store writes with the owning conversation generation."""
+        if not isinstance(generation, str) or not generation.strip():
+            raise ValueError("generation must be non-empty")
+        self._mutation_generation = generation
+
     async def start(self) -> None:
         """Activate the single worker; requests wait for settled meaningful user text."""
         if self._closed:
@@ -412,18 +421,30 @@ class MemoryCapture:
         self._signal_wake()
         self._cancel_request()
 
+        worker_still_active = False
         worker = self._worker_task
         if worker is not None and not worker.done():
             worker.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(worker), timeout=_CANCEL_WAIT_TIMEOUT_S)
             except asyncio.CancelledError:
-                pass
-            except TimeoutError:
+                if not worker.cancelled():
+                    raise
+            except asyncio.TimeoutError:
                 logger.warning("Household memory capture worker did not stop within the cancellation bound")
+                worker_still_active = True
 
-        if not self._client_closed:
+        if not worker_still_active and not self._client_closed:
+            provider_tasks = tuple(task for task in self._provider_tasks if not task.done())
+            if provider_tasks:
+                await asyncio.wait(provider_tasks, timeout=_CANCEL_WAIT_TIMEOUT_S)
+                if any(not task.done() for task in provider_tasks):
+                    for task in provider_tasks:
+                        task.cancel()
+                    raise RuntimeError("household memory capture provider request is still active")
             await self._close_client()
+        if worker_still_active or not self._client_closed:
+            raise RuntimeError("household memory capture cleanup is still active")
 
     async def _close_client(self) -> None:
         close_task = self._client_close_task
@@ -521,6 +542,19 @@ class MemoryCapture:
         self._buffer_chars += len(text)
         self._fragments_received += 1
         self._trim_buffer()
+        self._signal_wake()
+
+    def rebase_after_review(self, previous_revision: int, current_revision: int) -> None:
+        """Retain fresh speech across acknowledged maintenance while fencing old extraction."""
+        if not self._active or self._closed:
+            return
+        if self._buffer_store_revision not in (None, previous_revision):
+            self.invalidate()
+            return
+        self._generation += 1
+        self._cancel_request()
+        self._buffer_store_revision = current_revision
+        self._last_attempt_user_generation = None
         self._signal_wake()
 
     def invalidate(self) -> None:
@@ -683,10 +717,11 @@ class MemoryCapture:
                     mutation = replace(mutation, status=proposal.status)
                 mutations.append(mutation)
             try:
-                applied_snapshot = self._store.apply_capture(
-                    mutations,
-                    expected_revision=store_revision,
-                )
+                with mutation_writer(MutationWriterContext("capture", self._mutation_generation)):
+                    applied_snapshot = self._store.apply_capture(
+                        mutations,
+                        expected_revision=store_revision,
+                    )
             except MemoryStoreError:
                 self._requests_failed += 1
                 self._generation += 1
@@ -720,6 +755,8 @@ class MemoryCapture:
                 timeout=REQUEST_TIMEOUT_S,
             )
             provider_task = asyncio.create_task(provider_call, name="household-memory-provider-request")
+            self._provider_tasks.add(provider_task)
+            provider_task.add_done_callback(self._consume_provider_task)
         except Exception as exc:
             logger.warning("Household memory capture request setup failed error=%s", type(exc).__name__)
             return None
@@ -727,19 +764,17 @@ class MemoryCapture:
             done, _ = await asyncio.wait({provider_task}, timeout=REQUEST_TIMEOUT_S)
             if not done:
                 provider_task.cancel()
-                provider_task.add_done_callback(self._consume_provider_task)
                 return None
             return provider_task.result()
         except asyncio.CancelledError:
             provider_task.cancel()
-            provider_task.add_done_callback(self._consume_provider_task)
             raise
         except Exception as exc:
             logger.warning("Household memory capture request failed error=%s", type(exc).__name__)
             return None
 
-    @staticmethod
-    def _consume_provider_task(task: asyncio.Task[Response]) -> None:
+    def _consume_provider_task(self, task: asyncio.Task[Response]) -> None:
+        self._provider_tasks.discard(task)
         if task.cancelled():
             return
         try:
@@ -1067,7 +1102,15 @@ class MemoryCapture:
                 record.reserved_output_tokens + MAX_OUTPUT_TOKENS > BUDGET_OUTPUT_TOKEN_LIMIT
             ):
                 self._budget_blocked += 1
-                logger.info("Household memory capture daily budget exhausted")
+                logger.info(
+                    "Household memory capture daily budget exhausted "
+                    "reserved_calls=%d limit=%d reserved_output_tokens=%d token_limit=%d; "
+                    "resumes on the next local day",
+                    record.calls,
+                    BUDGET_CALL_LIMIT,
+                    record.reserved_output_tokens,
+                    BUDGET_OUTPUT_TOKEN_LIMIT,
+                )
                 return False
             self._write_budget(
                 _BudgetRecord(

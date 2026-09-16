@@ -445,11 +445,16 @@ function buildStatusSection() {
         not_started: "Not started",
         restart_required: "Restart required",
         waiting_for_config: "Waiting for configuration",
+        stopping: "Stopping…",
       };
+      const backendLabel =
+        backendState === "stopping" && /failed|timeout|incomplete|error/i.test(payload.backend_error || "")
+          ? "Cleanup unavailable"
+          : backendLabels[backendState] || "Unavailable";
       list.appendChild(
         statusRow(
           "Backend",
-          backendLabels[backendState] || "Unavailable",
+          backendLabel,
           backendState === "connected" ? "ok" : backendState === "not_started" ? undefined : "warn"
         )
       );

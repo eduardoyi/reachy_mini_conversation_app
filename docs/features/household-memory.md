@@ -1,7 +1,7 @@
 # Household memory
 
-- Status: `implemented` — M2 spoken capture/recall/correction/deletion passed; quiet unknown-person trial passed; spoken forgetting passed user retry; default off
-- Last updated: 2026-09-11
+- Status: `implemented` — M1–M2 user accepted; M3 engineering complete, default off; real-model review acceptance pending
+- Last updated: 2026-09-16
 - Plan: [Household memory lifecycle](../plans/household-memory-lifecycle.md)
 
 ## Overview
@@ -10,7 +10,7 @@ The first milestone replaces the flat list of facts with a small local notebook:
 who a note concerns, how certain it is, and how long it belongs in active context.
 It adds explicit corrections and safe deletion. Optional GPT Live capture quietly
 extracts grounded notes from active conversation, independently of spoken tool
-delegation. Daily consolidation and older recall remain later milestones.
+delegation. Optional daily tidy-up consolidates saved notes; older recall remains a later milestone.
 
 `HOUSEHOLD_MEMORY_ENABLED` defaults to false. Existing version 1 stores retain
 their old behavior while disabled. Version 2 data is never downgraded or replaced
@@ -37,8 +37,8 @@ flowchart LR
 The app owns persistent state independently of provider sessions. M2 adds one
 bounded, tool-free Responses worker to active GPT Live sessions. It reuses the
 installed OpenAI client; no dependency or Reachy SDK change is needed.
-`docs/scheme.mmd` includes this path; the generated architecture SVG still needs
-regeneration alongside the previously outstanding GPT Live diagram update.
+`docs/scheme.mmd` includes this path; the architecture SVG was regenerated from
+the source on 2026-09-16, including the shared memory session and shutdown barrier.
 
 | Area | Canonical file | Responsibility |
 |---|---|---|
@@ -48,12 +48,30 @@ regeneration alongside the previously outstanding GPT Live diagram update.
 | Tools | `tools/remember.py`, `tools/forget.py`, `tools/update_memory.py` | Local validated mutations; errors returned to caller |
 | Registry | `tools/core_tools.py` | Hide update tool when disabled; enable with default memory tools, respecting custom selections |
 | Capture | `household_memory_capture.py` | Active-session RAM buffer, evidence validation, daily reservations and revision-checked writes |
-| Live wiring | `openai_live.py`, `openai_live_backend.py` | Start after readiness; guard every Luna request/tool against stale context |
+| Daily tidy-up | `household_memory_review.py` | Bounded changed-note review, attempts budget and atomic checkpoint |
+| Shared session | `household_memory_session.py` | Active context checks, worker lifecycle and bounded cleanup |
+| Mutation receipts | `household_memory_receipts.py` | Ordered process-local acknowledgements of exact store changes; no persistent receipt history |
+| Live wiring | `openai_live.py`, `openai_live_backend.py`, `gemini_live.py` | Start after readiness; guard provider requests/tools against stale context |
 | Standby boundary | `conversation_handler.py`, `hybrid_runtime.py` | Synchronous background-work fence before entering ambient mode |
 | Local review | `console.py`, `static/js/views/settings.js` | Same-computer inspection and deletion |
-| Configuration | `config.py`, `.env.example` | Default-off `HOUSEHOLD_MEMORY_ENABLED` and `HOUSEHOLD_MEMORY_CAPTURE_ENABLED` |
+| Configuration | `config.py`, `.env.example` | Default-off household, capture and review flags |
 
-The version 2 envelope contains `version: 2`, monotonic `revision`, and `entries`. Records preserve
+The [Gemini 3.8 migration](../plans/gemini-38-live-extended-thinking-migration.md)
+moves provider memory lifecycle into the shared session. It prepares a memory
+snapshot before prompt construction and starts optional workers after provider
+readiness. Spoken updates remain usable in the current conversation; spoken forget
+removes saved content and pauses capture/review for the rest of that activation.
+External destructive changes or expired seeded context require a new session.
+Ordered RAM receipts distinguish an activation's exact local writes from external
+changes without broadly accepting whatever the latest store contains. Integration and offline regression validation passed; the existing capture/review
+opt-ins and budgets remain the contract. OpenAI text capture is preserved. Gemini
+captures accepted submitted text once; ambiguous spoken transcript chunks remain
+excluded until live framing is verified.
+
+The version 2 envelope contains `version: 2`, monotonic `revision`, and `entries`.
+Optional `review_checkpoint` stores a local day and up to 260 entry fingerprints;
+review batch/request digests and revision make replay harmless. Every existing
+mutation preserves this metadata and removes deleted IDs from the watermark. Records preserve
 `id`, `text` and millisecond `createdAt`, adding `subject_id`, `source_person_id`,
 `source_ref`, `kind`, `certainty`, UTC `learned_at`/`updated_at`, grounded
 `event_start`/`event_end`, `active_until`, `delete_after` and `status`.
@@ -122,8 +140,9 @@ mean the luggage arrived or the trip happened. A resolution removes a note from
 active context immediately. Reads do not count as new evidence.
 
 Retention-expired entries are hidden on reads and removed on a subsequent store
-write. M1 has no scheduled disk cleanup; an unused file may still contain expired
-entries until maintenance or deletion. Explicit forget removes the selected entry
+write. With review enabled, the next eligible active-session review prunes expired
+entries atomically. An unused file can still contain expired entries until maintenance
+or deletion. Explicit forget removes the selected entry
 from disk immediately.
 
 ## Invisible capture (M2)
@@ -185,6 +204,14 @@ written before requests, including failed/cancelled attempts, and survive
 restarts. Corrupt budget metadata stops capture. This is a per-installation call
 and token guard, not an account-wide dollar spending limit.
 
+An exhausted allowance is expected after 60 reservations, even if no notes were
+saved. Empty responses, failures and cancellations also consume reservations.
+Capture resumes on the next local day; restarting does not replenish it. The
+Terminal diagnostic includes reserved counts and limits, without private text.
+Settings shows saved notes, not background review diagnostics. Review runs at
+session readiness against notes already stored, so new notes from that conversation
+are not evidence that the once-daily review has processed them.
+
 The worker uses `OPENAI_LIVE_BACKEND_MODEL` (Luna by default), low reasoning,
 `tools=[]` and `store=False`. The official
 [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna),
@@ -192,6 +219,34 @@ checked 2026-09-11, lists $0.20/M input tokens, $0.02/M cached input and $1.20/M
 output. Input characters are not tokens; actual cost depends on language and
 usage. Prices may change. These small capture calls are additional to speech and
 tool delegation. `store=False` is not a promise of zero provider retention.
+
+### Daily tidy-up (M3)
+
+`HOUSEHOLD_MEMORY_REVIEW_ENABLED` is a separate default-off opt-in, requiring
+household memory. During the next active GPT Live conversation, a small review
+can examine changed saved notes and a bounded related set without delaying speech.
+It never reads ambient audio or a day-long transcript. An offline app catches up
+once instead of replaying every missed day.
+
+The initial operations keep existing wording: retain useful notes, merge duplicates
+for the same subject, and promote suitable notes to lasting facts. Promotion does
+not increase certainty. Resolution and substantive corrections continue to use the
+existing evidence-driven capture/tool path; aging alone never resolves a situation.
+Situation classification preserves the original note deadlines; lasting fact promotion
+removes expiry only for stated, known-owner notes. Expiry cleanup follows existing retention dates. Review is not fresh evidence and
+must not reset evidence dates or repeatedly extend a temporary note's life.
+
+One attempt per activation, at most two reserved attempts per local day, at most
+one successful daily review. Each request is capped at 20,000 input characters,
+2,000 output tokens and 30 seconds. With capture's independent 60,000-token cap,
+combined background output reservations are at most 64,000 tokens per local day.
+This does not include normal speech/delegation and is not a dollar budget.
+
+Standby, forgetting or shutdown fences pending work. A revision change while the
+review runs prevents stale writes. The successful review and its checkpoint are
+committed together; unselected notes remain eligible for later reviews. Settings
+Forget retains its stronger session reset. Spoken forgetting also cancels review
+for that activation so it cannot restore a removed note.
 
 ### Review and forgetting
 
@@ -263,6 +318,9 @@ over stale work. The plan owns the progressive acceptance sequence.
 | `tests/test_household_memory_registry.py` | Flag changes, default/custom Tool access, malformed argument logging privacy |
 | `tests/test_household_memory_capture.py` | Bounded tool-free requests, incomplete/assistant evidence, stale writes, persistent budget, timeout and resistant cancellation |
 | `tests/test_openai_live_memory.py` | Active-only capture wiring and stale Live/Luna context invalidation |
+| `tests/test_household_memory_review_store.py` | Atomic review/checkpoint, replay, retention, ownership, deadlines and rollback |
+| `tests/test_household_memory_review.py` | Active-only requests, bounded input/output, daily reservations, restart, invalid output and cancellation |
+| `tests/test_openai_live_review.py` | Readiness/standby/forget boundaries, maintenance continuity and deletion fencing |
 | `tests/test_memory_console.py` | Local-only review, Origin/body limits, owner-loop deletion, shutdown failure and late cancellation |
 | `tests/test_memory.py` | Existing legacy memory behavior and tool/prompt integration |
 | `tests/test_config.py` | Default-off flag and explicit environment parsing; existing config behavior |
@@ -537,3 +595,96 @@ attribution rules. The daily consolidation milestone remains gated on this check
   `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q` passed:
   **1106 passed, 2 skipped in 19.07 seconds**. The two native opt-in skips remain.
   Staged diff whitespace and credential-pattern checks passed.
+
+### M3 implementation and review — 2026-09-13
+
+- Added a separate default-off daily review flag; existing user settings and the
+  private notebook were not modified. Runs after Live readiness, at most once per
+  activation, without delaying speech or continuing work in ambient mode.
+- Incremental eligibility uses per-entry fingerprints rather than a single time
+  cursor, so bounded input does not permanently skip unselected notes. Checkpoints
+  and mutations share the same atomic JSON write. Attempts persist separately in
+  `memory.review-budget.v1.json`, including failed/cancelled attempts.
+- No arbitrary text rewriting or inferred resolutions. Keep/merge/promote operate
+  on existing entries; correctness of semantic duplicate/durability judgments still
+  depends on the model. Fake-provider tests do not prove real model quality.
+- Maintenance acknowledgement is scoped to its exact atomic revision and removed
+  IDs. Fresh capture fragments are retained across that known revision, while old
+  extraction responses are cancelled. Explicit forgetting still fences all review
+  work; spoken forgetting pauses capture until the next activation.
+- Three Luna max agents supplied store, worker and provider work. Primary review
+  removed unnecessary compatibility layers and caught removal-ID, replay, budget,
+  callback and capture-overlap issues before acceptance. When agent limits were
+  hit, primary continued implementation/tests; agents resumed after the user reset
+  limits for final adversarial checks.
+- The existing unrelated audio diagnostics changes were preserved. No new package
+  dependency, private-data upload or real cloud review test was used. The Mermaid
+  source includes the review path; rendered SVG regeneration remains outstanding.
+
+### Final M3 validation — 2026-09-13
+
+- Primary reviewed every delegated change and requested fixes for concrete defects;
+  resumed Luna max reviewers completed store, worker and integration checks.
+- `.venv/bin/ruff check .`, `.venv/bin/ruff format --check .` (139 files), and
+  `.venv/bin/mypy --pretty --show-error-codes` (69 source files) passed.
+- Focused capture/store/review/provider scenario suite passed during integration
+  (94 tests at that checkpoint); final agent checks also covered added concurrency,
+  direct cancellation, merge compatibility and configuration restoration cases.
+- Final `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q`:
+  **1169 passed, 3 skipped in 29.79 seconds**. Skips are native opt-in checks,
+  including the SDK flush smoke added by concurrent audio work.
+- A preceding full run failed the existing local VAD/deadline test
+  `test_processor_backed_split_followup_after_deadline_is_not_local_command`
+  with a VAD timeout. Its isolated rerun passed (1 test in 1.54 seconds), then the
+  complete suite passed. No timing threshold was weakened to obtain a pass.
+- `git diff --check` passed. No dependency change, real cloud review, hardware
+  acceptance or rendered architecture SVG update is claimed. M3 engineering is
+  complete; real-model/user acceptance is pending. M4 older recall is not started.
+
+
+### First live M3 troubleshooting — 2026-09-13
+
+The simulator run reached review transport, but logged one rejected proposal as
+malformed output. The response was not retained, so its exact contents cannot be
+recovered. Inspection identified a reproducible contract mismatch: unassigned
+legacy notes could enter requests even though validation rejects operations on
+unknown owners. Such notes must stay local and unchanged, outside model review.
+
+Capture was independently blocked by the persisted allowance: 60 calls and 60,000
+reserved output tokens for the local day. This is not an API account balance
+error. Reservations include unsuccessful and empty requests; historical counters
+do not show which earlier attempts saved notes. No allowance was reset or raised.
+Diagnostics now include counts, limits and next-local-day resumption. A regression
+checks blocked transport and next-day recovery in an isolated store.
+
+A real `gpt-5.6-luna` review against one made-up named note in a temporary store
+succeeded: one attempt, one applied promotion from note to fact, zero failures,
+and a saved checkpoint. No household text was sent by this diagnostic and no
+user store or budget was changed. This is a narrow provider smoke check, not
+household quality acceptance. Settings lists stored memories; maintenance logs
+are in Terminal. Live user follow-up remains pending.
+
+The final worker filters unassigned candidates before building the request. A
+legacy-only temporary store now checkpoints with zero provider attempts and
+`skipped_unassigned=1`; the note remains unchanged. A second real Luna smoke
+check after the fix again applied one named-note promotion. Malformed response
+shape and rejected proposals now have separate count-only diagnostics.
+
+Validation after the fix: `.venv/bin/ruff check .`, `.venv/bin/ruff format
+--check .` (139 files), `.venv/bin/mypy --pretty --show-error-codes` (69 source
+files), and `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q` passed:
+**1184 passed, 3 skipped in 23.05 seconds**. Skips remain native opt-in tests.
+The focused capture/review/Live suite passed during review (76 tests before the
+last three regression cases). An intermediate run caught an inverted parser
+result flag in the diagnostic edit; that defect was corrected before this final
+gate. No user simulator retest or hardware acceptance is claimed.
+
+## Shared migration validation — 2026-09-16
+
+The final full repository gate passed: **1,247 passed, 3 native opt-in checks
+skipped**, with two expected synthetic SDK warnings. Ruff, formatting, strict
+mypy, lock validation, JavaScript syntax and diff checks passed. The
+[final validation record](../plans/gemini-38-live-extended-thinking-migration.md#final-offline-validation--2026-09-16)
+lists exact commands, test inventory, skipped checks and the reproducible next
+live-validation step. Gemini spoken-memory parity and real audio/hardware
+acceptance remain unverified; the active provider was not switched.

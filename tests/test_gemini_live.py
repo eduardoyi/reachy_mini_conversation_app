@@ -289,6 +289,55 @@ def test_build_session_config_declares_nonempty_tools(gemini_config, deps) -> No
     assert session_config.tools[1].function_declarations[0].name == "move_head"
 
 
+def test_extended_thinking_session_config_sets_level_and_non_blocking_tools(gemini_config, deps, monkeypatch) -> None:
+    """The Extended Thinking model receives only its supported async setup fields."""
+    gemini_live_config_model = "gemini-3.8-live-extended-thinking"
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", gemini_live_config_model)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "high")
+    handler = build_handler(deps)
+
+    session_config = handler._build_session_config(
+        [
+            {
+                "type": "function",
+                "name": "move_head",
+                "description": "Move the head.",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    assert handler._model == gemini_live_config_model
+    assert session_config.thinking_config is not None
+    assert session_config.thinking_config.thinking_level == types.ThinkingLevel.HIGH
+    assert session_config.tools is not None
+    declarations = session_config.tools[1].function_declarations
+    assert declarations is not None
+    assert declarations[0].behavior == types.Behavior.NON_BLOCKING
+
+
+def test_standard_gemini_model_omits_extended_thinking_setup(gemini_config, deps) -> None:
+    """Legacy Gemini sessions keep their existing synchronous tool declaration."""
+    handler = build_handler(deps)
+
+    session_config = handler._build_session_config(
+        [
+            {
+                "type": "function",
+                "name": "move_head",
+                "description": "Move the head.",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    assert session_config.thinking_config is None
+    assert session_config.tools is not None
+    declarations = session_config.tools[1].function_declarations
+    assert declarations is not None
+    assert declarations[0].behavior is None
+
+
 def test_build_session_config_uses_initial_history_for_local_context(gemini_config, deps) -> None:
     """Derived ambient text uses Gemini's initial client-content history mode."""
     handler = build_handler(deps)
@@ -354,6 +403,70 @@ async def test_startup_uses_client_injection_and_closes_idempotently(gemini_conf
 
 
 @pytest.mark.asyncio
+async def test_policy_closed_session_rejects_same_handler_reconnect(gemini_config, deps) -> None:
+    """A provider policy close requires a fresh handler before another connection."""
+    first_session = FakeSession()
+    first_session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    second_session = FakeSession()
+    client = RotatingClient([first_session, second_session])
+    handler = build_handler(deps, client)
+
+    await handler.start_up()
+    assert client.aio.live.connect_count == 1
+
+    with pytest.raises(RuntimeError, match="Restart the conversation"):
+        await handler.start_up()
+
+    assert client.aio.live.connect_count == 1
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_raises_and_retains_failed_session_close(gemini_config, deps, monkeypatch) -> None:
+    """A failed session close stays fenced until a later retry succeeds."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    failed_close = AsyncMock(side_effect=RuntimeError("transport detail"))
+    monkeypatch.setattr(session, "close", failed_close)
+
+    with pytest.raises(RuntimeError, match="cleanup is incomplete"):
+        await handler.shutdown()
+
+    assert handler._protocol_fenced is True
+    assert handler._close_failed is True
+    assert handler._fenced_session is session
+    monkeypatch.setattr(session, "close", AsyncMock())
+    await handler.shutdown()
+    assert handler._fenced_session is None
+    assert handler._close_failed is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_raises_and_retries_failed_client_close(gemini_config, deps, monkeypatch) -> None:
+    """A failed client close keeps reactivation fenced until it is confirmed."""
+    session = FakeSession()
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+    activate_session(handler, session)
+    failed_close = AsyncMock(side_effect=RuntimeError("client detail"))
+    monkeypatch.setattr(client.aio, "aclose", failed_close)
+
+    with pytest.raises(RuntimeError, match="cleanup is incomplete"):
+        await handler.shutdown()
+
+    assert handler._client_closed is False
+    assert handler._close_failed is True
+    with pytest.raises(RuntimeError, match="cleanup is still pending"):
+        await handler.start_up()
+
+    monkeypatch.setattr(client.aio, "aclose", AsyncMock())
+    await handler.shutdown()
+    assert handler._client_closed is True
+    assert handler._close_failed is False
+
+
+@pytest.mark.asyncio
 async def test_startup_seeds_initial_context_before_connected_without_model_turn(gemini_config, deps, caplog) -> None:
     """Initial context is one ordered user content message before readiness is announced."""
     sentinel = "We should stay indoors tomorrow. Maybe the aquarium."
@@ -376,7 +489,7 @@ async def test_startup_seeds_initial_context_before_connected_without_model_turn
     assert content.parts is not None
     assert [part.text for part in content.parts] == [sentinel]
     assert session.client_contents[0]["turn_complete"] is True
-    assert connection_states == [True]
+    assert connection_states == [True, False]
     assert handler.output_queue.empty()
     assert sentinel not in caplog.text
 
@@ -670,6 +783,231 @@ async def test_transcripts_emit_interim_and_final_updates(gemini_config, deps) -
         "user",
         "assistant",
     ]
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_status_tracks_busy_until_authoritative_idle(gemini_config, deps, monkeypatch) -> None:
+    """Nested IN_PROGRESS and IDLE statuses drive the shared busy signal."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    observed: list[bool] = []
+    handler.set_interaction_busy_observer(observed.append)
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                turn_complete=True,
+                interaction_status=types.InteractionStatus.IN_PROGRESS,
+            )
+        ),
+        session,
+        1,
+    )
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                turn_complete=True,
+                interaction_status=types.InteractionStatus.IDLE,
+            )
+        ),
+        session,
+        1,
+    )
+
+    assert observed == [True, False]
+    assert handler.interaction_busy is False
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_missing_turn_status_fences_session(gemini_config, deps, monkeypatch) -> None:
+    """A completed Extended Thinking turn without nested status fails closed."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(turn_complete=True)),
+        session,
+        1,
+    )
+
+    assert session.closed
+    assert handler.connection is None
+    outputs = queued_messages(handler)
+    assert [item.args[0] for item in outputs if isinstance(item, gemini_live.AdditionalOutputs)] == [
+        {"role": "assistant", "content": gemini_live._PROTOCOL_ERROR_MESSAGE}
+    ]
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_unknown_status_fences_without_echoing_value(gemini_config, deps, monkeypatch) -> None:
+    """An unknown nested status closes the session without exposing protocol text."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    event_content = types.LiveServerContent.model_validate({"interactionStatus": "future-state"})
+
+    await handler._handle_server_message(types.LiveServerMessage(server_content=event_content), session, 1)
+
+    assert session.closed
+    assert handler.connection is None
+    assert "future-state" not in str(queued_messages(handler))
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_legacy_unknown_interaction_status_does_not_fence(gemini_config, deps) -> None:
+    """Legacy sessions retain their tolerant status handling."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    event_content = types.LiveServerContent.model_validate({"interactionStatus": "future-state"})
+
+    await handler._handle_server_message(types.LiveServerMessage(server_content=event_content), session, 1)
+
+    assert not session.closed
+    assert handler.connection is session
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_silence_stream_does_not_start_user_deadline(gemini_config, deps, monkeypatch) -> None:
+    """Ambient silence and an unsolicited busy status do not create an interaction cap."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await handler.receive((16_000, np.zeros(160, dtype=np.int16)))
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(interaction_status=types.InteractionStatus.IN_PROGRESS)
+        ),
+        session,
+        1,
+    )
+
+    assert handler._accepted_input_at is None
+    assert handler._interaction_deadline_at is None
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_speech_end_starts_user_deadline(gemini_config, deps, monkeypatch) -> None:
+    """Observed user voice activity starts the fixed cap at speech end."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_START)
+        ),
+        session,
+        1,
+    )
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_END)
+        ),
+        session,
+        1,
+    )
+
+    assert handler._accepted_input_at is not None
+    assert handler._interaction_deadline_at is not None
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_latency_records_speech_end_to_idle(gemini_config, deps, monkeypatch) -> None:
+    """Interaction completion is measured separately from first audible output."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    clock = FakeClock()
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=clock))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_START)
+        ),
+        session,
+        1,
+    )
+    clock.advance(0.1)
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_END)
+        ),
+        session,
+        1,
+    )
+    clock.advance(0.35)
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                turn_complete=True,
+                interaction_status=types.InteractionStatus.IDLE,
+            )
+        ),
+        session,
+        1,
+    )
+
+    assert handler.latency_snapshot.interaction_completion_ms == pytest.approx((350.0,))
+    assert handler.latency_snapshot.first_audio_ms == ()
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_interrupted_interaction_has_no_completion_sample(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """An interruption clears an unmatched completion boundary as unavailable."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_START)
+        ),
+        session,
+        1,
+    )
+    await handler._handle_server_message(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_END)
+        ),
+        session,
+        1,
+    )
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(interrupted=True)),
+        session,
+        1,
+    )
+
+    assert handler.latency_snapshot.interaction_completion_ms == ()
+    assert handler.latency_snapshot.interaction_completion_unavailable_count == 1
+    await handler.shutdown()
 
 
 @pytest.mark.asyncio
@@ -1486,6 +1824,96 @@ async def test_parallel_tool_calls_share_one_ordered_function_response(gemini_co
 
 
 @pytest.mark.asyncio
+async def test_extended_thinking_tool_results_send_independently_out_of_order(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """Extended Thinking sends each completed function response without sibling ordering."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    start_tool = AsyncMock(
+        side_effect=[SimpleNamespace(tool_id="tool-a"), SimpleNamespace(tool_id="tool-b")],
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    await handler._handle_tool_call(
+        types.LiveServerToolCall(
+            function_calls=[
+                types.FunctionCall(id="call-a", name="move_head", args={"value": 1}),
+                types.FunctionCall(id="call-b", name="move_head", args={"value": 2}),
+            ]
+        ),
+        session,
+        1,
+    )
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-b",
+            tool_name="move_head",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"value": 2},
+        ),
+        session,
+        1,
+    )
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-a",
+            tool_name="move_head",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"value": 1},
+        ),
+        session,
+        1,
+    )
+
+    assert len(session.tool_responses) == 2
+    response_ids = [response["function_responses"][0].id for response in session.tool_responses]
+    assert response_ids == ["call-b", "call-a"]
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_tool_ids_in_one_extended_thinking_message_start_once(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """Repeated call IDs in one provider event cannot start a second side effect."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="tool-a"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    duplicate_call = types.FunctionCall(id="call-a", name="move_head", args={"value": 1})
+    await handler._handle_tool_call(
+        types.LiveServerToolCall(function_calls=[duplicate_call, duplicate_call]),
+        session,
+        1,
+    )
+
+    start_tool.assert_awaited_once()
+    assert len(handler._in_flight_tool_calls) == 1
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-a",
+            tool_name="move_head",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        ),
+        session,
+        1,
+    )
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_parallel_call_does_not_strand_completed_result(gemini_config, deps, monkeypatch) -> None:
     """A completed sibling is flushed when its remaining batch call is cancelled."""
     session = FakeSession()
@@ -1557,6 +1985,62 @@ async def test_tool_result_sends_function_response_and_camera(gemini_config, dep
     assert function_response.response == {"output": {"image_attached": True, "image_width": 10}}
     assert session.realtime_inputs == [{"video": types.Blob(data=jpeg, mime_type="image/jpeg")}]
     assert [name for name, _ in session.calls] == ["realtime_input", "tool_response"]
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_camera_admission_rejects_near_session_limit(gemini_config, deps, monkeypatch) -> None:
+    """Camera work is rejected before starting when the 110-second budget is spent."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 109.0))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = 0.0
+    handler._session_deadline_at = 540.0
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="camera-tool"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    await handler._handle_tool_call(
+        types.LiveServerToolCall(function_calls=[types.FunctionCall(id="call-camera", name="camera", args={})]),
+        session,
+        1,
+    )
+
+    start_tool.assert_not_awaited()
+    assert session.realtime_inputs == []
+    response = session.tool_responses[0]["function_responses"][0]
+    assert isinstance(response, types.FunctionResponse)
+    assert response.response == {"output": {"error": gemini_live._TOOL_TIMEOUT_MESSAGE}}
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_camera_result_drops_image_at_session_limit(gemini_config, deps, monkeypatch) -> None:
+    """A camera result arriving at the limit cannot transfer image bytes."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 109.0))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = 0.0
+    handler._session_deadline_at = 540.0
+    notification = ToolNotification(
+        id="call-camera",
+        tool_name="camera",
+        is_idle_tool_call=False,
+        status=ToolState.COMPLETED,
+        result={"b64_im": base64.b64encode(b"fake-jpeg").decode("ascii")},
+    )
+
+    await handler._handle_tool_result(notification, session, 1)
+
+    assert session.realtime_inputs == []
+    response = session.tool_responses[0]["function_responses"][0]
+    assert isinstance(response, types.FunctionResponse)
+    assert response.response == {"output": {"image_attached": False}}
+    await handler.shutdown()
 
 
 @pytest.mark.asyncio

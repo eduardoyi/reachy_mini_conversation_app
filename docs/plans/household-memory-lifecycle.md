@@ -1,10 +1,10 @@
 # Household memory lifecycle
 
-- Status: `in-progress` — milestone 2 capture, recall, correction and deletion passed; quiet unknown-person behavior passed one spoken trial
+- Status: `in-progress` — milestones 1–2 accepted in user trials; milestone 3 engineering complete; real-model acceptance pending
 - Owner: Reachy project
 - Created: 2026-09-10
-- Last updated: 2026-09-11
-- Scope: milestone 1 accepted; milestone 2 capture, recall, correction, deletion and quiet unknown-person behavior passed user simulator trials. The newer uninterrupted correction/spoken-forget behavior has automated coverage but awaits a spoken check. Daily review is not implemented; flags remain default off.
+- Last updated: 2026-09-13
+- Scope: milestone 1 accepted; milestone 2 capture, recall, correction, deletion and quiet unknown-person behavior passed user simulator trials. The newer uninterrupted correction/spoken-forget behavior has automated coverage but awaits a spoken check. Daily review is implemented behind a separate default-off flag; real-provider/user acceptance is pending.
 - Related: [companion plan](reachy-hybrid-household-companion.md), [GPT Live](openai-live-migration.md), [provider contracts](../features/openai-live-provider.md).
 
 ## Outcome and philosophy
@@ -766,3 +766,119 @@ This documentation update changes no runtime behavior; `git diff --check` passed
   `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q` passed:
   **1106 passed, 2 skipped in 19.07 seconds**. The two native opt-in skips remain.
   Staged diff whitespace and credential-pattern checks passed.
+
+### Milestone 3 implementation started — 2026-09-13
+
+- User authorized daily tidy-up, with Luna max agents implementing bounded store,
+  worker and provider integration tasks; primary owns review and validation.
+- Default-off review runs only after an active GPT Live session starts, without
+  delaying speech. No cron, ambient upload, new database or dependency is planned.
+- Two reserved 2,000-token attempts per local day plus capture's 60,000-token
+  ceiling bounds combined background output reservations to 64,000, below 65,000.
+  Only one successful review per day; retries require a later activation.
+- Atomic memory/review metadata commit and revision checks prevent replay and
+  stale results after correction/forget. Truncated inputs must remain eligible
+  for later reviews. Maintenance must not reset an otherwise healthy conversation.
+- Existing uncommitted audio diagnostics work is outside this milestone and will
+  be preserved. No actual private notebook or runtime flag is changed for tests.
+
+#### M3 review acceptance matrix
+
+| Scenario | Required result |
+|---|---|
+| One clearly stated birthday note | Can become lasting without a second mention; original text/ownership retained |
+| Two duplicate notes for the same person | One current memory; no invented combined claim |
+| Same preference attributed to different people | Never merge their memories |
+| Tentative or unknown-owner note | Never promote certainty or guess ownership |
+| Temporary luggage report, review next week | Review does not refresh evidence date or assert resolution |
+| Resolved situation reviewed again | Stays resolved; cannot be reopened by maintenance |
+| Day advances after offline period | One catch-up, not a request for every missed day |
+| Request timeout/cancellation or malformed output | No memory mutation; bounded attempt remains charged |
+| Spoken forgetting or Settings deletion during review | Late review cannot resurrect the note |
+| Successful review with merge/expiry | Conversation continues; only maintenance removals are acknowledged |
+| Review input exceeds cap | Unselected changes remain eligible for a later day |
+| Corrupt budget/checkpoint or clock rollback | Skip safely, preserving conversation and memory |
+
+Review is not fresh user evidence. No lifetime extension merely from reading a
+note. Semantic classification remains a model judgment even when field/evidence
+validation succeeds; automated fake-provider tests do not establish real model
+quality. Test results and any remaining limitations will be recorded below.
+
+### M3 implemented scope and limits — 2026-09-13
+
+The initial review supports keep, compatible merge and note promotion using
+existing wording. Arbitrary update/resolve output is deliberately deferred to the
+existing spoken capture/tool paths; that removes an unnecessary way to invent or
+infer a resolution. Merge cannot shorten the kept knowledge's lifetime or combine
+incompatible ownership, certainty, kind or event dates. A situation classification
+keeps original deadlines; stated fact promotion can remove expiry. This narrows
+rather than expands the original proposed review operations.
+
+Known-maintenance capture rebase retains newly spoken fragments and cancels old
+extraction requests. Unrelated edits/deletion still discard stale work. A per-entry
+fingerprint checkpoint avoids starvation beyond the request cap, and successful
+checkpoint/memory mutations are atomic. The same original batch retry is harmless.
+
+Default remains off. Real Luna review quality and ordinary conversation acceptance
+remain pending; no private notes or actual cloud requests were used in these tests.
+Enable `HOUSEHOLD_MEMORY_REVIEW_ENABLED=1` alongside existing household-memory flags
+on a later normal app restart to try the new path. It checks after Live readiness;
+there is no nighttime job, no multi-day recording requirement and no M4 older recall.
+
+### Final M3 validation — 2026-09-13
+
+- Primary reviewed every delegated change and requested fixes for concrete defects;
+  resumed Luna max reviewers completed store, worker and integration checks.
+- `.venv/bin/ruff check .`, `.venv/bin/ruff format --check .` (139 files), and
+  `.venv/bin/mypy --pretty --show-error-codes` (69 source files) passed.
+- Focused capture/store/review/provider scenario suite passed during integration
+  (94 tests at that checkpoint); final agent checks also covered added concurrency,
+  direct cancellation, merge compatibility and configuration restoration cases.
+- Final `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q`:
+  **1169 passed, 3 skipped in 29.79 seconds**. Skips are native opt-in checks,
+  including the SDK flush smoke added by concurrent audio work.
+- A preceding full run failed the existing local VAD/deadline test
+  `test_processor_backed_split_followup_after_deadline_is_not_local_command`
+  with a VAD timeout. Its isolated rerun passed (1 test in 1.54 seconds), then the
+  complete suite passed. No timing threshold was weakened to obtain a pass.
+- `git diff --check` passed. No dependency change, real cloud review, hardware
+  acceptance or rendered architecture SVG update is claimed. M3 engineering is
+  complete; real-model/user acceptance is pending. M4 older recall is not started.
+
+
+### First live M3 troubleshooting — 2026-09-13
+
+The simulator run reached review transport, but logged one rejected proposal as
+malformed output. The response was not retained, so its exact contents cannot be
+recovered. Inspection identified a reproducible contract mismatch: unassigned
+legacy notes could enter requests even though validation rejects operations on
+unknown owners. Such notes must stay local and unchanged, outside model review.
+
+Capture was independently blocked by the persisted allowance: 60 calls and 60,000
+reserved output tokens for the local day. This is not an API account balance
+error. Reservations include unsuccessful and empty requests; historical counters
+do not show which earlier attempts saved notes. No allowance was reset or raised.
+Diagnostics now include counts, limits and next-local-day resumption. A regression
+checks blocked transport and next-day recovery in an isolated store.
+
+A real `gpt-5.6-luna` review against one made-up named note in a temporary store
+succeeded: one attempt, one applied promotion from note to fact, zero failures,
+and a saved checkpoint. No household text was sent by this diagnostic and no
+user store or budget was changed. This is a narrow provider smoke check, not
+household quality acceptance. Settings lists stored memories; maintenance logs
+are in Terminal. Live user follow-up remains pending.
+
+The final worker filters unassigned candidates before building the request. A
+legacy-only temporary store now checkpoints with zero provider attempts and
+`skipped_unassigned=1`; the note remains unchanged. A second real Luna smoke
+check after the fix again applied one named-note promotion. Malformed response
+shape and rejected proposals now have separate count-only diagnostics.
+
+Validation after the fix: `.venv/bin/ruff check .`, `.venv/bin/ruff format
+--check .` (139 files), `.venv/bin/mypy --pretty --show-error-codes` (69 source
+files), and `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q` passed:
+**1184 passed, 3 skipped in 23.05 seconds**. Skips remain native opt-in tests.
+The focused capture/review/Live suite passed during review (76 tests before the
+last three regression cases). An intermediate run caught an inverted parser
+result flag in the diagnostic edit; that defect was corrected before this final
+gate. No user simulator retest or hardware acceptance is claimed.

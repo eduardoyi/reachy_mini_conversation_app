@@ -6,6 +6,7 @@ import time
 import asyncio
 import logging
 import argparse
+import importlib
 import threading
 from typing import TYPE_CHECKING, Any, Optional
 from pathlib import Path
@@ -198,6 +199,9 @@ def run(
         logger.info("Configured Gemini Live realtime backend")
     elif realtime_provider == REALTIME_PROVIDER_OPENAI_LIVE:
         logger.info("Configured OpenAI Live realtime backend")
+        # Load lazy SDK modules before microphone capture can be stalled by imports.
+        importlib.import_module("reachy_mini_conversation_app.openai_live")
+        importlib.import_module("openai.resources.responses")
     else:
         logger.info(
             "Configured Hugging Face realtime backend, connection mode: %s",
@@ -463,7 +467,11 @@ def run(
     movement_manager.start()
     # Audio-reactive head motion follows SDK playback. The explicit simulator
     # output bypass does not feed assistant PCM into this wobbler.
-    robot.enable_wobbling()
+    if config.SPEECH_WOBBLE_ENABLED:
+        robot.enable_wobbling()
+    else:
+        robot.disable_wobbling()
+        logger.info("Speech wobbling disabled by configuration")
 
     timeout_minutes = resolve_app_timeout_minutes()
     if timeout_minutes is not None:

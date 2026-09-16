@@ -1174,6 +1174,46 @@ async def test_timeout_reserves_budget_and_advances_buffer(tmp_path: Path, monke
 
 
 @pytest.mark.asyncio
+async def test_exhausted_budget_blocks_requests_and_resumes_next_day(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Exhausted reservations prevent transport until the local day advances."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+    client = _FakeClient(_proposal_for_request)
+    capture, store = _capture(tmp_path, client)
+    capture.budget_path.write_text(
+        json.dumps({"version": 1, "local_date": "2026-09-11", "calls": 60, "reserved_output_tokens": 60000}),
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.INFO):
+        await capture.start()
+        capture.add_fragment("user", "Eduardo likes jazz.", 0, 100)
+        await asyncio.sleep(0.02)
+        await capture.close()
+    assert client.responses.calls == []
+    assert capture.stats.budget_blocked == 1
+    assert "reserved_calls=60 limit=60" in caplog.text
+    assert "resumes on the next local day" in caplog.text
+    assert "Eduardo likes jazz" not in caplog.text
+
+    next_client = _FakeClient(_proposal_for_request)
+    next_capture = MemoryCapture(
+        store,
+        "gpt-5.6-luna",
+        client=next_client,
+        clocks=CaptureClocks(now=lambda: datetime(2026, 9, 12, 12, tzinfo=timezone.utc), monotonic=lambda: 100.0),
+    )
+    await next_capture.start()
+    next_capture.add_fragment("user", "Eduardo likes jazz.", 0, 100)
+    await asyncio.wait_for(next_client.responses.started.wait(), timeout=1.0)
+    await asyncio.sleep(0.01)
+    await next_capture.close()
+    budget = json.loads(next_capture.budget_path.read_text(encoding="utf-8"))
+    assert budget["calls"] == 1
+    assert budget["local_date"] == "2026-09-12"
+
+
+@pytest.mark.asyncio
 async def test_budget_metadata_survives_restart_and_corruption_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1452,7 +1492,7 @@ async def test_no_final_cloud_flush_on_close(tmp_path: Path, monkeypatch: pytest
 async def test_close_bounds_cancellation_resistant_client_close(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A client that ignores cancellation cannot hold standby shutdown forever."""
+    """A client that ignores cancellation reports incomplete standby cleanup."""
     monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
     client = _FakeClient(_proposal_for_request)
     client.block_close = True
@@ -1460,7 +1500,8 @@ async def test_close_bounds_cancellation_resistant_client_close(
     capture, _ = _capture(tmp_path, client)
     await capture.start()
 
-    await asyncio.wait_for(capture.close(), timeout=2.0)
+    with pytest.raises(RuntimeError, match="cleanup is still active"):
+        await asyncio.wait_for(capture.close(), timeout=2.0)
     assert client.close_count == 1
     client.release_close.set()
     await asyncio.sleep(0.01)
@@ -1500,3 +1541,27 @@ async def test_new_note_accepts_only_current_explicit_status(
         assert "Eduardo likes jazz" not in caplog.text
     finally:
         await capture.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("matched_revision", [True, False])
+async def test_review_rebase_preserves_fresh_speech_but_not_unrelated_stale_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, matched_revision: bool
+) -> None:
+    """Only acknowledged maintenance permits queued user text to survive a store revision."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+    monkeypatch.setattr(capture_module, "REQUEST_INTERVAL_S", 0.0)
+    client = _FakeClient(_proposal_for_request)
+    capture, store = _capture(tmp_path, client)
+    await capture.start()
+    capture.add_fragment("user", "Eduardo likes jazz.", 0, 100)
+    store.revision = 1
+    capture.rebase_after_review(0 if matched_revision else 9, 1)
+    await asyncio.sleep(0.05)
+    if matched_revision:
+        assert len(store.applied) == 1
+        assert store.applied[0]["text"] == "Eduardo likes jazz"
+    else:
+        assert store.applied == []
+        assert client.responses.calls == []
+    await capture.close()

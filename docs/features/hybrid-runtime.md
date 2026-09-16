@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-09-11
+- Last updated: 2026-09-16
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -79,6 +79,34 @@ bounded cloud FIFO and observed by the local processor; pre-wake frames never
 cross the cloud boundary. Local success clears that FIFO; timeout or escalation
 leaves it intact for provider readiness. Shutdown and cancellation release the
 waiter without retaining its text.
+
+## Shutdown containment and provider busy state
+
+The [Gemini 3.8 migration](../plans/gemini-38-live-extended-thinking-migration.md)
+adds a shared STOPPING state and a provider-neutral interaction-busy signal.
+Provider integration and the full repository gate passed offline validation. The
+conversation UI displays `Stopping…` or `Cleanup unavailable` and blocks activation
+until cleanup is confirmed.
+
+A stop request fences new provider work immediately, clears queued output, and
+closes the old generation. LOCAL_AMBIENT is reached only when provider and auxiliary
+cleanup completes. A 15-second wait bounds the caller; delayed or failed cleanup
+leaves STOPPING visible and blocks reactivation. Confirmed late completion may
+release that barrier. This distinguishes immediate admission shutdown from proven
+connection closure; it cannot recall a request already accepted by a remote service.
+
+Provider reasoning and playback are separate from user speech. An authoritative
+busy signal suppresses ordinary inactivity without refreshing the provider's hard
+interaction deadline. The local output path must track queued playback duration;
+a successful SDK enqueue is not evidence that sound has finished playing. Interrupt
+and shutdown clear that estimate. Hardware playback timing remains unmeasured.
+
+Primary verification on 2026-09-16:
+`REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_hybrid_runtime.py tests/test_hybrid_smoke.py tests/test_console.py tests/test_main.py tests/test_moves.py tests/audio/test_speaker_output.py -q`
+passed 227 tests with one skipped opt-in native speaker smoke test. These fakes
+cover cancellation-resistant activation/cleanup, late completion, blocked
+reactivation, direct restart failure and playback estimates; they do not establish
+real speaker timing or cloud connection behavior.
 
 ## Architecture and data flow
 
@@ -260,8 +288,7 @@ LLM routing into this boundary.
   ambient text accepted before provider setup cannot become background history.
 - The initial RMS VAD is amplitude-based and must be replaced or tuned from
   microphone measurements; it does not solve echo cancellation.
-- Generated architecture SVG regeneration is pending; `docs/scheme.mmd` is the
-  source of truth.
+- The architecture SVG was regenerated on 2026-09-16 from `docs/scheme.mmd`.
 
 ## Test inventory
 
@@ -477,3 +504,13 @@ This MVP opens the normal conversation directly; it does not reuse the transcrip
 local-command follow-up path. Status adds acoustic_wake_enabled and selected
 detector counters. See wake-word feature docs for config, privacy boundaries,
 model provenance and the892-pass/2-skip gate plus opt-in headless SDK test.
+
+## Shared migration validation — 2026-09-16
+
+The final full repository gate passed: **1,247 passed, 3 native opt-in checks
+skipped**, with two expected synthetic SDK warnings. Ruff, formatting, strict
+mypy, lock validation, JavaScript syntax and diff checks passed. The
+[final validation record](../plans/gemini-38-live-extended-thinking-migration.md#final-offline-validation--2026-09-16)
+lists exact commands, test inventory, skipped checks and the reproducible next
+live-validation step. Gemini spoken-memory parity and real audio/hardware
+acceptance remain unverified; the active provider was not switched.

@@ -47,6 +47,7 @@ class RuntimeMode(str, Enum):
     LOCAL_AMBIENT = "LOCAL_AMBIENT"
     LOCAL_COMMAND = "LOCAL_COMMAND"
     CLOUD_CONVERSATION = "CLOUD_CONVERSATION"
+    STOPPING = "STOPPING"
 
 
 class LocalCommandOutcome(str, Enum):
@@ -64,6 +65,7 @@ AcknowledgementCallback: TypeAlias = Callable[[str], CallbackResult]
 ActivityObserver: TypeAlias = Callable[[str], None]
 TranscriptObserver: TypeAlias = Callable[[str, str, bool], None]
 StateObserver: TypeAlias = Callable[[RuntimeMode, str, int], None]
+InteractionBusyObserver: TypeAlias = Callable[[bool], None]
 CaptureBarrierProvider: TypeAlias = Callable[[], int | None]
 Clock: TypeAlias = Callable[[], float]
 PostActivationFrame: TypeAlias = tuple[int | None, AudioFrame]
@@ -93,6 +95,9 @@ class RuntimeStatusSnapshot:
     provider_task_running: bool
     inactivity_monitor_running: bool
     connected: bool
+    interaction_busy: bool = False
+    playback_active: bool = False
+    shutdown_error: str | None = None
     ambient_audio_seconds_buffered: float = 0.0
     ambient_audio_bytes_sent_to_cloud: int = 0
     cloud_audio_bytes_sent: int = 0
@@ -151,6 +156,9 @@ class RuntimeStatusSnapshot:
             "closed": self.closed,
             "provider_task_running": self.provider_task_running,
             "inactivity_monitor_running": self.inactivity_monitor_running,
+            "interaction_busy": self.interaction_busy,
+            "playback_active": self.playback_active,
+            "shutdown_error": self.shutdown_error,
             "ambient_audio_seconds_buffered": self.ambient_audio_seconds_buffered,
             "ambient_audio_bytes_sent_to_cloud": self.ambient_audio_bytes_sent_to_cloud,
             "cloud_audio_bytes_sent": self.cloud_audio_bytes_sent,
@@ -201,6 +209,7 @@ class HybridRuntime:
 
     _MAX_ADDRESSED_TEXT_CHARS = 512
     _LOCAL_PROCESSING_QUEUE_SIZE = 8
+    _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
     _POSTACTIVATION_BUFFER_SECONDS = 20.0
@@ -218,8 +227,11 @@ class HybridRuntime:
 
     _VALID_TRANSITIONS: dict[RuntimeMode, frozenset[RuntimeMode]] = {
         RuntimeMode.LOCAL_AMBIENT: frozenset({RuntimeMode.LOCAL_COMMAND}),
-        RuntimeMode.LOCAL_COMMAND: frozenset({RuntimeMode.LOCAL_AMBIENT, RuntimeMode.CLOUD_CONVERSATION}),
-        RuntimeMode.CLOUD_CONVERSATION: frozenset({RuntimeMode.LOCAL_AMBIENT}),
+        RuntimeMode.LOCAL_COMMAND: frozenset(
+            {RuntimeMode.LOCAL_AMBIENT, RuntimeMode.CLOUD_CONVERSATION, RuntimeMode.STOPPING}
+        ),
+        RuntimeMode.CLOUD_CONVERSATION: frozenset({RuntimeMode.STOPPING}),
+        RuntimeMode.STOPPING: frozenset({RuntimeMode.LOCAL_AMBIENT}),
     }
 
     def __init__(
@@ -292,11 +304,20 @@ class HybridRuntime:
         self._wake_followup_after_sequence: int | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._shutdown_error: str | None = None
+        self._stopping_handler: ConversationHandler | None = None
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._shutdown_deadline: float | None = None
+        self._close_deadline: float | None = None
         self._last_conversation_activity = self._clock()
         self._user_speaking = False
+        self._interaction_busy = False
+        self._playback_until = 0.0
         self._connected_since: float | None = None
         self._connection_ready = False
-        self._shutdown_handler_refs: list[weakref.ReferenceType[ConversationHandler]] = []
+        self._shutdown_handler_tasks: dict[
+            int, tuple[weakref.ReferenceType[ConversationHandler], asyncio.Task[None]]
+        ] = {}
         self._capture_barrier_provider: CaptureBarrierProvider | None = None
         self._activation_capture_barrier: int | None = None
         self._postactivation_frames: deque[PostActivationFrame] = deque()
@@ -359,6 +380,18 @@ class HybridRuntime:
         """Return the configured cloud inactivity threshold."""
         return self._inactivity_timeout_s
 
+    @property
+    def interaction_busy(self) -> bool:
+        """Return the provider's authoritative interaction busy state."""
+        with self._lifecycle_lock:
+            return self._interaction_busy
+
+    @property
+    def playback_active(self) -> bool:
+        """Return whether estimated queued playback is still active."""
+        with self._lifecycle_lock:
+            return self._playback_is_active_locked(self._clock())
+
     async def get_transcript_preview(self) -> str | None:
         """Return the bounded local transcript, or ``None`` when unavailable."""
         self._assert_owner_loop()
@@ -396,6 +429,9 @@ class HybridRuntime:
             provider_task = self._provider_task
             inactivity_task = self._inactivity_task
             connected = self._connection_ready
+            interaction_busy = self._interaction_busy
+            playback_active = self._playback_is_active_locked(self._clock())
+            shutdown_error = self._shutdown_error
             postactivation_frames_dropped = self._postactivation_frames_dropped
         metrics = self.metrics_snapshot()
         wake_metrics = self._wake_detector.metrics_snapshot() if self._wake_detector is not None else None
@@ -424,6 +460,9 @@ class HybridRuntime:
             provider_task_running=provider_task is not None and not provider_task.done(),
             inactivity_monitor_running=inactivity_task is not None and not inactivity_task.done(),
             connected=connected,
+            interaction_busy=interaction_busy,
+            playback_active=playback_active,
+            shutdown_error=shutdown_error,
             ambient_audio_seconds_buffered=metrics.ambient_audio_seconds_buffered,
             ambient_audio_bytes_sent_to_cloud=metrics.ambient_audio_bytes_sent_to_cloud,
             cloud_audio_bytes_sent=metrics.cloud_audio_bytes_sent,
@@ -521,6 +560,27 @@ class HybridRuntime:
         """Set the LocalStream-owned playback flush callback."""
         self._playback_clearer = clearer
 
+    def set_playback_active(self, active: bool) -> None:
+        """Set or clear an explicit playback boundary."""
+        with self._lifecycle_lock:
+            if active:
+                self._playback_until = math.inf
+            else:
+                self._playback_until = 0.0
+
+    def note_playback_queued(self, duration_s: float) -> None:
+        """Extend the estimated playback boundary by one queued audio duration."""
+        if duration_s <= 0 or not math.isfinite(duration_s):
+            return
+        with self._lifecycle_lock:
+            if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
+                return
+            now = self._clock()
+            self._playback_until = max(self._playback_until, now) + duration_s
+
+    def _playback_is_active_locked(self, now: float) -> bool:
+        return self._mode is RuntimeMode.CLOUD_CONVERSATION and self._playback_until > now
+
     def clear_provider_output(self) -> None:
         """Drain only the active provider output queue; playback remains LocalStream-owned."""
         with self._lifecycle_lock:
@@ -594,10 +654,13 @@ class HybridRuntime:
             reason,
             generation,
         )
+        self._notify_state_observer(new_mode, reason, generation)
+
+    def _notify_state_observer(self, state: RuntimeMode, reason: str, generation: int) -> None:
         observer = self._state_observer
         if observer is not None:
             try:
-                observer(new_mode, reason, generation)
+                observer(state, reason, generation)
             except Exception as error:
                 logger.warning("Runtime state observer failed: %s", type(error).__name__)
 
@@ -615,7 +678,7 @@ class HybridRuntime:
             closed = self._closed
             mode = self._mode
             activation_task = self._activation_task
-        if closed or mode is RuntimeMode.CLOUD_CONVERSATION:
+        if closed or mode in (RuntimeMode.CLOUD_CONVERSATION, RuntimeMode.STOPPING):
             return mode is RuntimeMode.CLOUD_CONVERSATION and not closed
 
         if activation_task is None or activation_task.done():
@@ -821,6 +884,8 @@ class HybridRuntime:
                     self._connected_since = None
                     self._last_conversation_activity = self._clock()
                     self._user_speaking = False
+                    self._interaction_busy = False
+                    self._playback_until = 0.0
                     self._pending_activation_text = (generation, addressed_text) if addressed_text else None
                 self._transition(RuntimeMode.CLOUD_CONVERSATION, "activation_ready")
                 provider_task = asyncio.create_task(
@@ -842,7 +907,7 @@ class HybridRuntime:
             if handler is not None and handler is active_handler:
                 await self._deactivate_cloud("activation_cancelled")
             elif handler is not None:
-                await self._shutdown_handler(handler, "activation_cancelled")
+                await self._shutdown_handler_strict(handler, "activation_cancelled")
             with self._lifecycle_lock:
                 still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
             if generation and still_command:
@@ -854,7 +919,7 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 active_handler = self._active_handler
             if handler is not None and handler is not active_handler:
-                await self._shutdown_handler(handler, "activation_failed")
+                await self._contain_uncommitted_handler(handler, "activation_failed", generation)
             with self._lifecycle_lock:
                 still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
             if generation and still_command:
@@ -967,6 +1032,9 @@ class HybridRuntime:
             lambda kind, byte_count: self._on_handler_traffic(handler, generation, kind, byte_count)
         )
         handler.set_connection_observer(lambda connected: self._on_handler_connection(handler, generation, connected))
+        busy_setter = getattr(handler, "set_interaction_busy_observer", None)
+        if callable(busy_setter):
+            busy_setter(lambda busy: self._on_handler_interaction_busy(handler, generation, busy))
         handler.set_startup_greeting_enabled(False)
 
     def _clear_handler_playback(self, handler: ConversationHandler, clearer: Callable[[], None]) -> None:
@@ -1028,6 +1096,13 @@ class HybridRuntime:
         if self._is_current_handler(handler, generation):
             self.record_provider_traffic(kind, byte_count)
 
+    def _on_handler_interaction_busy(self, handler: ConversationHandler, generation: int, busy: bool) -> None:
+        """Track provider busy state without changing the inactivity clock."""
+        if not self._is_current_handler(handler, generation):
+            return
+        with self._lifecycle_lock:
+            self._interaction_busy = bool(busy)
+
     def _on_handler_connection(self, handler: ConversationHandler, generation: int, connected: bool) -> None:
         if not self._is_current_handler(handler, generation):
             return
@@ -1039,6 +1114,7 @@ class HybridRuntime:
                 self._connection_ready = True
                 self._last_conversation_activity = now
                 self._user_speaking = False
+                self._interaction_busy = False
                 should_flush = bool(self._postactivation_frames)
                 pending_activation_text = self._pending_activation_text
                 if pending_activation_text is not None and pending_activation_text[0] == generation:
@@ -1057,6 +1133,7 @@ class HybridRuntime:
             return
         with self._lifecycle_lock:
             self._connection_ready = False
+            self._interaction_busy = False
             connected_since = self._connected_since
             self._connected_since = None
         if connected_since is not None:
@@ -1203,6 +1280,8 @@ class HybridRuntime:
                 mode = self._mode
                 barrier = self._activation_capture_barrier
                 generation = self._generation
+                if self._closed or mode is RuntimeMode.STOPPING:
+                    return
             if mode is RuntimeMode.CLOUD_CONVERSATION and active_handler is not None:
                 if barrier is not None and capture_sequence is not None and capture_sequence <= barrier:
                     local_frame = True
@@ -1277,7 +1356,7 @@ class HybridRuntime:
     async def _enqueue_local_frame(self, frame: AudioFrame, *, wait_for_completion: bool) -> None:
         """Queue one copied frame for ordered local processing without blocking capture."""
         with self._lifecycle_lock:
-            if self._closed:
+            if self._closed or self._mode is RuntimeMode.STOPPING:
                 return
             queue = self._local_processing_queue
             task = self._local_processing_task
@@ -1365,17 +1444,21 @@ class HybridRuntime:
             self._local_processing_queue = None
         if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
-            await self._await_cancelled_task(task)
+            completed_tasks, _ = await asyncio.wait({task}, timeout=self._remaining_cleanup_seconds())
+            if completed_tasks:
+                await asyncio.gather(*completed_tasks, return_exceptions=True)
+            else:
+                logger.warning("Hybrid local processing cleanup exceeded the cleanup deadline")
         if queue is None:
             return
         while True:
             try:
-                _, completed, _ = queue.get_nowait()
+                _, completed_future, _ = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
             queue.task_done()
-            if not completed.done():
-                completed.cancel()
+            if not completed_future.done():
+                completed_future.cancel()
 
     async def _observe_local(self, frame: AudioFrame) -> None:
         try:
@@ -1424,7 +1507,9 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
                     return False
-                if not self._connection_ready or self._user_speaking:
+                if not self._connection_ready or self._user_speaking or self._interaction_busy:
+                    return False
+                if self._playback_is_active_locked(self._clock()) or not self._active_handler.output_queue.empty():
                     return False
                 inactive_for = self._clock() - self._last_conversation_activity
             should_deactivate = inactive_for >= self._inactivity_timeout_s
@@ -1445,7 +1530,7 @@ class HybridRuntime:
         """Wait until cloud output can exist or shutdown has started."""
         while True:
             with self._lifecycle_lock:
-                if self._active_handler is not None or self._closed:
+                if self._active_handler is not None or self._closed or self._mode is RuntimeMode.STOPPING:
                     return
             await self._output_wakeup_event.wait()
             self._output_wakeup_event.clear()
@@ -1455,13 +1540,57 @@ class HybridRuntime:
         self._assert_owner_loop()
         return await self._deactivate_cloud(reason)
 
+    async def _contain_uncommitted_handler(self, handler: ConversationHandler, reason: str, generation: int) -> bool:
+        """Fence a constructed handler whose activation failed before cloud ownership."""
+        shutdown_task: asyncio.Task[None]
+        async with self._state_lock:
+            with self._lifecycle_lock:
+                current_mode = self._mode
+                if current_mode is RuntimeMode.LOCAL_AMBIENT:
+                    return self._shutdown_error is None
+                if current_mode is not RuntimeMode.LOCAL_COMMAND or self._generation != generation:
+                    return False
+                self._generation += 1
+                self._active_handler = None
+                self._stopping_handler = handler
+                self._provider_task = None
+                self._inactivity_task = None
+                self._postactivation_flush_task = None
+                self._activation_text_task = None
+                self._pending_activation_text = None
+                self._connection_ready = False
+                self._user_speaking = False
+                self._interaction_busy = False
+                self._playback_until = 0.0
+                self._clear_wake_followup_waiter()
+                self._clear_postactivation_queue()
+                self._shutdown_error = None
+                shutdown_deadline = asyncio.get_running_loop().time() + self._SHUTDOWN_TIMEOUT_S
+                if self._close_deadline is not None:
+                    shutdown_deadline = min(shutdown_deadline, self._close_deadline)
+                self._shutdown_deadline = shutdown_deadline
+                self._transition(RuntimeMode.STOPPING, reason)
+                try:
+                    handler.stop_background_work()
+                except Exception as error:
+                    self._shutdown_error = "provider_stop_failed"
+                    logger.warning("Provider background-work stop failed: %s", type(error).__name__)
+                self._clear_handler_state(handler)
+                shutdown_task = asyncio.create_task(
+                    self._run_shutdown(handler, reason, ()),
+                    name="hybrid-shutdown",
+                )
+                self._shutdown_task = shutdown_task
+                shutdown_task.add_done_callback(self._shutdown_task_done)
+
+        await self._wait_for_shutdown(shutdown_task)
+        with self._lifecycle_lock:
+            return self._mode is RuntimeMode.LOCAL_AMBIENT and self._shutdown_error is None
+
     async def _deactivate_cloud(self, reason: str) -> bool:
         current_task = asyncio.current_task()
-        activation_task: asyncio.Task[bool] | None = None
-        provider_task: asyncio.Task[None] | None = None
-        inactivity_task: asyncio.Task[None] | None = None
-        flush_task: asyncio.Task[None] | None = None
-        activation_text_task: asyncio.Task[None] | None = None
+        shutdown_task: asyncio.Task[None] | None = None
+        cleanup_tasks: list[asyncio.Task[bool] | asyncio.Task[None]] = []
         handler: ConversationHandler | None = None
 
         async with self._state_lock:
@@ -1473,22 +1602,42 @@ class HybridRuntime:
                     return False
 
                 if mode is RuntimeMode.LOCAL_COMMAND:
-                    self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
-                    activation_task = self._activation_task
+                    pending_activation = self._activation_task
+                    self._generation += 1
                     self._clear_postactivation_queue()
+                    self._clear_wake_followup_waiter()
+                    if pending_activation is None or pending_activation.done():
+                        self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
+                    else:
+                        self._shutdown_error = None
+                        shutdown_deadline = asyncio.get_running_loop().time() + self._SHUTDOWN_TIMEOUT_S
+                        if self._close_deadline is not None:
+                            shutdown_deadline = min(shutdown_deadline, self._close_deadline)
+                        self._shutdown_deadline = shutdown_deadline
+                        self._transition(RuntimeMode.STOPPING, reason)
+                        if pending_activation is not current_task:
+                            pending_activation.cancel()
+                            cleanup_tasks.append(pending_activation)
+                        shutdown_task = asyncio.create_task(
+                            self._run_shutdown(None, reason, tuple(cleanup_tasks)),
+                            name="hybrid-shutdown",
+                        )
+                        self._shutdown_task = shutdown_task
+                        shutdown_task.add_done_callback(self._shutdown_task_done)
+                elif mode is RuntimeMode.STOPPING:
+                    shutdown_task = self._shutdown_task
                 elif mode is RuntimeMode.CLOUD_CONVERSATION:
                     handler = active_handler
-                    if handler is not None:
-                        try:
-                            handler.stop_background_work()
-                        except Exception as error:
-                            logger.warning("Provider background-work stop failed: %s", type(error).__name__)
-                    self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
-                    provider_task = self._provider_task
-                    inactivity_task = self._inactivity_task
-                    flush_task = self._postactivation_flush_task
-                    activation_text_task = self._activation_text_task
+                    tasks_to_cancel = (
+                        self._activation_task,
+                        self._provider_task,
+                        self._inactivity_task,
+                        self._postactivation_flush_task,
+                        self._activation_text_task,
+                    )
+                    self._generation += 1
                     self._active_handler = None
+                    self._stopping_handler = handler
                     self._provider_task = None
                     self._inactivity_task = None
                     self._postactivation_flush_task = None
@@ -1496,38 +1645,162 @@ class HybridRuntime:
                     self._pending_activation_text = None
                     self._connection_ready = False
                     self._user_speaking = False
+                    self._interaction_busy = False
+                    self._playback_until = 0.0
+                    self._clear_wake_followup_waiter()
                     self._clear_postactivation_queue()
                     self._accumulate_session_duration(self._clock())
+                    self._shutdown_error = None
+                    shutdown_deadline = asyncio.get_running_loop().time() + self._SHUTDOWN_TIMEOUT_S
+                    if self._close_deadline is not None:
+                        shutdown_deadline = min(shutdown_deadline, self._close_deadline)
+                    self._shutdown_deadline = shutdown_deadline
+                    self._transition(RuntimeMode.STOPPING, reason)
+                    if handler is not None and isinstance(handler, ConversationHandler):
+                        try:
+                            handler.stop_background_work()
+                        except Exception as error:
+                            self._shutdown_error = "provider_stop_failed"
+                            logger.warning("Provider background-work stop failed: %s", type(error).__name__)
+                        self._clear_handler_state(handler)
+                    for task in tasks_to_cancel:
+                        if task is None or task is current_task:
+                            continue
+                        if task is not self._activation_task and not task.done():
+                            task.cancel()
+                        cleanup_tasks.append(task)
+                    shutdown_task = asyncio.create_task(
+                        self._run_shutdown(handler, reason, tuple(cleanup_tasks)),
+                        name="hybrid-shutdown",
+                    )
+                    self._shutdown_task = shutdown_task
+                    shutdown_task.add_done_callback(self._shutdown_task_done)
                 else:
                     raise ValueError(f"Unsupported runtime mode: {mode.value}")
 
-        if activation_task is not None and activation_task is not current_task and not activation_task.done():
-            activation_task.cancel()
-            await self._await_cancelled_task(activation_task)
+        if shutdown_task is None:
+            return mode is RuntimeMode.LOCAL_COMMAND
+        await self._wait_for_shutdown(shutdown_task)
+        with self._lifecycle_lock:
+            return self._mode is RuntimeMode.LOCAL_AMBIENT and self._shutdown_error is None
 
-        if inactivity_task is not None and inactivity_task is not current_task and not inactivity_task.done():
-            inactivity_task.cancel()
-            await self._await_cancelled_task(inactivity_task)
+    def _clear_handler_state(self, handler: ConversationHandler) -> None:
+        """Fence queued provider output and movement state before teardown."""
+        self._drain_handler_output(handler)
+        if not isinstance(handler, ConversationHandler):
+            return
+        clear_queue = handler._clear_queue
+        if clear_queue is not None:
+            try:
+                clear_queue()
+            except Exception as error:
+                logger.warning("Provider playback fence failed: %s", type(error).__name__)
+        try:
+            movement_manager = handler.deps.movement_manager
+            movement_manager.clear_move_queue()
+            movement_manager.set_listening(False)
+            movement_manager.set_speaking(False)
+        except (AttributeError, TypeError) as error:
+            logger.debug("Provider movement fence unavailable: %s", type(error).__name__)
+        except Exception as error:
+            logger.warning("Provider movement fence failed: %s", type(error).__name__)
 
-        if provider_task is not None and provider_task is not current_task and not provider_task.done():
-            provider_task.cancel()
-            await self._await_cancelled_task(provider_task)
-
-        if flush_task is not None and flush_task is not current_task and not flush_task.done():
-            flush_task.cancel()
-            await self._await_cancelled_task(flush_task)
-
-        if (
-            activation_text_task is not None
-            and activation_text_task is not current_task
-            and not activation_text_task.done()
-        ):
-            activation_text_task.cancel()
-            await self._await_cancelled_task(activation_text_task)
-
+    async def _run_shutdown(
+        self,
+        handler: ConversationHandler | None,
+        reason: str,
+        cleanup_tasks: tuple[asyncio.Task[bool] | asyncio.Task[None], ...],
+    ) -> None:
+        """Await provider and canceled auxiliary work as one bounded operation."""
+        cleanup_operations: list[Awaitable[object]] = [self._await_shutdown_task(task) for task in cleanup_tasks]
         if handler is not None:
-            await self._shutdown_handler(handler, reason)
-        return handler is not None or activation_task is not None
+            cleanup_operations.insert(0, self._shutdown_handler_strict(handler, reason))
+        if not cleanup_operations:
+            return
+        results = await asyncio.gather(*cleanup_operations, return_exceptions=True)
+        shutdown_result = results[0]
+        if handler is not None and isinstance(shutdown_result, BaseException):
+            raise RuntimeError("provider shutdown did not complete") from shutdown_result
+        auxiliary_results = results[1:] if handler is not None else results
+        for result in auxiliary_results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise RuntimeError("hybrid cleanup did not complete") from result
+
+    @staticmethod
+    async def _await_shutdown_task(task: asyncio.Task[bool] | asyncio.Task[None]) -> object:
+        """Await one task so cancellation or failure is included in containment."""
+        return await task
+
+    def _remaining_cleanup_seconds(self) -> float:
+        """Return the remaining fixed cleanup budget for provider-adjacent work."""
+        with self._lifecycle_lock:
+            deadlines = tuple(
+                deadline for deadline in (self._close_deadline, self._shutdown_deadline) if deadline is not None
+            )
+        if not deadlines:
+            return self._SHUTDOWN_TIMEOUT_S
+        return max(0.0, min(deadlines) - asyncio.get_running_loop().time())
+
+    async def _wait_for_shutdown(self, task: asyncio.Task[None]) -> None:
+        """Wait for shutdown until its fixed wall-clock containment deadline."""
+        if task.done():
+            self._finalize_shutdown(task)
+            return
+        with self._lifecycle_lock:
+            deadline = self._shutdown_deadline
+        remaining = self._SHUTDOWN_TIMEOUT_S
+        if deadline is not None:
+            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+        completed, _ = await asyncio.wait({task}, timeout=remaining)
+        if completed:
+            self._finalize_shutdown(task)
+        else:
+            self._mark_shutdown_timeout(task)
+
+    def _mark_shutdown_timeout(self, task: asyncio.Task[None]) -> None:
+        event: tuple[RuntimeMode, str, int] | None = None
+        with self._lifecycle_lock:
+            if self._shutdown_task is not task or self._mode is not RuntimeMode.STOPPING:
+                return
+            if task.done():
+                self._finalize_shutdown(task)
+                return
+            if self._shutdown_error is None:
+                self._shutdown_error = "provider_cleanup_timeout"
+                event = (RuntimeMode.STOPPING, "shutdown_timeout", self._generation)
+        logger.warning("Hybrid provider cleanup exceeded the bounded shutdown deadline")
+        if event is not None:
+            self._notify_state_observer(*event)
+
+    def _shutdown_task_done(self, task: asyncio.Task[None]) -> None:
+        self._finalize_shutdown(task)
+
+    def _finalize_shutdown(self, task: asyncio.Task[None]) -> None:
+        event: tuple[RuntimeMode, str, int] | None = None
+        failed = False
+        try:
+            task.result()
+        except BaseException as error:
+            failed = True
+            logger.warning("Hybrid provider cleanup failed: %s", type(error).__name__)
+        with self._lifecycle_lock:
+            if self._shutdown_task is not task or self._mode is not RuntimeMode.STOPPING:
+                return
+            if failed:
+                if self._shutdown_error is None:
+                    self._shutdown_error = "provider_cleanup_failed"
+                    event = (RuntimeMode.STOPPING, "shutdown_failed", self._generation)
+                self._shutdown_task = None
+                self._shutdown_deadline = None
+                self._stopping_handler = None
+            else:
+                self._shutdown_task = None
+                self._shutdown_deadline = None
+                self._stopping_handler = None
+                self._shutdown_error = None
+                self._transition(RuntimeMode.LOCAL_AMBIENT, "shutdown_complete")
+        if event is not None:
+            self._notify_state_observer(*event)
 
     async def close(self) -> None:
         """Idempotently stop the provider and leave subsequent frames local."""
@@ -1538,6 +1811,7 @@ class HybridRuntime:
             close_task = self._close_task
             if close_task is None or close_task.done():
                 self._closed = True
+                self._close_deadline = asyncio.get_running_loop().time() + self._SHUTDOWN_TIMEOUT_S
                 close_task = asyncio.create_task(self._finish_close(), name="hybrid-close")
                 self._close_task = close_task
         self._local_start_event.set()
@@ -1551,12 +1825,17 @@ class HybridRuntime:
 
     async def _finish_close(self) -> None:
         self._clear_wake_followup_waiter()
+        await self._deactivate_cloud("runtime_closed")
         current_task = asyncio.current_task()
         local_event_tasks = tuple(task for task in self._local_event_tasks if task is not current_task)
         for task in local_event_tasks:
             task.cancel()
         if local_event_tasks:
-            await asyncio.gather(*local_event_tasks, return_exceptions=True)
+            completed, _ = await asyncio.wait(local_event_tasks, timeout=self._remaining_cleanup_seconds())
+            if completed:
+                await asyncio.gather(*completed, return_exceptions=True)
+            if len(completed) != len(local_event_tasks):
+                logger.warning("Hybrid local event cleanup exceeded the cleanup deadline")
         self._local_event_tasks.clear()
         with self._lifecycle_lock:
             activation_task = self._activation_task
@@ -1566,15 +1845,22 @@ class HybridRuntime:
             and not activation_task.done()
         ):
             activation_task.cancel()
-            await self._await_cancelled_task(activation_task)
-        await self._deactivate_cloud("runtime_closed")
+            completed, _ = await asyncio.wait({activation_task}, timeout=self._remaining_cleanup_seconds())
+            if not completed:
+                logger.warning("Hybrid activation cleanup exceeded the cleanup deadline")
         await self._stop_local_processing()
         callback = self._local_processing_close_callback
         if callback is not None:
             try:
                 result = callback()
                 if inspect.isawaitable(result):
-                    await result
+                    callback_task: asyncio.Future[None] = asyncio.ensure_future(result)
+                    completed_tasks, _ = await asyncio.wait({callback_task}, timeout=self._remaining_cleanup_seconds())
+                    if completed_tasks:
+                        await asyncio.gather(*completed_tasks, return_exceptions=True)
+                    else:
+                        callback_task.cancel()
+                        logger.warning("Hybrid local processing cleanup exceeded the cleanup deadline")
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -1589,19 +1875,37 @@ class HybridRuntime:
             logger.warning("Hybrid task cleanup failed: %s", type(error).__name__)
 
     async def _shutdown_handler(self, handler: ConversationHandler, reason: str) -> None:
-        for reference in self._shutdown_handler_refs[:]:
-            target = reference()
-            if target is None:
-                self._shutdown_handler_refs.remove(reference)
-            elif target is handler:
-                return
-        self._shutdown_handler_refs.append(weakref.ref(handler))
         try:
-            await handler.shutdown()
+            await self._shutdown_handler_strict(handler, reason)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             logger.warning("Provider shutdown failed reason=%s error=%s", reason, type(error).__name__)
+
+    def _prune_shutdown_handler_tasks(self) -> None:
+        """Drop completed shutdown records whose handlers are no longer live."""
+        stale_handler_ids = [
+            handler_id
+            for handler_id, (handler_ref, task) in self._shutdown_handler_tasks.items()
+            if handler_ref() is None and task.done()
+        ]
+        for handler_id in stale_handler_ids:
+            self._shutdown_handler_tasks.pop(handler_id, None)
+
+    async def _shutdown_handler_strict(self, handler: ConversationHandler, reason: str) -> None:
+        """Shutdown one handler once and preserve failures for containment."""
+        del reason
+        self._prune_shutdown_handler_tasks()
+        handler_id = id(handler)
+        tracked = self._shutdown_handler_tasks.get(handler_id)
+        if tracked is not None:
+            target, task = tracked
+            if target() is handler:
+                await asyncio.shield(task)
+                return
+        task = asyncio.create_task(handler.shutdown(), name="hybrid-provider-shutdown")
+        self._shutdown_handler_tasks[handler_id] = (weakref.ref(handler), task)
+        await asyncio.shield(task)
 
     def _record_session_segment(self, duration: float) -> None:
         if duration <= 0:
@@ -1626,6 +1930,7 @@ __all__ = [
     "AcknowledgementCallback",
     "HandlerFactory",
     "HybridRuntime",
+    "InteractionBusyObserver",
     "LocalCommandOutcome",
     "RuntimeMode",
     "RuntimeStatusSnapshot",

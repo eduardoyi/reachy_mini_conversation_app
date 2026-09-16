@@ -3,14 +3,24 @@
 import os
 import json
 import uuid
+import hashlib
 import logging
 import tempfile
 import threading
 from typing import Literal
 from pathlib import Path
 from datetime import date, datetime, timezone, timedelta
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 from collections.abc import Mapping, Callable, Sequence
+
+from reachy_mini_conversation_app.household_memory_receipts import (
+    MutationSource,
+    MemoryMutationChange,
+    MemoryMutationReceipt,
+    MutationWriterContext,
+    memory_mutation_bus,
+    current_mutation_writer,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -22,10 +32,13 @@ MAX_FACTS = 60
 MAX_NOTES = 200
 MAX_FACT_CHARS = MAX_TEXT_CHARS
 MAX_CAPTURE_MUTATIONS = 6
+MAX_REVIEW_OPERATIONS = MAX_CAPTURE_MUTATIONS
+MAX_REVIEW_WATERMARK_ENTRIES = MAX_FACTS + MAX_NOTES
 
 MemoryKind = Literal["note", "situation", "plan", "fact"]
 MemoryCertainty = Literal["stated", "tentative"]
 MemoryStatus = Literal["current", "resolved", "superseded"]
+ReviewTargetKind = Literal["fact", "situation"]
 DateInput = str | date | datetime
 
 _KINDS: frozenset[str] = frozenset({"note", "situation", "plan", "fact"})
@@ -146,10 +159,61 @@ class CaptureMutation:
 
 
 @dataclass(frozen=True)
+class ReviewKeep:
+    """Mark one existing entry as reviewed without changing its content."""
+
+    memory_id: str
+    evidence_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReviewMerge:
+    """Supersede duplicate current entries while retaining one existing entry."""
+
+    keep_id: str
+    merge_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ReviewPromote:
+    """Promote a grounded note to a fact or situation."""
+
+    memory_id: str
+    target_kind: ReviewTargetKind
+    evidence_ids: tuple[str, ...]
+
+
+ReviewOperation = ReviewKeep | ReviewMerge | ReviewPromote
+
+
+@dataclass(frozen=True)
+class ReviewCheckpoint:
+    """Successful local-day review state and bounded entry fingerprints."""
+
+    local_day: str
+    watermark: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ReviewApplyResult:
+    """Result of one atomic daily review envelope write."""
+
+    snapshot: MemorySnapshot
+    checkpoint: ReviewCheckpoint
+    removed_ids: tuple[str, ...]
+    applied_operations: int
+
+
+@dataclass(frozen=True)
 class _Envelope:
     version: int
     entries: tuple[MemoryEntry, ...]
     revision: int
+    review_checkpoint: ReviewCheckpoint | None = None
+    review_batch_digest: str | None = None
+    review_batch_revision: int | None = None
+    review_request_digest: str | None = None
 
 
 def memory_path_for_instance(instance_path: str | Path | None = None) -> Path:
@@ -273,6 +337,90 @@ def _validate_enum(value: str, allowed: frozenset[str], field_name: str) -> None
     if value not in allowed:
         allowed_values = ", ".join(sorted(allowed))
         raise MemoryValidationError(f"{field_name} must be one of {allowed_values}")
+
+
+def _normalise_local_day(value: str) -> str:
+    if not isinstance(value, str):
+        raise MemoryValidationError("local_day must be an ISO date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise MemoryValidationError("local_day must be an ISO date") from exc
+    if parsed.isoformat() != value:
+        raise MemoryValidationError("local_day must use canonical ISO date form")
+    return value
+
+
+def _normalise_review_checkpoint(checkpoint: ReviewCheckpoint) -> ReviewCheckpoint:
+    if not isinstance(checkpoint, ReviewCheckpoint):
+        raise MemoryValidationError("checkpoint has an invalid type")
+    local_day = _normalise_local_day(checkpoint.local_day)
+    if not isinstance(checkpoint.watermark, Mapping):
+        raise MemoryValidationError("checkpoint watermark must be a mapping")
+    if len(checkpoint.watermark) > MAX_REVIEW_WATERMARK_ENTRIES:
+        raise MemoryValidationError("checkpoint watermark exceeds the memory capacity")
+    normalized: dict[str, str] = {}
+    for raw_id, fingerprint in checkpoint.watermark.items():
+        normalized_id = _normalise_identifier(raw_id, "memory_id")
+        if not isinstance(fingerprint, str) or not fingerprint or len(fingerprint) > 128:
+            raise MemoryValidationError("checkpoint fingerprint is invalid")
+        normalized[normalized_id] = fingerprint
+    return ReviewCheckpoint(local_day=local_day, watermark=dict(sorted(normalized.items())))
+
+
+def _review_fingerprint(entry: MemoryEntry) -> str:
+    payload = json.dumps(entry.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _review_operation_payload(operation: ReviewOperation) -> dict[str, object]:
+    if isinstance(operation, ReviewKeep):
+        return {
+            "operation": "keep",
+            "memory_id": operation.memory_id,
+            "evidence_ids": operation.evidence_ids,
+        }
+    if isinstance(operation, ReviewMerge):
+        return {
+            "operation": "merge",
+            "keep_id": operation.keep_id,
+            "merge_ids": operation.merge_ids,
+            "evidence_ids": operation.evidence_ids,
+        }
+    if isinstance(operation, ReviewPromote):
+        return {
+            "operation": "promote",
+            "memory_id": operation.memory_id,
+            "target_kind": operation.target_kind,
+            "evidence_ids": operation.evidence_ids,
+        }
+    raise MemoryValidationError("review operation has an invalid type")
+
+
+def _review_batch_digest(operations: tuple[ReviewOperation, ...]) -> str:
+    payload = json.dumps(
+        [_review_operation_payload(operation) for operation in operations],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _review_request_digest(operations: tuple[ReviewOperation, ...], checkpoint: ReviewCheckpoint) -> str:
+    payload = json.dumps(
+        {
+            "operations": [_review_operation_payload(operation) for operation in operations],
+            "checkpoint": {
+                "local_day": checkpoint.local_day,
+                "watermark": dict(checkpoint.watermark),
+            },
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _kind_from_json(value: object) -> MemoryKind:
@@ -474,6 +622,38 @@ def _validate_entries(entries: tuple[MemoryEntry, ...]) -> None:
         raise MemoryCorruptionError("memory store exceeds its capacity")
 
 
+def _review_metadata_from_json(
+    parsed: Mapping[str, object],
+) -> tuple[ReviewCheckpoint | None, str | None, int | None, str | None]:
+    raw_checkpoint = parsed.get("review_checkpoint")
+    if raw_checkpoint is None:
+        return None, None, None, None
+    if not isinstance(raw_checkpoint, Mapping):
+        raise MemoryCorruptionError("review checkpoint is invalid")
+    raw_local_day = raw_checkpoint.get("local_day")
+    raw_watermark = raw_checkpoint.get("watermark")
+    if not isinstance(raw_local_day, str) or not isinstance(raw_watermark, Mapping):
+        raise MemoryCorruptionError("review checkpoint is invalid")
+    if any(not isinstance(key, str) or not isinstance(value, str) for key, value in raw_watermark.items()):
+        raise MemoryCorruptionError("review checkpoint is invalid")
+    try:
+        checkpoint = _normalise_review_checkpoint(
+            ReviewCheckpoint(local_day=raw_local_day, watermark=dict(raw_watermark))
+        )
+    except MemoryValidationError as exc:
+        raise MemoryCorruptionError("review checkpoint is invalid") from exc
+    raw_digest = parsed.get("review_batch_digest")
+    if raw_digest is not None and (not isinstance(raw_digest, str) or len(raw_digest) != 64):
+        raise MemoryCorruptionError("review batch metadata is invalid")
+    raw_batch_revision = parsed.get("review_batch_revision")
+    if raw_batch_revision is not None and (type(raw_batch_revision) is not int or raw_batch_revision < 0):
+        raise MemoryCorruptionError("review batch metadata is invalid")
+    raw_request_digest = parsed.get("review_request_digest")
+    if raw_request_digest is not None and (not isinstance(raw_request_digest, str) or len(raw_request_digest) != 64):
+        raise MemoryCorruptionError("review request metadata is invalid")
+    return checkpoint, raw_digest, raw_batch_revision, raw_request_digest
+
+
 def _read_envelope(path: Path) -> _Envelope:
     try:
         raw = path.read_text(encoding="utf-8")
@@ -513,15 +693,47 @@ def _read_envelope(path: Path) -> _Envelope:
         raise MemoryCorruptionError("v2 memory store envelope is invalid")
     entries = tuple(_entry_from_v2(item) for item in raw_entries)
     _validate_entries(entries)
-    return _Envelope(version=SCHEMA_VERSION, entries=entries, revision=raw_revision)
+    review_checkpoint, review_batch_digest, review_batch_revision, review_request_digest = _review_metadata_from_json(
+        parsed
+    )
+    return _Envelope(
+        version=SCHEMA_VERSION,
+        entries=entries,
+        revision=raw_revision,
+        review_checkpoint=review_checkpoint,
+        review_batch_digest=review_batch_digest,
+        review_batch_revision=review_batch_revision,
+        review_request_digest=review_request_digest,
+    )
 
 
-def _write_envelope(path: Path, entries: tuple[MemoryEntry, ...], revision: int) -> None:
+def _write_envelope(
+    path: Path,
+    entries: tuple[MemoryEntry, ...],
+    revision: int,
+    *,
+    review_checkpoint: ReviewCheckpoint | None = None,
+    review_batch_digest: str | None = None,
+    review_batch_revision: int | None = None,
+    review_request_digest: str | None = None,
+) -> None:
     payload: dict[str, object] = {
         "version": SCHEMA_VERSION,
         "revision": revision,
         "entries": [entry.to_json() for entry in entries],
     }
+    if review_checkpoint is not None:
+        normalized_checkpoint = _normalise_review_checkpoint(review_checkpoint)
+        payload["review_checkpoint"] = {
+            "local_day": normalized_checkpoint.local_day,
+            "watermark": dict(normalized_checkpoint.watermark),
+        }
+        if review_batch_digest is not None:
+            payload["review_batch_digest"] = review_batch_digest
+        if review_batch_revision is not None:
+            payload["review_batch_revision"] = review_batch_revision
+        if review_request_digest is not None:
+            payload["review_request_digest"] = review_request_digest
     temporary_path: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -549,14 +761,61 @@ class HouseholdMemoryStore:
     """Manage bounded v2 household memory in the existing local JSON file."""
 
     def __init__(
-        self, instance_path: str | Path | None = None, *, clock: Callable[[], datetime] | None = None
+        self,
+        instance_path: str | Path | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        mutation_context: MutationWriterContext | None = None,
     ) -> None:
         """Create a store rooted at an app instance directory."""
         self.path = memory_path_for_instance(instance_path)
         self._clock = clock or _default_clock
+        if mutation_context is not None:
+            if not isinstance(mutation_context, MutationWriterContext):
+                raise TypeError("mutation_context has an invalid type")
+            if not mutation_context.source or not mutation_context.generation:
+                raise ValueError("mutation_context must identify its writer")
+        self._mutation_context = mutation_context
 
     def _now(self) -> datetime:
         return _normalise_clock_value(self._clock())
+
+    @staticmethod
+    def _entry_payload(entry: MemoryEntry) -> str:
+        return json.dumps(entry.to_json(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+    def _publish_mutation(
+        self,
+        before_entries: Sequence[MemoryEntry],
+        before_revision: int,
+        after_entries: Sequence[MemoryEntry],
+        after_revision: int,
+        default_source: MutationSource,
+    ) -> None:
+        if before_revision == after_revision and tuple(before_entries) == tuple(after_entries):
+            return
+        context = current_mutation_writer() or self._mutation_context
+        if context is None:
+            context = MutationWriterContext(default_source, "untrusted")
+        before_by_id = {entry.id: self._entry_payload(entry) for entry in before_entries}
+        after_by_id = {entry.id: self._entry_payload(entry) for entry in after_entries}
+        changes = tuple(
+            MemoryMutationChange(memory_id, before_by_id.get(memory_id), after_by_id.get(memory_id))
+            for memory_id in sorted(set(before_by_id) | set(after_by_id))
+            if before_by_id.get(memory_id) != after_by_id.get(memory_id)
+        )
+        if not changes and before_revision == after_revision:
+            return
+        memory_mutation_bus().publish(
+            self.path,
+            MemoryMutationReceipt(
+                source=context.source,
+                generation=context.generation,
+                before_revision=before_revision,
+                after_revision=after_revision,
+                changes=changes,
+            ),
+        )
 
     @staticmethod
     def _require_v2(envelope: _Envelope) -> None:
@@ -849,6 +1108,318 @@ class HouseholdMemoryStore:
             return self._apply_new_mutation(mutation, entries, now)
         return self._apply_update_mutation(mutation, entries, now)
 
+    @staticmethod
+    def _review_entry(entries: tuple[MemoryEntry, ...], memory_id: str) -> MemoryEntry:
+        normalized_id = _normalise_identifier(memory_id, "memory_id")
+        entry = next((candidate for candidate in entries if candidate.id == normalized_id), None)
+        if entry is None:
+            raise MemoryValidationError("review memory id was not found")
+        return entry
+
+    @staticmethod
+    def _review_evidence(
+        entries: tuple[MemoryEntry, ...],
+        evidence_ids: tuple[str, ...],
+        target_id: str,
+    ) -> tuple[MemoryEntry, ...]:
+        if not evidence_ids:
+            raise MemoryValidationError("review operation requires evidence ids")
+        normalized_ids = tuple(_normalise_identifier(memory_id, "evidence_id") for memory_id in evidence_ids)
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise MemoryValidationError("review evidence ids must be unique")
+        normalized_target = _normalise_identifier(target_id, "memory_id")
+        if normalized_target not in normalized_ids:
+            raise MemoryValidationError("review evidence must include the target memory")
+        evidence = tuple(HouseholdMemoryStore._review_entry(entries, memory_id) for memory_id in normalized_ids)
+        if any(entry.status != "current" for entry in evidence):
+            raise MemoryValidationError("review evidence must be current")
+        subjects = {entry.subject_id for entry in evidence}
+        if len(subjects) != 1 or None in subjects:
+            raise MemoryValidationError("review evidence must have one known subject")
+        return evidence
+
+    @staticmethod
+    def _review_replace(
+        entries: tuple[MemoryEntry, ...],
+        replacements: Mapping[str, MemoryEntry],
+    ) -> tuple[MemoryEntry, ...]:
+        return tuple(replacements.get(entry.id, entry) for entry in entries)
+
+    @staticmethod
+    def _review_deadline_covers(kept: datetime | None, duplicate: datetime | None) -> bool:
+        """Return whether a kept deadline is at least as durable as a duplicate's."""
+        if duplicate is None:
+            return kept is None
+        return kept is None or kept >= duplicate
+
+    @staticmethod
+    def _checkpoint_for_entries(
+        checkpoint: ReviewCheckpoint | None,
+        entries: tuple[MemoryEntry, ...],
+    ) -> ReviewCheckpoint | None:
+        if checkpoint is None:
+            return None
+        ids = {entry.id for entry in entries}
+        return ReviewCheckpoint(
+            local_day=checkpoint.local_day,
+            watermark={
+                memory_id: fingerprint for memory_id, fingerprint in checkpoint.watermark.items() if memory_id in ids
+            },
+        )
+
+    def _apply_review_operation(
+        self,
+        operation: ReviewOperation,
+        entries: tuple[MemoryEntry, ...],
+        now: datetime,
+    ) -> tuple[tuple[MemoryEntry, ...], set[str], bool]:
+        if isinstance(operation, ReviewKeep):
+            entry = self._review_entry(entries, operation.memory_id)
+            if entry.status != "current":
+                raise MemoryValidationError("review keep requires a current memory")
+            reviewed_ids = {entry.id}
+            if operation.evidence_ids:
+                evidence = self._review_evidence(entries, operation.evidence_ids, entry.id)
+                reviewed_ids.update(candidate.id for candidate in evidence)
+            return entries, reviewed_ids, False
+
+        if isinstance(operation, ReviewMerge):
+            keep = self._review_entry(entries, operation.keep_id)
+            if keep.status != "current":
+                raise MemoryValidationError("review merge requires a current memory to keep")
+            merge_ids = tuple(_normalise_identifier(memory_id, "memory_id") for memory_id in operation.merge_ids)
+            if not merge_ids:
+                raise MemoryValidationError("review merge requires duplicate memory ids")
+            if keep.id in merge_ids or len(set(merge_ids)) != len(merge_ids):
+                raise MemoryValidationError("review merge ids must be distinct from the kept memory")
+            evidence = self._review_evidence(entries, operation.evidence_ids, keep.id)
+            expected_ids = {keep.id, *merge_ids}
+            if {entry.id for entry in evidence} != expected_ids:
+                raise MemoryValidationError("review merge evidence must exactly select the merged memories")
+            if any(entry.subject_id != keep.subject_id or entry.certainty != keep.certainty for entry in evidence):
+                raise MemoryValidationError("review merge requires one subject and certainty")
+            if any(
+                entry.kind != keep.kind
+                or entry.event_start != keep.event_start
+                or entry.event_end != keep.event_end
+                or not self._review_deadline_covers(keep.active_until, entry.active_until)
+                or not self._review_deadline_covers(keep.delete_after, entry.delete_after)
+                for entry in evidence
+                if entry.id != keep.id
+            ):
+                raise MemoryValidationError("review merge requires compatible kind, dates, and retention")
+
+            replacements: dict[str, MemoryEntry] = {}
+            changed = False
+            for memory_id in merge_ids:
+                duplicate = self._review_entry(entries, memory_id)
+                if duplicate.status != "current":
+                    raise MemoryValidationError("review merge cannot revive resolved memory")
+                delete_after = duplicate.delete_after
+                if delete_after is None or delete_after <= now:
+                    delete_after = now + timedelta(days=30)
+                replacements[memory_id] = MemoryEntry(
+                    id=duplicate.id,
+                    text=duplicate.text,
+                    created_at=duplicate.created_at,
+                    subject_id=duplicate.subject_id,
+                    source_person_id=duplicate.source_person_id,
+                    kind=duplicate.kind,
+                    certainty=duplicate.certainty,
+                    source_ref=duplicate.source_ref,
+                    learned_at=duplicate.learned_at,
+                    updated_at=max(now, duplicate.updated_at),
+                    event_start=duplicate.event_start,
+                    event_end=duplicate.event_end,
+                    active_until=now,
+                    delete_after=delete_after,
+                    status="superseded",
+                )
+                changed = True
+            return self._review_replace(entries, replacements), expected_ids, changed
+
+        if not isinstance(operation, ReviewPromote):
+            raise MemoryValidationError("review operation has an invalid type")
+        _validate_enum(operation.target_kind, frozenset({"fact", "situation"}), "target_kind")
+        entry = self._review_entry(entries, operation.memory_id)
+        evidence = self._review_evidence(entries, operation.evidence_ids, entry.id)
+        if any(candidate.subject_id != entry.subject_id for candidate in evidence):
+            raise MemoryValidationError("review promotion requires one subject")
+        if entry.subject_id is None:
+            raise MemoryValidationError("review promotion requires known ownership")
+        if entry.kind != "note":
+            raise MemoryValidationError("review promotion is allowed only from a note")
+        if operation.target_kind == "fact" and entry.certainty == "tentative":
+            raise MemoryValidationError("tentative evidence cannot be promoted to a fact")
+        if operation.target_kind == "fact":
+            active_until = None
+            delete_after = None
+        else:
+            active_until = entry.active_until
+            delete_after = entry.delete_after
+        promoted = MemoryEntry(
+            id=entry.id,
+            text=entry.text,
+            created_at=entry.created_at,
+            subject_id=entry.subject_id,
+            source_person_id=entry.source_person_id,
+            kind=operation.target_kind,
+            certainty=entry.certainty,
+            source_ref=entry.source_ref,
+            learned_at=entry.learned_at,
+            updated_at=max(now, entry.updated_at),
+            event_start=entry.event_start,
+            event_end=entry.event_end,
+            active_until=active_until,
+            delete_after=delete_after,
+            status=entry.status,
+        )
+        if promoted == entry:
+            return entries, {candidate.id for candidate in evidence}, False
+        return self._review_replace(entries, {entry.id: promoted}), {candidate.id for candidate in evidence}, True
+
+    def review_watermark(self, entries: Sequence[MemoryEntry]) -> dict[str, str]:
+        """Return bounded fingerprints for entries included in a review request."""
+        if not isinstance(entries, Sequence):
+            raise MemoryValidationError("review entries must be a sequence")
+        if len(entries) > MAX_REVIEW_WATERMARK_ENTRIES:
+            raise MemoryValidationError("review watermark exceeds the memory capacity")
+        watermark: dict[str, str] = {}
+        for entry in entries:
+            if not isinstance(entry, MemoryEntry):
+                raise MemoryValidationError("review entries have an invalid type")
+            if entry.id in watermark:
+                raise MemoryValidationError("review entries contain duplicate ids")
+            watermark[entry.id] = _review_fingerprint(entry)
+        return dict(sorted(watermark.items()))
+
+    def review_checkpoint(self) -> ReviewCheckpoint | None:
+        """Return the last successful local-day review checkpoint."""
+        with _STORE_LOCK:
+            envelope = _read_envelope(self.path)
+            self._require_v2(envelope)
+            return envelope.review_checkpoint
+
+    def review_candidates(self, local_day: str | None = None) -> tuple[MemoryEntry, ...]:
+        """Return retained current entries whose content is new or changed since review."""
+        if local_day is not None:
+            _normalise_local_day(local_day)
+        with _STORE_LOCK:
+            envelope = _read_envelope(self.path)
+            self._require_v2(envelope)
+            now = self._now()
+            retained = self._retained_entries(envelope.entries, now)
+            watermark = {} if envelope.review_checkpoint is None else envelope.review_checkpoint.watermark
+            return tuple(
+                entry
+                for entry in retained
+                if entry.status == "current" and watermark.get(entry.id) != _review_fingerprint(entry)
+            )
+
+    def apply_review(
+        self,
+        operations: Sequence[ReviewOperation],
+        *,
+        expected_revision: int,
+        checkpoint: ReviewCheckpoint,
+    ) -> ReviewApplyResult:
+        """Atomically apply typed review operations and a successful checkpoint."""
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise MemoryValidationError("expected_revision must be a non-negative integer")
+        if not isinstance(operations, Sequence):
+            raise MemoryValidationError("review operations must be a sequence")
+        operation_batch = tuple(operations)
+        if len(operation_batch) > MAX_REVIEW_OPERATIONS:
+            raise MemoryValidationError(f"a review may contain at most {MAX_REVIEW_OPERATIONS} operations")
+        if any(not isinstance(operation, (ReviewKeep, ReviewMerge, ReviewPromote)) for operation in operation_batch):
+            raise MemoryValidationError("review operations have an invalid type")
+        normalized_checkpoint = _normalise_review_checkpoint(checkpoint)
+        batch_digest = _review_batch_digest(operation_batch)
+        request_digest = _review_request_digest(operation_batch, normalized_checkpoint)
+
+        with _STORE_LOCK:
+            envelope = _read_envelope(self.path)
+            self._require_v2(envelope)
+            now = self._now()
+            retained = self._retained_entries(envelope.entries, now)
+            retained_ids = {entry.id for entry in retained}
+            removed_ids = tuple(entry.id for entry in envelope.entries if entry.id not in retained_ids)
+
+            idempotent_retry = (
+                envelope.review_batch_digest == batch_digest
+                and envelope.review_batch_revision == envelope.revision
+                and envelope.review_checkpoint is not None
+                and expected_revision in {envelope.revision, envelope.revision - 1}
+                and (
+                    envelope.review_checkpoint == normalized_checkpoint
+                    or envelope.review_request_digest == request_digest
+                )
+            )
+            if expected_revision != envelope.revision and not idempotent_retry:
+                raise MemoryConflictError("memory store revision is stale")
+            if idempotent_retry:
+                assert envelope.review_checkpoint is not None
+                snapshot = MemorySnapshot(envelope.revision, retained)
+                return ReviewApplyResult(snapshot, envelope.review_checkpoint, (), len(operation_batch))
+
+            previous_checkpoint = envelope.review_checkpoint
+            if previous_checkpoint is not None:
+                previous_day = date.fromisoformat(previous_checkpoint.local_day)
+                requested_day = date.fromisoformat(normalized_checkpoint.local_day)
+                if requested_day < previous_day:
+                    raise MemoryConflictError("review checkpoint is older than the stored checkpoint")
+                if requested_day == previous_day:
+                    raise MemoryConflictError("a review was already completed for this local day")
+
+            previous_watermark = {} if previous_checkpoint is None else dict(previous_checkpoint.watermark)
+            for memory_id, fingerprint in normalized_checkpoint.watermark.items():
+                entry = next((candidate for candidate in retained if candidate.id == memory_id), None)
+                if entry is None:
+                    if memory_id in previous_watermark:
+                        continue
+                    raise MemoryValidationError("review checkpoint references an unknown memory")
+                if _review_fingerprint(entry) != fingerprint:
+                    raise MemoryConflictError("review checkpoint fingerprint is stale")
+
+            working = retained
+            reviewed_ids = set(normalized_checkpoint.watermark)
+            applied_operations = 0
+            for operation in operation_batch:
+                working, operation_ids, _changed = self._apply_review_operation(operation, working, now)
+                reviewed_ids.update(operation_ids)
+                applied_operations += 1
+
+            watermark = {
+                memory_id: fingerprint
+                for memory_id, fingerprint in previous_watermark.items()
+                if any(entry.id == memory_id for entry in working)
+            }
+            for memory_id in reviewed_ids:
+                entry = next((candidate for candidate in working if candidate.id == memory_id), None)
+                if entry is not None:
+                    watermark[memory_id] = _review_fingerprint(entry)
+            next_checkpoint = ReviewCheckpoint(
+                local_day=normalized_checkpoint.local_day,
+                watermark=dict(sorted(watermark.items())),
+            )
+            if len(next_checkpoint.watermark) > MAX_REVIEW_WATERMARK_ENTRIES:
+                raise MemoryValidationError("review watermark exceeds the memory capacity")
+            changed = working != envelope.entries or next_checkpoint != envelope.review_checkpoint or bool(removed_ids)
+            revision = envelope.revision + 1 if changed else envelope.revision
+            if changed:
+                _write_envelope(
+                    self.path,
+                    working,
+                    revision,
+                    review_checkpoint=next_checkpoint,
+                    review_batch_digest=batch_digest,
+                    review_batch_revision=revision,
+                    review_request_digest=request_digest,
+                )
+                self._publish_mutation(envelope.entries, envelope.revision, working, revision, "review")
+            snapshot = MemorySnapshot(revision, self._retained_entries(working, now))
+            return ReviewApplyResult(snapshot, next_checkpoint, removed_ids, applied_operations)
+
     def list_entries(self, include_inactive: bool = False) -> list[MemoryEntry]:
         """Return retained entries, filtering inactive entries by default."""
         with _STORE_LOCK:
@@ -869,6 +1440,15 @@ class HouseholdMemoryStore:
             self._require_v2(envelope)
             now = self._now()
             return MemorySnapshot(envelope.revision, self._retained_entries(envelope.entries, now))
+
+    def active_snapshot(self) -> MemorySnapshot:
+        """Return the current revision and active, known-lifetime entries."""
+        with _STORE_LOCK:
+            envelope = _read_envelope(self.path)
+            self._require_v2(envelope)
+            now = self._now()
+            retained = self._retained_entries(envelope.entries, now)
+            return MemorySnapshot(envelope.revision, self._active_entries(retained, now))
 
     def apply_capture(
         self,
@@ -899,7 +1479,16 @@ class HouseholdMemoryStore:
                 changed = changed or mutation_changed
             revision = envelope.revision + 1 if changed else envelope.revision
             if changed:
-                _write_envelope(self.path, working, revision)
+                _write_envelope(
+                    self.path,
+                    working,
+                    revision,
+                    review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, working),
+                    review_batch_digest=envelope.review_batch_digest,
+                    review_batch_revision=envelope.review_batch_revision,
+                    review_request_digest=envelope.review_request_digest,
+                )
+                self._publish_mutation(envelope.entries, envelope.revision, working, revision, "capture")
             return MemorySnapshot(revision, self._retained_entries(working, now))
 
     def remember(
@@ -931,7 +1520,22 @@ class HouseholdMemoryStore:
             entries = self._retained_entries(envelope.entries, now)
             updated_entries, entry, changed = self._apply_capture_mutation(mutation, entries, now)
             if changed:
-                _write_envelope(self.path, updated_entries, envelope.revision + 1)
+                _write_envelope(
+                    self.path,
+                    updated_entries,
+                    envelope.revision + 1,
+                    review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, updated_entries),
+                    review_batch_digest=envelope.review_batch_digest,
+                    review_batch_revision=envelope.review_batch_revision,
+                    review_request_digest=envelope.review_request_digest,
+                )
+                self._publish_mutation(
+                    envelope.entries,
+                    envelope.revision,
+                    updated_entries,
+                    envelope.revision + 1,
+                    "tool.remember",
+                )
             return entry
 
     @staticmethod
@@ -977,7 +1581,22 @@ class HouseholdMemoryStore:
             entries = self._retained_entries(envelope.entries, now)
             updated_entries, updated, changed = self._apply_capture_mutation(mutation, entries, now)
             if changed:
-                _write_envelope(self.path, updated_entries, envelope.revision + 1)
+                _write_envelope(
+                    self.path,
+                    updated_entries,
+                    envelope.revision + 1,
+                    review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, updated_entries),
+                    review_batch_digest=envelope.review_batch_digest,
+                    review_batch_revision=envelope.review_batch_revision,
+                    review_request_digest=envelope.review_request_digest,
+                )
+                self._publish_mutation(
+                    envelope.entries,
+                    envelope.revision,
+                    updated_entries,
+                    envelope.revision + 1,
+                    "tool.update",
+                )
             return updated
 
     def forget(self, query: str | None = None, memory_id: str | None = None) -> ForgetResult:
@@ -1001,20 +1620,59 @@ class HouseholdMemoryStore:
                 candidates = tuple(entry for entry in entries if folded_query in entry.text.casefold())
             if not candidates:
                 if entries != envelope.entries:
-                    _write_envelope(self.path, entries, envelope.revision + 1)
+                    _write_envelope(
+                        self.path,
+                        entries,
+                        envelope.revision + 1,
+                        review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, entries),
+                        review_batch_digest=envelope.review_batch_digest,
+                        review_batch_revision=envelope.review_batch_revision,
+                        review_request_digest=envelope.review_request_digest,
+                    )
+                    self._publish_mutation(
+                        envelope.entries,
+                        envelope.revision,
+                        entries,
+                        envelope.revision + 1,
+                        "tool.forget",
+                    )
                 return ForgetResult(removed=None, candidates=())
             if len(candidates) > 1:
                 return ForgetResult(removed=None, candidates=candidates)
             removed = candidates[0]
             remaining = tuple(entry for entry in entries if entry.id != removed.id)
-            _write_envelope(self.path, remaining, envelope.revision + 1)
+            _write_envelope(
+                self.path,
+                remaining,
+                envelope.revision + 1,
+                review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, remaining),
+                review_batch_digest=envelope.review_batch_digest,
+                review_batch_revision=envelope.review_batch_revision,
+                review_request_digest=envelope.review_request_digest,
+            )
+            self._publish_mutation(
+                envelope.entries,
+                envelope.revision,
+                remaining,
+                envelope.revision + 1,
+                "tool.forget",
+            )
             return ForgetResult(removed=removed, candidates=candidates)
 
     def clear(self) -> None:
         """Delete all entries and establish an empty v2 envelope."""
         with _STORE_LOCK:
             envelope = _read_envelope(self.path)
-            _write_envelope(self.path, (), envelope.revision + 1)
+            _write_envelope(
+                self.path,
+                (),
+                envelope.revision + 1,
+                review_checkpoint=self._checkpoint_for_entries(envelope.review_checkpoint, ()),
+                review_batch_digest=envelope.review_batch_digest,
+                review_batch_revision=envelope.review_batch_revision,
+                review_request_digest=envelope.review_request_digest,
+            )
+            self._publish_mutation(envelope.entries, envelope.revision, (), envelope.revision + 1, "console.clear")
 
     def migrate_v1(self) -> list[MemoryEntry]:
         """Explicitly convert a v1 envelope in place, preserving IDs and unknown subjects."""
@@ -1024,4 +1682,11 @@ class HouseholdMemoryStore:
                 return list(envelope.entries)
             _validate_entries(envelope.entries)
             _write_envelope(self.path, envelope.entries, envelope.revision + 1)
+            self._publish_mutation(
+                envelope.entries,
+                envelope.revision,
+                envelope.entries,
+                envelope.revision + 1,
+                "migration",
+            )
             return list(envelope.entries)

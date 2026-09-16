@@ -74,8 +74,12 @@ DEFAULT_REALTIME_PROVIDER = REALTIME_PROVIDER_HUGGINGFACE
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 GEMINI_LIVE_MODEL_ENV = "GEMINI_LIVE_MODEL"
 GEMINI_VOICE_ENV = "GEMINI_VOICE"
+GEMINI_THINKING_LEVEL_ENV = "GEMINI_THINKING_LEVEL"
 DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview"
+GEMINI_EXTENDED_THINKING_MODEL = "gemini-3.8-live-extended-thinking"
 DEFAULT_GEMINI_VOICE = "Puck"
+DEFAULT_GEMINI_THINKING_LEVEL = "medium"
+GEMINI_THINKING_LEVELS: tuple[str, ...] = ("low", "medium", "high")
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_LIVE_MODEL_ENV = "OPENAI_LIVE_MODEL"
 OPENAI_LIVE_BACKEND_MODEL_ENV = "OPENAI_LIVE_BACKEND_MODEL"
@@ -117,6 +121,7 @@ LOCAL_CONTEXT_MAX_CHARS_ENV = "LOCAL_CONTEXT_MAX_CHARS"
 LOCAL_TRANSCRIPT_PREVIEW_ENABLED_ENV = "LOCAL_TRANSCRIPT_PREVIEW_ENABLED"
 HOUSEHOLD_MEMORY_ENABLED_ENV = "HOUSEHOLD_MEMORY_ENABLED"
 HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV = "HOUSEHOLD_MEMORY_CAPTURE_ENABLED"
+HOUSEHOLD_MEMORY_REVIEW_ENABLED_ENV = "HOUSEHOLD_MEMORY_REVIEW_ENABLED"
 AUDIO_OUTPUT_BACKEND_ENV = "AUDIO_OUTPUT_BACKEND"
 AUDIO_OUTPUT_BACKEND_SDK = "sdk"
 AUDIO_OUTPUT_BACKEND_GSTREAMER = "gstreamer"
@@ -139,6 +144,7 @@ DEFAULT_LOCAL_CONTEXT_WINDOW_SECONDS = 60.0
 DEFAULT_LOCAL_CONTEXT_MAX_CHARS = 2_000
 DEFAULT_LOCAL_TRANSCRIPT_PREVIEW_ENABLED = False
 DEFAULT_HOUSEHOLD_MEMORY_ENABLED = False
+DEFAULT_HOUSEHOLD_MEMORY_REVIEW_ENABLED = False
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
@@ -254,6 +260,31 @@ def _normalize_realtime_provider(value: str | None) -> str:
     return candidate
 
 
+def is_gemini_extended_thinking_model(model: str | None = None) -> bool:
+    """Return whether a model ID is the supported Extended Thinking model."""
+    configured_model = model
+    if configured_model is None:
+        configured_model = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    return configured_model.strip().removeprefix("models/") == GEMINI_EXTENDED_THINKING_MODEL
+
+
+def resolve_gemini_thinking_level(model: str | None = None, value: str | None = None) -> str | None:
+    """Validate the optional thinking level for the selected Gemini model."""
+    configured_model = model
+    if configured_model is None:
+        configured_model = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    configured_value = value if value is not None else os.getenv(GEMINI_THINKING_LEVEL_ENV)
+    candidate = (configured_value or "").strip().lower()
+    if not candidate:
+        return DEFAULT_GEMINI_THINKING_LEVEL if is_gemini_extended_thinking_model(configured_model) else None
+    if not is_gemini_extended_thinking_model(configured_model):
+        raise ValueError(f"{GEMINI_THINKING_LEVEL_ENV} is supported only for {GEMINI_EXTENDED_THINKING_MODEL!r}.")
+    if candidate not in GEMINI_THINKING_LEVELS:
+        expected = ", ".join(GEMINI_THINKING_LEVELS)
+        raise ValueError(f"Invalid {GEMINI_THINKING_LEVEL_ENV}={configured_value!r}. Expected {expected}.")
+    return candidate
+
+
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured realtime transcription language."""
     candidate = (value or "").strip()
@@ -320,6 +351,14 @@ def is_local_transcript_preview_enabled() -> bool:
 def is_household_memory_enabled() -> bool:
     """Return whether the opt-in household memory integration is enabled."""
     return _env_flag(HOUSEHOLD_MEMORY_ENABLED_ENV, default=DEFAULT_HOUSEHOLD_MEMORY_ENABLED)
+
+
+def is_household_memory_review_enabled() -> bool:
+    """Return whether daily review is enabled for household memory."""
+    return is_household_memory_enabled() and _env_flag(
+        HOUSEHOLD_MEMORY_REVIEW_ENABLED_ENV,
+        default=DEFAULT_HOUSEHOLD_MEMORY_REVIEW_ENABLED,
+    )
 
 
 def resolve_local_context_strategy() -> str:
@@ -556,6 +595,10 @@ class Config:
     GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
     GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
     GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    GEMINI_THINKING_LEVEL = resolve_gemini_thinking_level(
+        GEMINI_LIVE_MODEL,
+        os.getenv(GEMINI_THINKING_LEVEL_ENV),
+    )
     OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
     OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
     OPENAI_LIVE_BACKEND_MODEL = (
@@ -589,6 +632,11 @@ class Config:
     LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
     HOUSEHOLD_MEMORY_ENABLED = is_household_memory_enabled()
     HOUSEHOLD_MEMORY_CAPTURE_ENABLED = _env_flag(HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, default=False)
+    HOUSEHOLD_MEMORY_REVIEW_ENABLED = is_household_memory_review_enabled()
+    AUDIO_DIAGNOSTICS_ENABLED = _env_flag("AUDIO_DIAGNOSTICS_ENABLED", default=False)
+    OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED = _env_flag("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", default=False)
+    MACOS_LOCAL_AUDIO_FLUSH_ENABLED = _env_flag("MACOS_LOCAL_AUDIO_FLUSH_ENABLED", default=False)
+    SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -702,8 +750,14 @@ def refresh_runtime_config_from_env() -> None:
     _warn_on_obsolete_backend_env()
     config.REALTIME_PROVIDER = _normalize_realtime_provider(os.getenv(REALTIME_PROVIDER_ENV))
     config.GEMINI_API_KEY = os.getenv(GEMINI_API_KEY_ENV)
-    config.GEMINI_LIVE_MODEL = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    gemini_model = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    gemini_thinking_level = resolve_gemini_thinking_level(
+        gemini_model,
+        os.getenv(GEMINI_THINKING_LEVEL_ENV),
+    )
+    config.GEMINI_LIVE_MODEL = gemini_model
     config.GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
+    config.GEMINI_THINKING_LEVEL = gemini_thinking_level
     config.OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
     config.OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
     config.OPENAI_LIVE_BACKEND_MODEL = (
@@ -737,6 +791,11 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_TRANSCRIPT_PREVIEW_ENABLED = is_local_transcript_preview_enabled()
     config.HOUSEHOLD_MEMORY_ENABLED = is_household_memory_enabled()
     config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED = _env_flag(HOUSEHOLD_MEMORY_CAPTURE_ENABLED_ENV, default=False)
+    config.HOUSEHOLD_MEMORY_REVIEW_ENABLED = is_household_memory_review_enabled()
+    config.AUDIO_DIAGNOSTICS_ENABLED = _env_flag("AUDIO_DIAGNOSTICS_ENABLED", default=False)
+    config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED = _env_flag("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", default=False)
+    config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED = _env_flag("MACOS_LOCAL_AUDIO_FLUSH_ENABLED", default=False)
+    config.SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

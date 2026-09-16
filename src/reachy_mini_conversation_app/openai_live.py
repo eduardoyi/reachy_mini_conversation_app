@@ -28,11 +28,23 @@ from reachy_mini_conversation_app.streaming import (
     audio_to_float32,
     audio_to_mono_int16,
 )
-from reachy_mini_conversation_app.household_memory import MemoryStoreError, HouseholdMemoryStore
+from reachy_mini_conversation_app.household_memory import (
+    MemorySnapshot,
+    ReviewApplyResult,
+    HouseholdMemoryStore,
+)
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.openai_live_backend import TranscriptTurn, OpenAILiveDelegationBackend
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, ConversationHandler
-from reachy_mini_conversation_app.household_memory_capture import CaptureStats, MemoryCapture
+from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
+from reachy_mini_conversation_app.household_memory_session import (
+    MemorySession,
+    CaptureFactory,
+    MemoryReviewWorker,
+    MemorySessionCloseError,
+    default_memory_review_factory,
+    default_memory_capture_factory,
+)
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
@@ -56,6 +68,7 @@ _MAX_DELEGATION_CONCURRENCY: Final[int] = 4
 _MAX_DELEGATION_OVERFLOW: Final[int] = 8
 _MEMORY_REVISION_POLL_S: Final[float] = 0.25
 _MEMORY_CAPTURE_CLOSE_TIMEOUT_S: Final[float] = 2.0
+_MEMORY_REVIEW_CLOSE_TIMEOUT_S: Final[float] = 2.0
 # Live WebSocket output is raw PCM16 without a silence event; -50 dBFS RMS is a quiet-packet guard.
 _OUTPUT_ACTIVITY_RMS_THRESHOLD: Final[float] = 104.0
 _FATAL_ERROR_CODES: Final[frozenset[str]] = frozenset(
@@ -98,7 +111,11 @@ class _LiveSocket(Protocol):
 
 
 WebSocketConnect = Callable[[str, Mapping[str, str]], Awaitable[_LiveSocket]]
-MemoryCaptureFactory = Callable[[str | None], MemoryCapture]
+MemoryCaptureFactory = CaptureFactory
+
+
+ReviewApplied = Callable[[MemorySnapshot, ReviewApplyResult], None]
+MemoryReviewFactory = Callable[[str | None, ReviewApplied], MemoryReviewWorker]
 
 
 @dataclass(frozen=True)
@@ -108,21 +125,6 @@ class _TranscriptFragment:
     start_ms: int | None
     end_ms: int | None
     sequence: int
-
-
-@dataclass(frozen=True)
-class _MemorySnapshot:
-    revision: int
-    entries: dict[str, str]
-
-
-def _default_memory_capture_factory(instance_path: str | None) -> MemoryCapture:
-    """Build the local capture worker for one active provider session."""
-    return MemoryCapture(
-        HouseholdMemoryStore(instance_path),
-        model=config.OPENAI_LIVE_BACKEND_MODEL,
-        api_key=config.OPENAI_API_KEY,
-    )
 
 
 class _StreamingResampler:
@@ -194,6 +196,7 @@ class OpenAILiveHandler(ConversationHandler):
         websocket_connect: WebSocketConnect | None = None,
         delegation_backend: OpenAILiveDelegationBackend | None = None,
         memory_capture_factory: MemoryCaptureFactory | None = None,
+        memory_review_factory: MemoryReviewFactory | None = None,
     ) -> None:
         """Initialize a deferred GPT Live handler."""
         super().__init__()
@@ -207,16 +210,26 @@ class OpenAILiveHandler(ConversationHandler):
         self._connect = websocket_connect or _default_websocket_connect
         self._delegation_backend = delegation_backend
         self._backend_owned = delegation_backend is None
-        self._memory_capture_factory = memory_capture_factory or _default_memory_capture_factory
-        self._memory_capture: MemoryCapture | None = None
-        self._memory_capture_closed = True
-        self._memory_watcher_task: asyncio.Task[None] | None = None
-        self._memory_snapshot: _MemorySnapshot | None = None
-        self._memory_stale_detected = False
+        self._memory_capture_factory = memory_capture_factory or default_memory_capture_factory
+        self._memory_review_factory = memory_review_factory or default_memory_review_factory
+        self._memory_session = MemorySession(
+            instance_path,
+            enabled=self._memory_enabled,
+            capture_enabled=self._memory_capture_enabled,
+            review_enabled=lambda: config.HOUSEHOLD_MEMORY_REVIEW_ENABLED,
+            store_factory=lambda path: HouseholdMemoryStore(path),
+            capture_factory=self._memory_capture_factory,
+            review_factory=self._memory_review_factory,
+            on_invalidated=self.invalidate_memory_context,
+            poll_interval_s=_MEMORY_REVISION_POLL_S,
+            close_timeout_s=max(_MEMORY_CAPTURE_CLOSE_TIMEOUT_S, _MEMORY_REVIEW_CLOSE_TIMEOUT_S),
+        )
         self._memory_invalidated = False
         self._memory_invalidation_lock = asyncio.Lock()
         self._backend_closed = False
         self._backend_close_lock = asyncio.Lock()
+        self._backend_close_task: asyncio.Task[None] | None = None
+        self._socket_close_tasks: dict[int, asyncio.Task[None]] = {}
         self._voice_override = self._normalize_voice(startup_voice)
         self._shutdown_requested = False
         self._session_ready = False
@@ -239,6 +252,11 @@ class OpenAILiveHandler(ConversationHandler):
         self._output_pending_byte = b""
         self._speaking_reset_task: asyncio.Task[None] | None = None
         self._event_counter = 0
+        self._barge_in_vad = RmsEnergyVAD(config.LOCAL_VAD_RMS_THRESHOLD)
+        self._barge_in_speech_samples = 0
+        self._barge_in_quiet_samples = 0
+        self._barge_in_latched = False
+        self._last_barge_in_output_at: float | None = None
 
     @staticmethod
     def _normalize_voice(voice: str | None) -> str:
@@ -278,178 +296,25 @@ class OpenAILiveHandler(ConversationHandler):
     def _memory_capture_enabled() -> bool:
         return config.HOUSEHOLD_MEMORY_ENABLED and config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED
 
-    def _read_memory_snapshot(self) -> _MemorySnapshot | None:
-        if not self._memory_enabled():
-            return None
-        try:
-            snapshot = HouseholdMemoryStore(self.instance_path).snapshot()
-        except MemoryStoreError as exc:
-            logger.debug("Household memory snapshot unavailable error=%s", type(exc).__name__)
-            return None
-        entries = {
-            entry.id: json.dumps(entry.to_json(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-            for entry in snapshot.entries
-        }
-        return _MemorySnapshot(revision=snapshot.revision, entries=entries)
-
-    @staticmethod
-    def _memory_snapshot_is_destructive(previous: _MemorySnapshot, current: _MemorySnapshot) -> bool:
-        if previous.revision == current.revision:
-            return False
-        return any(memory_id not in current.entries for memory_id in previous.entries)
-
     def _memory_context_is_current(self) -> bool:
         """Return whether a synchronous backend request may use this snapshot."""
-        if not self._memory_enabled() or self._memory_invalidated:
-            return not self._memory_invalidated
-        if self._memory_stale_detected:
+        if self._memory_invalidated:
             return False
-        current = self._read_memory_snapshot()
-        previous = self._memory_snapshot
-        if current is None:
-            if previous is not None:
-                self._memory_stale_detected = True
-                return False
-            return True
-        self._memory_snapshot = current
-        if previous is not None and self._memory_snapshot_is_destructive(previous, current):
-            self._memory_stale_detected = True
-            return False
-        return True
-
-    async def _start_memory_capture(self) -> None:
-        if not self._memory_enabled() or self._memory_watcher_task is not None:
-            return
-        if self._memory_capture_enabled() and self._memory_capture is None:
-            try:
-                capture = self._memory_capture_factory(self.instance_path)
-                await capture.start()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Household memory capture could not start error=%s", type(exc).__name__)
-            else:
-                self._memory_capture = capture
-                self._memory_capture_closed = False
-        if self._memory_snapshot is None:
-            self._memory_snapshot = self._read_memory_snapshot()
-        self._memory_watcher_task = asyncio.create_task(
-            self._watch_memory_changes(),
-            name="openai-live-memory-watch",
-        )
-
-    async def _watch_memory_changes(self) -> None:
-        current_task = asyncio.current_task()
-        try:
-            while self._is_connected():
-                await asyncio.sleep(_MEMORY_REVISION_POLL_S)
-                if not self._is_connected():
-                    return
-                await self._check_memory_snapshot()
-        except asyncio.CancelledError:
-            raise
-        finally:
-            if self._memory_watcher_task is current_task:
-                self._memory_watcher_task = None
+        return self._memory_session.context_is_current()
 
     async def _check_memory_snapshot(self) -> bool:
-        if not self._memory_enabled() or self._memory_invalidated:
-            return not self._memory_invalidated
-        if self._memory_stale_detected:
-            await self.invalidate_memory_context("memory_changed")
+        if self._memory_invalidated:
             return False
-        current = self._read_memory_snapshot()
-        previous = self._memory_snapshot
-        if current is None:
-            if previous is not None:
-                self._memory_stale_detected = True
-                await self.invalidate_memory_context("memory_changed")
-                return False
-            return True
-        self._memory_snapshot = current
-        if previous is not None and self._memory_snapshot_is_destructive(previous, current):
-            await self.invalidate_memory_context("memory_changed")
-            return False
-        return True
+        return await self._memory_session.check_current()
 
     def _queue_memory_fragment(self, fragment: _TranscriptFragment) -> None:
-        capture = self._memory_capture
-        if capture is None or self._memory_capture_closed or self._memory_invalidated:
-            return
         start_ms = fragment.start_ms if fragment.start_ms is not None else fragment.end_ms
         end_ms = fragment.end_ms if fragment.end_ms is not None else fragment.start_ms
         if start_ms is None:
             start_ms = fragment.sequence
         if end_ms is None or end_ms < start_ms:
             end_ms = start_ms
-        try:
-            capture.add_fragment(fragment.role, fragment.text, start_ms, end_ms)
-        except (TypeError, ValueError) as exc:
-            logger.debug("Household memory fragment rejected error=%s", type(exc).__name__)
-
-    async def _close_memory_capture(self) -> None:
-        self._memory_capture_closed = True
-        watcher = self._memory_watcher_task
-        self._memory_watcher_task = None
-        current_task = asyncio.current_task()
-        if watcher is not None and watcher is not current_task and not watcher.done():
-            watcher.cancel()
-            await asyncio.gather(watcher, return_exceptions=True)
-        capture = self._memory_capture
-        self._memory_capture = None
-        if capture is None:
-            return
-        try:
-            capture.invalidate()
-        except Exception as exc:
-            logger.warning("Household memory capture invalidation failed error=%s", type(exc).__name__)
-        close_task = asyncio.create_task(capture.close(), name="openai-live-memory-close")
-        try:
-            done, _pending = await asyncio.wait({close_task}, timeout=_MEMORY_CAPTURE_CLOSE_TIMEOUT_S)
-        except asyncio.CancelledError:
-            close_task.cancel()
-            close_task.add_done_callback(self._consume_memory_close_task)
-            self._log_memory_capture_stats(capture.stats)
-            raise
-        if not done:
-            logger.warning("Household memory capture close exceeded the cancellation bound")
-            close_task.cancel()
-            close_task.add_done_callback(self._consume_memory_close_task)
-            self._log_memory_capture_stats(capture.stats)
-            return
-        try:
-            close_task.result()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("Household memory capture close failed error=%s", type(exc).__name__)
-        finally:
-            self._log_memory_capture_stats(capture.stats)
-
-    @staticmethod
-    def _log_memory_capture_stats(stats: CaptureStats) -> None:
-        logger.info(
-            "Household memory capture summary fragments_received=%d fragments_dropped=%d "
-            "requests_attempted=%d requests_failed=%d proposals_applied=%d incomplete_batches=%d "
-            "stale_batches=%d budget_blocked=%d",
-            stats.fragments_received,
-            stats.fragments_dropped,
-            stats.requests_attempted,
-            stats.requests_failed,
-            stats.proposals_applied,
-            stats.incomplete_batches,
-            stats.stale_batches,
-            stats.budget_blocked,
-        )
-
-    @staticmethod
-    def _consume_memory_close_task(task: asyncio.Task[None]) -> None:
-        if task.cancelled():
-            return
-        try:
-            task.result()
-        except Exception as exc:
-            logger.warning("Household memory capture late close failed error=%s", type(exc).__name__)
+        self._memory_session.add_fragment(fragment.role, fragment.text, start_ms, end_ms)
 
     def _clear_output_queue(self) -> None:
         while True:
@@ -489,10 +354,43 @@ class OpenAILiveHandler(ConversationHandler):
     async def _close_socket(self, socket: _LiveSocket | None) -> None:
         if socket is None:
             return
+        socket_key = id(socket)
+        close_task = self._socket_close_tasks.get(socket_key)
+        if close_task is None:
+            close_task = asyncio.create_task(socket.close(), name="openai-live-socket-close")
+            self._socket_close_tasks[socket_key] = close_task
+            close_task.add_done_callback(self._consume_socket_close_task)
+        elif close_task.done():
+            self._socket_close_tasks.pop(socket_key, None)
+            if close_task.cancelled():
+                raise RuntimeError("OpenAI Live socket close was cancelled")
+            try:
+                close_task.result()
+            except Exception:
+                raise RuntimeError("OpenAI Live socket close failed") from None
+            return
         try:
-            await asyncio.wait_for(socket.close(), timeout=_SESSION_CLOSE_TIMEOUT_S)
+            done, _ = await asyncio.wait({close_task}, timeout=_SESSION_CLOSE_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        if not done:
+            raise RuntimeError("OpenAI Live socket close is still active")
+        self._socket_close_tasks.pop(socket_key, None)
+        if close_task.cancelled():
+            raise RuntimeError("OpenAI Live socket close was cancelled")
+        try:
+            close_task.result()
+        except Exception:
+            raise RuntimeError("OpenAI Live socket close failed") from None
+
+    @staticmethod
+    def _consume_socket_close_task(task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
         except Exception as exc:
-            logger.debug("OpenAI Live socket close ignored: %s", type(exc).__name__)
+            logger.warning("OpenAI Live socket close task failed error=%s", type(exc).__name__)
 
     async def _close_backend(self) -> None:
         backend = self._delegation_backend
@@ -501,14 +399,44 @@ class OpenAILiveHandler(ConversationHandler):
         async with self._backend_close_lock:
             if self._backend_closed:
                 return
+            close_task = self._backend_close_task
+            if close_task is None:
+                close_task = asyncio.create_task(backend.close(), name="openai-live-backend-close")
+                self._backend_close_task = close_task
+                close_task.add_done_callback(self._consume_backend_close_task)
+            elif close_task.done():
+                self._backend_close_task = None
+                if close_task.cancelled():
+                    raise RuntimeError("OpenAI Live delegation backend close was cancelled")
+                try:
+                    close_task.result()
+                except Exception:
+                    raise RuntimeError("OpenAI Live delegation backend close failed") from None
+                self._backend_closed = True
+                return
             try:
-                await asyncio.wait_for(backend.close(), timeout=_SESSION_CLOSE_TIMEOUT_S)
+                done, _ = await asyncio.wait({close_task}, timeout=_SESSION_CLOSE_TIMEOUT_S)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                logger.warning("OpenAI Live delegation backend close failed: %s", type(exc).__name__)
-            else:
-                self._backend_closed = True
+            if not done:
+                raise RuntimeError("OpenAI Live delegation backend close is still active")
+            self._backend_close_task = None
+            if close_task.cancelled():
+                raise RuntimeError("OpenAI Live delegation backend close was cancelled")
+            try:
+                close_task.result()
+            except Exception:
+                raise RuntimeError("OpenAI Live delegation backend close failed") from None
+            self._backend_closed = True
+
+    @staticmethod
+    def _consume_backend_close_task(task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception as exc:
+            logger.warning("OpenAI Live delegation backend close task failed error=%s", type(exc).__name__)
 
     async def _reset_speaking_after(self, duration_s: float) -> None:
         try:
@@ -582,7 +510,7 @@ class OpenAILiveHandler(ConversationHandler):
 
     async def _send_event(self, event: Mapping[str, object]) -> bool:
         socket = self.connection
-        if socket is None or self._shutdown_requested or self._memory_invalidated or self._memory_stale_detected:
+        if socket is None or self._shutdown_requested or self._memory_invalidated or self._memory_session.fenced:
             return False
         try:
             await asyncio.wait_for(socket.send(json.dumps(event)), timeout=_SESSION_SETUP_TIMEOUT_S)
@@ -629,7 +557,7 @@ class OpenAILiveHandler(ConversationHandler):
     async def _handle_event(self, event: Mapping[str, object]) -> None:
         event_type = event.get("type")
         if (
-            self._shutdown_requested or self._memory_invalidated or self._memory_stale_detected
+            self._shutdown_requested or self._memory_invalidated or self._memory_session.fenced
         ) and event_type != "session.closed":
             return
         if not self._session_ready and event_type not in {"session.started", "session.closed", "error"}:
@@ -642,13 +570,14 @@ class OpenAILiveHandler(ConversationHandler):
             self._emit_connection_state(True)
             # Session readiness is not a user speech boundary.
             self.deps.movement_manager.set_listening(False)
-            await self._start_memory_capture()
+            await self._memory_session.start()
+            self.deps.memory_mutation_generation = self._memory_session.generation
             await self._send_startup_greeting()
             return
         if event_type == "session.closed":
             self._session_closed.set()
             self._session_ready = False
-            await self._close_memory_capture()
+            await self._memory_session.close()
             self.deps.movement_manager.set_speaking(False)
             await self._cancel_speaking_reset()
             self.deps.movement_manager.set_listening(False)
@@ -711,6 +640,7 @@ class OpenAILiveHandler(ConversationHandler):
         audio_data = np.frombuffer(audio_bytes[:complete_length], dtype="<i2").copy()
         rms = float(np.sqrt(np.mean(np.square(audio_data.astype(np.float32, copy=False)))))
         if rms >= _OUTPUT_ACTIVITY_RMS_THRESHOLD:
+            self._last_barge_in_output_at = time.monotonic()
             self._mark_activity("assistant_audio_delta")
             self._mark_output_speaking(audio_data.size)
         self._queue_output((self.SAMPLE_RATE, audio_data))
@@ -1040,9 +970,11 @@ class OpenAILiveHandler(ConversationHandler):
         self._startup_task = asyncio.current_task()
         self._shutdown_requested = False
         self._session_ready = False
-        self._memory_stale_detected = False
+        self._barge_in_speech_samples = 0
+        self._barge_in_quiet_samples = 0
+        self._barge_in_latched = False
+        self._last_barge_in_output_at = None
         self._memory_invalidated = False
-        self._memory_snapshot = self._read_memory_snapshot()
         self.deps.on_memory_forgotten = self._on_memory_forgotten
         self._session_closed.clear()
         self._reset_transcript_state()
@@ -1055,12 +987,16 @@ class OpenAILiveHandler(ConversationHandler):
             api_key = (config.OPENAI_API_KEY or "").strip()
             if not api_key:
                 raise RuntimeError("OPENAI_API_KEY is required when REALTIME_PROVIDER=openai_live")
+            self._memory_session.prepare()
+            session_start = self._build_session_start()
+            if not await self._check_memory_snapshot():
+                raise RuntimeError("OpenAI Live memory context is unavailable")
             socket = await asyncio.wait_for(
                 self._connect(OPENAI_LIVE_ENDPOINT, {"Authorization": f"Bearer {api_key}"}),
                 timeout=_SESSION_SETUP_TIMEOUT_S,
             )
             self.connection = socket
-            if not await self._send_event(self._build_session_start()):
+            if not await self._send_event(session_start):
                 raise RuntimeError("OpenAI Live session.start failed")
             await self._wait_for_ready(socket)
             self.tool_manager.set_loop()
@@ -1086,12 +1022,22 @@ class OpenAILiveHandler(ConversationHandler):
                 raise
             raise RuntimeError("OpenAI Live session failed") from exc
         finally:
-            await self._close_memory_capture()
+            memory_close_error: MemorySessionCloseError | None = None
+            cleanup_errors: list[Exception] = []
+            try:
+                await self._memory_session.close()
+            except MemorySessionCloseError as exc:
+                memory_close_error = exc
             self._session_ready = False
-            if self.connection is socket:
-                self.connection = None
             if socket is not None:
-                await self._close_socket(socket)
+                try:
+                    await self._close_socket(socket)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
+                    logger.warning("OpenAI Live socket cleanup failed error=%s", type(exc).__name__)
+                else:
+                    if self.connection is socket:
+                        self.connection = None
             self.deps.movement_manager.set_speaking(False)
             self.deps.movement_manager.set_listening(False)
             if self._connection_observer_connected:
@@ -1100,16 +1046,25 @@ class OpenAILiveHandler(ConversationHandler):
             await self._cancel_delegations()
             await self._cancel_command_tasks(exclude_current=True)
             await self._cancel_speaking_reset()
-            await self._close_backend()
-            if self._backend_owned:
-                self._delegation_backend = None
-                self._backend_closed = False
+            try:
+                await self._close_backend()
+            except Exception as exc:
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live backend cleanup failed error=%s", type(exc).__name__)
+            else:
+                if self._backend_owned:
+                    self._delegation_backend = None
+                    self._backend_closed = False
             await self.tool_manager.shutdown()
             self._clear_output_queue()
             self._reset_transcript_state()
             self._resampler.reset()
             self._output_pending_byte = b""
             self._startup_task = None
+            if memory_close_error is not None:
+                raise memory_close_error
+            if cleanup_errors:
+                raise RuntimeError("OpenAI Live cleanup failed") from cleanup_errors[0]
 
     async def _cancel_delegations(self, *, exclude_current: bool = False) -> None:
         current_task = asyncio.current_task()
@@ -1156,6 +1111,28 @@ class OpenAILiveHandler(ConversationHandler):
             return
         if resampled.size == 0:
             return
+        if config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED:
+            if self._barge_in_vad.is_speech((self.SAMPLE_RATE, resampled)):
+                self._barge_in_quiet_samples = 0
+                self._barge_in_speech_samples = min(
+                    self._barge_in_speech_samples + resampled.size, self.SAMPLE_RATE * 120 // 1000
+                )
+                if not self._barge_in_latched and self._barge_in_speech_samples >= self.SAMPLE_RATE * 120 // 1000:
+                    self._barge_in_latched = True
+                    if (
+                        self._last_barge_in_output_at is not None
+                        and time.monotonic() - self._last_barge_in_output_at <= 1.0
+                    ):
+                        self._last_barge_in_output_at = None
+                        logger.info("Local microphone onset: clearing queued GPT Live playback")
+                        self._clear_output_queue()
+            else:
+                self._barge_in_speech_samples = 0
+                self._barge_in_quiet_samples = min(
+                    self._barge_in_quiet_samples + resampled.size, self.SAMPLE_RATE * 400 // 1000
+                )
+                if self._barge_in_quiet_samples >= self.SAMPLE_RATE * 400 // 1000:
+                    self._barge_in_latched = False
         event = {
             "type": "session.input_audio.append",
             "audio": base64.b64encode(resampled.astype("<i2", copy=False).tobytes()).decode("ascii"),
@@ -1165,23 +1142,12 @@ class OpenAILiveHandler(ConversationHandler):
 
     def _on_memory_forgotten(self, memory_id: str) -> None:
         """Allow spoken forgetting without replaying old fragments into capture."""
-        if self._memory_snapshot is not None:
-            self._memory_snapshot.entries.pop(memory_id, None)
-        self._memory_capture_closed = True
-        if self._memory_capture is not None:
-            self._memory_capture.invalidate()
+        self._memory_session.notify_spoken_forget(memory_id)
 
     def stop_background_work(self) -> None:
         """Fence memory extraction before cloud mode ends."""
-        self._memory_capture_closed = True
         self._memory_invalidated = True
-        capture = self._memory_capture
-        if capture is None:
-            return
-        try:
-            capture.invalidate()
-        except Exception as exc:
-            logger.warning("Household memory capture invalidation failed error=%s", type(exc).__name__)
+        self._memory_session.invalidate()
 
     def _build_backend_context(self) -> tuple[TranscriptTurn, ...]:
         context = self._group_transcript_fragments(self._eligible_fragments(None))[-_MAX_CONTEXT_TURNS:]
@@ -1244,19 +1210,33 @@ class OpenAILiveHandler(ConversationHandler):
             was_ready = self._session_ready
             self._shutdown_requested = True
             self._session_ready = False
-            await self._close_memory_capture()
+            cleanup_errors: list[Exception] = []
+            memory_close_error: MemorySessionCloseError | None = None
+            try:
+                await self._memory_session.close()
+            except MemorySessionCloseError as exc:
+                memory_close_error = exc
             await self._cancel_delegations(exclude_current=True)
             await self._cancel_command_tasks(exclude_current=True)
             self._clear_output_queue()
             self._output_pending_byte = b""
             self._resampler.reset()
             await self._cancel_speaking_reset()
-            await self._close_backend()
-            if self._backend_owned:
-                self._delegation_backend = None
-                self._backend_closed = False
+            try:
+                await self._close_backend()
+            except Exception as exc:
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live backend cleanup failed error=%s", type(exc).__name__)
+            else:
+                if self._backend_owned:
+                    self._delegation_backend = None
+                    self._backend_closed = False
 
             if socket is None:
+                if memory_close_error is not None:
+                    raise memory_close_error
+                if cleanup_errors:
+                    raise RuntimeError("OpenAI Live cleanup failed") from cleanup_errors[0]
                 return
             if was_ready:
                 try:
@@ -1267,7 +1247,8 @@ class OpenAILiveHandler(ConversationHandler):
                         timeout=_SESSION_CLOSE_TIMEOUT_S,
                     )
                 except Exception as exc:
-                    logger.debug("OpenAI Live memory invalidation close failed: %s", type(exc).__name__)
+                    cleanup_errors.append(exc)
+                    logger.warning("OpenAI Live memory invalidation close failed error=%s", type(exc).__name__)
                 startup_task = self._startup_task
                 current_task = asyncio.current_task()
                 if startup_task is not None and startup_task is not current_task and not startup_task.done():
@@ -1275,10 +1256,19 @@ class OpenAILiveHandler(ConversationHandler):
                         await asyncio.wait_for(self._session_closed.wait(), timeout=_SESSION_CLOSE_TIMEOUT_S)
                     except asyncio.TimeoutError:
                         logger.warning("OpenAI Live session.closed was not received after memory invalidation")
-            await self._close_socket(socket)
-            if self.connection is socket:
-                self.connection = None
+            try:
+                await self._close_socket(socket)
+            except Exception as exc:
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live socket cleanup failed error=%s", type(exc).__name__)
+            else:
+                if self.connection is socket:
+                    self.connection = None
             logger.info("OpenAI Live session reset after %s", reason)
+            if memory_close_error is not None:
+                raise memory_close_error
+            if cleanup_errors:
+                raise RuntimeError("OpenAI Live cleanup failed") from cleanup_errors[0]
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a profile for the next GPT Live session."""
@@ -1325,7 +1315,12 @@ class OpenAILiveHandler(ConversationHandler):
         self._session_ready = False
         if self.deps.on_memory_forgotten == self._on_memory_forgotten:
             self.deps.on_memory_forgotten = None
-        await self._close_memory_capture()
+        memory_close_error: MemorySessionCloseError | None = None
+        try:
+            await self._memory_session.close()
+        except MemorySessionCloseError as exc:
+            memory_close_error = exc
+        cleanup_errors: list[Exception] = []
         await self._cancel_delegations()
         await self._cancel_command_tasks()
         self._clear_output_queue()
@@ -1333,6 +1328,7 @@ class OpenAILiveHandler(ConversationHandler):
         self._resampler.reset()
         await self._cancel_speaking_reset()
         socket = self.connection
+        startup_error: Exception | None = None
         if socket is not None and was_ready:
             try:
                 await asyncio.wait_for(
@@ -1342,28 +1338,61 @@ class OpenAILiveHandler(ConversationHandler):
                     timeout=_SESSION_CLOSE_TIMEOUT_S,
                 )
             except Exception as exc:
-                logger.debug("OpenAI Live session.close failed: %s", type(exc).__name__)
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live session.close failed error=%s", type(exc).__name__)
             if startup_task is not None and not startup_task.done():
                 try:
                     await asyncio.wait_for(self._session_closed.wait(), timeout=_SESSION_CLOSE_TIMEOUT_S)
                 except asyncio.TimeoutError:
                     logger.warning("OpenAI Live session.closed was not received before timeout")
-            await self._close_socket(socket)
-            self.connection = None
+            try:
+                await self._close_socket(socket)
+            except Exception as exc:
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live socket cleanup failed error=%s", type(exc).__name__)
+            else:
+                if self.connection is socket:
+                    self.connection = None
         if startup_task is not None and startup_task is not current_task and not startup_task.done():
-            startup_task.cancel()
-            await asyncio.gather(startup_task, return_exceptions=True)
+            try:
+                await asyncio.wait_for(asyncio.shield(startup_task), timeout=_SESSION_CLOSE_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                startup_task.cancel()
+                await asyncio.gather(startup_task, return_exceptions=True)
+            except asyncio.CancelledError:
+                if not startup_task.cancelled():
+                    raise
+            except Exception as exc:
+                startup_error = exc
         elif socket is not None and self.connection is socket:
-            await self._close_socket(socket)
-            self.connection = None
-        await self._close_backend()
+            try:
+                await self._close_socket(socket)
+            except Exception as exc:
+                cleanup_errors.append(exc)
+                logger.warning("OpenAI Live socket cleanup failed error=%s", type(exc).__name__)
+            else:
+                self.connection = None
+        if isinstance(startup_error, MemorySessionCloseError) and memory_close_error is None:
+            memory_close_error = startup_error
+        elif startup_error is not None:
+            cleanup_errors.append(startup_error)
+        try:
+            await self._close_backend()
+        except Exception as exc:
+            cleanup_errors.append(exc)
+            logger.warning("OpenAI Live backend cleanup failed error=%s", type(exc).__name__)
+        else:
+            if self._backend_owned:
+                self._delegation_backend = None
+                self._backend_closed = False
         await self.tool_manager.shutdown()
-        if self._backend_owned:
-            self._delegation_backend = None
-            self._backend_closed = False
         self._reset_transcript_state()
         self.deps.movement_manager.set_speaking(False)
         self.deps.movement_manager.set_listening(False)
         if self._connection_observer_connected:
             self._connection_observer_connected = False
             self._emit_connection_state(False)
+        if memory_close_error is not None:
+            raise memory_close_error
+        if cleanup_errors:
+            raise RuntimeError("OpenAI Live cleanup failed") from cleanup_errors[0]

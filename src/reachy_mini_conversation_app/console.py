@@ -59,6 +59,7 @@ from reachy_mini_conversation_app.household_memory import (
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
+from reachy_mini_conversation_app.audio.diagnostics import AudioDiagnostics
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
@@ -152,6 +153,7 @@ class _AudioCaptureWorker:
         self,
         media: Any,
         *,
+        diagnostics: AudioDiagnostics | None = None,
         queue_size: int = CAPTURE_QUEUE_SIZE,
         poll_interval: float = CAPTURE_POLL_INTERVAL_SECONDS,
         stop_join_timeout: float = CAPTURE_STOP_JOIN_TIMEOUT_SECONDS,
@@ -163,6 +165,7 @@ class _AudioCaptureWorker:
             raise ValueError("Audio capture worker timeouts must not be negative")
 
         self._media = media
+        self._diagnostics = diagnostics
         self._queue: "queue.Queue[_CapturedAudioFrame]" = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._stop_join_timeout = stop_join_timeout
@@ -239,11 +242,16 @@ class _AudioCaptureWorker:
         try:
             sample_rate = int(self._media.get_input_audio_samplerate())
 
+            previous_capture_at: float | None = None
             while not self._stop_event.is_set():
                 with self._state_lock:
                     self._capture_epoch += 1
                     capture_epoch = self._capture_epoch
+                pull_started = time.monotonic()
                 audio_frame = self._media.get_audio_sample()
+                captured_at = time.monotonic()
+                if self._diagnostics is not None:
+                    self._diagnostics.observe("capture_pull", captured_at - pull_started)
                 if self._stop_event.is_set():
                     break
                 if audio_frame is None:
@@ -253,7 +261,11 @@ class _AudioCaptureWorker:
                 with self._state_lock:
                     self._sequence += 1
                     sequence = self._sequence
+                if self._diagnostics is not None and previous_capture_at is not None:
+                    self._diagnostics.observe("capture_gap", captured_at - previous_capture_at)
+                previous_capture_at = captured_at
                 captured_frame = _CapturedAudioFrame(sample_rate, audio_frame, sequence, capture_epoch)
+                captured_frame.captured_at = captured_at
                 try:
                     self._queue.put_nowait(captured_frame)
                 except queue.Full:
@@ -278,6 +290,7 @@ class _CapturedAudioFrame:
 
     def __init__(self, sample_rate: int, audio: Any, sequence: int, capture_epoch: int | None = None) -> None:
         """Store a captured frame and the epoch reserved before its SDK pull."""
+        self.captured_at = time.monotonic()
         self.sample_rate = sample_rate
         self.audio = audio
         self.sequence = sequence
@@ -335,7 +348,9 @@ class LocalStream:
         self._macos_local_flush_warning_logged = False
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
+        self._direct_shutdown_blocked = False
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        self._audio_diagnostics: AudioDiagnostics | None = None
         self._capture_worker: _AudioCaptureWorker | None = None
         self._speaker_output: SpeakerOutput | None = None
         self._speaker_output_factory = speaker_output_factory
@@ -526,18 +541,29 @@ class LocalStream:
     def _dispatch_hybrid_state(self, state: RuntimeMode, reason: str, generation: int) -> None:
         """Push a metadata-only hybrid state transition to RPC clients."""
         self._emit_phase(state.value, reason)
+        params: dict[str, object] = {
+            "state": state.value,
+            "reason": reason,
+            "generation": generation,
+        }
+        if state is RuntimeMode.STOPPING:
+            runtime = self._hybrid_runtime
+            shutdown_error = runtime.status.shutdown_error if runtime is not None else None
+            if shutdown_error:
+                params["error"] = shutdown_error
+            self._set_backend_connection_state("stopping", shutdown_error or "Provider cleanup is in progress.")
+        elif state is RuntimeMode.LOCAL_AMBIENT and reason == "shutdown_complete":
+            self._set_backend_connection_state("ambient")
         self._broadcast_rpc_threadsafe(
             "conversation.hybrid_state",
-            {
-                "state": state.value,
-                "reason": reason,
-                "generation": generation,
-            },
+            params,
         )
 
     def _install_handler(self, handler: ConversationHandler | HybridRuntime) -> None:
         """Set the active handler and wire LocalStream-owned helpers into it."""
         self.handler = handler
+        if self._hybrid_runtime is None:
+            self._direct_shutdown_blocked = False
         if self._hybrid_runtime is None:
             self.handler._clear_queue = self.clear_audio_queue
         self._attach_observers_to_handler()
@@ -678,25 +704,45 @@ class LocalStream:
         self._install_handler(handler)
         return handler
 
-    async def _shutdown_active_handler(self) -> None:
+    async def _shutdown_active_handler(self) -> bool:
         """Best-effort shutdown for the currently active handler."""
         if self._hybrid_runtime is not None:
             try:
-                await self._hybrid_runtime.deactivate_cloud("backend_restart")
+                result = await self._hybrid_runtime.deactivate_cloud("backend_restart")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                formatted_error = self._format_backend_error(e)
+                self._set_backend_connection_state("stopping", formatted_error)
                 logger.debug(
                     "Hybrid provider deactivation ignored during restart: %s",
-                    self._format_backend_error(e),
+                    formatted_error,
                 )
-            return
+                return False
+            status = self._hybrid_runtime.status
+            if status.mode is RuntimeMode.STOPPING:
+                self._set_backend_connection_state(
+                    "stopping", status.shutdown_error or "Provider cleanup is in progress."
+                )
+                return False
+            if status.mode is RuntimeMode.LOCAL_AMBIENT:
+                self._set_backend_connection_state("ambient")
+                return not status.active and not status.connected and status.shutdown_error is None
+            return bool(result)
+        if self._direct_shutdown_blocked:
+            self._set_backend_connection_state("stopping", self._backend_error or "Provider cleanup is incomplete.")
+            return False
         try:
             await self.handler.shutdown()
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.debug("Active handler shutdown ignored during restart: %s", self._format_backend_error(e))
+            formatted_error = self._format_backend_error(e)
+            self._direct_shutdown_blocked = True
+            self._set_backend_connection_state("stopping", formatted_error)
+            logger.warning("Active handler shutdown failed during restart: %s", formatted_error)
+            return False
+        return True
 
     def _mark_restart_requested(self, reason: str) -> None:
         """Request a backend restart from a synchronous route handler."""
@@ -712,7 +758,8 @@ class LocalStream:
         """Ask the startup loop to rebuild the backend and stop the current handler."""
         self._set_backend_connection_state("connecting")
         self._restart_requested.set()
-        await self._shutdown_active_handler()
+        if not await self._shutdown_active_handler():
+            self._set_backend_connection_state("stopping", self._backend_error or "Provider cleanup is incomplete.")
 
     async def _sleep_or_restart_requested(self, delay: float) -> None:
         """Sleep for a retry interval, waking early if a restart is requested."""
@@ -1195,10 +1242,15 @@ class LocalStream:
 
             async def _stop_and_forget() -> bool:
                 if self._hybrid_runtime is not None:
-                    active_handler = self._hybrid_runtime.active_handler
-                    if active_handler is not None:
-                        await active_handler.shutdown()
                     await self._hybrid_runtime.deactivate_cloud("memory_changed")
+                    status = self._hybrid_runtime.status
+                    if (
+                        status.mode is not RuntimeMode.LOCAL_AMBIENT
+                        or status.active
+                        or status.connected
+                        or status.shutdown_error is not None
+                    ):
+                        raise RuntimeError("conversation shutdown did not complete")
                 else:
                     await self.handler.shutdown()
                 if not request_active.is_set():
@@ -1432,13 +1484,25 @@ class LocalStream:
                 self._set_backend_connection_state("disconnected", formatted_error)
                 logger.warning("Hybrid local runtime failed to start: %s", formatted_error)
                 return
-            self._set_backend_connection_state("ambient")
+            if self._hybrid_runtime.mode is RuntimeMode.STOPPING:
+                status = self._hybrid_runtime.status
+                self._set_backend_connection_state(
+                    "stopping", status.shutdown_error or "Provider cleanup is in progress."
+                )
+            else:
+                self._set_backend_connection_state("ambient")
             await self._stop_event.wait()
             return
 
         while not self._stop_event.is_set():
             if self._restart_requested.is_set():
-                await self._shutdown_active_handler()
+                shutdown_contained = await self._shutdown_active_handler()
+                if not shutdown_contained:
+                    self._restart_requested.clear()
+                    self._set_backend_connection_state(
+                        "stopping", self._backend_error or "Provider cleanup is incomplete."
+                    )
+                    return
                 if not self._can_rebuild_handler():
                     self._restart_requested.clear()
                     self._set_backend_connection_state("restart_required")
@@ -1647,9 +1711,9 @@ class LocalStream:
         """Flush queued playback audio immediately on user barge-in.
 
         Calls the SDK's ``clear_player()`` on supported backends and drains the
-        provider/app queue. macOS LOCAL skips the native player flush as a
-        crash-containment workaround, so already-buffered native audio may
-        remain. Older SDKs fall back to ``clear_output_buffer()``.
+        provider/app queue. macOS LOCAL skips native flushing unless the
+        experimental reviewed-SDK override is enabled. Older SDKs fall back
+        to ``clear_output_buffer()``.
         """
         logger.info("User intervention: flushing player queue")
         if self._hybrid_runtime is not None:
@@ -1659,6 +1723,10 @@ class LocalStream:
         else:
             self._clear_robot_playback()
         self._drain_output_queue()
+        if self._hybrid_runtime is not None:
+            self._hybrid_runtime.set_playback_active(False)
+        elif isinstance(self.handler, ConversationHandler):
+            self.handler.set_playback_active(False)
 
     def _clear_robot_playback(self) -> None:
         """Flush SDK playback without recursively entering the hybrid runtime."""
@@ -1670,7 +1738,11 @@ class LocalStream:
         if audio is None:
             return
 
-        if sys.platform == "darwin" and getattr(media, "backend", None) == LOCAL_PLAYER_BACKEND:
+        if (
+            sys.platform == "darwin"
+            and getattr(media, "backend", None) == LOCAL_PLAYER_BACKEND
+            and not config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED
+        ):
             if not self._macos_local_flush_warning_logged:
                 logger.warning("Skipping native clear_player on macOS LOCAL media; buffered native audio may remain.")
                 self._macos_local_flush_warning_logged = True
@@ -1701,12 +1773,18 @@ class LocalStream:
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
+        self._audio_diagnostics = AudioDiagnostics() if config.AUDIO_DIAGNOSTICS_ENABLED else None
         capture_worker = self._capture_worker
         if capture_worker is None:
-            capture_worker = _AudioCaptureWorker(self._robot.media)
+            capture_worker = _AudioCaptureWorker(self._robot.media, diagnostics=self._audio_diagnostics)
             self._capture_worker = capture_worker
         capture_worker.start()
 
+        diagnostics_task = (
+            asyncio.create_task(self._monitor_audio(capture_worker), name="audio-diagnostics")
+            if self._audio_diagnostics is not None
+            else None
+        )
         logged_sample_rate = False
         try:
             while not self._stop_event.is_set():
@@ -1719,21 +1797,49 @@ class LocalStream:
                     await asyncio.sleep(CAPTURE_POLL_INTERVAL_SECONDS)
                     continue
 
+                if self._audio_diagnostics is not None:
+                    self._audio_diagnostics.observe("queue_age", time.monotonic() - captured_frame.captured_at)
                 input_sample_rate, audio_frame = captured_frame
                 if not logged_sample_rate:
                     logger.debug("Audio recording started at %s Hz", input_sample_rate)
                     logged_sample_rate = True
                 if not self._mic_muted:
                     frame = (input_sample_rate, audio_frame)
+                    forward_started = time.monotonic()
                     if self._hybrid_runtime is not None:
                         await self._receive_hybrid_frame(frame, captured_frame.capture_epoch)
                     else:
                         await self.handler.receive(frame)
+                    if self._audio_diagnostics is not None:
+                        self._audio_diagnostics.observe("input_forward", time.monotonic() - forward_started)
                     self._emit_level("user", audio_frame)
         finally:
+            if diagnostics_task is not None:
+                diagnostics_task.cancel()
+                await asyncio.gather(diagnostics_task, return_exceptions=True)
             capture_worker.stop()
+            if self._audio_diagnostics is not None:
+                self._audio_diagnostics.report(captured=capture_worker.sequence, dropped=capture_worker.dropped_frames)
+            self._audio_diagnostics = None
             if self._capture_worker is capture_worker:
                 self._capture_worker = None
+
+    async def _monitor_audio(self, capture_worker: _AudioCaptureWorker) -> None:
+        diagnostics = self._audio_diagnostics
+        if diagnostics is None:
+            return
+        logger.info(
+            "Audio diagnostics enabled backend=%s wobble=%s", get_audio_output_backend(), config.SPEECH_WOBBLE_ENABLED
+        )
+        last_report = time.monotonic()
+        while True:
+            scheduled = time.monotonic() + 0.1
+            await asyncio.sleep(0.1)
+            now = time.monotonic()
+            diagnostics.observe("loop_lag", now - scheduled)
+            if now - last_report >= 5.0:
+                diagnostics.report(captured=capture_worker.sequence, dropped=capture_worker.dropped_frames)
+                last_report = now
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler and play audio frames."""
@@ -1765,21 +1871,31 @@ class LocalStream:
 
                 # Cast and resample to the SDK playback rate when providers differ.
                 try:
+                    output_sample_rate = (
+                        self._speaker_output.sample_rate
+                        if self._speaker_output is not None
+                        else int(self._robot.media.get_output_audio_samplerate())
+                    )
                     audio_frame = resample_audio(
                         audio_to_float32(audio_data),
                         input_sample_rate,
-                        self._speaker_output.sample_rate
-                        if self._speaker_output is not None
-                        else self._robot.media.get_output_audio_samplerate(),
+                        output_sample_rate,
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
                     logger.warning("Ignoring invalid output audio frame: %s", exc)
                     continue
 
+                playback_started = time.monotonic()
                 if self._speaker_output is not None:
                     self._speaker_output.push(audio_frame)
                 else:
                     self._robot.media.push_audio_sample(audio_frame)
+                if self._audio_diagnostics is not None:
+                    self._audio_diagnostics.observe("playback_push", time.monotonic() - playback_started)
+                if self._hybrid_runtime is not None:
+                    self._hybrid_runtime.note_playback_queued(audio_frame.shape[0] / output_sample_rate)
+                elif isinstance(self.handler, ConversationHandler):
+                    self.handler.note_playback_queued(audio_frame.shape[0] / output_sample_rate)
                 self._emit_level("assistant", audio_frame)
 
             else:

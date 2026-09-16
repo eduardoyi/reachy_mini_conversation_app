@@ -48,6 +48,7 @@ from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
 )
 from reachy_mini_conversation_app.local_intent_router import IntentDecisionReason
+from reachy_mini_conversation_app.conversation_handler import HandlerOutput, ConversationHandler
 
 
 def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
@@ -147,6 +148,44 @@ class _HybridTestHandler:
 
     def set_initial_context(self, context: str) -> None:
         self.initial_context = context
+
+
+class _DirectPlaybackHandler(ConversationHandler):
+    """Minimal direct handler for LocalStream playback contract tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.output_queue: asyncio.Queue[tuple[int, np.ndarray] | AdditionalOutputs] = asyncio.Queue()
+
+    def _is_connected(self) -> bool:
+        return True
+
+    async def start_up(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        return None
+
+    async def receive(self, _frame: tuple[int, np.ndarray]) -> None:
+        return None
+
+    async def apply_personality(self, profile: str | None) -> str:
+        return profile or ""
+
+    async def get_available_voices(self) -> list[str]:
+        return []
+
+    def get_current_voice(self) -> str:
+        return "test"
+
+    async def change_voice(self, voice: str) -> str:
+        return voice
+
+    async def say(self, _text: str) -> None:
+        return None
+
+    async def emit(self) -> HandlerOutput:
+        return await self.output_queue.get()
 
 
 def _run_loop_in_thread(loop: asyncio.AbstractEventLoop) -> tuple[threading.Thread, threading.Event]:
@@ -920,6 +959,29 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
             await startup_task
         except asyncio.CancelledError:
             pass
+
+
+@pytest.mark.asyncio
+async def test_startup_loop_does_not_rebuild_after_direct_shutdown_failure() -> None:
+    """A failed direct close leaves the old handler fenced from replacement."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    handler.shutdown = AsyncMock(side_effect=RuntimeError("cleanup sentinel"))
+    replacement_attempts: list[str] = []
+
+    def handler_factory(_voice: str | None) -> ConversationHandler:
+        replacement_attempts.append("built")
+        raise AssertionError("handler replacement must remain fenced")
+
+    stream = LocalStream(handler, MagicMock(), handler_factory=handler_factory)
+    stream._restart_requested.set()
+
+    await stream._run_handler_startup_loop()
+
+    handler.shutdown.assert_awaited_once_with()
+    assert replacement_attempts == []
+    assert stream._backend_connection_state == "stopping"
+    assert stream._backend_error == "RuntimeError: cleanup sentinel"
 
 
 @pytest.mark.asyncio
@@ -1828,7 +1890,7 @@ async def test_blocked_capture_does_not_block_event_loop_or_close() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capture_worker_drops_oldest_frame_when_queue_is_full() -> None:
+async def test_capture_worker_drops_oldest_frame_when_queue_is_full(caplog) -> None:
     """Overflow keeps the newest bounded window in FIFO order."""
     next_frame = 0
 
@@ -1838,8 +1900,10 @@ async def test_capture_worker_drops_oldest_frame_when_queue_is_full() -> None:
         next_frame += 1
         return frame
 
+    diagnostics = console_mod.AudioDiagnostics()
     worker = _AudioCaptureWorker(
         SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=get_audio_sample),
+        diagnostics=diagnostics,
         queue_size=2,
         poll_interval=0,
     )
@@ -1858,6 +1922,11 @@ async def test_capture_worker_drops_oldest_frame_when_queue_is_full() -> None:
         assert retained_values[-1] >= 3
     finally:
         worker.stop()
+
+    with caplog.at_level(logging.INFO):
+        diagnostics.report(captured=worker.sequence, dropped=worker.dropped_frames)
+    assert '"capture_pull"' in caplog.text
+    assert '"capture_gap"' in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1945,6 +2014,25 @@ async def test_play_loop_resamples_provider_output_to_media_rate() -> None:
         media.push_audio_sample.call_args.args[0],
         np.array([0.0, 1.5, 3.0, 4.5], dtype=np.float32),
     )
+
+
+@pytest.mark.asyncio
+async def test_direct_playback_keeps_idle_fence_until_audio_estimate_drains() -> None:
+    """Direct output remains busy for the estimated SDK playback duration."""
+    handler = _DirectPlaybackHandler()
+    media = SimpleNamespace(
+        get_output_audio_samplerate=MagicMock(return_value=1_000),
+        push_audio_sample=MagicMock(),
+    )
+    stream = LocalStream(handler, SimpleNamespace(media=media))
+    handler.output_queue.put_nowait((1_000, np.ones(100, dtype=np.int16)))
+    media.push_audio_sample.side_effect = lambda _audio: stream._stop_event.set()
+
+    await stream.play_loop()
+
+    assert handler.playback_active
+    stream.clear_audio_queue()
+    assert not handler.playback_active
 
 
 @pytest.mark.asyncio
@@ -2586,3 +2674,103 @@ def test_rpc_settings_methods() -> None:
     assert isinstance(r2["result"], list)
     assert "spaces" in r3["result"]
     assert "enabled_tools" in r4["result"]
+
+
+@pytest.mark.asyncio
+async def test_audio_diagnostics_measure_queue_and_forward_without_logging_payload(monkeypatch, caplog) -> None:
+    """Time a delayed input frame and cancel the monitor without exposing its samples."""
+    monkeypatch.setattr(console_mod.config, "AUDIO_DIAGNOSTICS_ENABLED", True)
+    clock = [10.0]
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    frame = console_mod._CapturedAudioFrame(24_000, np.array([12345], dtype=np.int16), 1)
+    frame.captured_at = 9.5
+    worker = MagicMock()
+    worker.get_nowait.return_value = frame
+    worker.sequence = 1
+    worker.dropped_frames = 0
+    handler = MagicMock()
+    stream = LocalStream(handler, MagicMock())
+    stream._capture_worker = worker
+
+    async def receive(_frame):
+        clock[0] += 0.025
+        stream._stop_event.set()
+
+    handler.receive = receive
+    with caplog.at_level(logging.INFO):
+        await stream.record_loop()
+    report = next(record for record in caplog.records if record.msg.startswith("Audio diagnostics captured="))
+    assert '"queue_age": {"count": 1, "mean_ms": 500.0' in report.getMessage()
+    assert '"input_forward": {"count": 1, "mean_ms": 25.0' in report.getMessage()
+    assert "12345" not in caplog.text
+    worker.stop.assert_called_once()
+    assert not any(task.get_name() == "audio-diagnostics" for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bypass", [False, True])
+async def test_audio_diagnostics_measure_playback_boundary(monkeypatch, caplog, bypass) -> None:
+    """Measure the selected push call without changing the selected audio route."""
+    clock = [10.0]
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    handler = MagicMock()
+    robot = MagicMock()
+    robot.media.get_output_audio_samplerate.return_value = 24_000
+    stream = LocalStream(handler, robot)
+    stream._audio_diagnostics = console_mod.AudioDiagnostics()
+    output = MagicMock()
+    output.sample_rate = 24_000
+    if bypass:
+        stream._speaker_output = output
+
+    def push(_audio):
+        clock[0] += 0.04
+        stream._stop_event.set()
+
+    output.push.side_effect = push
+    robot.media.push_audio_sample.side_effect = push
+    handler.emit = AsyncMock(return_value=(24_000, np.array([100, -100], dtype=np.int16)))
+    await stream.play_loop()
+    with caplog.at_level(logging.INFO):
+        stream._audio_diagnostics.report(captured=0, dropped=0)
+    assert '"playback_push": {"count": 1, "mean_ms": 40.0' in caplog.text
+    assert output.push.call_count == int(bypass)
+    assert robot.media.push_audio_sample.call_count == int(not bypass)
+
+
+@pytest.mark.asyncio
+async def test_audio_diagnostics_monitor_measures_scheduler_delay(monkeypatch, caplog) -> None:
+    """Report a delayed scheduler wake and allow cancellation to propagate."""
+    clock = [0.0]
+    sleeps = [0]
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def delayed_sleep(_delay):
+        sleeps[0] += 1
+        if sleeps[0] > 1:
+            raise asyncio.CancelledError
+        clock[0] = 5.1
+
+    stream = LocalStream(MagicMock(), MagicMock())
+    stream._audio_diagnostics = console_mod.AudioDiagnostics()
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(console_mod, "asyncio", SimpleNamespace(sleep=delayed_sleep))
+    worker = MagicMock(sequence=4, dropped_frames=1)
+    with caplog.at_level(logging.INFO), pytest.raises(asyncio.CancelledError):
+        await stream._monitor_audio(worker)
+    assert '"loop_lag": {"count": 1, "mean_ms": 5000.0' in caplog.text
+
+
+def test_macos_native_flush_override_uses_public_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The explicit reviewed-SDK override enables LOCAL clearing on Mac."""
+    monkeypatch.setattr(console_mod.config, "MACOS_LOCAL_AUDIO_FLUSH_ENABLED", True)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    handler.output_queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
+    audio = SimpleNamespace(clear_player=MagicMock())
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.LOCAL))
+    stream = LocalStream(handler, robot)
+    stream.clear_audio_queue()
+    audio.clear_player.assert_called_once()
+    assert handler.output_queue.empty()

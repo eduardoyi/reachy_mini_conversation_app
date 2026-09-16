@@ -115,6 +115,7 @@ values. This keeps one-off commands such as
 | `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default), `gemini`, or `openai_live`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
 | `GEMINI_API_KEY` | Required only when `REALTIME_PROVIDER=gemini`. Configure it in the local app environment; it is not accepted by settings RPC and is never logged. |
 | `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. |
+| `GEMINI_THINKING_LEVEL` | `low`, `medium`, or `high` for `gemini-3.8-live-extended-thinking` only; defaults to `medium` for that model. Leave unset for other models. |
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
@@ -157,6 +158,14 @@ GEMINI_API_KEY=<configure locally; never commit>
 # GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
 # GEMINI_VOICE=Puck
 ```
+
+For Gemini 3.8 Live Extended Thinking, explicitly set
+`GEMINI_LIVE_MODEL=gemini-3.8-live-extended-thinking`; optionally set
+`GEMINI_THINKING_LEVEL=medium`. The local implementation passed offline validation;
+live account access and conversation acceptance remain pending. See the
+[migration plan](docs/plans/gemini-38-live-extended-thinking-migration.md).
+Optional household-memory capture and review keep their existing OpenAI text
+provider and budgets even when Gemini handles speech.
 
 To use GPT Live, set `REALTIME_PROVIDER=openai_live` and add `OPENAI_API_KEY`
 to the ignored `.env`. GPT Live handles speech; Luna executes existing tools
@@ -213,7 +222,8 @@ so exact first-audio latency remains unavailable rather than fabricated. A
 controlled Mac-speaker run immediately fed assistant output into the microphone
 and produced six self-triggered interruption flushes in about 18 seconds while
 the user stayed silent. The process remained live; this is acoustic feedback,
-not a freeze. Use headphones for simulator conversation.
+not a freeze. This describes the earlier Gemini setup; the September 13 GPT Live
+SDK-candidate setup has since passed laptop-speaker testing.
 
 The Phase 0 speaker echo loop remains a Mac speaker/headphone benchmark item,
 separate from the successful Phase 1 LOCAL conversation. Use headphones for
@@ -225,7 +235,8 @@ Strategy B added about 7.2 seconds before Gemini was ready, so Strategy A is the
 current latency preference. Multilingual local STT remains separate follow-up
 scope. The source diagram in
 [`docs/scheme.mmd`](docs/scheme.mmd) includes the provider choice; the generated
-SVG is not hand-edited and still needs regeneration.
+SVG was regenerated from that source on September 16, including shared memory
+and the shutdown barrier.
 
 ### Hybrid ambient mode
 
@@ -499,7 +510,10 @@ AUDIO_OUTPUT_BACKEND=gstreamer REALTIME_PROVIDER=gemini \
 
 This is an experimental simulator containment path, not an upstream SDK fix.
 It keeps SDK microphone capture, providers, tools, and normal movement, but the
-SDK audio-reactive wobbler does not receive assistant PCM. GPT Live session readiness
+SDK audio-reactive wobbler does not receive assistant PCM. The separate speaker route also
+bypasses the SDK playback reference needed for software echo cancellation; use
+headphones to avoid speaker feedback during simulator testing. See the
+[recorded audio findings](docs/features/simulator-speaker-output.md#speech-movement-hearing-and-echo-findings--2026-09-13). GPT Live session readiness
 does not freeze antennas or suppress local breathing; speech bobbing still
 requires the normal SDK playback route. The SDK mixer still
 exists for capture, so repeated live validation is required before the crash is
@@ -579,8 +593,14 @@ explicit migration. The filename stays `memory.v1.json`, with version 2 inside;
 switching the flag off does not restore an older copy. Add
 `HOUSEHOLD_MEMORY_CAPTURE_ENABLED=1` to collect notes quietly during active GPT Live
 conversations. Both flags default off. Capture is bounded and stops in standby;
-daily consolidation is not implemented. Settings → **What Reachy remembers**
-lets you inspect and forget notes locally. See [household memory](docs/features/household-memory.md)
+optional `HOUSEHOLD_MEMORY_REVIEW_ENABLED=1` runs one bounded daily tidy-up during
+an active GPT Live session. It keeps existing wording, merges compatible duplicates,
+promotes lasting notes and removes retention-expired entries. It never runs in standby.
+Settings → **What Reachy remembers**
+lets you inspect and forget notes locally. Review diagnostics appear in Terminal,
+not Settings. Automatic capture
+pauses after 60 reserved attempts in a local day and resumes the next day; restarting
+does not reset that allowance. See [household memory](docs/features/household-memory.md)
 for migration, lifetimes, costs and current limitations. Stop the app before external
 memory maintenance. Corrections keep the current GPT Live conversation running. Spoken forgetting also keeps the conversation running and pauses automatic capture until the next wake. Settings Forget resets the conversation to clear active context.
 
@@ -802,3 +822,31 @@ is selected automatically. Remove those settings or disable the profile tool to
 turn the integration off; revoke Reachy Home in Spotify account settings to
 remove account access. See [Spotify control](docs/features/spotify-control.md)
 for authentication, privacy, limitations and tests.
+
+### Supervised audio dropout test
+
+Set `AUDIO_DIAGNOSTICS_ENABLED=1` to log five-second timing/count summaries
+without audio or transcript payloads. It defaults off. `SPEECH_WOBBLE_ENABLED=0`
+disables SDK speech bobbing for comparison; it defaults on. Restart the app to
+apply these settings. Follow the [three-way test](docs/plans/audio-dropout-comparison.md)
+with headphones; preparation does not establish native audio or hardware quality.
+
+GPT Live loads its provider and Responses SDK modules before microphone capture
+to avoid first-use import stalls; cloud connection still waits for activation
+when hybrid mode is enabled.
+
+The optional [SDK flush probe](docs/plans/audio-dropout-comparison.md#controlled-sdk-flush-probe--2026-09-13)
+isolates Mac playback clearing with quiet synthetic tones and capture counters;
+stop the conversation app before running it. It does not change normal playback.
+
+For the supervised Mac audio trial, `OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED=1` enables
+local microphone-energy playback clearing. `MACOS_LOCAL_AUDIO_FLUSH_ENABLED=1`
+permits native Mac clearing only for use with the reviewed SDK candidate. Both
+default off; see [the trial and limitations](docs/plans/audio-dropout-comparison.md).
+
+**Current Mac result (September 13):** the user confirmed good GPT Live operation
+with both headphones and laptop speakers using the reviewed SDK candidate, SDK
+playback, speech wobble and the two trial flags above. Headphones are optional for
+that configuration. The separate `gstreamer` bypass still needs its headphone
+precaution. Installed SDK/defaults remain unchanged; physical hardware and broader
+reliability are pending. See [current audio guidance](docs/plans/audio-dropout-comparison.md#current-guidance).
