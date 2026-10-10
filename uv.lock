@@ -14,7 +14,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-03T19:17:41.960524Z"
+exclude-newer = "2026-10-03T10:59:30.802667Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -2779,7 +2779,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.10.0rc5"
+version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2810,17 +2810,15 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
     { name = "rustypot" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "starlette" },
     { name = "toml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/1d/160cb45d92b05642d1d8d792126bbb866788601cacc4f15f2ef55076b8dd/reachy_mini-1.10.0rc5.tar.gz", hash = "sha256:7f33454a8b0f97fce75da1a7ad2dc8942ac776980773484450a91c4f09fbe138", size = 24162044, upload-time = "2026-08-13T07:59:25.07Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/1a/0b875f30145228b350e0a442fa6c523311da57d56a4e842c14726ca6e3ff/reachy_mini-1.11.0.tar.gz", hash = "sha256:5c7634c0565485276cb8ee1a58b1cb244a740c5d7549f07bf4d4a6e9dd65ccce", size = 24169927, upload-time = "2026-09-21T12:04:52.967Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/30/2c9e0501d4bb5935fb0ec985095cbd3be3613b7aa5c4893647eb80093407/reachy_mini-1.10.0rc5-py3-none-any.whl", hash = "sha256:9769ca13b6a0fc151729097b75edc4dd66b95435078416824cf7fec60df27b6a", size = 24248732, upload-time = "2026-08-13T07:59:22.314Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/e4/83285d3af0b716cecaaebad2e1df8057ae867eec1f2e787b878f37916ef9/reachy_mini-1.11.0-py3-none-any.whl", hash = "sha256:5a1b59c9c1657c1a1a859e281a9fe543dedc91fd298cfb185c542801fc67ec79", size = 24258673, upload-time = "2026-09-21T12:04:49.349Z" },
 ]
 
 [package.optional-dependencies]
@@ -2875,7 +2873,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "openai", specifier = "==2.28.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.10.0rc5" },
+    { name = "reachy-mini", specifier = ">=1.11.0,<1.13" },
     { name = "reachy-mini-dances-library" },
     { name = "websockets", specifier = ">=15,<16" },
 ]
@@ -2890,7 +2888,7 @@ dev = [
     { name = "pytest-cov", specifier = "==7.1.0" },
     { name = "ruff", specifier = "==0.15.20" },
 ]
-sim = [{ name = "reachy-mini", extras = ["mujoco"], specifier = ">=1.10.0rc5" }]
+sim = [{ name = "reachy-mini", extras = ["mujoco"], specifier = ">=1.11.0,<1.13" }]
 wake-benchmark = [
     { name = "pypinyin", specifier = "==0.55.0" },
     { name = "sentencepiece", specifier = "==0.2.2" },
