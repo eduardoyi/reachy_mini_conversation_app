@@ -69,6 +69,9 @@ module.
 | VAD protocol | `ambient_context.LocalVAD` | `is_speech(frame)` returns `bool` or an awaitable boolean. |
 | STT protocol | `ambient_context.LocalSTT` | `transcribe(frame)` returns text or an awaitable string. |
 | Baseline VAD | `local_audio_backends.RmsEnergyVAD` | Validates a frame, downmixes locally, and compares RMS against a bounded threshold. |
+| Shared level rule | `local_audio_backends.pcm16_rms`, `RmsEnergyVAD.is_speech_level` | Int16-scale RMS and the non-zero/at-threshold speech rule used by the VAD, provider barge-in and the level probe. |
+| Barge-in timing | `LOCAL_BARGE_IN_ONSET_MS` (120), `LOCAL_BARGE_IN_REARM_MS` (400) | Sustained above-threshold time that latches a local interruption, and quiet time that rearms it; shared by Gemini Live, GPT Live and the probe. |
+| Level probe | `mic_level_probe` / `reachy-mic-levels` | Guided robot-microphone measurement of per-frame RMS against the threshold; keeps only levels in memory. |
 | Local STT | `local_audio_backends.OpenAICompatibleLocalSTT` | Posts a memory-only WAV to the validated loopback endpoint and parses bounded text. |
 | Sanitized errors | `LocalSTTError`, `LocalSTTResponseTooLarge` | Expose operation/status metadata, never response content or audio. |
 |
@@ -183,6 +186,7 @@ Tests are hardware-, credential-, disk-, and network-independent.
 
 | File | Scenarios |
 |---|---|
+| `tests/test_mic_level_probe.py` | Channel-average and channel-0 levels on the VAD scale, channels-first frames, onset/rearm latch rule, zero-threshold silence, threshold suggestion and refusal, phase-continuous bounded test sound, per-phase measurement with stale-frame draining, speaker use only in playback phases, media stop on capture failure, report rendering, and CLI connection/argument errors. |
 | `tests/test_local_audio_backends.py` | RMS threshold and stereo behavior; invalid rates, dimensions, dtypes, non-finite samples, and thresholds; multipart model/file/language shape; WAV mono/PCM16/16 kHz metadata; stereo downmix and resampling; 20-second request bound; JSON/plain-text parsing; status and malformed response errors; response byte/text limits; bounded timeout and client cleanup; cancellation cleanup; loopback allowlist and rejection of public/private/DNS/credential/query endpoints; no-auth, proxy-bypass, language-validation, and privacy-safe logs. |
 
 ### Integration tests
@@ -194,6 +198,29 @@ pre-activation audio bytes reach a provider, and that a blocked local processor
 does not block the LocalStream capture handoff. Runtime backpressure, ordered
 admission, cancellation, and close are deterministic fake-boundary tests. A
 live local STT server is intentionally not a test-suite dependency.
+
+### Microphone level probe
+
+`reachy-mic-levels` connects to the running daemon with the app's
+`--media-backend` choices and walks through four phases: `quiet`, `speech`,
+`playback` (a synthetic voice-like buzz on the robot speaker) and
+`speech_over_playback`. For each phase it reports per-SDK-frame RMS
+percentiles, the share of time at or above the threshold, the longest
+above-threshold run and the number of barge-in onsets under the providers'
+120 ms onset / 400 ms rearm rule. Levels are shown for the channel average
+(hybrid VAD, GPT Live) and channel 0 (Gemini Live, Hugging Face), which can
+differ on the XVF3800. It suggests a threshold at the geometric mean of the
+non-speech p99 ceiling and the weakest speech p75 when they are at least 1.5x
+apart. The threshold defaults to the configured `LOCAL_VAD_RMS_THRESHOLD`.
+
+```bash
+.venv/bin/reachy-mic-levels --media-backend local
+.venv/bin/reachy-mic-levels --media-backend local --threshold 300 --no-playback
+```
+
+The probe does not move the robot, write files, or keep audio: each frame is
+reduced to two RMS floats and discarded. Stop the conversation app first so its
+capture and speech do not mix into the measurement.
 
 ### Simulator / end-to-end tests
 
@@ -208,6 +235,7 @@ CPU/RAM, and transcript quality on the development machine.
 .venv/bin/ruff format --check src/reachy_mini_conversation_app/local_audio_backends.py tests/test_local_audio_backends.py
 .venv/bin/mypy --pretty --show-error-codes src/reachy_mini_conversation_app/local_audio_backends.py
 .venv/bin/pytest tests/test_local_audio_backends.py -v
+.venv/bin/pytest tests/test_mic_level_probe.py -v
 ```
 
 Validation on 2026-08-29: focused Ruff checks passed, formatting was unchanged,
@@ -229,3 +257,4 @@ resource validation remain pending.
 | 2026-08-30 | Corrected the Transformers Serve launch command after live acceptance showed that `FORCE_MODEL` is positional. The installed 5.16.1 help summary omits the transcription route, but its server implementation includes `/v1/audio/transcriptions`. |
 | 2026-08-30 | Added `python-multipart` to the isolated server install after live transcription requests reached the endpoint but returned HTTP 500 because the serving extra did not install its upload parser. |
 | 2026-08-30 | Added the bounded sequential LocalStream-to-HybridRuntime handoff and metadata-only local-processing drop counter. Deterministic pressure/cancellation/close tests prove ordering and privacy behavior; sustained live VAD/STT load remains unmeasured. |
+| 2026-10-10 | Added the `reachy-mic-levels` robot-microphone level probe for hardware threshold tuning, and shared `pcm16_rms`, `RmsEnergyVAD.is_speech_level` and the barge-in onset/rearm constants between the VAD, both live providers and the probe. Hardware measurements are pending the robot. |

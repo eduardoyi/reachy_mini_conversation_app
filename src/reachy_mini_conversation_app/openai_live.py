@@ -36,7 +36,11 @@ from reachy_mini_conversation_app.household_memory import (
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.openai_live_backend import TranscriptTurn, OpenAILiveDelegationBackend
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, ConversationHandler
-from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
+from reachy_mini_conversation_app.local_audio_backends import (
+    LOCAL_BARGE_IN_ONSET_MS,
+    LOCAL_BARGE_IN_REARM_MS,
+    RmsEnergyVAD,
+)
 from reachy_mini_conversation_app.household_memory_session import (
     MemorySession,
     CaptureFactory,
@@ -1115,9 +1119,12 @@ class OpenAILiveHandler(ConversationHandler):
             if self._barge_in_vad.is_speech((self.SAMPLE_RATE, resampled)):
                 self._barge_in_quiet_samples = 0
                 self._barge_in_speech_samples = min(
-                    self._barge_in_speech_samples + resampled.size, self.SAMPLE_RATE * 120 // 1000
+                    self._barge_in_speech_samples + resampled.size, self.SAMPLE_RATE * LOCAL_BARGE_IN_ONSET_MS // 1000
                 )
-                if not self._barge_in_latched and self._barge_in_speech_samples >= self.SAMPLE_RATE * 120 // 1000:
+                if (
+                    not self._barge_in_latched
+                    and self._barge_in_speech_samples >= self.SAMPLE_RATE * LOCAL_BARGE_IN_ONSET_MS // 1000
+                ):
                     self._barge_in_latched = True
                     if (
                         self._last_barge_in_output_at is not None
@@ -1129,9 +1136,9 @@ class OpenAILiveHandler(ConversationHandler):
             else:
                 self._barge_in_speech_samples = 0
                 self._barge_in_quiet_samples = min(
-                    self._barge_in_quiet_samples + resampled.size, self.SAMPLE_RATE * 400 // 1000
+                    self._barge_in_quiet_samples + resampled.size, self.SAMPLE_RATE * LOCAL_BARGE_IN_REARM_MS // 1000
                 )
-                if self._barge_in_quiet_samples >= self.SAMPLE_RATE * 400 // 1000:
+                if self._barge_in_quiet_samples >= self.SAMPLE_RATE * LOCAL_BARGE_IN_REARM_MS // 1000:
                     self._barge_in_latched = False
         event = {
             "type": "session.input_audio.append",

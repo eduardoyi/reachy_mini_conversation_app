@@ -32,7 +32,11 @@ from reachy_mini_conversation_app.prompts import (
 from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
-from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
+from reachy_mini_conversation_app.local_audio_backends import (
+    LOCAL_BARGE_IN_ONSET_MS,
+    LOCAL_BARGE_IN_REARM_MS,
+    RmsEnergyVAD,
+)
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.household_memory_session import (
     MemorySession,
@@ -68,8 +72,6 @@ _TOOL_CANCEL_TIMEOUT_S: Final[float] = 1.0
 _SESSION_AUDIO_LIMIT_S: Final[float] = 9 * 60.0
 _SESSION_CAMERA_LIMIT_S: Final[float] = 110.0
 _SESSION_DEADLINE_HEADROOM_S: Final[float] = 2.0
-_LOCAL_BARGE_IN_ONSET_MS: Final[int] = 120
-_LOCAL_BARGE_IN_REARM_MS: Final[int] = 400
 _LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
 _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
 _MEMORY_REVISION_POLL_S: Final[float] = 0.25
@@ -817,8 +819,8 @@ class GeminiLiveHandler(ConversationHandler):
             logger.debug("Skipping Gemini local barge-in detection for invalid audio frame")
             return
 
-        onset_samples = max(1, sample_rate * _LOCAL_BARGE_IN_ONSET_MS // 1000)
-        rearm_samples = max(1, sample_rate * _LOCAL_BARGE_IN_REARM_MS // 1000)
+        onset_samples = max(1, sample_rate * LOCAL_BARGE_IN_ONSET_MS // 1000)
+        rearm_samples = max(1, sample_rate * LOCAL_BARGE_IN_REARM_MS // 1000)
         if speech_detected:
             self._barge_in_quiet_samples = 0
             self._barge_in_speech_samples = min(self._barge_in_speech_samples + audio_frame.size, onset_samples)

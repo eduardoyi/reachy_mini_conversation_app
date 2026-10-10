@@ -356,6 +356,15 @@ multilingual benchmark before production selection.
 See [`docs/features/local-audio-backends.md`](docs/features/local-audio-backends.md)
 for its contracts and limitations.
 
+#### Microphone level probe
+
+`LOCAL_VAD_RMS_THRESHOLD` also gates local barge-in, and values tuned on one
+microphone rarely transfer to another. With the daemon running and the
+conversation app stopped, `.venv/bin/reachy-mic-levels --media-backend local`
+guides you through quiet, speech, robot-playback and speech-over-playback
+phases, then prints RMS percentiles, would-be barge-in onsets and a candidate
+threshold. It keeps only level numbers and does not move the robot.
+
 #### Optional acoustic wake benchmark
 
 The fixture-only `wake-benchmark` command is separate from the production

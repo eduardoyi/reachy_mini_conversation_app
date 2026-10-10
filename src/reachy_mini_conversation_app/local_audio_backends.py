@@ -26,6 +26,15 @@ _DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 _DEFAULT_MAX_TEXT_CHARS = 16_000
 _DEFAULT_MAX_AUDIO_SECONDS = 20.0
 _LANGUAGE_PATTERN = re.compile(r"[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*")
+LOCAL_BARGE_IN_ONSET_MS = 120
+LOCAL_BARGE_IN_REARM_MS = 400
+
+
+def pcm16_rms(audio: NDArray[np.int16]) -> float:
+    """Return the RMS of mono int16 PCM in int16 units, or 0.0 for an empty frame."""
+    if audio.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(audio.astype(np.float64, copy=False)))))
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,9 +52,10 @@ class RmsEnergyVAD:
         """Return whether a valid frame has non-zero RMS at or above the threshold."""
         sample_rate, audio = _normalize_local_frame(frame)
         del sample_rate
-        if audio.size == 0:
-            return False
-        rms = float(np.sqrt(np.mean(np.square(audio.astype(np.float64, copy=False)))))
+        return self.is_speech_level(pcm16_rms(audio))
+
+    def is_speech_level(self, rms: float) -> bool:
+        """Return whether an int16-scale RMS level is non-zero and at or above the threshold."""
         return rms > 0.0 and rms >= self.threshold
 
 
@@ -305,8 +315,11 @@ def _validate_loopback_url(parsed: SplitResult) -> None:
 
 
 __all__ = [
+    "LOCAL_BARGE_IN_ONSET_MS",
+    "LOCAL_BARGE_IN_REARM_MS",
     "LocalSTTError",
     "LocalSTTResponseTooLarge",
     "OpenAICompatibleLocalSTT",
     "RmsEnergyVAD",
+    "pcm16_rms",
 ]

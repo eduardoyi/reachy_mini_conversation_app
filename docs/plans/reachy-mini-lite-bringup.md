@@ -36,8 +36,8 @@ Verified in code or SDK source on 2026-10-10:
   [audio dropout comparison](audio-dropout-comparison.md)). SDK 1.12.0rc1 still
   flushes only the player `appsrc`, so barge-in will not cut buffered speaker
   audio on the stock SDK.
-- Local VAD and barge-in use an RMS threshold of 500 tuned on the Mac
-  microphone (`LOCAL_VAD_RMS_THRESHOLD`). Hybrid/OpenAI paths average both mic
+- Local VAD and barge-in share `LOCAL_VAD_RMS_THRESHOLD` (default 500; the
+  README hybrid example uses 100), tuned on the Mac microphone. Hybrid/OpenAI paths average both mic
   channels; Gemini and Hugging Face use channel 0.
 - `AUDIO_OUTPUT_BACKEND=gstreamer` plays through `autoaudiosink` (the Mac's
   default output), not the robot speaker. Keep `sdk`.
@@ -65,7 +65,8 @@ dark; mixer levels other than PCM should stay at 100%.
 - Prepare a minimal `.env` profile for bring-up: provider key only, with
   `HYBRID_RUNTIME_ENABLED`, `LOCAL_ACOUSTIC_WAKE_ENABLED`, barge-in flags,
   Spotify and household memory unset.
-- Prepare the Step 3 microphone level probe (levels only, nothing persisted).
+- Microphone level probe: done (`reachy-mic-levels`, see
+  [local audio backends](../features/local-audio-backends.md#microphone-level-probe)).
 - Acceptance: gate green on the target SDK.
 
 ### Step 1 — Power-on and motion only
@@ -100,10 +101,9 @@ frames are non-silent (silence suggests an inverted FPC cable per Pollen docs).
 1. Direct mode (no hybrid runtime), stock SDK, barge-in flags off. Hold a
    short conversation at normal speaker volume.
 2. Check the robot does not respond to its own voice.
-3. Measure ambient, speech and robot-playback RMS on the robot microphone in
-   the same int16 scale as `LOCAL_VAD_RMS_THRESHOLD`. No existing tool does
-   this: `AUDIO_DIAGNOSTICS_ENABLED` records timings only and the UI level meter
-   is rescaled. Prepare a small metadata-only probe before arrival.
+3. With the app stopped, run `.venv/bin/reachy-mic-levels --media-backend local`
+   at normal speaker volume and from the usual seating distance. Record the
+   table here, including both `mixed` and `channel0` rows.
 
 Acceptance: conversation, tools, movement and camera work; no self-triggering;
 measured RMS levels recorded here.
@@ -168,3 +168,4 @@ change, and the README launch section once the Lite procedure is confirmed.
 | Date | Step | Result |
 |------|------|--------|
 | 2026-10-10 | Plan | Created from a read-only hardware-readiness audit. SDK target moved to 1.11.0; gate green (1,264 passed, 4 skipped). A headless MuJoCo daemon launched from the agent sandbox did not bind its API port on either 1.11.0 or 1.10.0rc5, so simulator connectivity on 1.11.0 still needs a normal terminal run. |
+| 2026-10-10 | Step 0 | Added the `reachy-mic-levels` probe for Step 3: four guided phases, channel-average and channel-0 levels, barge-in onset counts and a candidate threshold. 15 unit tests with fake media; not yet run against hardware. |
