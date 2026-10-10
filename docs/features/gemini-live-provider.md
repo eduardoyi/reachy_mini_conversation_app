@@ -159,6 +159,15 @@ The Mac baseline reported a 16 kHz input stream. Gemini output is emitted at
 local resampler. There is one audio queue and one active provider handler; no
 second agent or movement loop is introduced.
 
+Gemini may emit a one-sample PCM fragment before speech. These tiny fragments
+reproduce a native SDK mixer crash on this Mac. `Pcm16ChunkBuffer` now retains
+fewer than 240 samples (10 ms), combining them with the next chunk before queueing.
+Generation/turn completion pads only a final short tail with silence; every output
+queue clear also discards held samples. Regular chunks remain immediate. This
+preserves the SDK speech-wobble and echo-reference path without SDK modifications.
+See [native evidence and tests](simulator-speaker-output.md#gemini-tiny-fragment-containment--2026-09-20).
+Live Gemini speaker acceptance after this correction remains pending.
+
 The Live setup handshake has a 15-second timeout; this bound applies only to
 opening the session, not to the ongoing receive loop. The adapter exposes a
 `GeminiLatencySnapshot` containing numeric monotonic-millisecond samples for
@@ -586,3 +595,32 @@ mypy, lock validation, JavaScript syntax and diff checks passed. The
 lists exact commands, test inventory, skipped checks and the reproducible next
 live-validation step. Gemini spoken-memory parity and real audio/hardware
 acceptance remain unverified; the active provider was not switched.
+
+### Optional local interruption assist — 2026-09-21
+
+`GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED=1` enables an experimental local microphone
+onset check (default off). After roughly 120 ms above `LOCAL_VAD_RMS_THRESHOLD`,
+it clears queued playback if Gemini recently produced audible output. A quiet
+400 ms re-arms the check. Microphone audio continues to Gemini; this does not
+cancel cloud generation, and later server audio can refill playback. Speaker
+leakage or noise can trigger the energy detector, so live speaker acceptance is
+still required. The SDK playback, expression and echo-processing paths remain
+in use. On the Mac trial, keep the reviewed SDK playback-flush checkout and
+`MACOS_LOCAL_AUDIO_FLUSH_ENABLED=1` from the existing launch command.
+
+Spotify investigation on the same date: the effective Gemini tool registry and
+schema include Spotify; 29 focused Spotify/SDK contract tests passed. A read-only
+live status call succeeded and confirmed the configured device was available.
+The supplied trial log contained no Spotify call. This does not establish that
+Gemini selects the tool correctly for the failed spoken request; the exact
+request/reply or a fresh reproduction remains needed. No playback was started
+and no speculative tool-schema change was made.
+
+Validation for the 2026-09-21 follow-up: full `REACHY_MINI_SKIP_DOTENV=1
+.venv/bin/pytest tests/ -q` passed (1,263 passed, four opt-in skips, two expected
+SDK enum warnings). `.venv/bin/ruff check .`, `.venv/bin/ruff format --check .`,
+`.venv/bin/mypy --pretty --show-error-codes` and `git diff --check` passed.
+Relevant regression inventory: `tests/test_gemini_live.py`, `tests/test_config.py`,
+`tests/test_hybrid_runtime.py`, `tests/test_hybrid_smoke.py`, with existing
+`tests/test_openai_live.py`, `tests/test_gemini_sdk_contract.py` and
+`tests/tools/test_spotify_control.py`. Live speaker acceptance remains pending.

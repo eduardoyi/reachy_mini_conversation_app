@@ -29,9 +29,10 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
-from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
+from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.household_memory_session import (
     MemorySession,
@@ -67,6 +68,10 @@ _TOOL_CANCEL_TIMEOUT_S: Final[float] = 1.0
 _SESSION_AUDIO_LIMIT_S: Final[float] = 9 * 60.0
 _SESSION_CAMERA_LIMIT_S: Final[float] = 110.0
 _SESSION_DEADLINE_HEADROOM_S: Final[float] = 2.0
+_LOCAL_BARGE_IN_ONSET_MS: Final[int] = 120
+_LOCAL_BARGE_IN_REARM_MS: Final[int] = 400
+_LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
+_LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
 _MEMORY_REVISION_POLL_S: Final[float] = 0.25
 _MEMORY_CAPTURE_CLOSE_TIMEOUT_S: Final[float] = 2.0
 _MEMORY_REVIEW_CLOSE_TIMEOUT_S: Final[float] = 2.0
@@ -151,6 +156,7 @@ class GeminiLiveHandler(ConversationHandler):
         self.client = client
         self.connection: AsyncSession | None = None
         self.output_queue: asyncio.Queue[AudioFrame | AdditionalOutputs] = asyncio.Queue()
+        self._audio_chunks = Pcm16ChunkBuffer(self.SAMPLE_RATE // 100)
         self.tool_manager = BackgroundToolManager()
         self._memory_capture_factory = memory_capture_factory or default_memory_capture_factory
         self._memory_review_factory = memory_review_factory or default_memory_review_factory
@@ -193,6 +199,13 @@ class GeminiLiveHandler(ConversationHandler):
         self._tool_received_at: dict[str, float] = {}
         self._tool_timeout_tasks: dict[str, asyncio.Task[None]] = {}
         self._timed_out_tool_call_ids: set[str] = set()
+        self._barge_in_vad = RmsEnergyVAD(config.LOCAL_VAD_RMS_THRESHOLD)
+        self._barge_in_speech_samples = 0
+        self._barge_in_quiet_samples = 0
+        self._barge_in_latched = False
+        self._last_barge_in_output_at: float | None = None
+        self._barge_in_output_generation: int | None = None
+        self._barge_in_session_generation: int | None = None
         self._fenced_session: AsyncSession | None = None
         self._close_failed = False
         self._session_ready_at: float | None = None
@@ -614,6 +627,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._clear_first_audio_markers(reason=reason)
         self.deps.movement_manager.set_listening(False)
         await self._clear_playback_for_interrupt()
+        self._reset_local_barge_in_state()
         if self._connection_observer_connected:
             self._connection_observer_connected = False
             self._emit_connection_state(False)
@@ -769,14 +783,64 @@ class GeminiLiveHandler(ConversationHandler):
 
     def _clear_output_queue(self) -> None:
         """Drain pending assistant output without replacing the queue."""
+        self._audio_chunks.clear()
         while not self.output_queue.empty():
             try:
                 self.output_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
+    def _reset_local_barge_in_state(self) -> None:
+        """Reset local interruption detection at a session boundary."""
+        self._barge_in_speech_samples = 0
+        self._barge_in_quiet_samples = 0
+        self._barge_in_latched = False
+        self._last_barge_in_output_at = None
+        self._barge_in_output_generation = None
+        self._barge_in_session_generation = None
+
+    async def _handle_local_barge_in(
+        self,
+        sample_rate: int,
+        audio_frame: np.ndarray,
+        generation: int,
+    ) -> None:
+        """Clear recent local playback after a sustained microphone onset."""
+        if self._barge_in_session_generation != generation:
+            self._barge_in_speech_samples = 0
+            self._barge_in_quiet_samples = 0
+            self._barge_in_latched = False
+            self._barge_in_session_generation = generation
+        try:
+            speech_detected = self._barge_in_vad.is_speech((sample_rate, audio_frame))
+        except (TypeError, ValueError):
+            logger.debug("Skipping Gemini local barge-in detection for invalid audio frame")
+            return
+
+        onset_samples = max(1, sample_rate * _LOCAL_BARGE_IN_ONSET_MS // 1000)
+        rearm_samples = max(1, sample_rate * _LOCAL_BARGE_IN_REARM_MS // 1000)
+        if speech_detected:
+            self._barge_in_quiet_samples = 0
+            self._barge_in_speech_samples = min(self._barge_in_speech_samples + audio_frame.size, onset_samples)
+            if not self._barge_in_latched and self._barge_in_speech_samples >= onset_samples:
+                self._barge_in_latched = True
+                if (
+                    self._barge_in_output_generation == generation
+                    and self._last_barge_in_output_at is not None
+                    and time.monotonic() - self._last_barge_in_output_at <= _LOCAL_BARGE_IN_OUTPUT_WINDOW_S
+                ):
+                    self._last_barge_in_output_at = None
+                    logger.info("Local microphone onset: clearing queued Gemini Live playback")
+                    await self._clear_playback_for_interrupt()
+            return
+
+        self._barge_in_speech_samples = 0
+        self._barge_in_quiet_samples = min(self._barge_in_quiet_samples + audio_frame.size, rearm_samples)
+        if self._barge_in_quiet_samples >= rearm_samples:
+            self._barge_in_latched = False
+
     async def _clear_playback_for_interrupt(self) -> None:
-        """Flush local playback when Gemini reports an interrupted turn."""
+        """Flush local playback for a provider or local interruption."""
         self._clear_output_queue()
         if self._clear_queue is not None:
             try:
@@ -988,6 +1052,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._session_generation += 1
         generation = self._session_generation
         self._active_generation = generation
+        self._reset_local_barge_in_state()
         self._connection_observer_connected = False
         self._protocol_fenced = False
         self._startup_greeting_sent = False
@@ -1117,6 +1182,7 @@ class GeminiLiveHandler(ConversationHandler):
             self._clear_interaction_deadline()
             self._emit_interaction_busy(False)
             self._clear_first_audio_markers(reason="session_closed")
+            self._reset_local_barge_in_state()
             self.deps.movement_manager.set_listening(False)
             if self.connection is active_session:
                 self.connection = None
@@ -1159,6 +1225,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._protocol_fenced = True
         self._emit_interaction_busy(False)
         self._clear_output_queue()
+        self._reset_local_barge_in_state()
         if self._clear_queue is not None:
             try:
                 self._clear_queue()
@@ -1272,6 +1339,11 @@ class GeminiLiveHandler(ConversationHandler):
                     if not inline_data.data:
                         continue
                     audio_data = np.frombuffer(inline_data.data, dtype=np.int16)
+                    if config.GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED:
+                        output_rms = float(np.sqrt(np.mean(np.square(audio_data.astype(np.float32, copy=False)))))
+                        if output_rms >= _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD:
+                            self._last_barge_in_output_at = time.monotonic()
+                            self._barge_in_output_generation = generation
                     if self._user_turn_active:
                         first_audio_at = time.perf_counter()
                         if self._first_audio_received_at is None:
@@ -1292,9 +1364,14 @@ class GeminiLiveHandler(ConversationHandler):
                                 self._clear_first_audio_markers(ignore_late_activity_end=True, turn_finished=True)
                     self._mark_activity("assistant_audio_delta")
                     self.deps.movement_manager.set_speaking(True)
-                    await self.output_queue.put((self.SAMPLE_RATE, audio_data))
+                    playable = self._audio_chunks.push(audio_data)
+                    if playable is not None:
+                        await self.output_queue.put((self.SAMPLE_RATE, playable))
 
             if server_content.turn_complete or server_content.generation_complete:
+                tail = self._audio_chunks.finish()
+                if tail is not None:
+                    await self.output_queue.put((self.SAMPLE_RATE, tail))
                 self.deps.movement_manager.set_speaking(False)
 
         if event.tool_call is not None:
@@ -1738,6 +1815,8 @@ class GeminiLiveHandler(ConversationHandler):
                 audio_frame = audio_frame[:, 0]
         audio_frame = audio_to_int16(audio_frame).reshape(-1)
         try:
+            if config.GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED:
+                await self._handle_local_barge_in(sample_rate, audio_frame, generation)
             await self._send_realtime_input(
                 session,
                 generation,
@@ -1849,6 +1928,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._clear_first_audio_markers(reason=reason)
         self.deps.movement_manager.set_listening(False)
         await self._clear_playback_for_interrupt()
+        self._reset_local_barge_in_state()
         if self._connection_observer_connected:
             self._connection_observer_connected = False
             self._emit_connection_state(False)
@@ -1908,6 +1988,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._clear_first_audio_markers(reason="session_shutdown")
         self._emit_interaction_busy(False)
         self._clear_output_queue()
+        self._reset_local_barge_in_state()
         if self._clear_queue is not None:
             try:
                 self._clear_queue()

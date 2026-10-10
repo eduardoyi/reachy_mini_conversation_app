@@ -12,6 +12,40 @@ AudioArray: TypeAlias = NDArray[np.int16] | NDArray[np.float32]
 QueueItem = TypeVar("QueueItem")
 
 
+class Pcm16ChunkBuffer:
+    """Coalesce tiny PCM fragments before native playback without losing samples."""
+
+    def __init__(self, min_samples: int) -> None:
+        """Set the minimum playable chunk size."""
+        if min_samples < 1:
+            raise ValueError("Minimum sample count must be positive")
+        self._min_samples = min_samples
+        self._pending = np.empty(0, dtype=np.int16)
+
+    def push(self, frame: NDArray[np.int16]) -> NDArray[np.int16] | None:
+        """Return a playable chunk or retain a bounded short fragment."""
+        if frame.ndim != 1 or frame.dtype != np.int16:
+            raise ValueError("Expected mono int16 PCM")
+        combined = np.concatenate((self._pending, frame)) if self._pending.size else frame
+        if combined.size < self._min_samples:
+            self._pending = combined.copy()
+            return None
+        self.clear()
+        return combined
+
+    def finish(self) -> NDArray[np.int16] | None:
+        """Pad a final short fragment with silence instead of discarding speech."""
+        if not self._pending.size:
+            return None
+        tail = np.pad(self._pending, (0, self._min_samples - self._pending.size))
+        self.clear()
+        return tail
+
+    def clear(self) -> None:
+        """Discard unfinished audio when playback is interrupted or closed."""
+        self._pending = np.empty(0, dtype=np.int16)
+
+
 class AdditionalOutputs:
     """Text or metadata emitted alongside audio frames."""
 

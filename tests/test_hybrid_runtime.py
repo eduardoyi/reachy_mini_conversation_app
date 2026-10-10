@@ -1508,6 +1508,24 @@ async def test_inactivity_pauses_during_long_user_utterance_then_counts_from_sto
 
 
 @pytest.mark.asyncio
+async def test_disconnect_mid_utterance_does_not_block_inactivity_after_reconnect() -> None:
+    """A speech start without its stop cannot outlive the provider connection."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=5, clock=clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime._on_handler_activity(handler, runtime.generation, "user_speech_started")
+
+    handler.set_connected(False)
+    handler.set_connected(True)
+    clock.advance(5)
+    assert await runtime.check_inactivity()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_postactivation_queue_survives_handshake_and_flushes_before_new_frames() -> None:
     """Frames after the activation barrier wait for readiness and preserve order."""
     handler = FakeHandler(drop_unready_frames=True)
@@ -2149,6 +2167,7 @@ async def test_acoustic_wake_uses_existing_barrier_and_returns_to_listening() ->
     await handlers[0].started.wait()
     handlers[0].set_connected(True)
     assert acknowledgements == ["acoustic_wake"]
+    await handlers[0].say_called.wait()
     assert runtime.mode is RuntimeMode.CLOUD_CONVERSATION
     assert not handlers[0].receive_frames
     assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
@@ -2165,6 +2184,133 @@ async def test_acoustic_wake_uses_existing_barrier_and_returns_to_listening() ->
     await runtime.close()
     await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)))
     assert len(handlers) == 2
+
+
+@pytest.mark.asyncio
+async def test_bare_acoustic_wake_acknowledges_once_after_provider_readiness() -> None:
+    """A bare acoustic activation speaks only after its provider is ready."""
+    handler = FakeHandler()
+    acknowledgements: list[str] = []
+    runtime = HybridRuntime(
+        lambda: handler,
+        acknowledgement_callback=acknowledgements.append,
+    )
+    runtime.set_capture_barrier_provider(lambda: 0)
+
+    assert await runtime.activate("acoustic_wake")
+    await handler.started.wait()
+    assert handler.say_texts == []
+    await runtime.handle_frame(frame(0), capture_sequence=1)
+
+    handler.set_connected(True)
+    handler.set_connected(True)
+    await handler.say_called.wait()
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+
+    assert acknowledgements == ["acoustic_wake"]
+    assert handler.say_texts == ["Acknowledge the wake word briefly, then listen."]
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_activation_with_addressed_text_does_not_add_ack() -> None:
+    """An addressed acoustic activation submits its text once without a second ack."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler)
+
+    assert await runtime.activate("acoustic_wake", addressed_text="what do you think?")
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+    assert handler.say_texts == ["what do you think?"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_ack_skips_when_postactivation_local_vad_hears_speech() -> None:
+    """Speech during the local activation seam suppresses the bare acknowledgment."""
+    acknowledgement_started = asyncio.Event()
+    release_acknowledgement = asyncio.Event()
+    handler = FakeHandler()
+
+    async def acknowledge(_reason: str) -> None:
+        acknowledgement_started.set()
+        await release_acknowledgement.wait()
+
+    runtime = HybridRuntime(
+        lambda: handler,
+        acknowledgement_callback=acknowledge,
+    )
+    runtime.set_capture_barrier_provider(lambda: 10)
+
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await acknowledgement_started.wait()
+        await runtime.handle_frame(frame(2_000), capture_sequence=11)
+        release_acknowledgement.set()
+
+        assert await activation
+        await handler.started.wait()
+        handler.set_connected(True)
+        await wait_until(lambda: bool(handler.receive_frames))
+
+        assert handler.say_texts == []
+        assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_canceled_acoustic_activation_cannot_ack_after_standby() -> None:
+    """A canceled acoustic activation cannot speak after returning to ambient mode."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler)
+
+    assert await runtime.activate("acoustic_wake")
+    await handler.started.wait()
+    assert await runtime.deactivate_cloud("test_cancel")
+
+    handler.set_connected(True)
+    await asyncio.sleep(0)
+
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert handler.say_texts == []
+    assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_deactivation_cancels_blocked_acoustic_ack() -> None:
+    """Deactivation cancels an acoustic acknowledgment waiting in the provider."""
+    handler = FakeHandler()
+    ack_started = asyncio.Event()
+    ack_cancelled = asyncio.Event()
+
+    async def blocked_say(_text: str) -> None:
+        ack_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            ack_cancelled.set()
+            raise
+
+    handler.say = blocked_say
+    runtime = HybridRuntime(lambda: handler)
+    runtime.set_capture_barrier_provider(lambda: 0)
+
+    assert await runtime.activate("acoustic_wake")
+    await handler.started.wait()
+    handler.set_connected(True)
+    await ack_started.wait()
+    await asyncio.wait_for(runtime.handle_frame(frame(2_000), capture_sequence=1), timeout=0.1)
+    assert handler.receive_frames == []
+
+    assert await runtime.deactivate_cloud("test_cancel")
+    assert ack_cancelled.is_set()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
 
 
 @pytest.mark.asyncio

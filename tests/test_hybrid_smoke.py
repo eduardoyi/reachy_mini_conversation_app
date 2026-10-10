@@ -338,6 +338,30 @@ async def test_split_final_delayed_non_exact_followup_escalates_with_suffix() ->
         await runtime.close()
 
 
+@pytest.mark.asyncio
+async def test_bare_acoustic_wake_acknowledges_after_ready_without_ambient_upload() -> None:
+    """A bare acoustic wake gets one concise cloud acknowledgment after readiness."""
+    handler = SmokeHandler()
+    acknowledgements: list[str] = []
+    runtime = HybridRuntime(
+        lambda: handler,
+        ambient_buffer=AmbientAudioBuffer(max_seconds=1, sample_rate=100),
+        acknowledgement_callback=acknowledgements.append,
+    )
+
+    try:
+        await runtime.handle_frame(_frame(1_000), capture_sequence=1)
+        assert await runtime.activate("acoustic_wake")
+        await handler.started.wait()
+        await handler.say_called.wait()
+
+        assert acknowledgements == ["acoustic_wake"]
+        assert handler.say_texts == ["Acknowledge the wake word briefly, then listen."]
+        assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
+    finally:
+        await runtime.close()
+
+
 def test_blocked_speaker_flush_discards_stale_generation_before_new_audio() -> None:
     """A bounded interruption flushes before any current-generation frame is emitted."""
     pipeline = SmokePipeline()

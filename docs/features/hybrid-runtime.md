@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-09-16
+- Last updated: 2026-09-21
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -226,7 +226,7 @@ single output queue. `HybridRuntime` is a coordinator, not a
 `ConversationHandler`; it delegates cloud audio/output to the one active
 provider. `ConversationHandler` supplies typed traffic, connection, and
 startup-greeting controls. `MovementManager.acknowledge_activation()` is the
-only path used for activation acknowledgment; the runtime never calls robot
+only path used for the physical activation acknowledgment; the runtime never calls robot
 motor APIs. The manager's worker captures its last commanded full-body pose,
 applies a relative nod, and returns to that exact pose.
 
@@ -514,3 +514,30 @@ mypy, lock validation, JavaScript syntax and diff checks passed. The
 lists exact commands, test inventory, skipped checks and the reproducible next
 live-validation step. Gemini spoken-memory parity and real audio/hardware
 acceptance remain unverified; the active provider was not switched.
+
+
+### Bare acoustic wake acknowledgment — 2026-09-21
+
+A bare acoustic wake now requests a brief spoken acknowledgment after the provider
+is ready. Local post-barrier speech energy suppresses this request when the user
+has already continued speaking; this does not require local STT. Addressed text
+retains its existing single-submission path. Silence in the setup FIFO does not
+suppress the acknowledgment. The physical nod remains immediate, and startup
+greetings remain disabled for other hybrid activation paths.
+
+The acknowledgment uses the existing provider `say()` boundary with a short
+synthetic instruction, not a new speech service. It is generation-fenced and
+canceled during shutdown. It does not upload pre-wake PCM or alter ambient
+privacy. Detection is an energy heuristic, not semantic recognition: noise or the
+tail of a wake word may suppress the acknowledgment, and speech starting after
+the instruction was submitted may still interrupt it through normal barge-in.
+Live acceptance must check bare wake and immediately continued questions.
+
+Validation for the 2026-09-21 follow-up: full `REACHY_MINI_SKIP_DOTENV=1
+.venv/bin/pytest tests/ -q` passed (1,263 passed, four opt-in skips, two expected
+SDK enum warnings). `.venv/bin/ruff check .`, `.venv/bin/ruff format --check .`,
+`.venv/bin/mypy --pretty --show-error-codes` and `git diff --check` passed.
+Relevant regression inventory: `tests/test_gemini_live.py`, `tests/test_config.py`,
+`tests/test_hybrid_runtime.py`, `tests/test_hybrid_smoke.py`, with existing
+`tests/test_openai_live.py`, `tests/test_gemini_sdk_contract.py` and
+`tests/tools/test_spotify_control.py`. Live speaker acceptance remains pending.

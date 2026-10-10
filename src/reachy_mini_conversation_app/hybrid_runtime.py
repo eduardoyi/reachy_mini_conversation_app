@@ -36,6 +36,7 @@ from reachy_mini_conversation_app.conversation_handler import (
     HandlerOutput,
     ConversationHandler,
 )
+from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
 
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ class HybridRuntime:
     """Coordinate local ambient capture with one on-demand cloud handler."""
 
     _MAX_ADDRESSED_TEXT_CHARS = 512
+    _ACOUSTIC_WAKE_ACK_TEXT = "Acknowledge the wake word briefly, then listen."
     _LOCAL_PROCESSING_QUEUE_SIZE = 8
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
@@ -332,6 +334,10 @@ class HybridRuntime:
         self._local_event_tasks: set[asyncio.Task[bool]] = set()
         self._local_processing_queue: asyncio.Queue[LocalProcessingItem] | None = None
         self._local_processing_task: asyncio.Task[None] | None = None
+        self._postactivation_speech_observed = False
+        self._acoustic_ack_vad = RmsEnergyVAD()
+        self._pending_acoustic_ack_generation: int | None = None
+        self._acoustic_ack_task: asyncio.Task[None] | None = None
 
         self._metrics_lock = threading.Lock()
         self._ambient_audio_bytes_sent_to_cloud = 0
@@ -829,6 +835,10 @@ class HybridRuntime:
                     barrier_provider = self._capture_barrier_provider
                     self._activation_capture_barrier = barrier_provider() if barrier_provider is not None else None
                     self._clear_postactivation_queue()
+                    self._postactivation_speech_observed = False
+                    self._pending_acoustic_ack_generation = (
+                        generation if reason == "acoustic_wake" and not addressed_text else None
+                    )
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
 
             await self._invoke_acknowledgement(reason)
@@ -911,6 +921,9 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
             if generation and still_command:
+                with self._lifecycle_lock:
+                    self._pending_acoustic_ack_generation = None
+                    self._postactivation_speech_observed = False
                 self._clear_postactivation_queue()
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "activation_cancelled")
             raise
@@ -923,6 +936,9 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
             if generation and still_command:
+                with self._lifecycle_lock:
+                    self._pending_acoustic_ack_generation = None
+                    self._postactivation_speech_observed = False
                 self._clear_postactivation_queue()
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "provider_setup_failed")
             return False
@@ -1113,12 +1129,15 @@ class HybridRuntime:
                     self._connected_since = now
                 self._connection_ready = True
                 self._last_conversation_activity = now
-                self._user_speaking = False
                 self._interaction_busy = False
                 should_flush = bool(self._postactivation_frames)
                 pending_activation_text = self._pending_activation_text
+                pending_acoustic_ack = (
+                    self._pending_acoustic_ack_generation == generation and self._acoustic_ack_task is None
+                )
                 if pending_activation_text is not None and pending_activation_text[0] == generation:
                     self._pending_activation_text = None
+                    pending_acoustic_ack = False
                 else:
                     pending_activation_text = None
             if pending_activation_text is not None:
@@ -1128,12 +1147,20 @@ class HybridRuntime:
                 )
                 with self._lifecycle_lock:
                     self._activation_text_task = task
+            elif pending_acoustic_ack:
+                task = asyncio.create_task(
+                    self._send_acoustic_ack(handler, generation),
+                    name=f"hybrid-acoustic-ack-{generation}",
+                )
+                with self._lifecycle_lock:
+                    self._acoustic_ack_task = task
             elif should_flush:
                 self._schedule_postactivation_flush(handler, generation)
             return
         with self._lifecycle_lock:
             self._connection_ready = False
             self._interaction_busy = False
+            self._user_speaking = False
             connected_since = self._connected_since
             self._connected_since = None
         if connected_since is not None:
@@ -1160,6 +1187,35 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._activation_text_task is current_task:
                     self._activation_text_task = None
+
+    async def _send_acoustic_ack(self, handler: ConversationHandler, generation: int) -> None:
+        """Acknowledge a bare acoustic wake unless speech already resumed."""
+        current_task = asyncio.current_task()
+        try:
+            async with self._provider_call_lock:
+                with self._lifecycle_lock:
+                    connection_ready = self._connection_ready
+                if not self._is_current_handler(handler, generation) or not connection_ready:
+                    return
+                with self._lifecycle_lock:
+                    speech_resumed = self._user_speaking or self._postactivation_speech_observed
+                if not speech_resumed:
+                    try:
+                        await handler.say(self._ACOUSTIC_WAKE_ACK_TEXT)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        logger.warning("Acoustic wake acknowledgement failed: %s", type(error).__name__)
+                if self._is_current_handler(handler, generation):
+                    await self._flush_postactivation_locked(handler, generation)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            with self._lifecycle_lock:
+                if self._acoustic_ack_task is current_task:
+                    self._acoustic_ack_task = None
+                if self._pending_acoustic_ack_generation == generation:
+                    self._pending_acoustic_ack_generation = None
 
     def _schedule_postactivation_flush(self, handler: ConversationHandler, generation: int) -> None:
         with self._lifecycle_lock:
@@ -1202,6 +1258,21 @@ class HybridRuntime:
                 self._clear_postactivation_queue()
                 await self._deactivate_cloud("provider_receive_failed")
                 return
+
+    def _observe_acoustic_ack_frame(self, frame: AudioFrame, generation: int) -> None:
+        """Record local speech evidence while a bare acoustic acknowledgment is pending."""
+        with self._lifecycle_lock:
+            if self._pending_acoustic_ack_generation != generation or self._closed:
+                return
+        try:
+            is_speech = self._acoustic_ack_vad.is_speech(frame)
+        except (TypeError, ValueError) as error:
+            logger.warning("Acoustic acknowledgment VAD rejected a frame: %s", type(error).__name__)
+            return
+        if is_speech:
+            with self._lifecycle_lock:
+                if self._pending_acoustic_ack_generation == generation and not self._closed:
+                    self._postactivation_speech_observed = True
 
     def _enqueue_postactivation(self, frame: AudioFrame, capture_sequence: int | None) -> None:
         duration = self._frame_duration(frame)
@@ -1272,6 +1343,7 @@ class HybridRuntime:
         local_frame = False
         postactivation_frame = False
         observe_postactivation_locally = False
+        observe_acoustic_ack_speech = False
         handler: ConversationHandler | None = None
         generation = 0
         async with self._state_lock:
@@ -1291,11 +1363,13 @@ class HybridRuntime:
                         logger.warning("Ambient frame rejected: %s", type(error).__name__)
                 else:
                     handler = active_handler
+                    observe_acoustic_ack_speech = self._pending_acoustic_ack_generation == generation
             elif mode is RuntimeMode.LOCAL_COMMAND:
                 with self._lifecycle_lock:
                     observe_postactivation_locally = (
                         self._wake_followup_future is not None and not self._wake_followup_future.done()
                     )
+                    observe_acoustic_ack_speech = self._pending_acoustic_ack_generation == generation
                 if barrier is not None and capture_sequence is not None and capture_sequence > barrier:
                     postactivation_frame = True
                 else:
@@ -1316,6 +1390,8 @@ class HybridRuntime:
             return
         if postactivation_frame:
             self._enqueue_postactivation(copied_frame, capture_sequence)
+            if observe_acoustic_ack_speech:
+                self._observe_acoustic_ack_frame(copied_frame, generation)
             if observe_postactivation_locally:
                 await self._enqueue_local_frame(copied_frame, wait_for_completion=wait_for_local_processing)
             return
@@ -1324,13 +1400,19 @@ class HybridRuntime:
 
         with self._lifecycle_lock:
             activation_text_task = self._activation_text_task
-            queue_behind_activation_text = (
-                activation_text_task is not None
-                and not activation_text_task.done()
+            acoustic_ack_task = self._acoustic_ack_task
+            queue_behind_provider_turn = (
+                (
+                    (activation_text_task is not None and not activation_text_task.done())
+                    or (acoustic_ack_task is not None and not acoustic_ack_task.done())
+                )
                 and self._active_handler is handler
                 and self._generation == generation
             )
-        if queue_behind_activation_text:
+        if observe_acoustic_ack_speech:
+            self._observe_acoustic_ack_frame(copied_frame, generation)
+
+        if queue_behind_provider_turn:
             self._enqueue_postactivation(copied_frame, capture_sequence)
             return
 
@@ -1367,7 +1449,6 @@ class HybridRuntime:
                 self._local_processing_task = asyncio.create_task(
                     self._run_local_processing(queue), name="hybrid-local-processing"
                 )
-
         completed = asyncio.get_running_loop().create_future()
         try:
             queue.put_nowait((frame, completed, self._acoustic_epoch))
@@ -1557,7 +1638,10 @@ class HybridRuntime:
                 self._inactivity_task = None
                 self._postactivation_flush_task = None
                 self._activation_text_task = None
+                self._acoustic_ack_task = None
                 self._pending_activation_text = None
+                self._pending_acoustic_ack_generation = None
+                self._postactivation_speech_observed = False
                 self._connection_ready = False
                 self._user_speaking = False
                 self._interaction_busy = False
@@ -1634,6 +1718,7 @@ class HybridRuntime:
                         self._inactivity_task,
                         self._postactivation_flush_task,
                         self._activation_text_task,
+                        self._acoustic_ack_task,
                     )
                     self._generation += 1
                     self._active_handler = None
@@ -1642,7 +1727,10 @@ class HybridRuntime:
                     self._inactivity_task = None
                     self._postactivation_flush_task = None
                     self._activation_text_task = None
+                    self._acoustic_ack_task = None
                     self._pending_activation_text = None
+                    self._pending_acoustic_ack_generation = None
+                    self._postactivation_speech_observed = False
                     self._connection_ready = False
                     self._user_speaking = False
                     self._interaction_busy = False

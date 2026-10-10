@@ -459,3 +459,64 @@ Documentation now distinguishes accepted candidate SDK laptop-speaker operation
 from the still-unreferenced GStreamer bypass. Runtime/defaults/dependencies remain
 unchanged. Verification: supplied metadata review, cross-document consistency and
 `git diff --check`; no tests rerun for this documentation-only update.
+
+
+### Gemini SDK mixer crash investigation — 2026-09-20
+
+Scope: preserve SDK playback, speech wobble and echo-reference routing while
+reproducing the September 19/20 native mixer crashes. Do not change household
+memory, credentials, active configuration or installed SDK internals. Existing
+OpenAI speaker acceptance does not establish Gemini stability.
+
+Both macOS reports identify `audiomixer0:src`, `do_convert_out`, `do_quantize`,
+`converter_generic` and `gst_audio_aggregator_convert_pad_convert_buffer`, with a
+null-address SIGSEGV. The second run completed local memory review without any
+review model request; memory timing alone is not evidence of causation.
+
+Controlled public-SDK subprocess tests, with synthetic zero-valued float32 audio
+and no cloud connection, reproduced SIGSEGV for 1, 2, 3 and 10 sample buffers at
+16 kHz stereo. Tested 80, 160, 240, 320 and 512 sample buffers survived eight
+bursts and gaps each. The runtime reports GStreamer 1.28.4. Microphone frames were
+not stored or sent; no household audio was used.
+
+A bounded Gemini provider probe using only a made-up counting request observed
+PCM byte lengths `{2: 1, 9120: 1, 7680: 2, 36480: 1, 13440: 1}`. The 2-byte
+fragment is one mono int16 sample at 24 kHz, resampled by the shared app boundary
+to one sample at the SDK's 16 kHz. This connects real provider output to the
+reproduced native failure; it does not establish that Gemini alone can trigger
+it. A first probe with minimal configuration returned APIError; a matching
+medium-thinking/voice configuration succeeded. No provider PCM was persisted.
+
+Implementation order: normalize tiny output fragments without discarding speech;
+regression-test ordering, final tails and interruption fences; replay synthetic
+fragment sizes through SDK in a bounded child; run focused and full gates.
+Acceptance: native child survives while preserving SDK path, no lost/reordered
+samples, no old tail after interruption; later user checks audible speech,
+speech movement and speaker interruption. No hardware acceptance is implied.
+
+
+### Tiny-fragment fix validation — 2026-09-20
+
+- Added `Pcm16ChunkBuffer` to the Gemini output path, retaining fewer than 240
+  PCM16 samples, joining next chunks and padding only a final tail. All existing
+  queue clears discard pending samples, including shutdown/reconnect/interruption.
+- Candidate SDK child replay of observed synthetic sizes with `--raw`: **exit -11**.
+  The same child with buffering: **exit 0**, three playback/clear cycles. Repeated
+  with wobble enabled: **exit 0**, 191 SDK wobble callbacks. Commands ran through
+  `subprocess.run(..., timeout=30)` with the documented candidate PYTHONPATH and
+  native environment cleanup; native probe is `tests/native_sdk_gemini_chunks.py`.
+- Installed SDK opt-in command:
+  `REACHY_RUN_SDK_CHUNK_SMOKE=1 REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_native_sdk_gemini_chunks.py -q`:
+  **1 passed in 6.38 s**. No cloud connection or stored microphone data.
+- Focused streaming/Gemini/console tests: **172 passed** before the additional
+  shutdown regression; final Gemini subset **71 passed**.
+- Final gate: `.venv/bin/ruff check .`, `.venv/bin/ruff format --check .` (146
+  files), `.venv/bin/mypy --pretty --show-error-codes` (71 source files), and
+  `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q`: **1251 passed, 4 skipped,
+  2 deliberate invalid-status SDK warnings in 39.86 s**. Four skips are opt-in
+  native tests; the new SDK chunk case was separately run above. Diff check passed.
+- Unrelated TypeSafe exploration files were preserved. No dependencies, installed
+  SDK code, .env or active local provider defaults changed. No commit/push made.
+- Remaining acceptance: user-led Gemini SDK conversation, speaker echo handling,
+  interruptions and visible speech movement. Native callbacks establish the route,
+  not subjective motion quality or an AEC measurement. Physical hardware untested.

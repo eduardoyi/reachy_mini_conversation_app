@@ -117,6 +117,7 @@ values. This keeps one-off commands such as
 | `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. |
 | `GEMINI_THINKING_LEVEL` | `low`, `medium`, or `high` for `gemini-3.8-live-extended-thinking` only; defaults to `medium` for that model. Leave unset for other models. |
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
+| `GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED` | Experimental local microphone onset playback clear for Gemini; default `0`. Set `1` for a supervised interruption trial. Noise can trigger it; cloud generation still controls the response. |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |
@@ -250,7 +251,7 @@ replayed when a session opens.
 Press Space or Enter in the browser conversation view to activate. With a local
 STT endpoint and `LOCAL_CONTEXT_STRATEGY=continuous`, saying “Reachy” also
 activates from locally derived transcript text. The runtime briefly enters
-`LOCAL_COMMAND` and acknowledges physically before any cloud setup. Exact
+`LOCAL_COMMAND` and acknowledges physically before any cloud setup. A bare acoustic wake also requests a brief spoken acknowledgment once connected, unless local speech has already resumed. Exact
 `stop`, `be quiet`, `look left`, `look right`, and `look at me` requests run
 through the existing movement/tool boundaries without opening cloud. Anything
 uncertain escalates to one fresh selected provider handler in
@@ -498,10 +499,16 @@ free: `REALTIME_PROVIDER=gemini .venv/bin/reachy-mini-conversation-app --media-b
 The optional `sim` group supplies the locked MuJoCo 3.3.0 dependency. It is not
 required for ordinary non-simulator runs.
 
+Gemini's tiny PCM fragments are now combined before playback to contain the
+reproduced SDK mixer crash (September 20). Synthetic SDK playback/flush/wobble
+checks pass; live Gemini speaker acceptance remains pending. The SDK route keeps
+speech wobble and echo-reference routing. See the
+[audio investigation](docs/plans/audio-dropout-comparison.md#gemini-sdk-mixer-crash-investigation--2026-09-20).
+
 The SDK LOCAL backend produced the earlier accepted simulator conversations on
 this Mac, but three later cloud-activation runs crashed in the native SDK
-GStreamer `audiomixer` zero-frame path. For the current macOS simulator test,
-explicitly route assistant sound around that mixer input:
+GStreamer `audiomixer` zero-frame path. As a temporary macOS simulator fallback,
+route assistant sound around that mixer input:
 
 ```bash
 AUDIO_OUTPUT_BACKEND=gstreamer REALTIME_PROVIDER=gemini \

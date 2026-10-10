@@ -9,8 +9,9 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
-| [Gemini 3.8 Live Extended Thinking migration](gemini-38-live-extended-thinking-migration.md) | `in-progress` | 2026-09-16 | Gemini async reasoning, shared memory and shutdown implemented; 1,247 tests passed; live transcript parity and rollout pending |
-| [Local audio dropout comparison](audio-dropout-comparison.md) | `Mac headphones and speakers accepted; SDK upstream/hardware pending` | 2026-09-13 | Audio diagnostics, SDK flush candidate and live audio acceptance |
+| [TypeSafe judgment exploration](typesafe-judgment-exploration.md) | `draft` | 2026-09-17 | Synthetic evaluation complete; background memory verification proposed, no runtime integration |
+| [Gemini 3.8 Live Extended Thinking migration](gemini-38-live-extended-thinking-migration.md) | `in-progress` | 2026-09-21 | SDK crash fix user-confirmed; wake acknowledgment and opt-in interruption assist implemented; 1,263 tests passed; speaker retest and live transcript parity pending |
+| [Local audio dropout comparison](audio-dropout-comparison.md) | `GPT speaker path accepted; Gemini tiny-chunk fix native-tested, live pending` | 2026-09-13 | Audio diagnostics, SDK flush candidate and live audio acceptance |
 | [Household memory lifecycle](household-memory-lifecycle.md) | `in-progress` | 2026-09-13 | M1–M2 user accepted; M3 daily tidy-up implemented; synthetic Luna review passed; live follow-up pending |
 | [GPT Live migration](openai-live-migration.md) | `Mac speech movement and speakers accepted; hardware pending` | 2026-09-13 | GPT Live speech, Luna delegation, local movement repair; simulator echo/hearing follow-up |
 | [Spotify playback control](reachy-spotify-control.md) | `complete: Mac playback and search/play/queue accepted` | 2026-09-10 | Optional Mac playback voice controls |

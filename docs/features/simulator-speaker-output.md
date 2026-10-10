@@ -4,6 +4,34 @@
 - Last updated: 2026-09-13
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
+## Gemini tiny-fragment containment — 2026-09-20
+
+September 19/20 Gemini SDK sessions reproduced the native mixer crash despite
+prior GPT Live speaker acceptance. A synthetic Gemini counting response contained
+a one-sample (two-byte) PCM fragment. Passing matching tiny buffers to the public
+SDK reproduced SIGSEGV without a cloud session; the test is isolated in a child.
+
+Gemini now uses `Pcm16ChunkBuffer` before emitting output: retain fewer than 240
+int16 samples at 24 kHz, join them to the next chunk, and emit normal-sized chunks
+immediately. At generation/turn completion, pad a remaining short tail to 10 ms
+with silence. Queue clearing also clears held audio on interruption, reconnect,
+fencing and shutdown. No sample is discarded in uninterrupted speech; pending
+storage is below 480 bytes and only final-tail padding adds duration (under 10 ms).
+The real Gemini wait for its next chunk is not bounded by that audio duration.
+
+The SDK route, software echo-reference path and wobble callbacks remain intact.
+No SDK internals, installed libraries, defaults or credentials were modified.
+`tests/test_streaming.py` and `tests/test_gemini_live.py` cover sample ordering,
+repeated tiny fragments, final-tail padding and interruption. The isolated native
+`tests/native_sdk_gemini_chunks.py` replays synthetic observed chunk sizes through
+the same buffer/resampler and SDK, with wobble enabled and three clear cycles.
+`--raw` intentionally reproduces the unsafe input; do not use it in the app.
+`REACHY_RUN_SDK_CHUNK_SMOKE=1 .venv/bin/pytest tests/test_native_sdk_gemini_chunks.py -q`
+is opt-in because it opens local audio devices; stop the conversation app first.
+This automated check uses the installed SDK. Candidate SDK evidence is recorded
+separately in the audio comparison plan. Live Gemini speaker/echo/gesture acceptance
+must still be repeated; native survival does not establish audible quality or AEC.
+
 ## Current Mac audio guidance
 
 September 13 user trials accepted GPT Live with the patched SDK playback path,
@@ -458,3 +486,37 @@ Software AEC was enabled; three local detections were followed by native clearin
 The excerpt contains 21 additional capture drops and no recorded crash; it ends
 mid-log, so shutdown is not established. This updates speaker acceptance for the
 candidate SDK only. See the comparison plan for timing metadata and remaining limits.
+
+
+September 20 final verification: Ruff/format/mypy passed; full suite **1251 passed,
+4 skipped, 2 deliberate SDK fixture warnings**. The new opt-in SDK chunk test
+passed separately (**1 passed**), candidate replay passed three clear cycles and
+191 wobble callbacks, while raw input reproduced SIGSEGV. Exact commands and
+limits are recorded in the audio comparison plan. Live user acceptance is pending.
+
+
+### Live Gemini follow-up — 2026-09-21
+
+User reports no further crashes and reasonably good laptop-speaker operation
+with the SDK route after tiny-fragment containment. The supplied log excerpt
+ends in orderly Ctrl+C shutdown, not a crash. Remaining user-reported issues are
+slow interruption, silent first acoustic activation and an unsuccessful Spotify
+request. The excerpt has no Spotify call and omits the activation; these require
+separate diagnosis. Speaker acceptance is partial, not a measured AEC result.
+
+For the follow-up trial, keep the simulator daemon running and restart only the
+conversation app with the same SDK command. Add this environment variable before
+rerunning that command (the new option is deliberately off by default):
+
+```bash
+export GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED=1
+```
+
+Test one bare “Reachy” and wait for a brief response; then try a wake immediately
+followed by a question. During a longer answer, interrupt naturally once. Finally
+ask to play a named song on Spotify with the Mac Spotify app open. Record whether
+the acknowledgment overlaps the question, interruption needs a second attempt,
+or the Spotify request produces a tool call/error. The local interruption assist
+can mistake speaker leakage/noise for speech; disable with the same export set to
+`0` if that happens. This trial is still needed; offline tests cannot establish
+speaker echo performance or subjective interruption latency.

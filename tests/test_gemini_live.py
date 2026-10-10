@@ -202,6 +202,7 @@ def gemini_config(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "fake-live-model", raising=False)
     monkeypatch.setattr(config, "GEMINI_VOICE", "Puck", raising=False)
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en-US", raising=False)
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", False, raising=False)
     monkeypatch.setattr(gemini_live, "get_session_greeting_prompt", lambda: "", raising=False)
 
 
@@ -686,6 +687,153 @@ async def test_receive_normalizes_mono_stereo_and_ignores_empty(gemini_config, d
 
 
 @pytest.mark.asyncio
+async def test_local_barge_in_clears_once_and_forwards_microphone(gemini_config, deps, monkeypatch) -> None:
+    """A sustained local onset clears recent playback once while all input frames are sent."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    handler.output_queue.put_nowait((24_000, np.array([7], dtype=np.int16)))
+    await handler._handle_server_message(audio_event(2_000), session, 1)
+
+    loud = np.full(960, 2_000, dtype=np.int16)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    clearer.assert_called_once_with()
+    assert len(session.realtime_inputs) == 3
+    assert handler.output_queue.empty()
+    assert handler._audio_chunks.finish() is None
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_does_not_clear_without_recent_output(gemini_config, deps, monkeypatch) -> None:
+    """A local onset without recent Gemini audio leaves playback untouched."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    handler.output_queue.put_nowait((24_000, np.array([7], dtype=np.int16)))
+
+    loud = np.full(960, 2_000, dtype=np.int16)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    clearer.assert_not_called()
+    assert not handler.output_queue.empty()
+    assert len(session.realtime_inputs) == 3
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_disabled_preserves_recent_playback(gemini_config, deps, monkeypatch) -> None:
+    """The default-off flag preserves existing Gemini playback behavior."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    handler.output_queue.put_nowait((24_000, np.array([7], dtype=np.int16)))
+    await handler._handle_server_message(audio_event(2_000), session, 1)
+
+    loud = np.full(960, 2_000, dtype=np.int16)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    clearer.assert_not_called()
+    assert not handler.output_queue.empty()
+    assert len(session.realtime_inputs) == 3
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_ignores_expired_output_recency(gemini_config, deps, monkeypatch) -> None:
+    """An onset after the recent-output window leaves queued playback untouched."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    handler.output_queue.put_nowait((24_000, np.array([7], dtype=np.int16)))
+    await handler._handle_server_message(audio_event(2_000), session, 1)
+    assert handler._last_barge_in_output_at is not None
+    handler._last_barge_in_output_at -= gemini_live._LOCAL_BARGE_IN_OUTPUT_WINDOW_S + 0.1
+
+    loud = np.full(960, 2_000, dtype=np.int16)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    clearer.assert_not_called()
+    assert not handler.output_queue.empty()
+    assert len(session.realtime_inputs) == 3
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_rearms_after_quiet_audio(gemini_config, deps, monkeypatch) -> None:
+    """A quiet period re-arms the local onset latch for a later answer."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    loud = np.full(960, 2_000, dtype=np.int16)
+    quiet = np.zeros(960, dtype=np.int16)
+
+    await handler._handle_server_message(audio_event(2_000), session, 1)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+    assert clearer.call_count == 1
+
+    for _ in range(10):
+        await handler.receive((24_000, quiet))
+    await handler._handle_server_message(audio_event(2_000), session, 1)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    assert clearer.call_count == 2
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_ignores_stale_output_from_replaced_session(gemini_config, deps, monkeypatch) -> None:
+    """Output recency from an old generation cannot clear the current session."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED", True)
+    old_session = FakeSession()
+    new_session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, old_session, generation=1)
+    clearer = MagicMock()
+    handler._clear_queue = clearer
+    await handler._handle_server_message(audio_event(2_000), old_session, 1)
+    handler.connection = new_session
+    handler._active_generation = 2
+    handler.output_queue.put_nowait((24_000, np.array([7], dtype=np.int16)))
+
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(interrupted=True)),
+        old_session,
+        1,
+    )
+    loud = np.full(960, 2_000, dtype=np.int16)
+    for _ in range(3):
+        await handler.receive((24_000, loud))
+
+    clearer.assert_not_called()
+    assert len(new_session.realtime_inputs) == 3
+    assert not handler.output_queue.empty()
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_successful_media_sends_notify_traffic_observer(gemini_config, deps) -> None:
     """Traffic hooks observe successful audio sends at the provider boundary."""
     session = FakeSession()
@@ -730,7 +878,7 @@ async def test_startup_greeting_can_be_suppressed_for_hybrid_sessions(gemini_con
 
 @pytest.mark.asyncio
 async def test_multi_part_audio_output_is_24khz(gemini_config, deps) -> None:
-    """Every inline audio part is emitted at Gemini's 24 kHz output rate."""
+    """Tiny inline parts retain order and are padded only at generation completion."""
     session = FakeSession()
     handler = build_handler(deps)
     activate_session(handler, session)
@@ -755,7 +903,15 @@ async def test_multi_part_audio_output_is_24khz(gemini_config, deps) -> None:
 
     outputs = queued_messages(handler)
     audio_outputs = [item for item in outputs if isinstance(item, tuple)]
-    assert [(rate, samples.tolist()) for rate, samples in audio_outputs] == [(24_000, [1, 2]), (24_000, [3])]
+    assert audio_outputs == []
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(generation_complete=True)), session, 1
+    )
+    final_audio = [item for item in queued_messages(handler) if isinstance(item, tuple)]
+    assert len(final_audio) == 1
+    rate, samples = final_audio[0]
+    assert rate == 24_000
+    np.testing.assert_array_equal(samples, np.array([1, 2, 3] + [0] * 237, dtype=np.int16))
 
 
 @pytest.mark.asyncio
@@ -2427,3 +2583,45 @@ async def test_server_error_is_user_visible_without_raw_event(gemini_config, dep
     assert isinstance(outputs[0], gemini_live.AdditionalOutputs)
     assert outputs[0].args[0] == {"role": "assistant", "content": "[error] sensitive response text"}
     assert "sensitive response text" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_tiny_audio_joins_next_chunk_and_interruption_discards_tail(gemini_config, deps) -> None:
+    """A real one-sample leading shape is coalesced and cannot leak across interruption."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    await handler._handle_server_message(audio_event(17), session, 1)
+    assert not any(isinstance(item, tuple) for item in queued_messages(handler))
+    normal = np.arange(4560, dtype=np.int16)
+    event = types.LiveServerMessage(
+        server_content=types.LiveServerContent(
+            model_turn=types.Content(
+                parts=[types.Part(inline_data=types.Blob(data=normal.tobytes(), mime_type="audio/pcm"))]
+            )
+        )
+    )
+    await handler._handle_server_message(event, session, 1)
+    frames = [item for item in queued_messages(handler) if isinstance(item, tuple)]
+    assert len(frames) == 1
+    np.testing.assert_array_equal(frames[0][1], np.concatenate(([17], normal)))
+    await handler._handle_server_message(audio_event(99), session, 1)
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(interrupted=True)), session, 1
+    )
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(generation_complete=True)), session, 1
+    )
+    assert not any(isinstance(item, tuple) for item in queued_messages(handler))
+
+
+@pytest.mark.asyncio
+async def test_shutdown_discards_unfinished_audio_before_reactivation(gemini_config, deps) -> None:
+    """A held tiny fragment cannot survive provider shutdown into a fresh activation."""
+    session = FakeSession()
+    handler = build_handler(deps, FakeClient(session))
+    activate_session(handler, session)
+    await handler._handle_server_message(audio_event(99), session, 1)
+    await handler.shutdown()
+    assert handler._audio_chunks.finish() is None
+    assert handler.output_queue.empty()

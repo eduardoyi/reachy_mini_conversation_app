@@ -3,7 +3,7 @@
 - Status: `in-progress` — offline implementation validated; live transcript parity and rollout pending
 - Owner: Reachy project
 - Created: 2026-09-16
-- Last updated: 2026-09-16
+- Last updated: 2026-09-21
 - Current milestone: local implementation and adversarial review complete; controlled live validation next
 
 ## Goal and scope
@@ -541,3 +541,85 @@ UI-only; only exact accepted submitted text enters automatic capture. Explicit
 memory tools and opted-in review remain available. Do not restore provider-specific
 lifecycle duplication or enable spoken capture until real transcript framing is
 verified. The first live trial's APIError and audio capture overload remain open.
+
+
+### SDK audio crash containment — 2026-09-20
+
+September 19/20 trials crashed in the native SDK audio mixer. A synthetic provider
+response exposed a one-sample PCM fragment; synthetic SDK replay reproduces the
+crash. Gemini now coalesces tiny fragments and pads only final tails to 10 ms,
+clearing held audio on interruption/shutdown. The SDK speaker/wobble/echo-reference
+route remains unchanged. See the [investigation](audio-dropout-comparison.md#gemini-sdk-mixer-crash-investigation--2026-09-20)
+for reproducible native evidence and final validation. Live Gemini speaker
+acceptance remains pending; spoken automatic memory capture is still gated.
+
+
+### Speaker trial follow-up — 2026-09-21
+
+User confirms the tiny-fragment correction stopped crashes and speaker operation
+is reasonably good. Supplied partial log ends in orderly Ctrl+C shutdown, with
+capture drops increasing from 356 to 361 in the excerpt. It contains no Spotify
+call and omits the first activation; do not infer a Spotify API error or lost
+first question from this excerpt alone. User reports delayed interruptions,
+a silent first acoustic wake and unsuccessful Spotify playback.
+
+Approved implementation steps:
+1. `hybrid_runtime.py`: acknowledge bare acoustic activation after provider
+   readiness, without duplicating addressed text, racing cancellation, or sending
+   pre-wake ambient audio. Preserve existing generation/cleanup boundaries.
+2. `gemini_live.py`, configuration and tests: opt-in local microphone-onset
+   playback clearing, analogous to the tested OpenAI heuristic. It must preserve
+   microphone forwarding, clear held tiny PCM, debounce/rearm, and never claim
+   local clearing cancels cloud generation. Keep SDK playback and echo reference.
+3. Spotify profile/tool audit: establish schema/dispatch/credential evidence before
+   making a narrow correction. Exact spoken request/reply was requested but not
+   supplied; no speculative API repair or automatic playback side effect.
+4. Review delegated diffs, run focused and full gates, update README and feature
+   contracts with a concrete supervised test command and known limitations.
+
+Risks: residual speaker echo/noise may trigger local clearing; a greeting can
+interrupt an immediate question; arriving provider audio can refill playback after
+local clear. Avoid broad provider refactors or silently enabling experimental
+behavior globally. Native SDK and .env remain unchanged; no commit requested.
+
+Implementation and review complete locally. Luna implementers delivered the two
+changes; primary review requested simpler synchronous wake VAD, generation-safe
+acknowledgment/cancellation, nonblocking capture during acknowledgment, and
+default-off/expired-output interruption coverage before acceptance. No new
+dependency or SDK change was required.
+
+Validation on 2026-09-21:
+- `.venv/bin/ruff check .`: passed.
+- `.venv/bin/ruff format --check .`: 146 files already formatted.
+- `.venv/bin/mypy --pretty --show-error-codes`: passed, 71 source files.
+- `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -q`: 1,263 passed,
+  four opt-in checks skipped, two expected unknown-status SDK warnings, 43.68 s.
+- Focused Gemini/config/OpenAI regression run: 186 passed; focused Spotify and
+  Gemini SDK contract run: 29 passed.
+- `git diff --check`: passed.
+- Read-only live Spotify status: success, configured device available. No playback
+  mutation. Supplied log has no Spotify call; failed spoken request still unresolved.
+
+New tests cover default-off local interruption, microphone forwarding, one clear
+per onset, quiet rearm, expired/stale-generation output; bare wake readiness,
+silence, duplicate connection callbacks, immediate post-barrier speech without
+STT, addressed-text precedence, canceled activation and blocked acknowledgment
+cancellation/nonblocking capture. The smoke test asserts zero ambient upload.
+Live speaker/interruption and actual spoken acknowledgment acceptance remain
+pending; no physical hardware or new native-audio trial was run for this follow-up.
+See [the speaker trial instructions](../features/simulator-speaker-output.md) for
+the added environment flag and the three short checks. No commit or push.
+
+### Reconnect speech-state regression — 2026-10-10
+
+Review of the uncommitted acknowledgment change found that removing the
+`_user_speaking` reset from the connected callback let a provider drop between
+`user_speech_started` and `user_speech_stopped` block inactivity forever after
+reconnect, keeping the cloud session and microphone upload open. The reset now
+runs in the disconnected branch, so post-connect speech detection used by the
+acoustic acknowledgment is unaffected.
+`test_disconnect_mid_utterance_does_not_block_inactivity_after_reconnect` failed
+before the fix and passes after it.
+
+Validation: Ruff check and format, strict mypy (71 files), and
+`.venv/bin/pytest tests/ -q`: 1,264 passed, 4 skipped. No live session run.

@@ -517,12 +517,17 @@ def test_audio_comparison_defaults(monkeypatch) -> None:
 @pytest.mark.parametrize("value", [None, "0", "1"])
 def test_local_interruption_flags_are_opt_in(monkeypatch, value) -> None:
     """Experimental microphone clearing and native override stay off by default."""
-    for name in ("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", "MACOS_LOCAL_AUDIO_FLUSH_ENABLED"):
+    for name in (
+        config.GEMINI_LIVE_LOCAL_BARGE_IN_ENV,
+        "OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED",
+        "MACOS_LOCAL_AUDIO_FLUSH_ENABLED",
+    ):
         monkeypatch.setattr(config.config, name, False)
         if value is None:
             monkeypatch.delenv(name, raising=False)
         else:
             monkeypatch.setenv(name, value)
     config.refresh_runtime_config_from_env()
+    assert config.config.GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED is (value == "1")
     assert config.config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED is (value == "1")
     assert config.config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED is (value == "1")

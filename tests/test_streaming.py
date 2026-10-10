@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from reachy_mini_conversation_app.streaming import (
+    Pcm16ChunkBuffer,
     AdditionalOutputs,
     wait_for_item,
     audio_to_int16,
@@ -75,3 +76,30 @@ def test_resample_audio_rejects_invalid_sample_rates(input_rate: int, output_rat
 
     with pytest.raises(ValueError, match="sample rates must be positive"):
         resample_audio(audio, input_rate, output_rate)
+
+
+def test_pcm_chunks_preserve_samples_and_pad_only_final_tail() -> None:
+    """Tiny fragments join normal audio and only the last short tail gains silence."""
+    chunks = Pcm16ChunkBuffer(240)
+    assert chunks.push(np.array([12], dtype=np.int16)) is None
+    normal = np.arange(480, dtype=np.int16)
+    joined = chunks.push(normal)
+    np.testing.assert_array_equal(joined, np.concatenate(([12], normal)))
+    assert chunks.finish() is None
+    for _ in range(239):
+        assert chunks.push(np.array([7], dtype=np.int16)) is None
+    complete = chunks.push(np.array([8], dtype=np.int16))
+    np.testing.assert_array_equal(complete, np.array([7] * 239 + [8], dtype=np.int16))
+    assert chunks.push(np.array([9], dtype=np.int16)) is None
+    np.testing.assert_array_equal(chunks.finish(), np.array([9] + [0] * 239, dtype=np.int16))
+    assert chunks.finish() is None
+
+
+def test_pcm_chunks_clear_discards_interrupted_tail() -> None:
+    """Clearing held audio prevents stale samples reaching a later turn."""
+    chunks = Pcm16ChunkBuffer(240)
+    chunks.push(np.array([123], dtype=np.int16))
+    chunks.clear()
+    assert chunks.finish() is None
+    fresh = np.ones(240, dtype=np.int16)
+    np.testing.assert_array_equal(chunks.push(fresh), fresh)
