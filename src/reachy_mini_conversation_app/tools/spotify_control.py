@@ -29,6 +29,7 @@ class SpotifySearchLogFilter(logging.Filter):
 logging.getLogger("httpx").addFilter(SpotifySearchLogFilter())
 SPOTIFY_TRANSFER_SETTLE_SECONDS = 0.5
 SPOTIFY_PLAYBACK_CHECK_SECONDS = 1.0
+SPOTIFY_PLAYBACK_CHECK_ATTEMPTS = 3  # some devices (e.g. TVs) never report their state back
 
 
 class SpotifyControl(Tool):
@@ -36,7 +37,7 @@ class SpotifyControl(Tool):
 
     name = "spotify_control"
     description = (
-        "Control Spotify on the configured computer, only when the user asks. "
+        "Control Spotify on the configured device, only when the user asks. "
         "Actions: search, play, queue, resume, pause, next, status. Search Spotify first, then use an exact returned URI. "
         "Search types: track, artist, album, episode, playlist. For podcasts search episodes. "
         "For decade requests use year:2000-2009 in the query. Play replaces current playback; queue appends a "
@@ -65,15 +66,19 @@ class SpotifyControl(Tool):
         client: httpx.AsyncClient, headers: dict[str, str], device_id: str
     ) -> dict[str, object]:
         """Report whether an accepted play command actually started on the configured device."""
-        await asyncio.sleep(SPOTIFY_PLAYBACK_CHECK_SECONDS)
-        response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
-        response.raise_for_status()
-        playback: object = response.json() if response.status_code != 204 else None
-        device = playback.get("device") if isinstance(playback, dict) else None
-        is_playing = isinstance(playback, dict) and playback.get("is_playing") is True
-        on_device = isinstance(device, dict) and device.get("id") == device_id
-        if is_playing and on_device:
-            return {"status": "Spotify is playing on the configured computer."}
+        playback: object = None
+        device: object = None
+        is_playing = on_device = False
+        for _ in range(SPOTIFY_PLAYBACK_CHECK_ATTEMPTS):
+            await asyncio.sleep(SPOTIFY_PLAYBACK_CHECK_SECONDS)
+            response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
+            response.raise_for_status()
+            playback = response.json() if response.status_code != 204 else None
+            device = playback.get("device") if isinstance(playback, dict) else None
+            is_playing = isinstance(playback, dict) and playback.get("is_playing") is True
+            on_device = isinstance(device, dict) and device.get("id") == device_id
+            if is_playing and on_device:
+                return {"status": "Spotify is playing on the configured device."}
         logger.info(
             "Spotify play not confirmed: playback_reported=%s is_playing=%s on_configured_device=%s "
             "item_present=%s device_is_active=%s",
@@ -83,9 +88,10 @@ class SpotifyControl(Tool):
             isinstance(playback, dict) and isinstance(playback.get("item"), dict),
             device.get("is_active") if isinstance(device, dict) else None,
         )
+        # Unconfirmed is not failure: a TV can play while reporting no item, so do not claim an error.
         return {
-            "error": "Spotify accepted the command but is not playing on the configured computer. "
-            "Ask the user to check the Spotify app. Do not auto-retry."
+            "status": "Spotify accepted the command but has not confirmed playback yet. Tell the user it should "
+            "start shortly and to say so if it does not. Do not auto-retry."
         }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: object) -> dict[str, object]:
@@ -233,7 +239,7 @@ class SpotifyControl(Tool):
                         if isinstance(device, dict) and device.get("id") == device_id
                     ]
                     if len(matches) != 1 or matches[0].get("is_restricted") is not False:
-                        return {"error": "Open Spotify on the configured computer; it is unavailable or restricted."}
+                        return {"error": "Open Spotify on the configured device; it is unavailable or restricted."}
                     if action == "status":
                         response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
                         response.raise_for_status()
@@ -244,7 +250,7 @@ class SpotifyControl(Tool):
                             raise ValueError("Invalid playback response")
                         device = playback.get("device")
                         if not isinstance(device, dict) or device.get("id") != device_id:
-                            return {"status": "Spotify playback is not on the configured computer."}
+                            return {"status": "Spotify playback is not on the configured device."}
                         item = playback.get("item")
                         title = item.get("name") if isinstance(item, dict) else None
                         return {
@@ -308,7 +314,7 @@ class SpotifyControl(Tool):
                 if code == 429:
                     return {"error": "Spotify rate limited the request. Wait before asking again."}
                 if code == 404:
-                    return {"error": "Start a song in Spotify on the configured computer first."}
+                    return {"error": "Start a song in Spotify on the configured device first."}
                 return {"error": "Spotify rejected the request (HTTP " + str(code) + ")."}
             except httpx.RequestError as error:
                 logger.warning("Spotify connection failed: %s", type(error).__name__)

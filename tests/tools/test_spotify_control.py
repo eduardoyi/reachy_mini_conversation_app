@@ -276,7 +276,7 @@ async def test_idle_device_is_activated_before_playback(configured, monkeypatch,
     await tool(Mock(spec=ToolDependencies), action="search", query="sample", search_type="track")
     calls.clear()
     result = await tool(Mock(spec=ToolDependencies), action=action, uri=uri)
-    assert result == {"status": "Spotify is playing on the configured computer."}
+    assert result == {"status": "Spotify is playing on the configured device."}
     assert calls == [
         ("GET", "/v1/me/player/devices"),
         ("PUT", "/v1/me/player"),
@@ -290,7 +290,7 @@ async def test_idle_device_is_activated_before_playback(configured, monkeypatch,
     "playback", [None, {"is_playing": False, "device": {"id": "mac"}}, {"is_playing": True, "device": {"id": "tv"}}]
 )
 async def test_accepted_play_that_does_not_start_is_reported(configured, monkeypatch, caplog, playback):
-    """Do not tell the model music is playing when Spotify accepted the command but stayed silent."""
+    """Unconfirmed playback is reported as such: neither claimed as playing nor as a failure."""
     calls = []
 
     def handler(request):
@@ -304,6 +304,28 @@ async def test_accepted_play_that_does_not_start_is_reported(configured, monkeyp
     install_transport(monkeypatch, handler)
     with caplog.at_level(logging.INFO):
         result = await SpotifyControl()(Mock(spec=ToolDependencies), action="resume")
-    assert "not playing" in result["error"]
-    assert len(calls) == 3
+    assert "not confirmed playback" in result["status"]
+    assert "error" not in result
+    assert len(calls) == 2 + spotify_control.SPOTIFY_PLAYBACK_CHECK_ATTEMPTS
     assert "Spotify play not confirmed: playback_reported=" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_slow_starting_device_is_confirmed_once_it_plays(configured, monkeypatch):
+    """An idle TV can take seconds to start; keep checking instead of reporting a false failure."""
+    checks = []
+
+    def handler(request):
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        if request.method == "GET":
+            checks.append(request)
+            if len(checks) < 3:
+                return httpx.Response(200, json={"is_playing": False, "device": {"id": "mac"}, "item": None})
+            return playing_on("mac")
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    result = await SpotifyControl()(Mock(spec=ToolDependencies), action="resume")
+    assert result == {"status": "Spotify is playing on the configured device."}
+    assert len(checks) == 3

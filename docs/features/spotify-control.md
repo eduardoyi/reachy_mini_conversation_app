@@ -112,8 +112,8 @@ nothing played and the model told the user it had. Spotify accepts commands for 
 device that is not the active player without starting it. For `play` and `resume`,
 when the pinned device reports `is_active` other than true, the tool now first
 transfers playback to that same pinned device (`PUT /me/player` with
-`play: false`) and waits 0.5 s. After `play` or `resume` it waits 1 s and reads
-`GET /me/player`; unless that reports playing on the pinned device, it returns an
+`play: false`) and waits 0.5 s. After `play` or `resume` it reads `GET /me/player`
+once a second for up to six seconds; unless that reports playing on the pinned device, it returns an
 error telling the model the command was accepted but nothing is playing, so it
 does not claim success. These are additional requests within one command, not
 retries; the mutation itself is still sent once.
@@ -144,3 +144,18 @@ track on the account's TV started at once. Only starting new content on the Mac
 desktop app fails, even after quitting and reopening the app. The fault is local to
 that desktop client; the tool and authorization need no change. Suggested user fix:
 sign out of and back into the Mac app, or reinstall it.
+
+Device switch (2026-10-12): logging the Mac desktop app out and in did not help, so
+the user pointed `SPOTIFY_DEVICE_ID` at the living-room TV, where Web API playback
+works. An idle TV had not started three seconds after an accepted play, although it
+then played, so the confirmation now polls for up to six seconds instead of checking
+once after one second (`test_slow_starting_device_is_confirmed_once_it_plays`).
+Tool wording now says "configured device" rather than "configured computer".
+
+TV follow-up (same day): with the app running, the TV played the requested track while
+`GET /me/player` reported it active with `is_playing` false and no item for all six
+checks, so Reachy wrongly told the user playback had failed. Some devices do not
+report playback state back to the Web API. An unconfirmed play is now a status, not an
+error: the model tells the user the track should start shortly and to say if it does
+not. Confirmation polls three times, one second apart, and a confirmed play still
+returns "Spotify is playing on the configured device."
