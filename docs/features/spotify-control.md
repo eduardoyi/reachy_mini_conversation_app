@@ -159,3 +159,12 @@ report playback state back to the Web API. An unconfirmed play is now a status, 
 error: the model tells the user the track should start shortly and to say if it does
 not. Confirmation polls three times, one second apart, and a confirmed play still
 returns "Spotify is playing on the configured device."
+
+Confirmation removed (same day): after the user reinstalled the Mac desktop app,
+Web API playback worked on both the Mac and the TV, yet `GET /me/player` still
+reported `is_playing` false with no item for several seconds on every successful
+play. The state endpoint cannot confirm a fresh start, so the polling only delayed
+the reply by about three seconds and made the model hedge. Play and resume now
+return success once Spotify accepts the command (HTTP 204); the idle-device
+activation and the URI-kind log remain. A device that silently fails to start is
+again indistinguishable from success, so the user would notice and say so.

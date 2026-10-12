@@ -28,8 +28,6 @@ class SpotifySearchLogFilter(logging.Filter):
 
 logging.getLogger("httpx").addFilter(SpotifySearchLogFilter())
 SPOTIFY_TRANSFER_SETTLE_SECONDS = 0.5
-SPOTIFY_PLAYBACK_CHECK_SECONDS = 1.0
-SPOTIFY_PLAYBACK_CHECK_ATTEMPTS = 3  # some devices (e.g. TVs) never report their state back
 
 
 class SpotifyControl(Tool):
@@ -60,39 +58,6 @@ class SpotifyControl(Tool):
         """Serialize commands and token refresh without connecting during startup."""
         self._lock = asyncio.Lock()
         self._search_results: dict[str, float] = {}
-
-    @staticmethod
-    async def _confirm_playing(
-        client: httpx.AsyncClient, headers: dict[str, str], device_id: str
-    ) -> dict[str, object]:
-        """Report whether an accepted play command actually started on the configured device."""
-        playback: object = None
-        device: object = None
-        is_playing = on_device = False
-        for _ in range(SPOTIFY_PLAYBACK_CHECK_ATTEMPTS):
-            await asyncio.sleep(SPOTIFY_PLAYBACK_CHECK_SECONDS)
-            response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
-            response.raise_for_status()
-            playback = response.json() if response.status_code != 204 else None
-            device = playback.get("device") if isinstance(playback, dict) else None
-            is_playing = isinstance(playback, dict) and playback.get("is_playing") is True
-            on_device = isinstance(device, dict) and device.get("id") == device_id
-            if is_playing and on_device:
-                return {"status": "Spotify is playing on the configured device."}
-        logger.info(
-            "Spotify play not confirmed: playback_reported=%s is_playing=%s on_configured_device=%s "
-            "item_present=%s device_is_active=%s",
-            isinstance(playback, dict),
-            is_playing,
-            on_device,
-            isinstance(playback, dict) and isinstance(playback.get("item"), dict),
-            device.get("is_active") if isinstance(device, dict) else None,
-        )
-        # Unconfirmed is not failure: a TV can play while reporting no item, so do not claim an error.
-        return {
-            "status": "Spotify accepted the command but has not confirmed playback yet. Tell the user it should "
-            "start shortly and to say so if it does not. Do not auto-retry."
-        }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: object) -> dict[str, object]:
         """Execute a bounded request without replaying playback mutations."""
@@ -289,7 +254,6 @@ class SpotifyControl(Tool):
                         response.raise_for_status()
                         if action == "play":
                             logger.info("Spotify play accepted kind=%s", uri.split(":")[1])
-                            return await self._confirm_playing(client, headers, device_id)
                         return {"status": "Spotify accepted the " + action + " command."}
                     method, endpoint = {
                         "resume": ("PUT", "play"),
@@ -303,8 +267,6 @@ class SpotifyControl(Tool):
                         headers=headers,
                     )
                     response.raise_for_status()
-                    if action == "resume":
-                        return await self._confirm_playing(client, headers, device_id)
                     return {"status": "Spotify accepted the " + action + " command."}
             except httpx.HTTPStatusError as error:
                 code = error.response.status_code
