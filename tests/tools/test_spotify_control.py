@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import httpx
 import pytest
 
+from reachy_mini_conversation_app.tools import spotify_control
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
 
@@ -30,6 +31,18 @@ def configured(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture(autouse=True)
+def no_spotify_waits(monkeypatch):
+    """Skip the device-activation and playback-check pauses."""
+    monkeypatch.setattr(spotify_control, "SPOTIFY_TRANSFER_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(spotify_control, "SPOTIFY_PLAYBACK_CHECK_SECONDS", 0.0)
+
+
+def playing_on(device_id: str) -> httpx.Response:
+    """Return a current-playback response for one device."""
+    return httpx.Response(200, json={"is_playing": True, "device": {"id": device_id}, "item": {"name": "x"}})
+
+
 def install_transport(monkeypatch, handler):
     """Install transport."""
     original = httpx.AsyncClient
@@ -39,9 +52,7 @@ def install_transport(monkeypatch, handler):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "action,method,suffix", [("resume", "PUT", "play"), ("pause", "PUT", "pause"), ("next", "POST", "next")]
-)
+@pytest.mark.parametrize("action,method,suffix", [("pause", "PUT", "pause"), ("next", "POST", "next")])
 async def test_controls_only_selected_device(configured, monkeypatch, action, method, suffix):
     """Test controls only selected device."""
     calls = []
@@ -186,9 +197,12 @@ async def test_search_then_select(configured, monkeypatch, kind, action):
         calls.append(request)
         if request.url.path.endswith("/search"):
             assert request.url.params["type"] == kind
+            assert "market" not in request.url.params  # needs a profile scope this app does not request
             return httpx.Response(200, json={kind + "s": {"items": [None, {"uri": uri, "name": "Selection"}]}})
         if request.url.path.endswith("/devices"):
-            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False}]})
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        if request.url.path.endswith("/me/player"):
+            return playing_on("mac")
         assert request.url.params["device_id"] == "mac"
         if action == "queue":
             assert request.url.params["uri"] == uri
@@ -203,7 +217,7 @@ async def test_search_then_select(configured, monkeypatch, kind, action):
     found = await tool(Mock(spec=ToolDependencies), action="search", query="sample", search_type=kind)
     assert found["results"][0]["uri"] == uri
     assert "status" in await tool(Mock(spec=ToolDependencies), action=action, uri=uri)
-    assert len(calls) == 3
+    assert len(calls) == (4 if action == "play" else 3)
 
 
 @pytest.mark.asyncio
@@ -234,3 +248,62 @@ async def test_search_query_is_not_logged(configured, monkeypatch, caplog):
         "results"
     ] == []
     assert "private-search" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["play", "resume"])
+async def test_idle_device_is_activated_before_playback(configured, monkeypatch, action):
+    """An idle desktop app accepts play with HTTP 204 but stays silent unless it is the active device first."""
+    uri = "spotify:track:" + "a" * 22
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json={"tracks": {"items": [{"uri": uri, "name": "Selection"}]}})
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": False}]})
+        if request.method == "PUT" and request.url.path == "/v1/me/player":
+            assert json.loads(request.content) == {"device_ids": ["mac"], "play": False}
+            return httpx.Response(204)
+        if request.method == "GET" and request.url.path == "/v1/me/player":
+            return playing_on("mac")
+        assert request.url.params["device_id"] == "mac"
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    tool = SpotifyControl()
+    await tool(Mock(spec=ToolDependencies), action="search", query="sample", search_type="track")
+    calls.clear()
+    result = await tool(Mock(spec=ToolDependencies), action=action, uri=uri)
+    assert result == {"status": "Spotify is playing on the configured computer."}
+    assert calls == [
+        ("GET", "/v1/me/player/devices"),
+        ("PUT", "/v1/me/player"),
+        ("PUT", "/v1/me/player/play"),
+        ("GET", "/v1/me/player"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "playback", [None, {"is_playing": False, "device": {"id": "mac"}}, {"is_playing": True, "device": {"id": "tv"}}]
+)
+async def test_accepted_play_that_does_not_start_is_reported(configured, monkeypatch, caplog, playback):
+    """Do not tell the model music is playing when Spotify accepted the command but stayed silent."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        if request.method == "GET":
+            return httpx.Response(204) if playback is None else httpx.Response(200, json=playback)
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    with caplog.at_level(logging.INFO):
+        result = await SpotifyControl()(Mock(spec=ToolDependencies), action="resume")
+    assert "not playing" in result["error"]
+    assert len(calls) == 3
+    assert "Spotify play not confirmed: playback_reported=" in caplog.text

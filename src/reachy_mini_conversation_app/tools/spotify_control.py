@@ -27,6 +27,8 @@ class SpotifySearchLogFilter(logging.Filter):
 
 
 logging.getLogger("httpx").addFilter(SpotifySearchLogFilter())
+SPOTIFY_TRANSFER_SETTLE_SECONDS = 0.5
+SPOTIFY_PLAYBACK_CHECK_SECONDS = 1.0
 
 
 class SpotifyControl(Tool):
@@ -57,6 +59,34 @@ class SpotifyControl(Tool):
         """Serialize commands and token refresh without connecting during startup."""
         self._lock = asyncio.Lock()
         self._search_results: dict[str, float] = {}
+
+    @staticmethod
+    async def _confirm_playing(
+        client: httpx.AsyncClient, headers: dict[str, str], device_id: str
+    ) -> dict[str, object]:
+        """Report whether an accepted play command actually started on the configured device."""
+        await asyncio.sleep(SPOTIFY_PLAYBACK_CHECK_SECONDS)
+        response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
+        response.raise_for_status()
+        playback: object = response.json() if response.status_code != 204 else None
+        device = playback.get("device") if isinstance(playback, dict) else None
+        is_playing = isinstance(playback, dict) and playback.get("is_playing") is True
+        on_device = isinstance(device, dict) and device.get("id") == device_id
+        if is_playing and on_device:
+            return {"status": "Spotify is playing on the configured computer."}
+        logger.info(
+            "Spotify play not confirmed: playback_reported=%s is_playing=%s on_configured_device=%s "
+            "item_present=%s device_is_active=%s",
+            isinstance(playback, dict),
+            is_playing,
+            on_device,
+            isinstance(playback, dict) and isinstance(playback.get("item"), dict),
+            device.get("is_active") if isinstance(device, dict) else None,
+        )
+        return {
+            "error": "Spotify accepted the command but is not playing on the configured computer. "
+            "Ask the user to check the Spotify app. Do not auto-retry."
+        }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: object) -> dict[str, object]:
         """Execute a bounded request without replaying playback mutations."""
@@ -155,7 +185,11 @@ class SpotifyControl(Tool):
                     if action == "search":
                         response = await client.get(
                             "https://api.spotify.com/v1/search",
-                            params={"q": str(query).strip(), "type": str(search_type), "limit": 5},
+                            params={
+                                "q": str(query).strip(),
+                                "type": str(search_type),
+                                "limit": 5,
+                            },
                             headers=headers,
                         )
                         response.raise_for_status()
@@ -217,6 +251,15 @@ class SpotifyControl(Tool):
                             "status": "playing" if playback.get("is_playing") else "paused",
                             "track": title if isinstance(title, str) else "Unknown track",
                         }
+                    if action in {"play", "resume"} and matches[0].get("is_active") is not True:
+                        # An idle desktop app accepts play commands (HTTP 204) without playing; activate it first.
+                        response = await client.put(
+                            "https://api.spotify.com/v1/me/player",
+                            json={"device_ids": [device_id], "play": False},
+                            headers=headers,
+                        )
+                        response.raise_for_status()
+                        await asyncio.sleep(SPOTIFY_TRANSFER_SETTLE_SECONDS)
                     if action in {"play", "queue"}:
                         assert isinstance(uri, str)
                         if action == "queue":
@@ -238,6 +281,9 @@ class SpotifyControl(Tool):
                                 headers=headers,
                             )
                         response.raise_for_status()
+                        if action == "play":
+                            logger.info("Spotify play accepted kind=%s", uri.split(":")[1])
+                            return await self._confirm_playing(client, headers, device_id)
                         return {"status": "Spotify accepted the " + action + " command."}
                     method, endpoint = {
                         "resume": ("PUT", "play"),
@@ -251,6 +297,8 @@ class SpotifyControl(Tool):
                         headers=headers,
                     )
                     response.raise_for_status()
+                    if action == "resume":
+                        return await self._confirm_playing(client, headers, device_id)
                     return {"status": "Spotify accepted the " + action + " command."}
             except httpx.HTTPStatusError as error:
                 code = error.response.status_code

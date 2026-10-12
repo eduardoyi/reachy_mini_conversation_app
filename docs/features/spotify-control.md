@@ -5,8 +5,9 @@
 The optional `spotify_control` tool resumes existing playback, pauses, skips one
 track or reports current playback on one configured Spotify Connect device.
 It is included in the household companion profile; missing configuration returns
-an error without networking. It does not transfer playback,
-change volume or run background polling. The simulator and real app share this
+an error without networking. It may make the configured device active (see the
+2026-10-12 update) but never moves playback elsewhere, changes volume or runs
+background polling. The simulator and real app share this
 standard tool path; no Reachy SDK internals change.
 
 An active conversation's explicit tool call enters the shared tool registry,
@@ -102,3 +103,44 @@ queue acceptance remain pending. No new dependencies or authorization scopes.
 and artist playback, podcast search, queue addition and a 2000s request. The
 search/play/queue milestone is accepted on the Mac; preceding pending live-test
 notes describe the state before this user acceptance.
+
+## Idle-device activation and play confirmation — 2026-10-12
+
+On the Reachy Mini Lite bring-up the Mac desktop app was listed as an available,
+unrestricted device, and `PUT /me/player/play?device_id=…` returned HTTP 204, yet
+nothing played and the model told the user it had. Spotify accepts commands for a
+device that is not the active player without starting it. For `play` and `resume`,
+when the pinned device reports `is_active` other than true, the tool now first
+transfers playback to that same pinned device (`PUT /me/player` with
+`play: false`) and waits 0.5 s. After `play` or `resume` it waits 1 s and reads
+`GET /me/player`; unless that reports playing on the pinned device, it returns an
+error telling the model the command was accepted but nothing is playing, so it
+does not claim success. These are additional requests within one command, not
+retries; the mutation itself is still sent once.
+
+Tests: `test_idle_device_is_activated_before_playback` (request order for play and
+resume) and `test_accepted_play_that_does_not_start_is_reported` (no playback,
+paused, other device). Live acceptance on the Mac is pending.
+
+Follow-up the same day: with the Mac already the active player, play still returned
+204 and the desktop app showed an empty player (pause icon, no track, `-:--`),
+which suggests the app received content it could not load. `market=from_token`
+was tried for search and reverted: with only the two playback scopes Spotify
+answers 403 "Insufficient client scope", and search without a market already
+returns `is_playable`. Accepted plays log only the URI kind (`track`, `album`,
+`playlist`, …), and an unconfirmed play logs true/false playback state.
+
+A direct check outside the app (known track, `is_playable=true`, pinned Mac device
+active and unrestricted at volume 91) reproduced the failure: play returned 204,
+and three seconds later the player reported the Mac with no item, `is_playing`
+false, progress 0 and every action disallowed, including transfer. The command
+reaches the desktop app (it stops local playback and goes blank) but the app does
+not load the track, so the fault is in the Spotify client or account state, not
+this tool's request. Investigation continues.
+
+Isolation result (2026-10-12): with the same login and device ID, pause and resume
+on the Mac worked (HTTP 200, `is_playing` flipped as expected), and playing the same
+track on the account's TV started at once. Only starting new content on the Mac
+desktop app fails, even after quitting and reopening the app. The fault is local to
+that desktop client; the tool and authorization need no change. Suggested user fix:
+sign out of and back into the Mac app, or reinstall it.
