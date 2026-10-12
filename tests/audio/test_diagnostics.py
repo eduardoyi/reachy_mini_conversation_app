@@ -29,3 +29,18 @@ def test_capture_and_event_loop_can_update_same_summary(caplog) -> None:
     with caplog.at_level(logging.INFO):
         diagnostics.report(captured=100, dropped=0)
     assert json.loads(caplog.records[-1].args[2])["capture_pull"]["count"] == 100
+
+
+def test_reports_forwarded_input_levels_and_server_idle_time(caplog) -> None:
+    """Report mic level counts and backend silence so a mute mic and a silent server can be told apart."""
+    diagnostics = AudioDiagnostics(loud_rms_threshold=400.0)
+    for rms in (50.0, 399.0, 400.0, 1200.4):
+        diagnostics.observe_input_level(rms)
+    with caplog.at_level(logging.INFO):
+        diagnostics.report(captured=4, dropped=0, server_idle_s=12.34)
+        diagnostics.report(captured=4, dropped=0)
+    first, second = caplog.records
+    assert json.loads(first.args[3]) == {"frames": 4, "loud": 2, "max_rms": 1200}
+    assert first.args[4] == "12.3"
+    assert json.loads(second.args[3]) == {"frames": 0, "loud": 0, "max_rms": 0}
+    assert second.args[4] == "n/a"

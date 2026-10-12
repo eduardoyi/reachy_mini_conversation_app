@@ -397,6 +397,13 @@ full `REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/ -v` passed 1119 tests wi
 files), launch-function `zsh -n`, and `git diff --check` passed. Exact commands and
 remaining human/native acceptance are recorded in the comparison plan.
 
+Update 2026-10-12: each report also carries `input_level` (forwarded microphone
+frames, frames at or above `LOCAL_VAD_RMS_THRESHOLD`, and the window's maximum
+channel-0 int16 RMS) and, in direct mode, `server_idle_s` (seconds since the handler
+last recorded backend activity; `n/a` in hybrid mode). Together they separate a
+silent microphone from a backend that stops answering live speech. Only these
+aggregates are logged, never samples.
+
 ## First-use import stalls — 2026-09-13
 
 User A/B/C trials all showed early loop stalls followed by stable processing.
@@ -520,3 +527,21 @@ or the Spotify request produces a tool call/error. The local interruption assist
 can mistake speaker leakage/noise for speech; disable with the same export set to
 `0` if that happens. This trial is still needed; offline tests cannot establish
 speaker echo performance or subjective interruption latency.
+
+## Paced SDK playback — 2026-10-12
+
+On the SDK speaker path, `LocalStream.play_loop` no longer hands each provider
+frame to `push_audio_sample` as soon as it arrives. Providers stream faster than
+real time, so seconds of speech used to accumulate inside the native pipeline,
+and on macOS LOCAL (where native `clear_player` stays skipped without the
+reviewed SDK candidate) an interruption could not remove it. Frames are now
+split evenly into pieces of at most `PLAYBACK_PIECE_SECONDS` (0.1 s) and pushed
+only while less than `PLAYBACK_LEAD_SECONDS` (0.3 s) of pushed audio remains
+unplayed. The remainder waits in an app-owned queue that `_clear_robot_playback`
+empties immediately, bounding talk-over after an interruption to roughly the
+lead plus one piece. The 0.3 s lead covers the ~230 ms event-loop stalls seen on
+hardware. The app-owned GStreamer speaker path is unchanged because its flush
+already clears. Tests: `test_play_loop_paces_long_replies_into_the_sdk`,
+`test_interruption_drops_paced_audio_not_yet_in_the_sdk`,
+`test_play_loop_splits_frames_evenly_without_tiny_pieces`. Audible acceptance on
+the Reachy Mini Lite is pending.

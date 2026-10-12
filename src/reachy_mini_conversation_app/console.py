@@ -7,6 +7,7 @@ selects the provider, and edits only the Hugging Face connection target.
 import os
 import sys
 import json
+import math
 import time
 import queue
 import asyncio
@@ -15,9 +16,11 @@ import ipaddress
 import threading
 from typing import Any, List, TypeVar, Optional, Protocol
 from pathlib import Path
+from collections import deque
 from collections.abc import Callable, Iterator, Coroutine
 
 import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini import ReachyMini
 from reachy_mini.io.jsonrpc import JsonRpcError
@@ -50,7 +53,7 @@ from reachy_mini_conversation_app.config import (
     get_realtime_missing_config_message,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.streaming import AdditionalOutputs, resample_audio, audio_to_float32
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16, resample_audio, audio_to_float32
 from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime
 from reachy_mini_conversation_app.household_memory import (
     MemoryStoreError,
@@ -69,6 +72,7 @@ from reachy_mini_conversation_app.profile_tool_routes import register_profile_to
 from reachy_mini_conversation_app.audio.speaker_output import SpeakerOutput, create_speaker_output
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.local_audio_backends import pcm16_rms
 
 
 try:
@@ -134,8 +138,18 @@ BACKEND_RETRY_DELAY_SECONDS = 5.0
 CAPTURE_QUEUE_SIZE = 200  # about 2 s of 10 ms SDK frames, enough to ride out event-loop stalls
 CAPTURE_POLL_INTERVAL_SECONDS = 0.005
 CAPTURE_STOP_JOIN_TIMEOUT_SECONDS = 0.1
+PLAYBACK_LEAD_SECONDS = 0.3  # SDK audio kept ahead of the speaker; bounds talk-over after an interruption
+PLAYBACK_PIECE_SECONDS = 0.1
 HYBRID_ACTIVATION_TIMEOUT_SECONDS = 10.0
 LOCAL_TRANSCRIPT_PREVIEW_PATH = "/api/transcript-preview"
+
+
+def _channel0_rms(audio_frame: NDArray[Any]) -> float:
+    """Return the int16 RMS of the channel the direct providers send."""
+    samples = audio_frame
+    if samples.ndim == 2:
+        samples = samples[:, 0] if samples.shape[0] >= samples.shape[1] else samples[0]
+    return pcm16_rms(audio_to_int16(samples))
 
 
 class _HybridLoopUnavailable(RuntimeError):
@@ -363,6 +377,8 @@ class LocalStream:
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
         self._audio_diagnostics: AudioDiagnostics | None = None
         self._capture_worker: _AudioCaptureWorker | None = None
+        self._paced_playback: deque[tuple[NDArray[np.float32], int]] = deque()
+        self._paced_playback_until = 0.0
         self._speaker_output: SpeakerOutput | None = None
         self._speaker_output_factory = speaker_output_factory
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
@@ -1551,12 +1567,26 @@ class LocalStream:
                     formatted_error,
                     self._backend_retry_delay,
                 )
+                if self._can_rebuild_handler():
+                    # A session the provider closed (e.g. Gemini close code 1000) can leave the handler fenced,
+                    # so retry with a fresh handler rather than the same one.
+                    await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    self._restart_requested.set()
+                    continue
             else:
                 if self._stop_event.is_set():
                     return
                 self._set_backend_connection_state("disconnected")
                 if self._restart_requested.is_set():
                     logger.info("Backend stopped for requested restart.")
+                    continue
+                if self._can_rebuild_handler():
+                    # A provider-ended session (e.g. Gemini GoAway at its time limit) fences its handler.
+                    logger.info(
+                        "Backend session ended. Starting a fresh session in %.1f seconds.", self._backend_retry_delay
+                    )
+                    await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    self._restart_requested.set()
                     continue
                 logger.info(
                     "Backend session ended. Settings UI remains available; retrying in %.1f seconds.",
@@ -1745,6 +1775,7 @@ class LocalStream:
         if self._speaker_output is not None:
             self._speaker_output.flush()
             return
+        self._paced_playback.clear()
         audio = getattr(media, "audio", None)
         if audio is None:
             return
@@ -1787,7 +1818,11 @@ class LocalStream:
         if getattr(self._robot.media, "backend", None) == MediaBackend.NO_MEDIA:
             logger.info("Media disabled; microphone capture not started.")
             return
-        self._audio_diagnostics = AudioDiagnostics() if config.AUDIO_DIAGNOSTICS_ENABLED else None
+        self._audio_diagnostics = (
+            AudioDiagnostics(loud_rms_threshold=config.LOCAL_VAD_RMS_THRESHOLD)
+            if config.AUDIO_DIAGNOSTICS_ENABLED
+            else None
+        )
         capture_worker = self._capture_worker
         if capture_worker is None:
             capture_worker = _AudioCaptureWorker(self._robot.media, diagnostics=self._audio_diagnostics)
@@ -1826,6 +1861,7 @@ class LocalStream:
                         await self.handler.receive(frame)
                     if self._audio_diagnostics is not None:
                         self._audio_diagnostics.observe("input_forward", time.monotonic() - forward_started)
+                        self._audio_diagnostics.observe_input_level(_channel0_rms(audio_frame))
                     self._emit_level("user", audio_frame)
         finally:
             if diagnostics_task is not None:
@@ -1833,7 +1869,11 @@ class LocalStream:
                 await asyncio.gather(diagnostics_task, return_exceptions=True)
             capture_worker.stop()
             if self._audio_diagnostics is not None:
-                self._audio_diagnostics.report(captured=capture_worker.sequence, dropped=capture_worker.dropped_frames)
+                self._audio_diagnostics.report(
+                    captured=capture_worker.sequence,
+                    dropped=capture_worker.dropped_frames,
+                    server_idle_s=self._server_idle_seconds(),
+                )
             self._audio_diagnostics = None
             if self._capture_worker is capture_worker:
                 self._capture_worker = None
@@ -1852,15 +1892,59 @@ class LocalStream:
             now = time.monotonic()
             diagnostics.observe("loop_lag", now - scheduled)
             if now - last_report >= 5.0:
-                diagnostics.report(captured=capture_worker.sequence, dropped=capture_worker.dropped_frames)
+                diagnostics.report(
+                    captured=capture_worker.sequence,
+                    dropped=capture_worker.dropped_frames,
+                    server_idle_s=self._server_idle_seconds(),
+                )
                 last_report = now
 
+    def _server_idle_seconds(self) -> float | None:
+        """Return seconds since the direct-mode handler last saw backend activity."""
+        if self._hybrid_runtime is not None or not isinstance(self.handler, ConversationHandler):
+            return None
+        return time.monotonic() - self.handler.last_activity_time
+
+    def _push_playback(self, audio_frame: NDArray[np.float32], sample_rate: int) -> None:
+        """Hand one frame to the speaker and record its playback duration."""
+        duration_s = audio_frame.shape[0] / sample_rate
+        playback_started = time.monotonic()
+        if self._speaker_output is not None:
+            self._speaker_output.push(audio_frame)
+        else:
+            self._robot.media.push_audio_sample(audio_frame)
+            self._paced_playback_until = max(self._paced_playback_until, playback_started) + duration_s
+        if self._audio_diagnostics is not None:
+            self._audio_diagnostics.observe("playback_push", time.monotonic() - playback_started)
+        if self._hybrid_runtime is not None:
+            self._hybrid_runtime.note_playback_queued(duration_s)
+        elif isinstance(self.handler, ConversationHandler):
+            self.handler.note_playback_queued(duration_s)
+        self._emit_level("assistant", audio_frame)
+
+    def _push_due_playback(self) -> float | None:
+        """Feed paced SDK audio while less than the lead is queued; return seconds until the next push."""
+        while self._paced_playback:
+            wait_s = self._paced_playback_until - time.monotonic() - PLAYBACK_LEAD_SECONDS
+            if wait_s > 0:
+                return wait_s
+            audio_frame, sample_rate = self._paced_playback.popleft()
+            self._push_playback(audio_frame, sample_rate)
+        return None
+
     async def play_loop(self) -> None:
-        """Fetch outputs from the handler and play audio frames."""
+        """Fetch outputs from the handler and play audio frames.
+
+        SDK playback is paced so only ``PLAYBACK_LEAD_SECONDS`` sits in the native
+        pipeline; the rest stays in an app queue that interruptions drop at once.
+        """
         while not self._stop_event.is_set():
             handler = self.handler
+            next_push_s = self._push_due_playback()
             try:
-                handler_output = await asyncio.wait_for(handler.emit(), timeout=0.5)
+                handler_output = await asyncio.wait_for(
+                    handler.emit(), timeout=0.5 if next_push_s is None else min(0.5, next_push_s)
+                )
             except asyncio.TimeoutError:
                 continue
 
@@ -1899,18 +1983,14 @@ class LocalStream:
                     logger.warning("Ignoring invalid output audio frame: %s", exc)
                     continue
 
-                playback_started = time.monotonic()
                 if self._speaker_output is not None:
-                    self._speaker_output.push(audio_frame)
+                    self._push_playback(audio_frame, output_sample_rate)
                 else:
-                    self._robot.media.push_audio_sample(audio_frame)
-                if self._audio_diagnostics is not None:
-                    self._audio_diagnostics.observe("playback_push", time.monotonic() - playback_started)
-                if self._hybrid_runtime is not None:
-                    self._hybrid_runtime.note_playback_queued(audio_frame.shape[0] / output_sample_rate)
-                elif isinstance(self.handler, ConversationHandler):
-                    self.handler.note_playback_queued(audio_frame.shape[0] / output_sample_rate)
-                self._emit_level("assistant", audio_frame)
+                    pieces = math.ceil(audio_frame.shape[0] / (output_sample_rate * PLAYBACK_PIECE_SECONDS))
+                    self._paced_playback.extend(
+                        (piece, output_sample_rate) for piece in np.array_split(audio_frame, max(1, pieces))
+                    )
+                    self._push_due_playback()
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

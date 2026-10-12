@@ -225,7 +225,13 @@ result of an explicit camera-tool call, not merely because a camera exists.
 Tool results, transcripts, assistant audio, interruptions, and session errors
 remain inside the existing conversation lifecycle. A provider/session failure
 is reported through logs and the settings connection state; the supervisor can
-retry or rebuild the handler.
+retry or rebuild the handler. In direct mode (no hybrid runtime), a session that
+the provider ends normally, such as a GoAway at Gemini's session time limit,
+leaves its handler policy-fenced, so the supervisor waits the retry delay and
+then builds a fresh handler instead of retrying the fenced one. The same applies
+when the session ends with an error, such as a provider close surfaced as
+`APIError: 1000`: every failed start in direct mode is retried with a fresh
+handler. The new session starts without the previous conversation context.
 
 Parallel Gemini function calls are started through the shared tool manager, but
 their function responses are sent together in the server-provided order. If one
@@ -589,6 +595,8 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-08-29 | Corrected first-audio instrumentation for independent Gemini event ordering: marker-before-audio records a positive sample, audio-first records bounded unavailable/reordered diagnostics, and completed/interrupted turns cannot be rearmed by late or duplicate markers. Added partial-transcript and startup-greeting regression coverage. |
 | 2026-08-29 | Added explicit same-text/final-only ambiguity handling after adversarial review. Independent re-review found no P0/P1 blocker; 41 focused Gemini tests and the full 474-test repository gate pass. |
 | 2026-10-12 | Raised the microphone capture queue from 8 frames (80 ms) to 200 (about 2 s) and replaced first/every-100th drop warnings with one warning per overflow burst giving frames and milliseconds lost. Reachy Mini Lite diagnostics had shown 14 frames of speech dropped silently during a 158 ms loop stall. Regression tests: `test_capture_worker_default_queue_survives_short_event_loop_stall`, `test_capture_worker_reports_each_drop_burst_with_lost_duration`. |
+| 2026-10-12 | Direct mode now rebuilds the handler after a provider-ended session. On the Reachy Mini Lite a Gemini GoAway after ~9.5 minutes left the fenced handler retrying every 5 s with "Restart the conversation", so Reachy stopped responding. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_ends_session`. |
+| 2026-10-12 | Direct mode also rebuilds the handler when start-up fails. On `gemini-3.8-live-extended-thinking`, after the user stopped talking for about a minute, the provider closed the session (`APIError: 1000 None.`); the startup loop kept retrying the fenced handler every 5 s with "Restart the conversation", so Reachy looked asleep. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_closes_with_error`. |
 
 ## Shared migration validation — 2026-09-16
 

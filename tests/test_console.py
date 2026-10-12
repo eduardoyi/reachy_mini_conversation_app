@@ -962,6 +962,123 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_startup_loop_starts_fresh_handler_after_provider_ends_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider-ended session (e.g. Gemini GoAway) reconnects with a new handler instead of the finished one."""
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    class OneSessionHandler:
+        """Ends its only session at once and refuses a second start, like a policy-fenced Gemini handler."""
+
+        def __init__(self) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.start_calls = 0
+            self.shutdown_calls = 0
+
+        async def start_up(self) -> None:
+            self.start_calls += 1
+            if self.start_calls > 1:
+                raise RuntimeError("Restart the conversation to begin a new session")
+
+        def _is_connected(self) -> bool:
+            return False
+
+        async def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        async def receive(self, _frame: Any) -> None:
+            return None
+
+        async def emit(self) -> None:
+            return None
+
+    handlers: list[OneSessionHandler] = []
+
+    def handler_factory(_voice: str | None) -> OneSessionHandler:
+        handler = OneSessionHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler_factory(None), robot, handler_factory=handler_factory)
+    stream._backend_retry_delay = 0.01
+
+    startup_task = asyncio.create_task(stream._run_handler_startup_loop())
+    try:
+        await _wait_until(lambda: len(handlers) >= 2 and handlers[1].start_calls >= 1)
+
+        assert handlers[0].start_calls == 1
+        assert handlers[0].shutdown_calls >= 1
+    finally:
+        stream._stop_event.set()
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_startup_loop_starts_fresh_handler_after_provider_closes_with_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider close surfaced as an error (Gemini code 1000) must not retry the fenced handler forever."""
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    class ClosedSessionHandler:
+        """Fails its first start with a provider close and refuses later starts, like a fenced Gemini handler."""
+
+        def __init__(self) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.start_calls = 0
+
+        async def start_up(self) -> None:
+            self.start_calls += 1
+            if self.start_calls == 1:
+                raise RuntimeError("APIError: 1000 None.")
+            raise RuntimeError("Restart the conversation to begin a new session")
+
+        def _is_connected(self) -> bool:
+            return False
+
+        async def shutdown(self) -> None:
+            return None
+
+        async def receive(self, _frame: Any) -> None:
+            return None
+
+        async def emit(self) -> None:
+            return None
+
+    handlers: list[ClosedSessionHandler] = []
+
+    def handler_factory(_voice: str | None) -> ClosedSessionHandler:
+        handler = ClosedSessionHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler_factory(None), robot, handler_factory=handler_factory)
+    stream._backend_retry_delay = 0.01
+
+    startup_task = asyncio.create_task(stream._run_handler_startup_loop())
+    try:
+        await _wait_until(lambda: len(handlers) >= 2 and handlers[1].start_calls >= 1)
+
+        assert handlers[0].start_calls == 1
+    finally:
+        stream._stop_event.set()
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_startup_loop_does_not_rebuild_after_direct_shutdown_failure() -> None:
     """A failed direct close leaves the old handler fenced from replacement."""
     handler = MagicMock()
@@ -2096,6 +2213,72 @@ async def test_play_loop_resamples_provider_output_to_media_rate() -> None:
     )
 
 
+def _paced_stream(frame: np.ndarray) -> tuple[LocalStream, list[np.ndarray]]:
+    """Build a stream on a 1 kHz fake speaker that receives ``frame`` once from the handler."""
+    pushed: list[np.ndarray] = []
+    media = SimpleNamespace(get_output_audio_samplerate=lambda: 1_000, push_audio_sample=pushed.append)
+    handler = MagicMock()
+    pending = [(1_000, frame)]
+
+    async def emit() -> tuple[int, np.ndarray] | None:
+        if pending:
+            return pending.pop()
+        await asyncio.sleep(0.01)
+        return None
+
+    handler.emit = emit
+    return LocalStream(handler, SimpleNamespace(media=media)), pushed
+
+
+@pytest.mark.asyncio
+async def test_play_loop_paces_long_replies_into_the_sdk() -> None:
+    """A 2 s reply reaches the SDK in <=100 ms pieces, never far ahead of real time."""
+    stream, pushed = _paced_stream(np.ones(2_000, dtype=np.int16))
+    play_task = asyncio.create_task(stream.play_loop())
+    try:
+        await asyncio.sleep(0.15)
+        early_samples = sum(piece.shape[0] for piece in pushed)
+        assert 0 < early_samples <= 600
+        assert all(piece.shape[0] <= 100 for piece in pushed)
+
+        await asyncio.sleep(0.5)
+        assert sum(piece.shape[0] for piece in pushed) > early_samples
+    finally:
+        stream._stop_event.set()
+        await asyncio.wait_for(play_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_interruption_drops_paced_audio_not_yet_in_the_sdk() -> None:
+    """After a flush, the rest of the interrupted reply is never handed to the speaker."""
+    stream, pushed = _paced_stream(np.ones(2_000, dtype=np.int16))
+    play_task = asyncio.create_task(stream.play_loop())
+    try:
+        await _wait_until(lambda: len(pushed) > 0)
+        stream.clear_audio_queue()
+        pushed_at_interrupt = len(pushed)
+
+        await asyncio.sleep(0.6)
+        assert len(pushed) == pushed_at_interrupt
+        assert sum(piece.shape[0] for piece in pushed) <= 500
+    finally:
+        stream._stop_event.set()
+        await asyncio.wait_for(play_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_play_loop_splits_frames_evenly_without_tiny_pieces() -> None:
+    """A 105 ms frame becomes two ~52 ms pieces rather than 100 ms plus a 5 ms fragment."""
+    stream, pushed = _paced_stream(np.ones(105, dtype=np.int16))
+    play_task = asyncio.create_task(stream.play_loop())
+    try:
+        await _wait_until(lambda: sum(piece.shape[0] for piece in pushed) == 105)
+        assert sorted(piece.shape[0] for piece in pushed) == [52, 53]
+    finally:
+        stream._stop_event.set()
+        await asyncio.wait_for(play_task, timeout=1.0)
+
+
 @pytest.mark.asyncio
 async def test_direct_playback_keeps_idle_fence_until_audio_estimate_drains() -> None:
     """Direct output remains busy for the estimated SDK playback duration."""
@@ -2762,7 +2945,7 @@ async def test_audio_diagnostics_measure_queue_and_forward_without_logging_paylo
     monkeypatch.setattr(console_mod.config, "AUDIO_DIAGNOSTICS_ENABLED", True)
     clock = [10.0]
     monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    frame = console_mod._CapturedAudioFrame(24_000, np.array([12345], dtype=np.int16), 1)
+    frame = console_mod._CapturedAudioFrame(24_000, np.array([12345, 0, 0, 0], dtype=np.int16), 1)
     frame.captured_at = 9.5
     worker = MagicMock()
     worker.get_nowait.return_value = frame
@@ -2782,6 +2965,7 @@ async def test_audio_diagnostics_measure_queue_and_forward_without_logging_paylo
     report = next(record for record in caplog.records if record.msg.startswith("Audio diagnostics captured="))
     assert '"queue_age": {"count": 1, "mean_ms": 500.0' in report.getMessage()
     assert '"input_forward": {"count": 1, "mean_ms": 25.0' in report.getMessage()
+    assert 'input_level={"frames": 1, "loud": 1, "max_rms": 6172}' in report.getMessage()
     assert "12345" not in caplog.text
     worker.stop.assert_called_once()
     assert not any(task.get_name() == "audio-diagnostics" for task in asyncio.all_tasks())
@@ -2816,6 +3000,25 @@ async def test_audio_diagnostics_measure_playback_boundary(monkeypatch, caplog, 
     assert '"playback_push": {"count": 1, "mean_ms": 40.0' in caplog.text
     assert output.push.call_count == int(bypass)
     assert robot.media.push_audio_sample.call_count == int(not bypass)
+
+
+def test_diagnostic_input_level_uses_the_channel_direct_providers_send() -> None:
+    """Measure channel 0 of SDK float frames, as Gemini does, in int16 units."""
+    frame = np.zeros((160, 2), dtype=np.float32)
+    frame[:, 0] = 0.25
+    frame[:, 1] = 0.9
+    assert console_mod._channel0_rms(frame) == pytest.approx(0.25 * 32767, rel=0.01)
+    assert console_mod._channel0_rms(frame.T.copy()) == pytest.approx(0.25 * 32767, rel=0.01)
+
+
+def test_audio_diagnostics_report_backend_idle_time_in_direct_mode(monkeypatch) -> None:
+    """Report how long a direct-mode handler has seen no backend activity."""
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: 40.0))
+    handler = MagicMock(spec=console_mod.ConversationHandler)
+    handler.last_activity_time = 25.0
+    stream = LocalStream(handler, MagicMock())
+    assert stream._server_idle_seconds() == 15.0
+    assert LocalStream(MagicMock(), MagicMock())._server_idle_seconds() is None
 
 
 @pytest.mark.asyncio
