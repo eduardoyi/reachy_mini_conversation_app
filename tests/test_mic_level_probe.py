@@ -278,6 +278,15 @@ def test_format_report_lists_phases_and_suggestions() -> None:
     assert "channel0: no clear separation" in report
 
 
+def test_format_report_flags_digital_silence() -> None:
+    """All-zero input is reported as blocked capture rather than a quiet room."""
+    silent = {"quiet": {"mixed": _summary(p75=0, p99=0), "channel0": _summary(p75=0, p99=0)}}
+    live = {"quiet": {"mixed": _summary(p75=20, p99=40), "channel0": _summary(p75=20, p99=40)}}
+
+    assert "every sample was exactly 0" in format_report(silent, 500)
+    assert "every sample was exactly 0" not in format_report(live, 500)
+
+
 def test_main_reports_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing daemon exits with status 2 instead of a traceback."""
 

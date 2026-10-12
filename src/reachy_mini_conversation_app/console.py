@@ -131,7 +131,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
-CAPTURE_QUEUE_SIZE = 8
+CAPTURE_QUEUE_SIZE = 200  # about 2 s of 10 ms SDK frames, enough to ride out event-loop stalls
 CAPTURE_POLL_INTERVAL_SECONDS = 0.005
 CAPTURE_STOP_JOIN_TIMEOUT_SECONDS = 0.1
 HYBRID_ACTIVATION_TIMEOUT_SECONDS = 10.0
@@ -243,6 +243,8 @@ class _AudioCaptureWorker:
             sample_rate = int(self._media.get_input_audio_samplerate())
 
             previous_capture_at: float | None = None
+            burst_dropped_frames = 0
+            burst_dropped_seconds = 0.0
             while not self._stop_event.is_set():
                 with self._state_lock:
                     self._capture_epoch += 1
@@ -270,15 +272,24 @@ class _AudioCaptureWorker:
                     self._queue.put_nowait(captured_frame)
                 except queue.Full:
                     try:
-                        self._queue.get_nowait()
+                        dropped_frame = self._queue.get_nowait()
                     except queue.Empty:
                         pass
+                    else:
+                        burst_dropped_frames += 1
+                        burst_dropped_seconds += len(dropped_frame.audio) / dropped_frame.sample_rate
+                        with self._state_lock:
+                            self._dropped_frames += 1
                     self._queue.put_nowait(captured_frame)
-                    with self._state_lock:
-                        self._dropped_frames += 1
-                        dropped_frames = self._dropped_frames
-                    if dropped_frames == 1 or dropped_frames % 100 == 0:
-                        logger.warning("Audio capture queue full; dropped_frames=%d", dropped_frames)
+                    continue
+                if burst_dropped_frames:
+                    logger.warning(
+                        "Audio capture queue overflowed; dropped %d frames (%.0f ms of microphone audio)",
+                        burst_dropped_frames,
+                        burst_dropped_seconds * 1000,
+                    )
+                    burst_dropped_frames = 0
+                    burst_dropped_seconds = 0.0
         except Exception as exc:
             with self._state_lock:
                 self._failure_type = type(exc).__name__
@@ -1773,6 +1784,9 @@ class LocalStream:
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
+        if getattr(self._robot.media, "backend", None) == MediaBackend.NO_MEDIA:
+            logger.info("Media disabled; microphone capture not started.")
+            return
         self._audio_diagnostics = AudioDiagnostics() if config.AUDIO_DIAGNOSTICS_ENABLED else None
         capture_worker = self._capture_worker
         if capture_worker is None:

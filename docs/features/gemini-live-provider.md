@@ -29,9 +29,12 @@ the same send-chain implementation, so this workaround is not validated and
 should not be presented as expected to work on this Mac. Disk pressure was
 resolved to 19 GiB free, and the Python runtime was rebuilt for arm64. The
 earlier 545.7 ms and 270.8/274.2 ms samples remain historical only. The bounded
-daemon capture worker keeps its queue at 8, polls empty input every 5 ms, drops
-the oldest frame on overflow, joins for at most 100 ms at stop, and records
-metadata-only diagnostics covered by privacy tests.
+daemon capture worker keeps up to 200 frames (about 2 s of the SDK's 10 ms
+frames, raised from 8 after hardware diagnostics showed 140 ms of user speech
+lost to a 158 ms event-loop stall), polls empty input every 5 ms, drops the
+oldest frame on overflow and logs each drop burst with the lost duration, joins
+for at most 100 ms at stop, and records metadata-only diagnostics covered by
+privacy tests.
 
 The current local forensic snapshot found one daemon and four conversation-app
 processes in uninterruptible `UE` state, including two `PPID 1` orphans; four
@@ -585,6 +588,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-08-29 | Recorded the WebRTC producer-registration `KeyError`, retry initialization with `connection_ready_ms=640.8` and greeting-tool timings of 231.6/230.9 ms, the SDK reverse-audio `not-negotiated (-4)` failure, the unchanged SDK send chain, and the stop recommendation pending a clean reboot/local retest versus a native macOS audio adapter/upstream SDK fix; Phase 1 remains in progress. |
 | 2026-08-29 | Corrected first-audio instrumentation for independent Gemini event ordering: marker-before-audio records a positive sample, audio-first records bounded unavailable/reordered diagnostics, and completed/interrupted turns cannot be rearmed by late or duplicate markers. Added partial-transcript and startup-greeting regression coverage. |
 | 2026-08-29 | Added explicit same-text/final-only ambiguity handling after adversarial review. Independent re-review found no P0/P1 blocker; 41 focused Gemini tests and the full 474-test repository gate pass. |
+| 2026-10-12 | Raised the microphone capture queue from 8 frames (80 ms) to 200 (about 2 s) and replaced first/every-100th drop warnings with one warning per overflow burst giving frames and milliseconds lost. Reachy Mini Lite diagnostics had shown 14 frames of speech dropped silently during a 158 ms loop stall. Regression tests: `test_capture_worker_default_queue_survives_short_event_loop_stall`, `test_capture_worker_reports_each_drop_burst_with_lost_duration`. |
 
 ## Shared migration validation — 2026-09-16
 

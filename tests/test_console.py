@@ -1503,6 +1503,21 @@ async def test_record_loop_forwards_ordered_frames_and_polls_empty_capture() -> 
 
 
 @pytest.mark.asyncio
+async def test_record_loop_does_not_poll_microphone_without_media() -> None:
+    """A no_media robot has no audio system, so capture must not poll the SDK."""
+    media = SimpleNamespace(
+        backend=MediaBackend.NO_MEDIA,
+        get_input_audio_samplerate=MagicMock(return_value=16_000),
+        get_audio_sample=MagicMock(return_value=None),
+    )
+    stream = LocalStream(MagicMock(), SimpleNamespace(media=media))
+
+    await asyncio.wait_for(stream.record_loop(), timeout=1.0)
+
+    media.get_audio_sample.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_hybrid_record_loop_fences_capture_queue_at_activation(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -1927,6 +1942,71 @@ async def test_capture_worker_drops_oldest_frame_when_queue_is_full(caplog) -> N
         diagnostics.report(captured=worker.sequence, dropped=worker.dropped_frames)
     assert '"capture_pull"' in caplog.text
     assert '"capture_gap"' in caplog.text
+
+
+class _TenMsFrameSource:
+    """SDK-like pull that yields a settable number of 10 ms stereo frames, then nothing."""
+
+    def __init__(self, frames: int) -> None:
+        """Queue ``frames`` frames for the capture worker to pull."""
+        self.remaining = frames
+        self.exhausted = threading.Event()
+
+    def get_audio_sample(self) -> np.ndarray | None:
+        """Return the next frame, or None once the requested frames were pulled."""
+        if self.remaining == 0:
+            self.exhausted.set()
+            return None
+        self.remaining -= 1
+        return np.zeros((160, 2), dtype=np.float32)
+
+    def send(self, frames: int) -> None:
+        """Make more frames available."""
+        self.exhausted.clear()
+        self.remaining = frames
+
+
+@pytest.mark.asyncio
+async def test_capture_worker_default_queue_survives_short_event_loop_stall() -> None:
+    """1.5 s of unconsumed 10 ms frames, like a busy event loop, loses no microphone audio."""
+    source = _TenMsFrameSource(150)
+    worker = _AudioCaptureWorker(
+        SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=source.get_audio_sample),
+        poll_interval=0,
+    )
+    worker.start()
+    try:
+        assert await asyncio.to_thread(source.exhausted.wait, 1.0)
+        assert worker.dropped_frames == 0
+    finally:
+        worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_capture_worker_reports_each_drop_burst_with_lost_duration(caplog: pytest.LogCaptureFixture) -> None:
+    """A burst of overflow is logged once it ends, with the amount of lost audio."""
+    source = _TenMsFrameSource(14)
+    worker = _AudioCaptureWorker(
+        SimpleNamespace(get_input_audio_samplerate=lambda: 16_000, get_audio_sample=source.get_audio_sample),
+        queue_size=4,
+        poll_interval=0,
+    )
+    with caplog.at_level(logging.WARNING, logger=console_mod.logger.name):
+        worker.start()
+        try:
+            assert await asyncio.to_thread(source.exhausted.wait, 1.0)
+            assert worker.dropped_frames == 10
+            assert "Audio capture queue overflowed" not in caplog.text
+
+            while worker.get_nowait() is not None:
+                pass
+            source.send(1)
+            await _wait_until(lambda: "Audio capture queue overflowed" in caplog.text)
+        finally:
+            worker.stop()
+
+    assert "dropped 10 frames (100 ms of microphone audio)" in caplog.text
+    assert caplog.text.count("Audio capture queue overflowed") == 1
 
 
 @pytest.mark.asyncio

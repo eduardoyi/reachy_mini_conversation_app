@@ -240,6 +240,12 @@ def format_report(results: Mapping[str, Mapping[str, LevelSummary]], threshold: 
         else:
             lines.append(f"{signal}: candidate threshold about {suggestion:.0f}.")
     lines.append("Onsets in non-speech phases would be false barge-ins at the current threshold.")
+    if all(summary.peak == 0.0 for by_signal in results.values() for summary in by_signal.values()):
+        lines.append(
+            "WARNING: every sample was exactly 0. A live microphone always picks up some noise, so this is "
+            "usually blocked input: allow the app running this terminal in System Settings > Privacy & "
+            "Security > Microphone, then restart that app."
+        )
     return "\n".join(lines)
 
 
