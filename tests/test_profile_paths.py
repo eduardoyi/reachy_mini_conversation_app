@@ -81,6 +81,7 @@ def test_household_companion_profile_loads_character_and_existing_tools() -> Non
     assert "Comfortable silence" in profile.instructions
     assert "raw motor control" in profile.instructions
     assert {"move_head", "head_tracking", "remember", "forget"}.issubset(profile.default_tools)
+    assert "pollen_robotics_reachy_mini_search_tool__search_web" not in profile.default_tools
 
 
 def test_prompts_load_from_compact_builtin_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
