@@ -140,6 +140,7 @@ values. This keeps one-off commands such as
 | `LOCAL_VAD_SILENCE_SECONDS` | Silence needed to close a local speech segment. Defaults to `0.6`. |
 | `LOCAL_ACOUSTIC_WAKE_ENABLED` | `0` (off). Opt into the supervised official33 acoustic trial; requires hybrid mode. Replaces transcript wake while enabled. |
 | `LOCAL_ACOUSTIC_WAKE_MODEL_DIR` | Private directory containing the frozen official33 ONNX model and both verified backbone files. No automatic downloads. |
+| `LOCAL_ACOUSTIC_WAKE_THRESHOLD` | Acoustic wake score threshold in (0, 1]; defaults to the frozen `0.5`. Each wake logs its score and each sub-threshold score event logs its peak ("near miss", numbers only) for calibrating a new microphone; `1` effectively disables waking while still logging scores. | Calibrate it with the guided `reachy-wake-calibrate --media-backend local --model-dir <bundle>` (app stopped).
 | `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`; matching remains exact and caller-configured. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
 | `LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` | Seconds to wait for one next final local command after a wake-only transcript. Defaults to `5`, with a `15`-second maximum; timeout opens the normal cloud path. |

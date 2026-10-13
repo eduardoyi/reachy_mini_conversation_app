@@ -1215,3 +1215,64 @@ not verify inactivity rearm or ordinary-chatter false wakes in this session,
 visible viewer reliability, or physical hardware. Training remains paused.
 Validation: user report and supplied log review only; documentation-only update,
 no code or model changes and no test suite rerun.
+
+### Hardware threshold calibration support — 2026-10-13
+
+The first hybrid run on the Reachy Mini Lite (robot microphone, XVF3800 echo
+cancellation and AGC) woke about 16 seconds after startup without the user saying
+"Reachy". The official33 operating point was chosen on simulator and Mac audio, and
+the log gave no score, so the margin could not be judged. `OpenWakeWordDetector` now
+takes a threshold (`LOCAL_ACOUSTIC_WAKE_THRESHOLD`, default and invalid-value
+fallback `0.5`, valid range (0, 1]) and logs metadata only: `Acoustic wake detected
+score=… threshold=…` for each wake, and `Acoustic wake near miss peak=…` once per
+score event that rose above `min(0.2, threshold/2)` but stayed under the threshold.
+No audio or transcript is kept. Setting the threshold to `1` turns a run into a
+calibration pass: wakes effectively stop while every score event is logged, so
+counts for spoken "Reachy" and ordinary speech can be compared to choose a threshold.
+Cooldown (3 s) is unchanged. Tests: `test_configured_threshold_replaces_the_default`,
+`test_rejects_invalid_thresholds`, `test_logs_detection_scores_and_near_miss_peaks`,
+and `test_acoustic_wake_threshold_resolution` in `tests/test_config.py`.
+
+Guided calibration tool (same day): unannotated log timestamps could not be matched to
+the user's phases, so `reachy-wake-calibrate` (`wake_calibration.py`, also
+`python -m reachy_mini_conversation_app.wake_calibration`) runs a prompted sequence on
+the robot microphone with the app stopped: 15 s quiet, 60 s ordinary speech without the
+wake word (`--talk-seconds`), two tries each of "ready", "really", "reach", "peachy"
+and "Richie", then ten "Reachy" trials (six normal, two soft, two from 2–3 m). Each
+step resets the detector, feeds live audio through official33 (threshold 1, so nothing
+wakes) and records every 80 ms score through the detector's `score_observer`. Score
+runs above the 0.2 floor that are less than 1 s apart count as one event. The report
+lists each step's peak and event counts at candidate thresholds 0.5–0.98, then per
+threshold the wake recall, similar-word hits and background events per minute. Only
+scores are held in memory; no audio, transcript or file is kept. Tests:
+`tests/test_wake_calibration.py`.
+
+The first hardware run of the tool reported 0.00 for every step, including the
+60 s talk step, and its report could not tell missing audio from a silent model. The
+tool now feeds a 1.5 s pre-roll after each reset before printing "Now!" (the model
+scores nothing for about 1.3 s after a reset, which could swallow a word spoken right
+after Enter), reports each step's peak microphone RMS, stops with an error if a step
+receives no frames, and warns if every level is exact silence. "Richie" is accepted
+as an alternative wake word by the user, so it does not count against a threshold.
+
+Reachy Mini Lite calibration result (2026-10-13, robot microphone, user's voice, after
+restarting the daemon; levels confirm live audio):
+
+| Group | Steps | Peak scores |
+|---|---|---|
+| Quiet (15 s) | 1 | 0.02 |
+| Ordinary speech (60 s) | 1 | 0.00 |
+| "ready" / "really" | 4 | 0.96, 0.04, 0.05, 0.00 |
+| "reach" | 2 | 0.96, 0.77 |
+| "peachy" | 2 | 0.81, 0.00 |
+| "Richie" (accepted as a wake word) | 2 | 0.99, 0.99 |
+| "Reachy" normal ×6, soft ×2, far ×2 | 10 | 0.99 ×9; 0.34 for the second far try |
+
+At every candidate threshold from 0.5 to 0.98, recall was 9/10 with no background
+events; only the similar-word hits changed (6/10 at 0.5, 4/10 at 0.9–0.95, 2/10 at
+0.98, both "Richie"). The chosen threshold for the Lite is **0.98**, which rejects
+"ready" and "reach" (0.96) while keeping every "Reachy" that scored. The margin is
+narrow on both sides (0.96 vs 0.99), and one minute of ordinary speech is a small
+false-wake sample: the earlier 0.5 run woke on ordinary speech, so a longer live run
+at 0.98 is still required.
+

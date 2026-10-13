@@ -1,5 +1,6 @@
 """Tests for the optional local acoustic wake-word detector."""
 
+import logging
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -293,3 +294,36 @@ def test_loads_verified_assets_with_frozen_model_kwargs(tmp_path: Path, monkeypa
         }
     ]
     assert detector.process_audio(_pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16)), SAMPLE_RATE) is not None
+
+
+@pytest.mark.parametrize(("score", "detected"), [(0.69, False), (0.7, True)])
+def test_configured_threshold_replaces_the_default(score: float, detected: bool) -> None:
+    """A calibrated threshold is applied inclusively instead of the frozen 0.5."""
+    detector = acoustic_wake_word.OpenWakeWordDetector(FakeWakeModel(default_score=score), threshold=0.7)
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    assert (detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) is not None) is detected
+
+
+@pytest.mark.parametrize("threshold", [0.0, -0.1, 1.5, float("nan")])
+def test_rejects_invalid_thresholds(threshold: float) -> None:
+    """Thresholds outside (0, 1] are rejected before any inference."""
+    with pytest.raises(ValueError):
+        acoustic_wake_word.OpenWakeWordDetector(FakeWakeModel(), threshold=threshold)
+
+
+def test_logs_detection_scores_and_near_miss_peaks(caplog: pytest.LogCaptureFixture) -> None:
+    """Each score event logs its peak once: as a detection, or as a near miss when it stays under threshold."""
+    scores = [0.1, 0.3, 0.45, 0.25, 0.05, 0.4, 0.8, 0.6, 0.1, 0.1]
+    detector = acoustic_wake_word.OpenWakeWordDetector(FakeWakeModel(scores=scores))
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    with caplog.at_level(logging.INFO, logger=acoustic_wake_word.__name__):
+        for _ in scores:
+            detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "Acoustic wake near miss peak=0.45 threshold=0.50",
+        "Acoustic wake detected score=0.80 threshold=0.50",
+    ]

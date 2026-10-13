@@ -115,6 +115,8 @@ LOCAL_VAD_RMS_THRESHOLD_ENV = "LOCAL_VAD_RMS_THRESHOLD"
 LOCAL_VAD_SILENCE_SECONDS_ENV = "LOCAL_VAD_SILENCE_SECONDS"
 LOCAL_ACOUSTIC_WAKE_ENABLED_ENV = "LOCAL_ACOUSTIC_WAKE_ENABLED"
 LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV = "LOCAL_ACOUSTIC_WAKE_MODEL_DIR"
+LOCAL_ACOUSTIC_WAKE_THRESHOLD_ENV = "LOCAL_ACOUSTIC_WAKE_THRESHOLD"
+DEFAULT_LOCAL_ACOUSTIC_WAKE_THRESHOLD = 0.5
 LOCAL_WAKE_WORD_ENV = "LOCAL_WAKE_WORD"
 LOCAL_WAKE_COOLDOWN_SECONDS_ENV = "LOCAL_WAKE_COOLDOWN_SECONDS"
 LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS_ENV = "LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS"
@@ -422,6 +424,21 @@ def resolve_local_wake_followup_timeout_seconds() -> float:
     return value
 
 
+def resolve_local_acoustic_wake_threshold() -> float:
+    """Return the acoustic wake score threshold in (0, 1], defaulting to the frozen 0.5."""
+    raw_value = os.getenv(LOCAL_ACOUSTIC_WAKE_THRESHOLD_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_LOCAL_ACOUSTIC_WAKE_THRESHOLD
+    try:
+        value = float(raw_value)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or not 0 < value <= 1:
+        logger.warning("Ignoring invalid %s=%r; using default.", LOCAL_ACOUSTIC_WAKE_THRESHOLD_ENV, raw_value)
+        return DEFAULT_LOCAL_ACOUSTIC_WAKE_THRESHOLD
+    return value
+
+
 def resolve_local_vad_rms_threshold() -> float:
     """Return the non-negative PCM RMS threshold for the baseline local VAD."""
     value = _resolve_non_negative_seconds(LOCAL_VAD_RMS_THRESHOLD_ENV, DEFAULT_LOCAL_VAD_RMS_THRESHOLD)
@@ -622,6 +639,7 @@ class Config:
     )
     LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
+    LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
     LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
@@ -783,6 +801,7 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
+    config.LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
     config.LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     config.LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS

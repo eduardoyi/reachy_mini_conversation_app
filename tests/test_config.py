@@ -531,3 +531,19 @@ def test_local_interruption_flags_are_opt_in(monkeypatch, value) -> None:
     assert config.config.GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED is (value == "1")
     assert config.config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED is (value == "1")
     assert config.config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED is (value == "1")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, 0.5), ("0.7", 0.7), ("1", 1.0), ("0", 0.5), ("1.2", 0.5), ("high", 0.5), ("nan", 0.5)],
+)
+def test_acoustic_wake_threshold_resolution(monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: float) -> None:
+    """The acoustic wake threshold accepts (0, 1] and falls back to the frozen 0.5."""
+    from reachy_mini_conversation_app.config import resolve_local_acoustic_wake_threshold
+
+    if raw is None:
+        monkeypatch.delenv("LOCAL_ACOUSTIC_WAKE_THRESHOLD", raising=False)
+    else:
+        monkeypatch.setenv("LOCAL_ACOUSTIC_WAKE_THRESHOLD", raw)
+
+    assert resolve_local_acoustic_wake_threshold() == expected

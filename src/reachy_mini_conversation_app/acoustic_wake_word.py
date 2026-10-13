@@ -3,9 +3,11 @@
 import math
 import time
 import hashlib
+import logging
 import importlib
 from typing import Protocol
 from pathlib import Path
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,6 +15,12 @@ from numpy.typing import NDArray
 from reachy_mini_conversation_app.streaming import resample_audio
 from reachy_mini_conversation_app.wake_word import WakeWordDetection, WakeWordMetricsSnapshot
 
+
+logger = logging.getLogger(__name__)
+
+# Score events that rise above this floor but stay under the threshold are logged as near misses,
+# so the threshold can be calibrated on new microphones from scores alone (no audio kept).
+NEAR_MISS_FLOOR = 0.2
 
 OFFICIAL33_ASSETS = {
     "reachy-official33.onnx": "f94693ce16d970d8ab0524f36854491d7f6067ae0f46b23cea624e86e5928427",
@@ -34,9 +42,21 @@ class WakeModel(Protocol):
 class OpenWakeWordDetector:
     """Detect official33 at its frozen operating point without owning a microphone."""
 
-    def __init__(self, model: WakeModel) -> None:
-        """Use a prepared model and bounded PCM state."""
+    def __init__(
+        self,
+        model: WakeModel,
+        *,
+        threshold: float = 0.5,
+        score_observer: Callable[[float], None] | None = None,
+    ) -> None:
+        """Use a prepared model and bounded PCM state; ``score_observer`` receives every 80 ms score."""
+        if not math.isfinite(threshold) or not 0 < threshold <= 1:
+            raise ValueError("Wake threshold must be in (0, 1]")
         self._model = model
+        self._threshold = threshold
+        self._score_observer = score_observer
+        self._event_peak: float | None = None
+        self._event_detected = False
         self._pending = b""
         self._samples = 0
         self._last_detection_sample = -48000
@@ -45,7 +65,13 @@ class OpenWakeWordDetector:
         self._sample_rate: int | None = None
 
     @classmethod
-    def from_directory(cls, directory: Path) -> "OpenWakeWordDetector":
+    def from_directory(
+        cls,
+        directory: Path,
+        *,
+        threshold: float = 0.5,
+        score_observer: Callable[[float], None] | None = None,
+    ) -> "OpenWakeWordDetector":
         """Load only the frozen local assets, failing before any inference on mismatch."""
         for name, expected in OFFICIAL33_ASSETS.items():
             path = directory / name
@@ -59,12 +85,12 @@ class OpenWakeWordDetector:
             embedding_model_path=str(directory / "embedding_model.onnx"),
             ncpu=1,
         )
-        return cls(model)
+        return cls(model, threshold=threshold, score_observer=score_observer)
 
     def process_audio(
         self, audio: bytes, sample_rate: int, *, observed_at: float | None = None
     ) -> WakeWordDetection | None:
-        """Consume mono PCM16 in bounded 80ms windows at threshold 0.5 and cooldown 3s."""
+        """Consume mono PCM16 in bounded 80ms windows at the configured threshold and a 3s cooldown."""
         if sample_rate <= 0 or sample_rate % 25 or len(audio) % 2 or len(audio) > sample_rate * 10:
             raise ValueError("Expected at most five seconds of mono PCM16 at a positive sample rate divisible by 25")
         if observed_at is not None and not math.isfinite(observed_at):
@@ -88,13 +114,18 @@ class OpenWakeWordDetector:
                 raise ValueError("Invalid wake-word model score")
             instant = self._samples
             self._samples += 1280
-            if score < 0.5:
+            if self._score_observer is not None:
+                self._score_observer(score)
+            self._track_score_event(score)
+            if score < self._threshold:
                 continue
             if instant - self._last_detection_sample < 48000:
                 self._suppressed += 1
                 continue
             self._last_detection_sample = instant
             self._detections += 1
+            self._event_detected = True
+            logger.info("Acoustic wake detected score=%.2f threshold=%.2f", score, self._threshold)
             detection = detection or WakeWordDetection(
                 wake_word="Reachy",
                 remaining_text="",
@@ -106,8 +137,21 @@ class OpenWakeWordDetector:
             )
         return detection
 
+    def _track_score_event(self, score: float) -> None:
+        """Log the peak of each above-floor score event that did not wake (metadata only)."""
+        floor = min(NEAR_MISS_FLOOR, self._threshold / 2)
+        if score >= floor:
+            self._event_peak = score if self._event_peak is None else max(self._event_peak, score)
+            return
+        if self._event_peak is not None and not self._event_detected and self._event_peak < self._threshold:
+            logger.info("Acoustic wake near miss peak=%.2f threshold=%.2f", self._event_peak, self._threshold)
+        self._event_peak = None
+        self._event_detected = False
+
     def reset(self) -> None:
         """Discard stream history between conversation generations without clearing counters."""
+        self._event_peak = None
+        self._event_detected = False
         self._pending = b""
         self._samples = 0
         self._sample_rate = None

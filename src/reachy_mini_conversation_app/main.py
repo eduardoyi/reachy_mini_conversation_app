@@ -190,9 +190,13 @@ def run(
         if not config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR:
             raise ValueError("Acoustic wake requires LOCAL_ACOUSTIC_WAKE_MODEL_DIR")
         acoustic_wake_detector = OpenWakeWordDetector.from_directory(
-            Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser()
+            Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser(),
+            threshold=config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
         )
-        logger.info("Supervised official33 acoustic wake enabled; threshold=0.5 cooldown=3s")
+        logger.info(
+            "Supervised official33 acoustic wake enabled; threshold=%.2f cooldown=3s",
+            config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
+        )
 
     realtime_provider = get_realtime_provider()
     if realtime_provider == REALTIME_PROVIDER_GEMINI:
