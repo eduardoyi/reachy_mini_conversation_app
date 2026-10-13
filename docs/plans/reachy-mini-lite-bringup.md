@@ -1,9 +1,9 @@
 # Reachy Mini Lite hardware bring-up
 
-- Status: `approved` — ready to execute when the robot arrives
+- Status: `in-progress` — Steps 3–4 (robot audio, conversation, camera) on hardware; hybrid/wake and endurance pending
 - Owner: Reachy project
 - Created: 2026-10-10
-- Last updated: 2026-10-10
+- Last updated: 2026-10-13
 - Scope: first power-on through re-tuning of audio, wake and hybrid runtime on a
   USB-tethered Reachy Mini Lite driven from the existing Mac checkout
 
@@ -181,3 +181,5 @@ change, and the README launch section once the Lite procedure is confirmed.
 | 2026-10-13 | Step 3–4 | The camera failure was a startup glitch; after restarting Reachy it worked, but looks felt slow. Camera frames are now downscaled to fit 768x768 before upload, and each camera request logs capture, send and reply timings so the next run shows where the wait is. Next: a live probe of `media_resolution`, context window compression and session resumption on `gemini-3.8-live-extended-thinking`, which its model card does not document. |
 | 2026-10-13 | Step 3–4 | Live probe on `gemini-3.8-live-extended-thinking`: context window compression, session resumption and `media_resolution` are accepted, and a resumed session recalled earlier context. Resumption and compression are now enabled, so provider-ended connections resume instead of starting over and the camera no longer shortens sessions. The probe also showed frames sent as realtime video right before a question going unseen ("I cannot see the image"); a second probe compares ordered client content and images inside the function response. |
 | 2026-10-13 | Step 3–4 | Image-delivery probe: frames sent as realtime video just before the camera tool result were often unseen (wrong colours once, timeout once), while images attached to the function response were described correctly 3 of 3 times. The camera path now attaches the image to the function response. Most of the remaining wait is the model's own 3.5–6 s before it calls the camera. Next: a live Reachy run to check camera answers, resumption at the ~9-minute reconnect, and the new camera timing lines. |
+| 2026-10-13 | Step 3–4 | Reachy run with the new camera path: answers were accurate; capture, downscale and send took ~35 ms, while Gemini took 4-12 s to call the camera and 2.7-7.3 s to answer. At 9 minutes the session closed and resumed ("Resuming the previous Gemini Live session", 0.7 s connect, no greeting), but only after the 5 s retry delay. Resumable closes now reconnect immediately. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED=1`), streaming one frame per second while the user is engaged, to remove the camera-call step. Retest pending. |
+| 2026-10-13 | Step 3–4 | Live video retest: with `GEMINI_LIVE_VIDEO_ENABLED=1` the user reported visual answers as much faster. Live video stays opt-in because it sends camera frames to Google throughout each conversation (about $0.90 per streamed hour). Still to confirm in a long run: the immediate resume at the nine-minute close and continuity after it. |

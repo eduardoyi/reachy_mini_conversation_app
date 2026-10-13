@@ -2,6 +2,8 @@
 
 import struct
 import logging
+import threading
+from typing import Any
 
 
 logger = logging.getLogger(__name__)
@@ -10,7 +12,16 @@ logger = logging.getLogger(__name__)
 MODEL_FRAME_MAX_SIDE = 768
 MODEL_FRAME_JPEG_QUALITY = 85
 _PULL_TIMEOUT_NS = 1_000_000_000
+# The SDK's one-shot JPEG encoder is shared, so the camera tool and the live stream take turns.
+_CAPTURE_LOCK = threading.Lock()
 _SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF})
+
+
+def capture_jpeg(media: Any) -> bytes | None:
+    """Return the current camera frame as JPEG bytes (blocking), serialized across callers."""
+    with _CAPTURE_LOCK:
+        jpeg: bytes | None = media.get_frame_jpeg()
+    return jpeg
 
 
 def jpeg_size(jpeg: bytes) -> tuple[int, int] | None:

@@ -4,6 +4,7 @@ import time
 import base64
 import asyncio
 import logging
+import contextlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from collections.abc import Callable
@@ -2479,6 +2480,66 @@ async def test_extended_thinking_camera_image_is_attached_to_the_function_respon
     part = wire["tool_response"]["functionResponses"][0]["parts"][0]
     assert base64.b64decode(part["inline_data"]["data"]) == jpeg
     await handler.shutdown()
+
+
+def test_live_video_is_opt_in_and_requires_compression(gemini_config, monkeypatch) -> None:
+    """Video streaming needs the flag, the Extended Thinking model, and a camera; it adds model guidance."""
+    camera_deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_enabled=True)
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low", raising=False)
+
+    monkeypatch.setattr(config, "GEMINI_LIVE_VIDEO_ENABLED", False, raising=False)
+    off = build_handler(camera_deps)
+    monkeypatch.setattr(config, "GEMINI_LIVE_VIDEO_ENABLED", True, raising=False)
+    on = build_handler(camera_deps)
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "fake-live-model", raising=False)
+    legacy = build_handler(camera_deps)
+
+    assert off._video_enabled is False
+    assert on._video_enabled is True
+    assert legacy._video_enabled is False
+    off_instructions = off._build_session_config([]).system_instruction
+    on_instructions = on._build_session_config([]).system_instruction
+    assert off_instructions is not None and on_instructions is not None
+    assert gemini_live._VIDEO_GUIDANCE not in str(off_instructions.parts[0].text)
+    assert gemini_live._VIDEO_GUIDANCE in str(on_instructions.parts[0].text)
+
+
+@pytest.mark.asyncio
+async def test_camera_stream_sends_frames_only_while_the_user_is_engaged(gemini_config, monkeypatch) -> None:
+    """Frames flow about once per interval after user speech and stop once the engagement window passes."""
+    monkeypatch.setattr(gemini_live, "_VIDEO_FRAME_INTERVAL_S", 0.01)
+    reachy_mini = MagicMock()
+    reachy_mini.media.get_frame_jpeg.return_value = b"\xff\xd8frame\xff\xd9"
+    camera_deps = ToolDependencies(reachy_mini=reachy_mini, movement_manager=MagicMock(), camera_enabled=True)
+    session = FakeSession()
+    handler = build_handler(camera_deps)
+    activate_session(handler, session)
+    stream = asyncio.create_task(handler._stream_camera(session, 1))
+    try:
+        await asyncio.sleep(0.05)
+        assert session.realtime_inputs == []
+
+        handler._handle_transcription(types.Transcription(text="what am I holding?"), role="user", interim=True)
+        for _ in range(100):
+            if len(session.realtime_inputs) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert session.realtime_inputs[0] == {
+            "video": types.Blob(data=b"\xff\xd8frame\xff\xd9", mime_type="image/jpeg")
+        }
+
+        assert handler._last_user_speech_at is not None
+        handler._last_user_speech_at -= gemini_live._VIDEO_ENGAGED_S + 1
+        await asyncio.sleep(0.03)
+        sent = len(session.realtime_inputs)
+        await asyncio.sleep(0.05)
+        assert len(session.realtime_inputs) == sent
+    finally:
+        stream.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stream
+        await handler.shutdown()
 
 
 @pytest.mark.asyncio

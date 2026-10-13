@@ -233,8 +233,22 @@ using the hybrid runtime, independently of the selected profile's custom tool
 access. Gemini handles that search server-side; only application function calls
 enter the shared local tool manager and require a client function response.
 
-The `camera` tool is on-demand. A camera frame is sent to Gemini only as the
-result of an explicit camera-tool call, not merely because a camera exists.
+The `camera` tool is on-demand. By default a camera frame is sent to Gemini only
+as the result of an explicit camera-tool call, not merely because a camera exists.
+
+Optional live video (`GEMINI_LIVE_VIDEO_ENABLED=1`, Extended Thinking only, since it
+relies on context compression to avoid Gemini's two-minute audio+video session
+limit) streams the camera at about one frame per second while the user is engaged:
+from the first user voice activity or transcript until 30 seconds after the last
+one. Frames are captured off the event loop, downscaled like camera-tool frames,
+and sent with `send_realtime_input`; the system instruction tells the model to
+answer visual questions from the feed and keep the camera tool for when it has no
+recent frame. This removes the model's 4-12 s decide-then-call step for "what do
+you see" questions observed on the Reachy Mini Lite. Streaming is logged only as
+started or paused, never per frame. It changes the privacy boundary: camera frames
+go to Google throughout each conversation, not only on request, and video costs
+about $0.90 per streamed hour. The camera tool and the stream share one capture
+lock because the SDK's one-shot JPEG encoder is not safe to use concurrently.
 The tool downscales each frame to fit 768x768 (Gemini's recommended Live input
 size) before upload, using the GStreamer stack the SDK already depends on
 (`camera_frames.py`); a 1280x720 frame becomes 768x432 and about 70% smaller in
@@ -255,8 +269,10 @@ then builds a fresh handler instead of retrying the fenced one. The same applies
 when the session ends with an error, such as a provider close surfaced as
 `APIError: 1000`: every failed start in direct mode is retried with a fresh
 handler. That fresh handler continues the conversation instead of starting over.
-If the previous handler holds a session resumption handle, the supervisor passes it
-on and disables the startup greeting; Gemini restores the full session. A handle the
+If the previous handler holds a session resumption handle, the supervisor reconnects
+immediately (no retry delay; logged as "Backend session closed (...); resuming it
+now", not as a start failure), passes the handle on and disables the startup
+greeting; Gemini restores the full session. A handle the
 server rejects (for example after its two-hour validity) is dropped, and the next
 attempt falls back to the recap. Without a handle, when the conversation already has
 turns, the supervisor disables the startup greeting and seeds a recap of the last 12 turns (bounded by `LOCAL_CONTEXT_MAX_CHARS`) as untrusted
@@ -284,7 +300,8 @@ the Gemini endpoint. Current live microphone audio, provider transcripts, tool
 schemas and results, and explicitly requested camera frames cross that cloud
 boundary as part of the active conversation. The local app still avoids raw
 payload logging and does not send camera frames unless the camera tool is
-requested.
+requested or live video is explicitly enabled, in which case frames are sent while
+the user is engaged in conversation (see above).
 
 Changing the active profile or voice requests a backend reconnect so the next
 session receives the new instructions or voice. An active Gemini handler marks
@@ -545,11 +562,11 @@ diagnostic bounds are covered without live credentials.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, camera session-age limit applied only to a sent frame (late camera calls and frames rejected without ending the session) and lifted under context compression, camera image attached inside the function response and JSON-encodable through the SDK, session resumption and compression config, resumable-handle tracking without logging, rejected-handle reset, camera timing logs, intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
+| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, camera session-age limit applied only to a sent frame (late camera calls and frames rejected without ending the session) and lifted under context compression, opt-in live video with model guidance and engagement-gated frame streaming, camera image attached inside the function response and JSON-encodable through the SDK, session resumption and compression config, resumable-handle tracking without logging, rejected-handle reset, camera timing logs, intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
 | `tests/test_camera_frames.py` | JPEG size parsing, aspect-preserving fit, real GStreamer 1280x720 to 768x432 downscale, small-frame and unreadable-data passthrough, and original-frame fallback on encoder failure. |
 | `tests/tools/test_camera.py` | Camera tool frame capture, downscaled frame returned to the model, disabled camera, missing frame, and question kept out of logs. |
 | `tests/test_conversation_recap.py` | Recap turn merging (cumulative and delta chunks), exclusion of user partials and error notices, newest-first bounding, and truncation. |
-| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, session resumption handle handoff (recap fallback without a handle) and no greeting after a provider-ended session, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
+| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, session resumption handle handoff with immediate reconnect (recap fallback without a handle) and no greeting after a provider-ended session, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
 
 ### Simulator / end-to-end tests
 
@@ -643,6 +660,8 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-13 | Camera frames are downscaled to fit 768x768 before upload (1280x720 to 768x432, about 70% fewer bytes) and each camera request logs capture, send and reply timings, after the user reported slow camera looks on the Reachy Mini Lite. Pillow could not be added (resolving the lockfile rebuilds `pygobject` from source), so scaling uses GStreamer. `media_resolution`, context window compression and session resumption are not yet enabled: the model card does not list them, so they are being probed live first. |
 | 2026-10-13 | Enabled sliding-window context window compression and session resumption for `gemini-3.8-live-extended-thinking` after a live probe: the model accepted both, plus `media_resolution` MEDIUM and LOW, and after reconnecting with a handle it recalled a code word from the earlier connection. Provider-ended connections now resume the same session (full context, no greeting); the recap remains the fallback when no handle exists or the server rejects one. The 110-second camera session limit no longer applies under compression. The same probe showed the model answering "I cannot see the image" for frames sent with `send_realtime_input` immediately before a question; image delivery is being compared before changing the camera path. Regression tests: `test_extended_thinking_session_config_enables_resumption_and_compression`, `test_failed_resume_clears_the_handle`, `test_provider_ended_session_resumes_with_the_previous_handle`. |
 | 2026-10-13 | Camera images for `gemini-3.8-live-extended-thinking` now travel inside the function response instead of as a realtime frame sent just before it. In a live tool-flow probe with a colour-bar image, the old path named the wrong colours once and timed out once, while the attached image was described correctly 3 of 3 times (first reply audio 2.4–2.9 s after the response). The probe also showed the model taking 3.5–6 s, including a spoken filler, before calling the camera at all. Regression test: `test_extended_thinking_camera_image_is_attached_to_the_function_response`. |
+| 2026-10-13 | A Reachy Mini Lite run confirmed accurate camera answers and a resumed session at the nine-minute close, but the app's part of each look took ~35 ms while Gemini took 4-12 s to call the camera and 2.7-7.3 s more to answer. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED`) streaming one frame per second while the user is engaged, so the model can answer from the feed without a tool call. Resumable closes now reconnect immediately instead of after the 5 s retry delay, and are logged as a resume rather than a start failure. Regression tests: `test_live_video_is_opt_in_and_requires_compression`, `test_camera_stream_sends_frames_only_while_the_user_is_engaged`, `test_resumable_session_close_reconnects_without_the_retry_delay`. |
+| 2026-10-13 | Live acceptance on the Reachy Mini Lite with `GEMINI_LIVE_VIDEO_ENABLED=1`: the user reported visual answers as much faster than the camera-tool path. The architecture source (`docs/scheme.mmd`) now shows the opt-in live video edge; the generated SVG still needs regenerating with the Mermaid CLI, which is not installed here. |
 
 ## Shared migration validation — 2026-09-16
 

@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
 from reachy_mini_conversation_app.local_audio_backends import (
@@ -80,6 +81,14 @@ _TOOL_CANCEL_TIMEOUT_S: Final[float] = 1.0
 _SESSION_AUDIO_LIMIT_S: Final[float] = 9 * 60.0
 _SESSION_CAMERA_LIMIT_S: Final[float] = 110.0
 _SESSION_DEADLINE_HEADROOM_S: Final[float] = 2.0
+_VIDEO_FRAME_INTERVAL_S: Final[float] = 1.0
+_VIDEO_ENGAGED_S: Final[float] = 30.0
+_VIDEO_GUIDANCE: Final[str] = (
+    "While the user is talking, and for a short while after, you also receive a live camera feed "
+    "from your own eyes at about one frame per second. Answer questions about what you can see "
+    "directly from the most recent frames without calling the camera tool; use the camera tool "
+    "only if you have no recent frame."
+)
 _LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
 _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
 _MEMORY_REVISION_POLL_S: Final[float] = 0.25
@@ -194,6 +203,9 @@ class GeminiLiveHandler(ConversationHandler):
         # shorter limit after an image; resumption carries the session across connections.
         self._context_compression = self._extended_thinking
         self._resumption_handle: str | None = None
+        # Live video needs compression: without it Gemini ends audio+video sessions after two minutes.
+        self._video_enabled = config.GEMINI_LIVE_VIDEO_ENABLED and self._context_compression
+        self._last_user_speech_at: float | None = None
         self._thinking_level = (
             resolve_gemini_thinking_level(self._model, config.GEMINI_THINKING_LEVEL)
             if self._extended_thinking
@@ -767,6 +779,8 @@ class GeminiLiveHandler(ConversationHandler):
             language_codes=[language] if language else None,
         )
         session_instructions = get_session_instructions(self.instance_path)
+        if self._video_enabled and self.deps.camera_enabled:
+            session_instructions = f"{session_instructions}\n\n{_VIDEO_GUIDANCE}"
         has_initial_context = self._build_initial_context_content() is not None
         if has_initial_context:
             session_instructions = f"{session_instructions}\n\n{_INITIAL_CONTEXT_SECURITY_GUIDANCE}"
@@ -944,6 +958,41 @@ class GeminiLiveHandler(ConversationHandler):
         elif traffic_kind == "video":
             self._emit_traffic("video", traffic_bytes)
         return True
+
+    def _video_engaged(self) -> bool:
+        """Return whether the user spoke recently enough to keep streaming camera frames."""
+        last = self._last_user_speech_at
+        return last is not None and time.perf_counter() - last <= _VIDEO_ENGAGED_S
+
+    async def _stream_camera(self, session: AsyncSession, generation: int) -> None:
+        """Send about one camera frame per second while the user is engaged in conversation."""
+        media = self.deps.reachy_mini.media
+        streaming = False
+        failure_logged = False
+        while self._is_current_session(session, generation):
+            await asyncio.sleep(_VIDEO_FRAME_INTERVAL_S)
+            if not self._video_engaged():
+                if streaming:
+                    streaming = False
+                    logger.info("Gemini camera stream paused after %.0f s without user speech", _VIDEO_ENGAGED_S)
+                continue
+            if not streaming:
+                streaming = True
+                logger.info("Gemini camera stream started")
+            try:
+                jpeg = await asyncio.to_thread(capture_jpeg, media)
+                if jpeg is None:
+                    continue
+                jpeg = await asyncio.to_thread(fit_jpeg_for_model, jpeg)
+                await self._send_realtime_input(
+                    session, generation, video=types.Blob(data=jpeg, mime_type="image/jpeg")
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if not failure_logged:
+                    failure_logged = True
+                    logger.warning("Gemini camera stream frame failed: %s", type(error).__name__)
 
     async def _send_startup_greeting(self, session: AsyncSession, generation: int) -> None:
         """Ask the model for the profile's initial greeting once per session."""
@@ -1172,6 +1221,7 @@ class GeminiLiveHandler(ConversationHandler):
         active_session: AsyncSession | None = None
         resuming = self._resumption_handle is not None
         session_ready = False
+        video_task: asyncio.Task[None] | None = None
         if resuming:
             logger.info("Resuming the previous Gemini Live session")
         try:
@@ -1200,6 +1250,10 @@ class GeminiLiveHandler(ConversationHandler):
 
                 self.tool_manager.start_up(tool_callbacks=[handle_tool_result])
                 self._tool_manager_started = True
+                if self._video_enabled and self.deps.camera_enabled:
+                    video_task = asyncio.create_task(
+                        self._stream_camera(session, generation), name="gemini-camera-stream"
+                    )
                 await self._send_startup_greeting(session, generation)
 
                 while self._is_current_session(session, generation):
@@ -1225,6 +1279,10 @@ class GeminiLiveHandler(ConversationHandler):
                 raise
             logger.info("Gemini Live session ended for a requested reconnect")
         finally:
+            if video_task is not None:
+                video_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await video_task
             if resuming and not session_ready:
                 # An expired or rejected handle must not be retried; the next session starts fresh.
                 self._resumption_handle = None
@@ -1335,6 +1393,8 @@ class GeminiLiveHandler(ConversationHandler):
 
         if event.voice_activity is not None:
             activity_type = event.voice_activity.voice_activity_type
+            if activity_type in (types.VoiceActivityType.ACTIVITY_START, types.VoiceActivityType.ACTIVITY_END):
+                self._last_user_speech_at = time.perf_counter()
             if activity_type == types.VoiceActivityType.ACTIVITY_START:
                 self._mark_activity("user_speech_started")
                 self._start_user_turn()
@@ -1471,6 +1531,9 @@ class GeminiLiveHandler(ConversationHandler):
         text = transcription.text.strip()
         if not text:
             return
+
+        if role == "user":
+            self._last_user_speech_at = time.perf_counter()
 
         if interim:
             if role == "user" and not self._user_turn_active:

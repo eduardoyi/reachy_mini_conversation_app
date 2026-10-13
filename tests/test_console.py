@@ -1200,6 +1200,79 @@ def test_provider_ended_session_resumes_with_the_previous_handle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resumable_session_close_reconnects_without_the_retry_delay(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A planned close with a resumption handle reconnects immediately and is not logged as a failure."""
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    class ResumingHandler:
+        def __init__(self) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.start_calls = 0
+            self.greeting_enabled = True
+            self.resumption_handle: str | None = None
+
+        def set_startup_greeting_enabled(self, enabled: bool) -> None:
+            self.greeting_enabled = enabled
+
+        def set_initial_context(self, context: str) -> None:
+            return None
+
+        def set_resumption_handle(self, handle: str | None) -> None:
+            self.resumption_handle = handle
+
+        async def start_up(self) -> None:
+            self.start_calls += 1
+            if len(handlers) == 1:
+                self.resumption_handle = "handle-1"
+                raise RuntimeError("APIError: 1000 None.")
+            await asyncio.Event().wait()
+
+        def _is_connected(self) -> bool:
+            return False
+
+        async def shutdown(self) -> None:
+            return None
+
+        async def receive(self, _frame: Any) -> None:
+            return None
+
+        async def emit(self) -> None:
+            return None
+
+    handlers: list[ResumingHandler] = []
+
+    def handler_factory(_voice: str | None) -> ResumingHandler:
+        handler = ResumingHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler_factory(None), robot, handler_factory=handler_factory)
+    stream._backend_retry_delay = 30.0
+
+    startup_task = asyncio.create_task(stream._run_handler_startup_loop())
+    try:
+        with caplog.at_level(logging.INFO):
+            await _wait_until(lambda: len(handlers) >= 2 and handlers[1].start_calls >= 1)
+
+        assert handlers[1].resumption_handle == "handle-1"
+        assert handlers[1].greeting_enabled is False
+        assert "resuming it now" in caplog.text
+        assert "Backend failed to start" not in caplog.text
+    finally:
+        stream._stop_event.set()
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_requested_restart_starts_a_new_conversation() -> None:
     """A user-requested rebuild (e.g. a backend change) keeps the normal greeting and no recap."""
 

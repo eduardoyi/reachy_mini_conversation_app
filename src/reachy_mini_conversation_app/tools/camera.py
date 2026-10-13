@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from reachy_mini_conversation_app.camera_frames import fit_jpeg_for_model
+from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -52,7 +52,7 @@ class Camera(Tool):
             return {"error": "Camera is disabled"}
 
         started_at = time.perf_counter()
-        jpeg_bytes = deps.reachy_mini.media.get_frame_jpeg()
+        jpeg_bytes = await asyncio.to_thread(capture_jpeg, deps.reachy_mini.media)
         if jpeg_bytes is None:
             logger.error("No frame available from camera")
             return {"error": "No frame available"}

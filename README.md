@@ -118,6 +118,7 @@ values. This keeps one-off commands such as
 | `GEMINI_THINKING_LEVEL` | `low`, `medium`, or `high` for `gemini-3.8-live-extended-thinking` only; defaults to `medium` for that model. Leave unset for other models. |
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
 | `GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED` | Experimental local microphone onset playback clear for Gemini; default `0`. Set `1` for a supervised interruption trial. Noise can trigger it; cloud generation still controls the response. |
+| `GEMINI_LIVE_VIDEO_ENABLED` | Stream the camera to Gemini at 1 frame per second while the user is talking and for 30 seconds after, so visual questions need no camera tool call; default `0`. Requires `gemini-3.8-live-extended-thinking`. Camera frames go to Google during conversations; video costs about $0.90 per streamed hour. |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |
@@ -237,7 +238,8 @@ current latency preference. Multilingual local STT remains separate follow-up
 scope. The source diagram in
 [`docs/scheme.mmd`](docs/scheme.mmd) includes the provider choice; the generated
 SVG was regenerated from that source on September 16, including shared memory
-and the shutdown barrier.
+and the shutdown barrier. The opt-in Gemini live video edge added to the source on
+October 13 is not yet in the generated SVG; regenerate it with the Mermaid CLI.
 
 ### Hybrid ambient mode
 

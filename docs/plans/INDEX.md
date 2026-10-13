@@ -9,7 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
-| [Reachy Mini Lite hardware bring-up](reachy-mini-lite-bringup.md) | `approved` | 2026-10-10 | Stepwise first power-on, robot audio, interruption, hybrid/wake re-tuning; SDK target 1.11 |
+| [Reachy Mini Lite hardware bring-up](reachy-mini-lite-bringup.md) | `in-progress` | 2026-10-13 | Stepwise first power-on, robot audio, interruption, hybrid/wake re-tuning; SDK target 1.11 |
 | [TypeSafe judgment exploration](typesafe-judgment-exploration.md) | `draft` | 2026-09-17 | Synthetic evaluation complete; background memory verification proposed, no runtime integration |
 | [Gemini 3.8 Live Extended Thinking migration](gemini-38-live-extended-thinking-migration.md) | `in-progress` | 2026-09-21 | SDK crash fix user-confirmed; wake acknowledgment and opt-in interruption assist implemented; 1,263 tests passed; speaker retest and live transcript parity pending |
 | [Local audio dropout comparison](audio-dropout-comparison.md) | `GPT speaker path accepted; Gemini tiny-chunk fix native-tested, live pending` | 2026-09-13 | Audio diagnostics, SDK flush candidate and live audio acceptance |

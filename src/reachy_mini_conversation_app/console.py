@@ -721,6 +721,10 @@ class LocalStream:
             logger.debug("Failed to read backend connection state: %s", self._format_backend_error(exc))
             return False
 
+    def _handler_has_resumption_handle(self) -> bool:
+        """Return whether the current handler can resume its provider session."""
+        return isinstance(getattr(self.handler, "resumption_handle", None), str)
+
     def _can_rebuild_handler(self) -> bool:
         """Return whether LocalStream can construct handlers for backend changes."""
         return self._hybrid_runtime is None and self._handler_factory is not None
@@ -1580,15 +1584,21 @@ class LocalStream:
             except Exception as e:
                 formatted_error = self._format_backend_error(e)
                 self._set_backend_connection_state("disconnected", formatted_error)
-                logger.warning(
-                    "Backend failed to start: %s. Settings UI remains available; retrying in %.1f seconds.",
-                    formatted_error,
-                    self._backend_retry_delay,
-                )
+                resumable = self._can_rebuild_handler() and self._handler_has_resumption_handle()
+                if resumable:
+                    # A planned close (session time limit, GoAway) that the provider can resume: reconnect at once.
+                    logger.info("Backend session closed (%s); resuming it now.", formatted_error)
+                else:
+                    logger.warning(
+                        "Backend failed to start: %s. Settings UI remains available; retrying in %.1f seconds.",
+                        formatted_error,
+                        self._backend_retry_delay,
+                    )
                 if self._can_rebuild_handler():
                     # A session the provider closed (e.g. Gemini close code 1000) can leave the handler fenced,
                     # so retry with a fresh handler rather than the same one.
-                    await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    if not resumable:
+                        await self._sleep_or_restart_requested(self._backend_retry_delay)
                     self._continue_after_provider_end = not self._restart_requested.is_set()
                     self._restart_requested.set()
                     continue
@@ -1598,6 +1608,11 @@ class LocalStream:
                 self._set_backend_connection_state("disconnected")
                 if self._restart_requested.is_set():
                     logger.info("Backend stopped for requested restart.")
+                    continue
+                if self._can_rebuild_handler() and self._handler_has_resumption_handle():
+                    logger.info("Backend session ended; resuming it now.")
+                    self._continue_after_provider_end = True
+                    self._restart_requested.set()
                     continue
                 if self._can_rebuild_handler():
                     # A provider-ended session (e.g. Gemini GoAway at its time limit) fences its handler.
