@@ -3,6 +3,7 @@
 import time
 import base64
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from collections.abc import Callable
@@ -234,6 +235,19 @@ def queued_messages(handler: gemini_live.GeminiLiveHandler) -> list[object]:
     return messages
 
 
+def attached_image(session: FakeSession) -> bytes | None:
+    """Return the camera image attached to the first function response, if any."""
+    response = session.tool_responses[0]["function_responses"][0]
+    assert isinstance(response, types.FunctionResponse)
+    if not response.parts:
+        return None
+    inline_data = response.parts[0].inline_data
+    assert inline_data is not None
+    assert inline_data.mime_type == "image/jpeg"
+    assert isinstance(inline_data.data, str)
+    return base64.b64decode(inline_data.data)
+
+
 def audio_event(sample: int = 1) -> types.LiveServerMessage:
     """Build one minimal Gemini model-audio event."""
     return types.LiveServerMessage(
@@ -317,6 +331,24 @@ def test_extended_thinking_session_config_sets_level_and_non_blocking_tools(gemi
     assert declarations[0].behavior == types.Behavior.NON_BLOCKING
 
 
+def test_extended_thinking_session_config_enables_resumption_and_compression(gemini_config, deps, monkeypatch) -> None:
+    """Extended Thinking sessions use sliding-window compression and resume from the stored handle."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking")
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low")
+    handler = build_handler(deps)
+
+    fresh_config = handler._build_session_config([])
+    handler.set_resumption_handle("resume-handle")
+    resumed_config = handler._build_session_config([])
+
+    assert fresh_config.session_resumption is not None
+    assert fresh_config.session_resumption.handle is None
+    assert fresh_config.context_window_compression is not None
+    assert fresh_config.context_window_compression.sliding_window is not None
+    assert resumed_config.session_resumption is not None
+    assert resumed_config.session_resumption.handle == "resume-handle"
+
+
 def test_standard_gemini_model_omits_extended_thinking_setup(gemini_config, deps) -> None:
     """Legacy Gemini sessions keep their existing synchronous tool declaration."""
     handler = build_handler(deps)
@@ -337,6 +369,8 @@ def test_standard_gemini_model_omits_extended_thinking_setup(gemini_config, deps
     declarations = session_config.tools[1].function_declarations
     assert declarations is not None
     assert declarations[0].behavior is None
+    assert session_config.session_resumption is None
+    assert session_config.context_window_compression is None
 
 
 def test_build_session_config_uses_initial_history_for_local_context(gemini_config, deps) -> None:
@@ -401,6 +435,48 @@ async def test_startup_uses_client_injection_and_closes_idempotently(gemini_conf
 
     assert client.aio.aclose_count == 1
     assert session.close_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_resumption_updates_store_the_latest_resumable_handle_without_logging(
+    gemini_config, deps, caplog
+) -> None:
+    """Only resumable updates replace the handle, and the handle never reaches the logs."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    with caplog.at_level(logging.DEBUG):
+        for update in (
+            types.LiveServerSessionResumptionUpdate(new_handle="secret-handle-1", resumable=True),
+            types.LiveServerSessionResumptionUpdate(new_handle="secret-handle-2", resumable=False),
+            types.LiveServerSessionResumptionUpdate(resumable=True),
+        ):
+            await handler._handle_server_message(types.LiveServerMessage(session_resumption_update=update), session, 1)
+
+    assert handler.resumption_handle == "secret-handle-1"
+    assert "secret-handle" not in caplog.text
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_failed_resume_clears_the_handle(gemini_config, deps) -> None:
+    """A handle the server rejects is dropped so the next session starts fresh instead of retrying it."""
+    session = FakeSession()
+    client = FakeClient(session)
+
+    def reject_resume() -> None:
+        raise RuntimeError("invalid resumption handle")
+
+    client.aio.live.enter_callback = reject_resume
+    handler = build_handler(deps, client)
+    handler.set_resumption_handle("expired-handle")
+
+    with pytest.raises(RuntimeError):
+        await handler.start_up()
+
+    assert handler.resumption_handle is None
+    await handler.shutdown()
 
 
 @pytest.mark.asyncio
@@ -2151,6 +2227,7 @@ async def test_extended_thinking_camera_admission_rejects_near_session_limit(gem
     monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 109.0))
     session = FakeSession()
     handler = build_handler(deps)
+    handler._context_compression = False
     activate_session(handler, session)
     handler._session_ready_at = 0.0
     handler._session_deadline_at = 540.0
@@ -2184,6 +2261,7 @@ async def test_extended_thinking_camera_call_does_not_shorten_session_before_a_f
     monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 10.0))
     session = FakeSession()
     handler = build_handler(deps)
+    handler._context_compression = False
     activate_session(handler, session)
     handler._session_ready_at = 0.0
     handler._session_deadline_at = 540.0
@@ -2226,6 +2304,7 @@ async def test_extended_thinking_sent_camera_frame_installs_session_limit(gemini
     monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 10.0))
     session = FakeSession()
     handler = build_handler(deps)
+    handler._context_compression = False
     activate_session(handler, session)
     handler._session_ready_at = 0.0
     handler._session_deadline_at = 540.0
@@ -2242,7 +2321,8 @@ async def test_extended_thinking_sent_camera_frame_installs_session_limit(gemini
         1,
     )
 
-    assert session.realtime_inputs == [{"video": types.Blob(data=b"fake-jpeg", mime_type="image/jpeg")}]
+    assert session.realtime_inputs == []
+    assert attached_image(session) == b"fake-jpeg"
     assert handler._session_deadline_at == gemini_live._SESSION_CAMERA_LIMIT_S
     assert handler._camera_limit_activated is True
     await handler.shutdown()
@@ -2256,6 +2336,7 @@ async def test_extended_thinking_camera_result_drops_image_at_session_limit(gemi
     monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 109.0))
     session = FakeSession()
     handler = build_handler(deps)
+    handler._context_compression = False
     activate_session(handler, session)
     handler._session_ready_at = 0.0
     handler._session_deadline_at = 540.0
@@ -2276,6 +2357,127 @@ async def test_extended_thinking_camera_result_drops_image_at_session_limit(gemi
     # The dropped frame must not end the session.
     assert handler._session_deadline_at == 540.0
     assert handler._camera_limit_activated is False
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_camera_timing_logs_frame_send_and_first_reply_audio(gemini_config, deps, caplog) -> None:
+    """A sent frame logs call-to-send time, and the next model audio logs frame-to-reply time once."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    jpeg = b"fake-jpeg"
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.gemini_live"):
+        await handler._send_tool_results(
+            [
+                ToolNotification(
+                    id="call-camera",
+                    tool_name="camera",
+                    is_idle_tool_call=False,
+                    status=ToolState.COMPLETED,
+                    result={"b64_im": base64.b64encode(jpeg).decode("ascii")},
+                )
+            ],
+            {"call-camera": time.perf_counter()},
+            session,
+            1,
+        )
+        await handler._handle_server_message(audio_event(), session, 1)
+        await handler._handle_server_message(audio_event(), session, 1)
+
+    assert "Gemini camera timing call_to_frame_sent_ms=" in caplog.text
+    assert f"image_bytes={len(jpeg)}" in caplog.text
+    assert caplog.text.count("Gemini camera timing frame_to_first_audio_ms=") == 1
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_compressed_session_has_no_camera_session_limit(gemini_config, deps, monkeypatch) -> None:
+    """With context compression the shorter image-session limit does not apply, even late in a session."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 300.0))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = 0.0
+    handler._session_deadline_at = 540.0
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": base64.b64encode(b"fake-jpeg").decode("ascii")},
+        ),
+        session,
+        1,
+    )
+
+    assert session.realtime_inputs == []
+    assert attached_image(session) == b"fake-jpeg"
+    assert handler._session_deadline_at == 540.0
+    assert handler._camera_limit_activated is False
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_camera_image_is_attached_to_the_function_response(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """The image travels inside the function response and survives the SDK's JSON encoding without warnings."""
+    import json
+    import warnings
+
+    from google.genai import _common
+    from google.genai import _transformers as genai_transformers
+
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low", raising=False)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    traffic: list[tuple[str, int]] = []
+    handler.set_traffic_observer(lambda kind, byte_count: traffic.append((kind, byte_count)))
+    jpeg = b"\xff\xd8camera-frame\xff\xd9"
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": base64.b64encode(jpeg).decode("ascii")},
+        ),
+        session,
+        1,
+    )
+
+    assert session.realtime_inputs == []
+    assert attached_image(session) == jpeg
+    response = session.tool_responses[0]["function_responses"][0]
+    assert response.response == {"output": {"image_attached": True}}
+    assert traffic == [("video", len(jpeg))]
+    # Mirror AsyncSession.send_tool_response, which json.dumps the converted response.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Pydantic serializer warnings:\s+PydanticSerializationUnexpectedValue\(Expected `bytes`.*field_name='data'",
+        )
+        wire = json.loads(
+            json.dumps(
+                {
+                    "tool_response": _common.convert_to_dict(
+                        genai_transformers.t_tool_response([response]), convert_keys=True
+                    )
+                }
+            )
+        )
+    part = wire["tool_response"]["functionResponses"][0]["parts"][0]
+    assert base64.b64decode(part["inline_data"]["data"]) == jpeg
     await handler.shutdown()
 
 

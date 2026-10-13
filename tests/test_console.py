@@ -1153,6 +1153,52 @@ async def test_startup_loop_continues_conversation_after_provider_ends_session(
             pass
 
 
+def test_provider_ended_session_resumes_with_the_previous_handle() -> None:
+    """A resumable provider session is resumed (no greeting, no recap); without a handle the recap is used."""
+
+    class ResumableHandler:
+        def __init__(self, handle: str | None = None) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.greeting_enabled = True
+            self.initial_context = ""
+            self.resumption_handle = handle
+
+        def set_startup_greeting_enabled(self, enabled: bool) -> None:
+            self.greeting_enabled = enabled
+
+        def set_initial_context(self, context: str) -> None:
+            self.initial_context = context
+
+        def set_resumption_handle(self, handle: str | None) -> None:
+            self.resumption_handle = handle
+
+    handlers: list[ResumableHandler] = []
+
+    def handler_factory(_voice: str | None) -> ResumableHandler:
+        handler = ResumableHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(ResumableHandler("handle-1"), robot, handler_factory=handler_factory)
+    stream._dispatch_transcript("user", "my name is Sam", True)
+
+    stream._continue_after_provider_end = True
+    stream._build_handler_for_current_backend()
+
+    assert handlers[0].resumption_handle == "handle-1"
+    assert handlers[0].greeting_enabled is False
+    assert handlers[0].initial_context == ""
+
+    handlers[0].resumption_handle = None  # as after a rejected resume
+    stream._continue_after_provider_end = True
+    stream._build_handler_for_current_backend()
+
+    assert handlers[1].resumption_handle is None
+    assert handlers[1].greeting_enabled is False
+    assert "User: my name is Sam" in handlers[1].initial_context
+
+
 @pytest.mark.asyncio
 async def test_requested_restart_starts_a_new_conversation() -> None:
     """A user-requested rebuild (e.g. a backend change) keeps the normal greeting and no recap."""

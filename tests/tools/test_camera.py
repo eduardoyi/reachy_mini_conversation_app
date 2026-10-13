@@ -78,3 +78,21 @@ async def test_camera_tool_does_not_log_question(caplog: pytest.LogCaptureFixtur
 
     assert "b64_im" in result
     assert sentinel not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_camera_tool_sends_the_downscaled_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tool returns the model-sized JPEG rather than the full camera frame."""
+    reachy_mini = MagicMock()
+    reachy_mini.media.get_frame_jpeg.return_value = b"full-frame"
+    # Patch the globals the tool really uses; other tests may reload the tools modules.
+    monkeypatch.setitem(Camera.__call__.__globals__, "fit_jpeg_for_model", lambda jpeg: b"small-" + jpeg)
+    deps = ToolDependencies(
+        reachy_mini=reachy_mini,
+        movement_manager=MagicMock(),
+        camera_enabled=True,
+    )
+
+    result = await Camera()(deps, question="What do you see?")
+
+    assert result["b64_im"] == base64.b64encode(b"small-full-frame").decode("utf-8")

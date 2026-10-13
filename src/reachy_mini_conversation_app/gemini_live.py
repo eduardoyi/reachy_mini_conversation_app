@@ -6,6 +6,7 @@ import base64
 import asyncio
 import logging
 import binascii
+import warnings
 import contextlib
 from typing import Any, Final, Literal
 from collections import deque
@@ -54,6 +55,13 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
 
 
 logger = logging.getLogger(__name__)
+# The pre-encoded camera image in a function response (see _function_response) makes pydantic
+# warn that the blob's bytes field holds a string; that string is the intended wire format.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Pydantic serializer warnings:\s+PydanticSerializationUnexpectedValue\(Expected `bytes`.*field_name='data'",
+    category=UserWarning,
+)
 
 GEMINI_OUTPUT_SAMPLE_RATE: Final[int] = 24_000
 GEMINI_DEFAULT_VOICE: Final[str] = "Puck"
@@ -182,6 +190,10 @@ class GeminiLiveHandler(ConversationHandler):
         self._voice_override = self._normalize_voice(startup_voice, source="persisted startup voice")
         self._model = config.GEMINI_LIVE_MODEL
         self._extended_thinking = is_gemini_extended_thinking_model(self._model)
+        # Sliding-window compression lifts the Live session-length limits, including the
+        # shorter limit after an image; resumption carries the session across connections.
+        self._context_compression = self._extended_thinking
+        self._resumption_handle: str | None = None
         self._thinking_level = (
             resolve_gemini_thinking_level(self._model, config.GEMINI_THINKING_LEVEL)
             if self._extended_thinking
@@ -216,6 +228,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._session_ready_at: float | None = None
         self._session_deadline_at: float | None = None
         self._session_deadline_task: asyncio.Task[None] | None = None
+        self._camera_frame_sent_at: float | None = None
         self._camera_limit_activated = False
         self._interaction_deadline_at: float | None = None
         self._interaction_deadline_task: asyncio.Task[None] | None = None
@@ -507,16 +520,35 @@ class GeminiLiveHandler(ConversationHandler):
             deadlines.append(self._session_deadline_at - _SESSION_DEADLINE_HEADROOM_S)
         return min(deadlines)
 
+    @property
+    def resumption_handle(self) -> str | None:
+        """Return the latest resumable session handle, if the server has issued one."""
+        return self._resumption_handle
+
+    def set_resumption_handle(self, handle: str | None) -> None:
+        """Resume this provider session on the next connection instead of starting fresh."""
+        self._resumption_handle = handle or None
+
     def _camera_window_closed(self) -> bool:
         """Return whether sending a first frame now would exceed the camera session-age limit."""
-        if not self._extended_thinking or self._camera_limit_activated or self._session_ready_at is None:
+        if (
+            not self._extended_thinking
+            or self._context_compression
+            or self._camera_limit_activated
+            or self._session_ready_at is None
+        ):
             return False
         camera_deadline = self._session_ready_at + _SESSION_CAMERA_LIMIT_S
         return time.perf_counter() >= camera_deadline - _SESSION_DEADLINE_HEADROOM_S
 
     def _install_camera_session_limit(self, session: AsyncSession, generation: int) -> None:
         """Install the shorter session-age limit when the first frame is sent."""
-        if not self._extended_thinking or self._camera_limit_activated or self._session_ready_at is None:
+        if (
+            not self._extended_thinking
+            or self._context_compression
+            or self._camera_limit_activated
+            or self._session_ready_at is None
+        ):
             return
         self._camera_limit_activated = True
         camera_deadline = self._session_ready_at + _SESSION_CAMERA_LIMIT_S
@@ -761,6 +793,11 @@ class GeminiLiveHandler(ConversationHandler):
                 session_options["thinking_config"] = types.ThinkingConfig(
                     thinking_level=types.ThinkingLevel(thinking_level)
                 )
+            session_options["session_resumption"] = types.SessionResumptionConfig(handle=self._resumption_handle)
+        if self._context_compression:
+            session_options["context_window_compression"] = types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow()
+            )
         return types.LiveConnectConfig.model_validate(session_options)
 
     def _is_connected(self) -> bool:
@@ -1078,6 +1115,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._session_ready_at = None
         self._session_deadline_at = None
         self._camera_limit_activated = False
+        self._camera_frame_sent_at = None
         self._interaction_deadline_at = None
         self._accepted_input_at = None
         self._in_flight_tool_calls.clear()
@@ -1132,6 +1170,10 @@ class GeminiLiveHandler(ConversationHandler):
         )
         connection_started_at = time.perf_counter()
         active_session: AsyncSession | None = None
+        resuming = self._resumption_handle is not None
+        session_ready = False
+        if resuming:
+            logger.info("Resuming the previous Gemini Live session")
         try:
             async with self._connect_with_timeout(client, session_config) as session:
                 active_session = session
@@ -1144,6 +1186,7 @@ class GeminiLiveHandler(ConversationHandler):
                 await self._memory_session.start()
                 self._connection_observer_connected = True
                 self._emit_connection_state(True)
+                session_ready = True
                 if self._extended_thinking:
                     self._start_session_deadline(session, generation)
                 self._append_latency_sample(
@@ -1182,6 +1225,10 @@ class GeminiLiveHandler(ConversationHandler):
                 raise
             logger.info("Gemini Live session ended for a requested reconnect")
         finally:
+            if resuming and not session_ready:
+                # An expired or rejected handle must not be retried; the next session starts fresh.
+                self._resumption_handle = None
+                logger.warning("Gemini Live session resumption failed; the next session starts fresh")
             self._cancel_deadline_task(self._session_deadline_task)
             self._cancel_deadline_task(self._interaction_deadline_task)
             for timeout_task in tuple(self._tool_timeout_tasks.values()):
@@ -1374,6 +1421,12 @@ class GeminiLiveHandler(ConversationHandler):
                             else:
                                 self._record_first_audio_unavailable("non_monotonic_event_order", reordered=True)
                                 self._clear_first_audio_markers(ignore_late_activity_end=True, turn_finished=True)
+                    if self._camera_frame_sent_at is not None:
+                        logger.info(
+                            "Gemini camera timing frame_to_first_audio_ms=%.1f",
+                            self._elapsed_ms(self._camera_frame_sent_at),
+                        )
+                        self._camera_frame_sent_at = None
                     self._mark_activity("assistant_audio_delta")
                     self.deps.movement_manager.set_speaking(True)
                     playable = self._audio_chunks.push(audio_data)
@@ -1391,6 +1444,11 @@ class GeminiLiveHandler(ConversationHandler):
 
         if event.tool_call_cancellation is not None:
             await self._handle_tool_cancellation(event.tool_call_cancellation, generation)
+
+        resumption_update = getattr(event, "session_resumption_update", None)
+        if resumption_update is not None and resumption_update.resumable and resumption_update.new_handle:
+            # The handle is a credential for this conversation; never log it.
+            self._resumption_handle = resumption_update.new_handle
 
         if event.go_away is not None:
             logger.warning("Gemini Live server requested connection shutdown: time_left=%s", event.go_away.time_left)
@@ -1518,6 +1576,11 @@ class GeminiLiveHandler(ConversationHandler):
             self._tool_received_at[call_id] = admitted_at
             self._tool_name_by_call_id[call_id] = tool_name
             self._in_flight_tool_calls.add(call_id)
+            if tool_name == "camera" and self._interaction_completion_started_at is not None:
+                logger.info(
+                    "Gemini camera timing speech_end_to_call_ms=%.1f",
+                    self._elapsed_ms(self._interaction_completion_started_at),
+                )
             if self._extended_thinking:
                 if tool_name == "camera" and self._camera_window_closed():
                     # Only a sent frame shortens the session; reject late camera work so the session continues.
@@ -1741,6 +1804,28 @@ class GeminiLiveHandler(ConversationHandler):
             completed_tool.tool_name, tool_result, image_bytes is not None
         ), image_bytes
 
+    def _function_response(
+        self,
+        completed_tool: ToolNotification,
+        model_result: dict[str, Any],
+        image_bytes: bytes | None,
+    ) -> types.FunctionResponse:
+        """Build one function response, attaching the camera image for Extended Thinking."""
+        response = types.FunctionResponse(
+            id=completed_tool.id,
+            name=completed_tool.tool_name,
+            response={"output": model_result},
+        )
+        if image_bytes is not None and self._extended_thinking:
+            # google-genai 2.19 does not base64-encode bytes in tool responses (json.dumps fails),
+            # so the image is attached already encoded.
+            blob = types.FunctionResponseBlob.model_construct(
+                data=base64.b64encode(image_bytes).decode("ascii"),
+                mime_type="image/jpeg",
+            )
+            response.parts = [types.FunctionResponsePart.model_construct(inline_data=blob)]
+        return response
+
     async def _send_tool_results(
         self,
         completed_tools: list[ToolNotification],
@@ -1773,14 +1858,24 @@ class GeminiLiveHandler(ConversationHandler):
                                 model_result = dict(model_result)
                                 model_result["image_attached"] = False
                                 image_bytes = None
-                        if image_bytes is None:
-                            prepared.append((completed_tool, model_result, None))
+                        if image_bytes is None or self._extended_thinking:
+                            # Extended Thinking gets the image inside its function response (ordered with the
+                            # result); a realtime frame sent just before the response is often not yet seen.
+                            prepared.append((completed_tool, model_result, image_bytes))
                             continue
                         try:
                             await session.send_realtime_input(
                                 video=types.Blob(data=image_bytes, mime_type="image/jpeg"),
                             )
                             self._emit_traffic("video", len(image_bytes))
+                            self._camera_frame_sent_at = time.perf_counter()
+                            call_received_at = received_at.get(completed_tool.id)
+                            if call_received_at is not None:
+                                logger.info(
+                                    "Gemini camera timing call_to_frame_sent_ms=%.1f image_bytes=%d",
+                                    self._elapsed_ms(call_received_at),
+                                    len(image_bytes),
+                                )
                         except asyncio.CancelledError:
                             raise
                         except Exception as exc:
@@ -1801,14 +1896,23 @@ class GeminiLiveHandler(ConversationHandler):
                         ),
                     )
                 function_responses = [
-                    types.FunctionResponse(
-                        id=completed_tool.id,
-                        name=completed_tool.tool_name,
-                        response={"output": model_result},
-                    )
-                    for completed_tool, model_result, _ in prepared
+                    self._function_response(completed_tool, model_result, image_bytes)
+                    for completed_tool, model_result, image_bytes in prepared
                 ]
                 await session.send_tool_response(function_responses=function_responses)
+                if self._extended_thinking:
+                    for completed_tool, _, image_bytes in prepared:
+                        if image_bytes is None:
+                            continue
+                        self._emit_traffic("video", len(image_bytes))
+                        self._camera_frame_sent_at = time.perf_counter()
+                        call_received_at = received_at.get(completed_tool.id)
+                        if call_received_at is not None:
+                            logger.info(
+                                "Gemini camera timing call_to_frame_sent_ms=%.1f image_bytes=%d",
+                                self._elapsed_ms(call_received_at),
+                                len(image_bytes),
+                            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

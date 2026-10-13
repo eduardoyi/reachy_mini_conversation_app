@@ -83,15 +83,24 @@ these limits, not just a successful greeting.
 
 Extended Thinking interactions have a fixed 120-second cap. Tools have at most
 30 seconds, shortened to leave two seconds before an interaction/session deadline.
-Audio-only sessions close after nine minutes. The first camera frame actually sent
-to Gemini imposes a 110-second total session-age limit, including time already
-elapsed. A camera call alone, or a camera result without a frame, leaves the
-nine-minute limit in place. Once the 110-second window (less the two-second
-headroom) has passed, a camera request is rejected without taking a frame and a
-late frame is dropped (`image_attached: false`); neither ends the session. GoAway
-and expired limits close the session without automatic replay or resumption. In
-direct mode the next session continues from a short recap (see below).
-These limits apply to the selected Extended Thinking model; the legacy Gemini model
+Extended Thinking sessions enable sliding-window context window compression and
+session resumption. Compression removes Gemini's session-length limits (15 minutes
+audio-only, 2 minutes once an image is sent), so no camera session limit applies.
+Each connection still closes after nine minutes (Gemini ends connections at about
+ten). The handler keeps the latest handle from resumable `session_resumption_update`
+messages; it is never logged. GoAway and expired limits close the connection without
+replaying any tool call. In direct mode the next connection resumes the same session
+from that handle, with full context and no greeting (see below). A live probe on
+2026-10-13 confirmed that `gemini-3.8-live-extended-thinking` accepts both settings
+and recalls earlier turns after resuming; neither is listed on its model card.
+
+The 110-second camera session limit remains for an Extended Thinking session without
+compression (`_context_compression` false, used in tests): the first frame actually
+sent imposes a 110-second total session-age limit. A camera call alone, or a result
+without a frame, leaves the nine-minute limit in place. Once the window (less the
+two-second headroom) has passed, a camera request is rejected without taking a frame
+and a late frame is dropped (`image_attached: false`); neither ends the session.
+These settings apply to the selected Extended Thinking model; the legacy Gemini model
 keeps its existing configuration.
 
 Memory integration uses the shared store and active-session lifecycle, including
@@ -226,6 +235,16 @@ enter the shared local tool manager and require a client function response.
 
 The `camera` tool is on-demand. A camera frame is sent to Gemini only as the
 result of an explicit camera-tool call, not merely because a camera exists.
+The tool downscales each frame to fit 768x768 (Gemini's recommended Live input
+size) before upload, using the GStreamer stack the SDK already depends on
+(`camera_frames.py`); a 1280x720 frame becomes 768x432 and about 70% smaller in
+roughly 10 ms. Frames that are already small, unreadable, or fail to re-encode are
+sent unchanged. Each camera request logs payload-free timings: `Camera frame ready
+capture_ms scale_ms bytes`, and `Gemini camera timing` lines for
+`speech_end_to_call_ms` (end of the user's speech to the model's camera call),
+`call_to_frame_sent_ms`, and `frame_to_first_audio_ms` (frame sent to the first
+reply audio). `media_resolution` is left at the default: MEDIUM was accepted but
+was not faster for a 768x432 frame in the probe.
 Tool results, transcripts, assistant audio, interruptions, and session errors
 remain inside the existing conversation lifecycle. A provider/session failure
 is reported through logs and the settings connection state; the supervisor can
@@ -235,9 +254,12 @@ leaves its handler policy-fenced, so the supervisor waits the retry delay and
 then builds a fresh handler instead of retrying the fenced one. The same applies
 when the session ends with an error, such as a provider close surfaced as
 `APIError: 1000`: every failed start in direct mode is retried with a fresh
-handler. When the conversation already has turns, that fresh handler continues it
-instead of starting over: the supervisor disables the startup greeting and seeds a
-recap of the last 12 turns (bounded by `LOCAL_CONTEXT_MAX_CHARS`) as untrusted
+handler. That fresh handler continues the conversation instead of starting over.
+If the previous handler holds a session resumption handle, the supervisor passes it
+on and disables the startup greeting; Gemini restores the full session. A handle the
+server rejects (for example after its two-hour validity) is dropped, and the next
+attempt falls back to the recap. Without a handle, when the conversation already has
+turns, the supervisor disables the startup greeting and seeds a recap of the last 12 turns (bounded by `LOCAL_CONTEXT_MAX_CHARS`) as untrusted
 initial context, telling the model not to greet again. The recap
 (`conversation_recap.py`) is built in memory from final user transcripts and
 assistant transcript chunks; it is never logged or written to disk, and a
@@ -247,9 +269,15 @@ conversation with a greeting. Hybrid mode does not use this path.
 Parallel Gemini function calls are started through the shared tool manager, but
 their function responses are sent together in the server-provided order. If one
 call is cancelled, completed sibling results are flushed and the cancelled local
-tool is cancelled; no completed result is stranded. For a camera result, the
-image frame is sent before the function response so Gemini receives the image
-context before the sanitized JSON result.
+tool is cancelled; no completed result is stranded. For a camera result on the
+Extended Thinking model, the image is attached to the function response itself
+(`FunctionResponse.parts` inline JPEG), so it is ordered with the result. A live
+probe showed that a frame sent with `send_realtime_input` just before the response
+was often not yet seen: the model named the wrong colours or timed out, while the
+attached image was described correctly in 3 of 3 runs. google-genai 2.19 does not
+base64-encode bytes in tool responses, so the image is attached pre-encoded and the
+resulting pydantic serializer warning is filtered narrowly. The legacy model still
+sends the frame with `send_realtime_input` before the JSON result.
 
 When Gemini is selected, there is no application gateway between this app and
 the Gemini endpoint. Current live microphone audio, provider transcripts, tool
@@ -517,9 +545,11 @@ diagnostic bounds are covered without live credentials.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, camera session-age limit applied only to a sent frame (late camera calls and frames rejected without ending the session), intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
+| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, camera session-age limit applied only to a sent frame (late camera calls and frames rejected without ending the session) and lifted under context compression, camera image attached inside the function response and JSON-encodable through the SDK, session resumption and compression config, resumable-handle tracking without logging, rejected-handle reset, camera timing logs, intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
+| `tests/test_camera_frames.py` | JPEG size parsing, aspect-preserving fit, real GStreamer 1280x720 to 768x432 downscale, small-frame and unreadable-data passthrough, and original-frame fallback on encoder failure. |
+| `tests/tools/test_camera.py` | Camera tool frame capture, downscaled frame returned to the model, disabled camera, missing frame, and question kept out of logs. |
 | `tests/test_conversation_recap.py` | Recap turn merging (cumulative and delta chunks), exclusion of user partials and error notices, newest-first bounding, and truncation. |
-| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, conversation recap and no greeting after a provider-ended session, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
+| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, session resumption handle handoff (recap fallback without a handle) and no greeting after a provider-ended session, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
 
 ### Simulator / end-to-end tests
 
@@ -610,6 +640,9 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-12 | Direct mode now rebuilds the handler after a provider-ended session. On the Reachy Mini Lite a Gemini GoAway after ~9.5 minutes left the fenced handler retrying every 5 s with "Restart the conversation", so Reachy stopped responding. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_ends_session`. |
 | 2026-10-12 | Direct mode also rebuilds the handler when start-up fails. On `gemini-3.8-live-extended-thinking`, after the user stopped talking for about a minute, the provider closed the session (`APIError: 1000 None.`); the startup loop kept retrying the fenced handler every 5 s with "Restart the conversation", so Reachy looked asleep. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_closes_with_error`. |
 | 2026-10-13 | Sessions no longer restart because the camera was asked for. In a long Reachy Mini Lite conversation Reachy "started over" four times: three sessions were fenced by `camera_session_age_limit` after camera calls that returned no frame (the camera was not delivering frames), and one ended at Gemini's ~9-minute limit. The 110-second limit is now installed only when a frame is sent; late camera calls and frames are refused without ending the session. After any provider-ended session, direct mode now continues with a recap of recent turns and no greeting. Regression tests: `test_extended_thinking_camera_call_does_not_shorten_session_before_a_frame`, `test_startup_loop_continues_conversation_after_provider_ends_session`. |
+| 2026-10-13 | Camera frames are downscaled to fit 768x768 before upload (1280x720 to 768x432, about 70% fewer bytes) and each camera request logs capture, send and reply timings, after the user reported slow camera looks on the Reachy Mini Lite. Pillow could not be added (resolving the lockfile rebuilds `pygobject` from source), so scaling uses GStreamer. `media_resolution`, context window compression and session resumption are not yet enabled: the model card does not list them, so they are being probed live first. |
+| 2026-10-13 | Enabled sliding-window context window compression and session resumption for `gemini-3.8-live-extended-thinking` after a live probe: the model accepted both, plus `media_resolution` MEDIUM and LOW, and after reconnecting with a handle it recalled a code word from the earlier connection. Provider-ended connections now resume the same session (full context, no greeting); the recap remains the fallback when no handle exists or the server rejects one. The 110-second camera session limit no longer applies under compression. The same probe showed the model answering "I cannot see the image" for frames sent with `send_realtime_input` immediately before a question; image delivery is being compared before changing the camera path. Regression tests: `test_extended_thinking_session_config_enables_resumption_and_compression`, `test_failed_resume_clears_the_handle`, `test_provider_ended_session_resumes_with_the_previous_handle`. |
+| 2026-10-13 | Camera images for `gemini-3.8-live-extended-thinking` now travel inside the function response instead of as a realtime frame sent just before it. In a live tool-flow probe with a colour-bar image, the old path named the wrong colours once and timed out once, while the attached image was described correctly 3 of 3 times (first reply audio 2.4–2.9 s after the response). The probe also showed the model taking 3.5–6 s, including a spoken filler, before calling the camera at all. Regression test: `test_extended_thinking_camera_image_is_attached_to_the_function_response`. |
 
 ## Shared migration validation — 2026-09-16
 

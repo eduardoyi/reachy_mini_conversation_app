@@ -733,9 +733,15 @@ class LocalStream:
             if isinstance(self.handler, ConversationHandler):
                 return self.handler
             raise RuntimeError("No handler factory is configured")
+        previous_handle = getattr(self.handler, "resumption_handle", None)
         handler = self._handler_factory(self._voice_override)
+        set_resumption_handle = getattr(handler, "set_resumption_handle", None)
         recap = self._conversation_recap.render(config.LOCAL_CONTEXT_MAX_CHARS)
-        if self._continue_after_provider_end and recap:
+        if self._continue_after_provider_end and isinstance(previous_handle, str) and callable(set_resumption_handle):
+            # Resume the provider session itself: full context, no greeting.
+            handler.set_startup_greeting_enabled(False)
+            set_resumption_handle(previous_handle)
+        elif self._continue_after_provider_end and recap:
             # Continue the same conversation: no fresh greeting, and seed recent turns as context.
             handler.set_startup_greeting_enabled(False)
             handler.set_initial_context(recap)
