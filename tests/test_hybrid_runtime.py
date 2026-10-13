@@ -517,6 +517,52 @@ async def test_strategy_a_excludes_current_wake_question_from_seeded_context() -
 
 
 @pytest.mark.asyncio
+async def test_transcript_wake_mid_sentence_sends_the_whole_sentence_alongside_acoustic_wake() -> None:
+    """With acoustic wake also configured, a mid-sentence wake in the transcript sends the full sentence."""
+    clock = FakeClock()
+    clock.value = 4.0
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+        clock=clock,
+    )
+    sentence = "I think Real Madrid might play this weekend, Richie, can you check?"
+    assert processor.transcript.add(TranscriptSegment("We were talking about football.", 1, 2, 1))
+    assert processor.transcript.add(TranscriptSegment(sentence, 3, 4, 2))
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(aliases=("richie",), cooldown_seconds=0),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        clock=clock,
+    )
+
+    runtime.observe_local_transcript(TranscriptSegment(sentence, 3, 4, 2))
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+    assert handler.say_texts == [sentence]
+    assert handler.get_initial_context() == framed("We were talking about football.")
+    await runtime.close()
+
+
+def test_transcript_wake_aliases_match_whole_words_only() -> None:
+    """Aliases are extra accepted spellings; substrings and unrelated words do not wake."""
+    detector = TranscriptWakeWordDetector(aliases=("richie", "ritchie"), cooldown_seconds=0)
+
+    detection = detector.process_transcript("Ritchie, what time is it?", is_final=True)
+    assert detection is not None and detection.remaining_text == "what time is it?"
+    detector.consume_detection()
+    assert detector.process_transcript("that was rich", is_final=True) is None
+    assert detector.process_transcript("Richieland is far", is_final=True) is None
+
+
+@pytest.mark.asyncio
 async def test_strategy_a_excludes_split_wake_and_followup_from_seeded_context() -> None:
     """Split-final handoff keeps prior context while omitting both current segments."""
     clock = FakeClock()
@@ -2357,6 +2403,45 @@ async def test_acoustic_wake_appends_the_followup_when_nothing_followed_the_wake
     try:
         await _activate_and_collect(runtime, handler, TranscriptSegment("can you check?", 2, 3, 3))
         assert handler.say_texts == ["I think Real Madrid might play this weekend. Reachy can you check?"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_treats_a_short_segment_as_the_wake_word_and_waits_for_the_request() -> None:
+    """A one- or two-word segment at the wake is not sent alone; the next segment carries the request."""
+    processor = _processor_with_open_wake_segment("Re")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=2.0,
+    )
+    try:
+        await _activate_and_collect(runtime, handler, TranscriptSegment("can you check?", 2, 3, 3))
+        assert handler.say_texts == ["Re can you check?"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_with_only_a_fragment_and_no_request_falls_back_to_audio() -> None:
+    """Without a follow-up, a wake-word fragment is never sent as the request."""
+    processor = _processor_with_open_wake_segment("Re")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=0.05,
+    )
+    try:
+        assert await runtime.activate("acoustic_wake")
+        await handler.started.wait()
+        handler.set_connected(True)
+        await handler.say_called.wait()
+        assert handler.say_texts == [HybridRuntime._ACOUSTIC_WAKE_ACK_TEXT]
     finally:
         await runtime.close()
 

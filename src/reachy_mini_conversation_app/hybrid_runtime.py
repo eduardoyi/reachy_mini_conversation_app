@@ -257,6 +257,8 @@ class HybridRuntime:
     _LOCAL_PROCESSING_QUEUE_SIZE = 100
     # Bound on waiting for Whisper to finish the sentence in progress when an acoustic wake fires.
     _ACOUSTIC_CONTEXT_SETTLE_S = 3.0
+    # A wake segment this short is taken as the wake word alone; the request is the next segment.
+    _WAKE_ONLY_MAX_WORDS = 2
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -320,8 +322,8 @@ class HybridRuntime:
         self._ambient_buffer = ambient_buffer if ambient_buffer is not None else AmbientAudioBuffer()
         self._local_processor = local_processor if local_processor is not None else NullLocalProcessingBackend()
         self._context_processor = context_processor
-        if wake_detector is not None and acoustic_wake_detector is not None:
-            raise ValueError("Select one wake detector for the supervised trial")
+        # Both may run: acoustic wake is the fast path, and the transcript detector catches a wake word
+        # spoken mid-sentence that the acoustic model scored below threshold. activate() admits only one.
         self._wake_detector = wake_detector
         self._acoustic_wake_detector = acoustic_wake_detector
         self._acoustic_epoch = 0
@@ -829,12 +831,22 @@ class HybridRuntime:
                     return
                 self._wake_followup_future = followup_waiter
                 self._wake_followup_after_sequence = segment.sequence
+        addressed_text = detection.remaining_text
+        context_fence = segment.sequence
+        if not detection.wake_word_is_first_word:
+            if addressed_text:
+                # Mid-sentence wake ("…this weekend, Reachy, can you check?"): the whole sentence is the request,
+                # so what the request refers to is not lost from the seeded context.
+                addressed_text = segment.text[: self._MAX_ADDRESSED_TEXT_CHARS]
+            else:
+                # Wake at the end of a sentence: keep that sentence as context; the follow-up is the request.
+                context_fence = segment.sequence + 1
         try:
             task = asyncio.create_task(
                 self.activate(
                     "wake_word",
-                    addressed_text=detection.remaining_text,
-                    wake_sequence=segment.sequence,
+                    addressed_text=addressed_text,
+                    wake_sequence=context_fence,
                 ),
                 name="hybrid-wake-activation",
             )
@@ -941,7 +953,7 @@ class HybridRuntime:
             if reason == "wake_word" and not addressed_text:
                 followup_segment, waited_wake_sequence = await self._wait_for_wake_followup()
                 if waited_wake_sequence is not None:
-                    wake_sequence = waited_wake_sequence
+                    wake_sequence = max(wake_sequence or 0, waited_wake_sequence)
                 if followup_segment is not None:
                     addressed_text = followup_segment.text[: self._MAX_ADDRESSED_TEXT_CHARS]
                 else:
@@ -964,14 +976,18 @@ class HybridRuntime:
                 wake_text = self._segment_text(wake_segment_sequence)
                 wake_word_found = _WAKE_WORD_TRANSCRIPT_PATTERN.search(wake_text) is not None
                 followup_text = ""
-                if not wake_text or (wake_word_found and not request_after_wake(wake_text)):
+                # A segment of a word or two at the wake is the wake word itself (or a fragment of it): the
+                # request follows, so wait for it rather than sending the fragment as the request.
+                wake_text_is_request = len(wake_text.split()) > self._WAKE_ONLY_MAX_WORDS
+                if not wake_text_is_request or (wake_word_found and not request_after_wake(wake_text)):
                     followup_segment, _ = await self._wait_for_wake_followup()
                     followup_text = followup_segment.text if followup_segment is not None else ""
                 else:
                     self._clear_wake_followup_waiter()
                 # Send the whole utterance around the wake as the user's turn: it carries the request (and
                 # what it refers to) without depending on how local STT spelled the wake word.
-                request_text = " ".join(part for part in (wake_text, followup_text) if part).strip()
+                parts = (wake_text, followup_text) if followup_text else ((wake_text,) if wake_text_is_request else ())
+                request_text = " ".join(part for part in parts if part).strip()
                 if request_text:
                     addressed_text = request_text[: self._MAX_ADDRESSED_TEXT_CHARS]
                     with self._lifecycle_lock:

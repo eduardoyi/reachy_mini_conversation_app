@@ -95,6 +95,10 @@ class AcousticWakeWordDetector(Protocol):
         """Return transcript-free counters for benchmark reporting."""
 
 
+# Spellings local STT commonly produces for "Reachy" ("Richie" is accepted as a wake word by the household).
+REACHY_TRANSCRIPT_ALIASES: tuple[str, ...] = ("reachie", "reechy", "richie", "richy", "ritchie")
+
+
 class TranscriptWakeWordDetector:
     """Detect a bounded wake phrase from local partial and final transcripts."""
 
@@ -102,11 +106,12 @@ class TranscriptWakeWordDetector:
         self,
         wake_word: str = DEFAULT_LOCAL_WAKE_WORD,
         *,
+        aliases: tuple[str, ...] = (),
         cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS,
         clock: MonotonicClock = time.monotonic,
     ) -> None:
-        """Initialize a detector with a monotonic cooldown clock."""
-        self._wake_word, self._wake_word_pattern = self._compile_wake_word(wake_word)
+        """Initialize a detector with a monotonic cooldown clock; ``aliases`` are extra accepted spellings."""
+        self._wake_word, self._wake_word_pattern = self._compile_wake_word(wake_word, aliases)
         if not math.isfinite(cooldown_seconds) or cooldown_seconds < 0:
             raise ValueError("Wake-word cooldown must be a finite non-negative number")
         self._cooldown_seconds = cooldown_seconds
@@ -272,15 +277,21 @@ class TranscriptWakeWordDetector:
         self._total_latency_seconds += latency_seconds
 
     @staticmethod
-    def _compile_wake_word(wake_word: str) -> tuple[str, re.Pattern[str]]:
-        if not isinstance(wake_word, str):
+    def _compile_wake_word(wake_word: str, aliases: tuple[str, ...] = ()) -> tuple[str, re.Pattern[str]]:
+        if not isinstance(wake_word, str) or not all(isinstance(alias, str) for alias in aliases):
             raise TypeError("Wake word must be a string")
-        tokens = tuple(re.findall(r"\w+", wake_word.casefold()))
-        if not tokens:
-            raise ValueError("Wake word must contain at least one word")
-        display_word = " ".join(tokens)
-        token_pattern = r"[\W_]+".join(re.escape(token) for token in tokens)
-        pattern = re.compile(rf"(?<!\w){token_pattern}(?!\w)", re.IGNORECASE)
+        display_word = ""
+        alternatives: list[str] = []
+        for index, phrase in enumerate((wake_word, *aliases)):
+            tokens = tuple(re.findall(r"\w+", phrase.casefold()))
+            if not tokens:
+                if index == 0:
+                    raise ValueError("Wake word must contain at least one word")
+                continue
+            if index == 0:
+                display_word = " ".join(tokens)
+            alternatives.append(r"[\W_]+".join(re.escape(token) for token in tokens))
+        pattern = re.compile(rf"(?<!\w)(?:{'|'.join(alternatives)})(?!\w)", re.IGNORECASE)
         return display_word, pattern
 
     @staticmethod

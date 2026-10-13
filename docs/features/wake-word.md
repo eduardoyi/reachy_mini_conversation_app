@@ -1287,3 +1287,9 @@ second wake's speech registered within 3 s. The difference matches the bare-wake
 where the runtime asks Gemini to acknowledge the wake before forwarding speech; the
 cause is not yet confirmed.
 
+Transcript backup for acoustic wake (2026-10-13): on the Reachy Mini Lite, "Reachy"
+spoken mid-sentence scored 0.80 or less while ordinary talk reaches 0.84–0.88, so with
+continuous local STT the transcript detector now also runs, accepting
+`REACHY_TRANSCRIPT_ALIASES` spellings. See the hybrid runtime document for how the
+request and context are formed.
+

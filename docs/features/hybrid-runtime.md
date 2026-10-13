@@ -684,3 +684,27 @@ helpers were removed. Tests: `test_acoustic_activation_does_not_stall_local_proc
 `test_acoustic_wake_appends_the_followup_when_nothing_followed_the_wake`,
 `test_acoustic_wake_sends_the_utterance_even_if_stt_misspelled_the_wake`.
 
+Robot retest of the above: the first wake answered with context. On the second, the
+context sentence had already closed (a short pause before "Reachy"), and the segment
+open at the wake held only two characters, a fragment of the wake word, which was
+sent alone as the request. A wake segment of at most `_WAKE_ONLY_MAX_WORDS` (2) words
+is now treated as the wake word: the runtime waits for the next segment and sends both;
+if none arrives, the fragment is not sent and the acknowledgement plus queued audio
+path is used. Tests:
+`test_acoustic_wake_treats_a_short_segment_as_the_wake_word_and_waits_for_the_request`,
+`test_acoustic_wake_with_only_a_fragment_and_no_request_falls_back_to_audio`.
+
+Next retest: "…this weekend, Reachy, can you check?" never woke the robot (acoustic
+peaks 0.80 and below 0.2): official33 scores "Reachy" lower inside running speech than
+spoken alone, and ordinary talk already reaches 0.84–0.88, so the threshold cannot
+drop. With continuous local STT the transcript wake detector now runs alongside
+acoustic wake as a backup (the "select one wake detector" restriction is removed;
+`activate()` admits only one activation). It accepts `REACHY_TRANSCRIPT_ALIASES`
+(reachie, reechy, richie, richy, ritchie) as whole words when the wake word is Reachy.
+For a mid-sentence transcript wake, the whole sentence is the addressed text; when
+the wake ends the sentence, that sentence stays in the context (fence after it) and
+the follow-up is the request; a sentence starting with the wake word keeps the
+existing suffix behaviour, so exact local commands are unchanged. Tests:
+`test_transcript_wake_mid_sentence_sends_the_whole_sentence_alongside_acoustic_wake`,
+`test_transcript_wake_aliases_match_whole_words_only`.
+
