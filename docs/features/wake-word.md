@@ -1276,3 +1276,14 @@ narrow on both sides (0.96 vs 0.99), and one minute of ordinary speech is a smal
 false-wake sample: the earlier 0.5 run woke on ordinary speech, so a longer live run
 at 0.98 is still required.
 
+Live hybrid run at 0.98 (same day, about 18 minutes, roughly 12 of them in ambient
+listening): two intended wakes (scores 0.98 and 0.99), no false wakes, and two near
+misses during ordinary talk (0.70 and 0.88). Because a real wake landed exactly on
+0.98, the user chose **0.97** for the Lite: it keeps a small margin under real wakes,
+still rejects the ordinary-talk peak (0.88) and the calibration's "ready"/"reach"
+(0.96, a 0.01 margin), and accepts "Richie". The first wake felt slow: Gemini
+connected in 0.5 s but registered the user's first speech only 26 s later, while the
+second wake's speech registered within 3 s. The difference matches the bare-wake path,
+where the runtime asks Gemini to acknowledge the wake before forwarding speech; the
+cause is not yet confirmed.
+
