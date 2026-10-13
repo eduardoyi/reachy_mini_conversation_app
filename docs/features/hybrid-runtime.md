@@ -708,3 +708,14 @@ existing suffix behaviour, so exact local commands are unchanged. Tests:
 `test_transcript_wake_mid_sentence_sends_the_whole_sentence_alongside_acoustic_wake`,
 `test_transcript_wake_aliases_match_whole_words_only`.
 
+Non-Latin replies (2026-10-13): with `REALTIME_TRANSCRIPTION_LANGUAGE=auto`, multilingual
+Whisper sometimes turns a short or noisy segment into invented Chinese or Korean text.
+After a wake that text became the addressed request, and Gemini (told to match the
+user's language) answered in Chinese or Korean. `LOCAL_STT_LATIN_ONLY=1`
+(`AmbientContextConfig.latin_script_only`) drops a continuous STT result when less than
+80% of its letters are Latin script (`is_mostly_latin`), logging only that it was
+dropped. The household profile now names English, Spanish, Italian and Portuguese and
+tells the model to treat other languages as mishearing. Tests:
+`test_is_mostly_latin_accepts_household_languages_and_rejects_cjk`,
+`test_latin_only_drops_non_latin_stt_hallucinations`.
+

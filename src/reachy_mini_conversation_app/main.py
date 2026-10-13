@@ -320,6 +320,7 @@ def run(
                     max_transcript_chars=config.LOCAL_CONTEXT_MAX_CHARS,
                     min_silence_seconds=config.LOCAL_VAD_SILENCE_SECONDS,
                     stt_timeout_seconds=config.LOCAL_STT_TIMEOUT_SECONDS,
+                    latin_script_only=config.LOCAL_STT_LATIN_ONLY,
                 ),
             )
             if context_strategy is AmbientContextStrategy.CONTINUOUS_TRANSCRIPT:

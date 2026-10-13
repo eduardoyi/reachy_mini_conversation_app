@@ -135,6 +135,7 @@ values. This keeps one-off commands such as
 | `LOCAL_CONTEXT_STRATEGY` | `continuous` (default) transcribes completed local speech segments and enables transcript wake/local commands; `activation` transcribes the RAM snapshot only after keyboard activation. |
 | `LOCAL_STT_BASE_URL` | Optional OpenAI-compatible transcription base URL. Only explicit loopback hosts are accepted; when unset, hybrid mode retains keyboard activation and the RAM ring without local STT. |
 | `LOCAL_STT_MODEL` | Model name sent to the local endpoint. Defaults to `whisper-1`. |
+| `LOCAL_STT_LATIN_ONLY` | `0` (off). Set `1` for a household that speaks only Latin-script languages (for example English, Spanish, Italian, Portuguese): local STT results mostly in another script are dropped, because multilingual Whisper invents Chinese or Korean text for short or noisy segments. |
 | `LOCAL_STT_TIMEOUT_SECONDS` | Per-request local STT timeout. Defaults to `5`. |
 | `LOCAL_VAD_RMS_THRESHOLD` | PCM RMS speech threshold for the initial lightweight VAD. Defaults to `500`. |
 | `LOCAL_VAD_SILENCE_SECONDS` | Silence needed to close a local speech segment. Defaults to `0.6`. |

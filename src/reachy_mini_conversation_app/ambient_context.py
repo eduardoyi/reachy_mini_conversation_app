@@ -5,6 +5,7 @@ import time
 import asyncio
 import inspect
 import logging
+import unicodedata
 from enum import Enum
 from typing import Literal, Protocol, TypeAlias
 from collections import deque
@@ -49,6 +50,15 @@ class LocalSTT(Protocol):
         """Return derived text for one in-memory audio segment."""
 
 
+def is_mostly_latin(text: str, minimum_share: float = 0.8) -> bool:
+    """Return whether at least ``minimum_share`` of the letters in ``text`` are Latin script (True if none)."""
+    letters = [character for character in text if character.isalpha()]
+    if not letters:
+        return True
+    latin = sum(1 for character in letters if "LATIN" in unicodedata.name(character, ""))
+    return latin / len(letters) >= minimum_share
+
+
 class AmbientContextStrategy(str, Enum):
     """Select how pre-activation context is produced."""
 
@@ -68,6 +78,9 @@ class AmbientContextConfig:
     vad_timeout_seconds: float = 1.0
     stt_timeout_seconds: float = 5.0
     max_pending_stt_tasks: int = 2
+    # Drop transcripts mostly in non-Latin script: multilingual Whisper invents Chinese or Korean text for
+    # short or noisy segments, which a Latin-script household never speaks.
+    latin_script_only: bool = False
 
     def __post_init__(self) -> None:
         """Reject invalid processing bounds before audio is accepted."""
@@ -628,14 +641,17 @@ class AmbientContextProcessor:
         started_at = self._clock()
         result: TranscriptSegment | None = None
         try:
-            text = await self._await_backend_text(backend_task)
-            result = TranscriptSegment(
-                text=_normalize_text(text),
-                started_at=speech.started_at,
-                ended_at=speech.ended_at,
-                sequence=speech.sequence,
-            )
+            text = _normalize_text(await self._await_backend_text(backend_task))
             self._increment_metrics(continuous_stt_completed=self._metrics.continuous_stt_completed + 1)
+            if self.config.latin_script_only and not is_mostly_latin(text):
+                logger.info("Local STT result dropped: not in Latin script (likely a hallucination)")
+            else:
+                result = TranscriptSegment(
+                    text=text,
+                    started_at=speech.started_at,
+                    ended_at=speech.ended_at,
+                    sequence=speech.sequence,
+                )
         except asyncio.CancelledError:
             raise
         except asyncio.TimeoutError:

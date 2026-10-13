@@ -818,3 +818,39 @@ async def test_empty_activation_snapshot_does_not_call_stt() -> None:
     assert processor.metrics.activation_stt_requests == 0
     assert stt.audio == []
     await processor.close()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("I think Real Madrid might play this weekend", True),
+        ("¿Qué hora es? Está lloviendo", True),
+        ("Che ore sono? Não sei", True),
+        ("你好，今天怎么样", False),
+        ("안녕하세요 반갑습니다", False),
+        ("...", True),
+        ("ok 你好你好你好", False),
+    ],
+)
+def test_is_mostly_latin_accepts_household_languages_and_rejects_cjk(text: str, expected: bool) -> None:
+    """English, Spanish, Italian and Portuguese pass; Chinese and Korean text does not."""
+    from reachy_mini_conversation_app.ambient_context import is_mostly_latin
+
+    assert is_mostly_latin(text) is expected
+
+
+@pytest.mark.asyncio
+async def test_latin_only_drops_non_latin_stt_hallucinations() -> None:
+    """With latin_script_only, a CJK transcript is discarded and later ordered text still commits."""
+    processor = AmbientContextProcessor(
+        vad=SequenceVAD([True, False, False, True, False, False]),
+        stt=MappingSTT(["你好你好", "can you check?"]),
+        config=processor_config(latin_script_only=True),
+    )
+
+    for value in range(6):
+        await processor.observe_frame(frame(value))
+    await processor.drain()
+
+    assert processor.transcript.text() == "can you check?"
+    await processor.close()
