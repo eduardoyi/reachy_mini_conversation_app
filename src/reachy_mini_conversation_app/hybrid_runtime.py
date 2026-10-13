@@ -1,5 +1,6 @@
 """Provider lifecycle and privacy boundary for the local/cloud runtime."""
 
+import re
 import math
 import time
 import asyncio
@@ -16,6 +17,7 @@ from collections.abc import Callable, Awaitable
 from reachy_mini_conversation_app.config import (
     MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
     DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+    config,
 )
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import audio_to_mono_int16
@@ -23,6 +25,7 @@ from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, Tra
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
+    AmbientContextStrategy,
     AmbientContextProcessor,
 )
 from reachy_mini_conversation_app.local_processing import (
@@ -205,6 +208,46 @@ class RuntimeStatusSnapshot:
         }
 
 
+ACTIVATION_CONTEXT_HEADER = "Conversation near you before you were called (local transcript, may be imperfect):"
+ACTIVATION_CONTEXT_FOOTER = (
+    "The user has just called you by name and is talking to you now. Their request follows and is addressed "
+    'to you; if it refers to the conversation above ("can you check?", "what do you think?"), use it to '
+    "understand what they mean and answer or act on the live request."
+)
+ACTIVATION_CUE = (
+    "The user has just called you by name and is talking to you now. Their request follows and is addressed "
+    "to you; answer it."
+)
+# Whisper spellings of the wake word; the acoustic wake keeps the word itself local.
+_WAKE_WORD_VARIANTS = (
+    r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi"
+)
+_WAKE_WORD_TRANSCRIPT_PATTERN = re.compile(rf"\b(?:{_WAKE_WORD_VARIANTS})\b", re.IGNORECASE)
+
+
+def frame_activation_context(transcript: str, max_chars: int) -> str:
+    """Frame activation context: background transcript (if any) plus a cue that the request is addressed."""
+    text = transcript.strip()
+    if not text:
+        # Gemini Live always uses proactive audio and may ignore speech it does not think is addressed to it;
+        # the wake word stays local, so say explicitly that the following request is for the robot.
+        return ACTIVATION_CUE if len(ACTIVATION_CUE) <= max_chars else ""
+    budget = max_chars - len(ACTIVATION_CONTEXT_HEADER) - len(ACTIVATION_CONTEXT_FOOTER) - 4
+    if budget <= 0:
+        return ""
+    if len(text) > budget:
+        text = text[-budget:]  # keep the newest lines, which the request most likely refers to
+    return f"{ACTIVATION_CONTEXT_HEADER}\n{text}\n\n{ACTIVATION_CONTEXT_FOOTER}"
+
+
+def request_after_wake(text: str) -> str:
+    """Return what follows the last wake word in a transcript segment ("" when nothing does)."""
+    matches = list(_WAKE_WORD_TRANSCRIPT_PATTERN.finditer(text))
+    if not matches:
+        return ""
+    return text[matches[-1].end() :].lstrip(" ,.;:!?¡¿-").strip()
+
+
 class HybridRuntime:
     """Coordinate local ambient capture with one on-demand cloud handler."""
 
@@ -212,6 +255,8 @@ class HybridRuntime:
     _ACOUSTIC_WAKE_ACK_TEXT = "Acknowledge the wake word briefly, then listen."
     # About one second of 10 ms frames, so short event-loop stalls do not drop wake-word audio.
     _LOCAL_PROCESSING_QUEUE_SIZE = 100
+    # Bound on waiting for Whisper to finish the sentence in progress when an acoustic wake fires.
+    _ACOUSTIC_CONTEXT_SETTLE_S = 3.0
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -866,6 +911,25 @@ class HybridRuntime:
                     self._pending_acoustic_ack_generation = (
                         generation if reason == "acoustic_wake" and not addressed_text else None
                     )
+                    processor = self._context_processor
+                    transcribe_request = (
+                        reason == "acoustic_wake"
+                        and not addressed_text
+                        and processor is not None
+                        and processor.config.strategy is AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
+                    )
+                    wake_segment_sequence: int | None = None
+                    if transcribe_request and processor is not None:
+                        open_at_wake = processor.has_open_segment
+                        # The sentence in progress (ending in "Reachy") becomes background context; the next
+                        # final local segment is the request, sent as text because Gemini's proactive audio
+                        # can ignore a short request heard without the wake word.
+                        processor.close_open_segment()
+                        self._clear_wake_followup_waiter()
+                        self._wake_followup_future = asyncio.get_running_loop().create_future()
+                        self._wake_followup_after_sequence = processor.latest_sequence
+                        if open_at_wake:
+                            wake_segment_sequence = processor.latest_sequence
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
 
             await self._invoke_acknowledgement(reason)
@@ -895,7 +959,36 @@ class HybridRuntime:
                         self._transition(RuntimeMode.LOCAL_AMBIENT, "local_command_completed")
                 return True
 
-            initial_context = await self._context_for_activation(before_sequence=wake_sequence)
+            if reason == "acoustic_wake" and self._context_processor is not None:
+                await self._settle_local_transcript()
+                wake_text = self._segment_text(wake_segment_sequence)
+                wake_word_found = _WAKE_WORD_TRANSCRIPT_PATTERN.search(wake_text) is not None
+                followup_text = ""
+                if not wake_text or (wake_word_found and not request_after_wake(wake_text)):
+                    followup_segment, _ = await self._wait_for_wake_followup()
+                    followup_text = followup_segment.text if followup_segment is not None else ""
+                else:
+                    self._clear_wake_followup_waiter()
+                # Send the whole utterance around the wake as the user's turn: it carries the request (and
+                # what it refers to) without depending on how local STT spelled the wake word.
+                request_text = " ".join(part for part in (wake_text, followup_text) if part).strip()
+                if request_text:
+                    addressed_text = request_text[: self._MAX_ADDRESSED_TEXT_CHARS]
+                    with self._lifecycle_lock:
+                        self._pending_acoustic_ack_generation = None
+                        if wake_word_found or followup_text:
+                            # The request is in the text; drop its queued audio so it is not heard twice.
+                            self._clear_postactivation_queue()
+                    if wake_segment_sequence is not None:
+                        wake_sequence = wake_segment_sequence  # context = what came before this utterance
+                logger.info(
+                    "Acoustic wake request wake_segment_chars=%d wake_word_found=%s followup_chars=%d",
+                    len(wake_text),
+                    wake_word_found,
+                    len(followup_text),
+                )
+            ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
+            initial_context = frame_activation_context(ambient_text, config.LOCAL_CONTEXT_MAX_CHARS)
 
             produced_handler = self._handler_factory()
             handler = await produced_handler if inspect.isawaitable(produced_handler) else produced_handler
@@ -1041,6 +1134,37 @@ class HybridRuntime:
                 self._local_command_router_rejections += 1
             elif outcome is LocalCommandOutcome.FOLLOWUP_TIMEOUT:
                 self._local_command_followup_timeouts += 1
+
+    def _segment_text(self, sequence: int | None) -> str:
+        """Return the final local transcript text of one segment, or "" if it has none."""
+        processor = self._context_processor
+        if processor is None or sequence is None:
+            return ""
+        for segment in processor.transcript.segments:
+            if segment.sequence == sequence:
+                return segment.text.strip()
+        return ""
+
+    async def _settle_local_transcript(self) -> None:
+        """Wait, within a short bound, for the sentence closed at an acoustic wake to finish transcribing.
+
+        Activation closes the open segment (ending in "Reachy") so it can become background context; this
+        waits for local STT without closing the request segment that may already be in progress.
+        """
+        processor = self._context_processor
+        if processor is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(processor.drain()), self._ACOUSTIC_CONTEXT_SETTLE_S)
+        except asyncio.TimeoutError:
+            logger.info(
+                "Local transcript not ready within %.1f s of the wake; activating without it",
+                self._ACOUSTIC_CONTEXT_SETTLE_S,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Local transcript settle failed: %s", type(error).__name__)
 
     async def _context_for_activation(self, *, before_sequence: int | None = None) -> str:
         """Build bounded text context while keeping the ambient PCM snapshot local."""
@@ -1559,7 +1683,11 @@ class HybridRuntime:
             and self._mode is RuntimeMode.LOCAL_AMBIENT
             and epoch == self._acoustic_epoch
         ):
-            await self.activate("acoustic_wake")
+            # Activate in its own task: awaiting it here would stall this worker, so frames after the wake
+            # (the spoken request) would not reach local STT until activation finished.
+            task = asyncio.create_task(self.activate("acoustic_wake"), name="hybrid-acoustic-activation")
+            self._local_event_tasks.add(task)
+            task.add_done_callback(self._local_event_tasks.discard)
 
     async def _stop_local_processing(self) -> None:
         """Cancel the local worker and release queued frame waiters during close."""

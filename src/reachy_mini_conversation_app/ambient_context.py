@@ -411,8 +411,18 @@ class AmbientContextProcessor:
             else:
                 self._discard_continuous_sequence(speech.sequence)
 
-    async def flush(self) -> None:
-        """Finalize a pending speech segment and wait for local STT tasks."""
+    @property
+    def has_open_segment(self) -> bool:
+        """Return whether speech is currently being accumulated into an unfinished segment."""
+        return self._speech is not None
+
+    @property
+    def latest_sequence(self) -> int:
+        """Return the highest speech-segment sequence assigned so far, including an open segment."""
+        return self._next_sequence - 1
+
+    def close_open_segment(self) -> None:
+        """Finalize the open speech segment now (if any) and schedule its transcription without waiting."""
         if self._closed:
             return
         speech = self._speech
@@ -421,6 +431,12 @@ class AmbientContextProcessor:
             self._schedule_continuous_transcription(speech)
         elif speech is not None:
             self._discard_continuous_sequence(speech.sequence)
+
+    async def flush(self) -> None:
+        """Finalize a pending speech segment and wait for local STT tasks."""
+        if self._closed:
+            return
+        self.close_open_segment()
         await self.drain()
 
     async def drain(self) -> None:

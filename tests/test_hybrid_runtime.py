@@ -14,7 +14,12 @@ from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
 from reachy_mini_conversation_app.local_actions import LocalActionExecutor
-from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime, LocalCommandOutcome
+from reachy_mini_conversation_app.hybrid_runtime import (
+    RuntimeMode,
+    HybridRuntime,
+    LocalCommandOutcome,
+    frame_activation_context,
+)
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
     AmbientContextConfig,
@@ -25,6 +30,11 @@ from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, HandlerOutput, ConversationHandler
+
+
+def framed(transcript: str) -> str:
+    """Return ambient transcript as the runtime frames it for an activation."""
+    return frame_activation_context(transcript, config.config.LOCAL_CONTEXT_MAX_CHARS)
 
 
 class FakeClock:
@@ -458,13 +468,16 @@ async def test_strategy_a_injects_completed_dinner_context_without_replaying_aud
     handler.set_connected(True)
     await handler.say_called.wait()
 
-    assert handler.get_initial_context() == (
+    assert handler.get_initial_context() == framed(
         "We should do something indoors tomorrow. Maybe the aquarium. Reachy, what do you think?"
     )
     assert handler.say_texts == ["what do you think?"]
     assert handler.receive_frames == []
     assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
-    assert runtime.status.local_context_chars == len(handler.get_initial_context())
+    # The counter measures the raw ambient transcript, not the activation framing around it.
+    assert runtime.status.local_context_chars == len(
+        "We should do something indoors tomorrow. Maybe the aquarium. Reachy, what do you think?"
+    )
     assert runtime.status.local_context_strategy == "continuous_transcript"
     assert runtime.status.local_audio_seconds_observed == pytest.approx(0.1)
     await runtime.close()
@@ -498,7 +511,7 @@ async def test_strategy_a_excludes_current_wake_question_from_seeded_context() -
     handler.set_connected(True)
     await handler.say_called.wait()
 
-    assert handler.get_initial_context() == "Earlier dinner context."
+    assert handler.get_initial_context() == framed("Earlier dinner context.")
     assert handler.say_texts == ["what do you think?"]
     await runtime.close()
 
@@ -535,7 +548,7 @@ async def test_strategy_a_excludes_split_wake_and_followup_from_seeded_context()
     handler.set_connected(True)
     await handler.say_called.wait()
 
-    assert handler.get_initial_context() == "Earlier dinner context."
+    assert handler.get_initial_context() == framed("Earlier dinner context.")
     assert handler.say_texts == ["What do you think?"]
     await runtime.close()
 
@@ -721,7 +734,7 @@ async def test_strategy_b_acknowledges_then_transcribes_ram_before_factory() -> 
     await handler.started.wait()
 
     assert events[:3] == ["ack", "stt", "factory"]
-    assert handler.get_initial_context() == "indoors tomorrow, maybe the aquarium"
+    assert handler.get_initial_context() == framed("indoors tomorrow, maybe the aquarium")
     assert len(stt.frames) == 1
     np.testing.assert_array_equal(stt.frames[0][1], np.arange(100, dtype=np.int16))
     assert handler.receive_frames == []
@@ -2212,6 +2225,190 @@ async def test_bare_acoustic_wake_acknowledges_once_after_provider_readiness() -
     assert handler.say_texts == ["Acknowledge the wake word briefly, then listen."]
     assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
     await runtime.close()
+
+
+def test_activation_context_framing_marks_background_and_keeps_newest_lines() -> None:
+    """Ambient text is labelled as background for the addressed request and trimmed from the oldest end."""
+    from reachy_mini_conversation_app.hybrid_runtime import (
+        ACTIVATION_CUE,
+        ACTIVATION_CONTEXT_FOOTER,
+        ACTIVATION_CONTEXT_HEADER,
+    )
+
+    framed_text = frame_activation_context("I think Real Madrid might play this weekend", 2_000)
+
+    assert framed_text.startswith(ACTIVATION_CONTEXT_HEADER)
+    assert "I think Real Madrid might play this weekend" in framed_text
+    assert framed_text.endswith(ACTIVATION_CONTEXT_FOOTER)
+    assert frame_activation_context("   ", 2_000) == ACTIVATION_CUE
+
+    limit = len(ACTIVATION_CONTEXT_HEADER) + len(ACTIVATION_CONTEXT_FOOTER) + 4 + 10
+    trimmed = frame_activation_context("oldest line\nnewest one", limit)
+    assert len(trimmed) <= limit
+    assert "newest one" in trimmed
+    assert "oldest" not in trimmed
+
+
+def _processor_with_open_wake_segment(wake_segment_text: str) -> AmbientContextProcessor:
+    """Return a processor holding earlier context and an open segment that closes with the given text."""
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+        clock=lambda: 3.0,
+    )
+    processor.transcript.add(TranscriptSegment("We were talking about football.", 0.5, 1, 1))
+    processor._next_sequence = 3  # segment 2 is open while the wake fires
+    processor._speech = object()  # type: ignore[assignment]
+
+    def close_wake_segment() -> None:
+        processor._speech = None
+        processor.transcript.add(TranscriptSegment(wake_segment_text, 1, 2, 2))
+
+    processor.close_open_segment = close_wake_segment  # type: ignore[method-assign]
+    return processor
+
+
+async def _activate_and_collect(
+    runtime: HybridRuntime, handler: "FakeHandler", followup: TranscriptSegment | None = None
+) -> None:
+    activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+    if followup is not None:
+        await wait_until(lambda: runtime._wake_followup_future is not None)
+        await asyncio.sleep(0.05)
+        runtime.observe_local_transcript(followup)
+    assert await asyncio.wait_for(activation, timeout=3.0)
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_activation_does_not_stall_local_processing() -> None:
+    """While an acoustic activation is still setting up, later frames keep reaching the local processor."""
+    release_factory = asyncio.Event()
+
+    class CountingProcessor:
+        """Count observed frames."""
+
+        def __init__(self) -> None:
+            self.frames = 0
+
+        async def observe_frame(self, _frame: AudioFrame) -> None:
+            """Record one observed frame."""
+            self.frames += 1
+
+    processor = CountingProcessor()
+
+    async def slow_factory() -> FakeHandler:
+        await release_factory.wait()
+        return FakeHandler()
+
+    runtime = HybridRuntime(
+        slow_factory, local_processor=processor, acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel())
+    )
+    try:
+        await runtime.handle_frame((16_000, np.full(1280, 222, dtype=np.int16)), wait_for_local_processing=False)
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        frames_at_wake = processor.frames
+        for _ in range(5):
+            await runtime.handle_frame((16_000, np.zeros(160, dtype=np.int16)), wait_for_local_processing=False)
+        await wait_until(lambda: processor.frames >= frames_at_wake + 1)
+        assert runtime.mode is RuntimeMode.LOCAL_COMMAND
+    finally:
+        release_factory.set()
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_sends_the_utterance_with_the_request_at_once() -> None:
+    """The utterance containing the wake and its request is sent as text; earlier talk stays context."""
+    processor = _processor_with_open_wake_segment(
+        "I think Real Madrid might play this weekend. Reachy, can you check?"
+    )
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=15.0,
+    )
+    try:
+        await _activate_and_collect(runtime, handler)
+        assert handler.say_texts == ["I think Real Madrid might play this weekend. Reachy, can you check?"]
+        context = handler.get_initial_context()
+        assert "We were talking about football." in context
+        assert "Real Madrid" not in context
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_appends_the_followup_when_nothing_followed_the_wake() -> None:
+    """A wake at the end of the utterance waits for the next local segment and sends both."""
+    processor = _processor_with_open_wake_segment("I think Real Madrid might play this weekend. Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=2.0,
+    )
+    try:
+        await _activate_and_collect(runtime, handler, TranscriptSegment("can you check?", 2, 3, 3))
+        assert handler.say_texts == ["I think Real Madrid might play this weekend. Reachy can you check?"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_sends_the_utterance_even_if_stt_misspelled_the_wake() -> None:
+    """An unrecognized wake spelling still sends the utterance as the request, without waiting."""
+    processor = _processor_with_open_wake_segment("I think Real Madrid might play this weekend. Ritzy, can you check?")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=15.0,
+    )
+    try:
+        await _activate_and_collect(runtime, handler)
+        assert handler.say_texts == ["I think Real Madrid might play this weekend. Ritzy, can you check?"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("I think Real Madrid might play this weekend. Reachy, can you check?", "can you check?"),
+        ("talking about Reachy", ""),
+        ("we were saying Ricci, can you check?", "can you check?"),
+        ("Richy what time is it", "what time is it"),
+        ("no wake here", ""),
+    ],
+)
+def test_request_after_wake_returns_the_suffix(text: str, expected: str) -> None:
+    """Only text after the last wake word counts as the request."""
+    from reachy_mini_conversation_app.hybrid_runtime import request_after_wake
+
+    assert request_after_wake(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_without_context_still_marks_the_request_as_addressed() -> None:
+    """With no ambient transcript, the provider still learns the following request is addressed to it."""
+    from reachy_mini_conversation_app.hybrid_runtime import ACTIVATION_CUE
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler)
+    try:
+        assert await runtime.activate("acoustic_wake")
+        await handler.started.wait()
+        assert handler.get_initial_context() == ACTIVATION_CUE
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.asyncio

@@ -492,6 +492,30 @@ async def test_failed_resume_clears_the_handle(gemini_config, deps) -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_end_logs_server_event_counts(gemini_config, deps, caplog) -> None:
+    """Each session logs how many events of each kind the server sent, without payloads."""
+    session = FakeSession()
+    session.events.put_nowait(
+        types.LiveServerMessage(
+            voice_activity=types.VoiceActivity(voice_activity_type=types.VoiceActivityType.ACTIVITY_START)
+        )
+    )
+    session.events.put_nowait(audio_event())
+    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    handler = build_handler(deps, FakeClient(session))
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.gemini_live"):
+        await handler.start_up()
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Gemini session events")]
+    assert len(lines) == 1
+    assert "total=3" in lines[0]
+    assert "voice_activity=1" in lines[0]
+    assert "model_turns=1" in lines[0]
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_policy_closed_session_rejects_same_handler_reconnect(gemini_config, deps) -> None:
     """A provider policy close requires a fresh handler before another connection."""
     first_session = FakeSession()

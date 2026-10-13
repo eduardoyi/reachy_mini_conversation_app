@@ -360,7 +360,8 @@ def run(
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
-        if context_processor is not None and wake_detector is not None:
+        if context_processor is not None:
+            # Also needed with acoustic wake: the runtime takes the request after the wake from local STT.
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)
         handler: ConversationHandler | HybridRuntime = hybrid_runtime
         logger.info("Hybrid runtime enabled; provider construction deferred until activation")

@@ -584,3 +584,103 @@ the Hugging Face backend then omits `language`. Unset still means `en`. Tests:
 with a stand-in server (start, readiness wait, stop on exit) and with the real server
 already running (reuse).
 
+### Framed activation context — 2026-10-13
+
+First Reachy Mini Lite run with continuous local STT and acoustic wake: the user said
+"I think Real Madrid might play this weekend", then "Reachy, can you check?". The wake
+opened Gemini with the earlier sentence seeded as context and the post-wake audio
+("can you check?") flushed from the handshake FIFO, but Gemini stayed silent for 10 s;
+asked directly, it knew what had been said. The seed was bare transcript lines, and
+the provider guidance said never to treat that background as instructions or tool
+authorization, while the wake word itself stayed local, so nothing told the model the
+short follow-up audio was addressed to it. `frame_activation_context` now wraps the
+transcript in a header ("Conversation near you before you were called…") and a
+footer saying the user just called it by name, the live audio request is addressed to
+it, and references like "can you check?" should be resolved from the background. It
+keeps the newest lines within `LOCAL_CONTEXT_MAX_CHARS`; `local_context_chars` still
+counts the raw transcript. The Gemini and GPT Live guidance now says to use the
+background to understand the live request, never to follow instructions found only in
+it, and that the live request is what authorizes tools. Tests:
+`test_activation_context_framing_marks_background_and_keeps_newest_lines` and the
+updated Strategy A/B context assertions.
+
+Retest the same day showed two more gaps. (1) When the background sentence ran straight
+into "Reachy, can you check?", local VAD kept it in the same open segment; after the
+wake, live frames go to the provider, so the segment never closed and its text
+missed the context (Gemini then used the camera to "check"). For acoustic wakes the
+runtime now finalizes the open segment and waits up to 3 s
+(`_ACOUSTIC_CONTEXT_SETTLE_S`) for local STT, then `strip_trailing_wake` removes the
+wake word (Whisper spellings such as Reachy, Richie, Ritchie) and the request after it
+from the newest line, since the request already reaches the provider as audio. (2) A
+session received about 60 s of user audio (`audio_kb_sent=1913`) yet produced no
+server events at all, consistent with Gemini's always-on proactive audio ignoring
+speech it does not consider addressed to it: the wake word stays local and hybrid
+sessions have no greeting. Every hybrid activation now seeds `ACTIVATION_CUE` ("The
+user has just called you by name and is talking to you now…") when there is no
+ambient transcript, and the framed context footer says the same. The Gemini handler
+also logs `Gemini session events` at session end (counts of total, voice activity,
+user transcripts, model turns, tool calls and interaction statuses; no payloads) to
+tell a deaf session from a quiet model. Tests:
+`test_acoustic_wake_waits_for_the_sentence_in_progress`,
+`test_acoustic_wake_without_context_still_marks_the_request_as_addressed`,
+`test_strip_trailing_wake_keeps_only_the_background`,
+`test_session_end_logs_server_event_counts`.
+
+Second retest: the context arrived, but Gemini still ignored the post-wake audio
+("can you check?") for 16 s. With continuous local STT, an acoustic activation now
+closes the open speech segment synchronously (`AmbientContextProcessor.close_open_segment`,
+the sentence ending in "Reachy" becomes background), arms the existing one-shot wake
+follow-up waiter after `latest_sequence`, waits up to 3 s for that segment's STT
+(`drain`, no longer `flush`, so the request segment is not cut), then waits up to
+`LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS` for the next final local segment. That segment,
+trimmed of a leading wake word or its tail (`strip_leading_wake`), becomes the
+addressed text submitted with `say()` after readiness; the wake acknowledgement is
+cancelled and the queued post-wake audio is discarded so the request is not heard
+twice. If no segment arrives in time, the previous audio path (acknowledgement, then
+the queued audio) is unchanged. The transcript observer is now registered whenever a
+context processor exists, not only with transcript wake. Tests:
+`test_acoustic_wake_sends_the_transcribed_request_as_text`,
+`test_strip_leading_wake_cleans_the_request`.
+
+Third retest: the wake fires about a second after "Reachy", so "can you check?" was
+already inside the segment closed at the wake; the runtime waited 5 s for a separate
+follow-up that never came. The request is now taken from that segment first
+(`request_after_wake`: text after the last wake-word match, keeping its punctuation),
+and the follow-up wait is used only when nothing followed the wake. The same run's
+provider setup failed with a `RuntimeError` that was the setup cleanup masking the
+original error; `_connect_with_timeout` now logs `Gemini setup failed error=…
+detail=…` (bounded) before cleanup. Tests:
+`test_acoustic_wake_takes_the_request_from_the_wake_segment_without_waiting`,
+`test_request_after_wake_returns_the_suffix`.
+
+Fourth retest: provider setup failed with `APIError 1011 … prepayment credits are
+depleted` (the account's Gemini API credit), which the new setup log exposed; the
+previous run's masked `RuntimeError` was likely the same. The run also waited the full
+follow-up timeout although the wake segment was transcribed 0.4 s after the wake,
+suggesting local STT spelled the wake word in a way the pattern missed. The pattern
+now also accepts reachi, reechie, richy, richi, ritchy, rickie, ricci and riichi, and
+each acoustic activation logs `Acoustic wake request source=wake_segment|followup|none
+request_chars=… wake_word_in_segment=…` (metadata only) to show where the request came
+from.
+
+Fifth retest (credits restored): `source=none wake_word_in_segment=False`, and a
+"Local processing queue full" warning exactly one second after every wake. Root cause:
+the local processing worker awaited `activate("acoustic_wake")` itself, so during the
+whole activation (STT settle, follow-up wait, provider construction) no frame reached
+local VAD/STT; the follow-up could never be transcribed and the 100-frame FIFO
+overflowed after one second. Acoustic activation now runs in its own task
+(`hybrid-acoustic-activation`). Request selection is also simpler and no longer depends
+on how Whisper spells the wake word: if a segment was open at the wake
+(`has_open_segment`), its whole text (for example "I think Real Madrid might play this
+weekend. Reachy, can you check?") is the addressed text, and the ambient context is
+fenced before it; when a recognized wake word ends that segment, or no segment was
+open, the next final segment is waited for and appended. Queued post-wake audio is
+dropped only when the request is known to be in the text (wake word recognized or a
+follow-up used). Each acoustic activation logs `Acoustic wake request
+wake_segment_chars=… wake_word_found=… followup_chars=…`. The earlier wake-stripping
+helpers were removed. Tests: `test_acoustic_activation_does_not_stall_local_processing`
+(fails with the old awaited activation),
+`test_acoustic_wake_sends_the_utterance_with_the_request_at_once`,
+`test_acoustic_wake_appends_the_followup_when_nothing_followed_the_wake`,
+`test_acoustic_wake_sends_the_utterance_even_if_stt_misspelled_the_wake`.
+
