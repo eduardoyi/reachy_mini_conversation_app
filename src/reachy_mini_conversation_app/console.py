@@ -64,6 +64,7 @@ from reachy_mini_conversation_app.startup_settings import read_startup_settings,
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.audio.diagnostics import AudioDiagnostics
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
+from reachy_mini_conversation_app.conversation_recap import ConversationRecap
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
     register_personality_methods,
@@ -388,6 +389,9 @@ class LocalStream:
         self._last_turn_state: Optional[str] = None
         # Per-role throttle timestamps for conversation.level (orb audio meter).
         self._last_level_emit: dict[str, float] = {}
+        # Recent turns (memory only) so a session the provider ends can continue instead of restarting.
+        self._conversation_recap = ConversationRecap()
+        self._continue_after_provider_end = False
         self._install_handler(handler)
         self._attach_hybrid_runtime()
 
@@ -610,6 +614,8 @@ class LocalStream:
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification to JSON-RPC clients."""
+        if self._hybrid_runtime is None:
+            self._conversation_recap.observe(role, text, final)
         self._broadcast_rpc_threadsafe("conversation.transcript", {"role": role, "text": text, "final": final})
 
     # Audio level meter for the client orb. RMS is scaled into a visible 0..1
@@ -728,6 +734,12 @@ class LocalStream:
                 return self.handler
             raise RuntimeError("No handler factory is configured")
         handler = self._handler_factory(self._voice_override)
+        recap = self._conversation_recap.render(config.LOCAL_CONTEXT_MAX_CHARS)
+        if self._continue_after_provider_end and recap:
+            # Continue the same conversation: no fresh greeting, and seed recent turns as context.
+            handler.set_startup_greeting_enabled(False)
+            handler.set_initial_context(recap)
+        self._continue_after_provider_end = False
         self._install_handler(handler)
         return handler
 
@@ -1571,6 +1583,7 @@ class LocalStream:
                     # A session the provider closed (e.g. Gemini close code 1000) can leave the handler fenced,
                     # so retry with a fresh handler rather than the same one.
                     await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    self._continue_after_provider_end = not self._restart_requested.is_set()
                     self._restart_requested.set()
                     continue
             else:
@@ -1586,6 +1599,7 @@ class LocalStream:
                         "Backend session ended. Starting a fresh session in %.1f seconds.", self._backend_retry_delay
                     )
                     await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    self._continue_after_provider_end = not self._restart_requested.is_set()
                     self._restart_requested.set()
                     continue
                 logger.info(

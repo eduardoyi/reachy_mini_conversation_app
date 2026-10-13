@@ -2167,7 +2167,84 @@ async def test_extended_thinking_camera_admission_rejects_near_session_limit(gem
     assert session.realtime_inputs == []
     response = session.tool_responses[0]["function_responses"][0]
     assert isinstance(response, types.FunctionResponse)
-    assert response.response == {"output": {"error": gemini_live._TOOL_TIMEOUT_MESSAGE}}
+    assert response.response == {"output": {"error": gemini_live._CAMERA_UNAVAILABLE_MESSAGE}}
+    # A rejected late camera request must not end the session.
+    assert handler._session_deadline_at == 540.0
+    assert handler._session_deadline_task is None
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_camera_call_does_not_shorten_session_before_a_frame(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """Calling the camera alone keeps the audio session limit; only a sent frame shortens it."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 10.0))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = 0.0
+    handler._session_deadline_at = 540.0
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="camera-tool"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+    monkeypatch.setattr(handler, "_schedule_tool_deadline", MagicMock())
+
+    await handler._handle_tool_call(
+        types.LiveServerToolCall(function_calls=[types.FunctionCall(id="call-camera", name="camera", args={})]),
+        session,
+        1,
+    )
+
+    start_tool.assert_awaited_once()
+    assert handler._session_deadline_at == 540.0
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"error": "No frame available from camera"},
+        ),
+        session,
+        1,
+    )
+
+    assert session.realtime_inputs == []
+    assert handler._session_deadline_at == 540.0
+    assert handler._camera_limit_activated is False
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_sent_camera_frame_installs_session_limit(gemini_config, deps, monkeypatch) -> None:
+    """The first frame sent to Gemini applies the 110-second session-age limit."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=lambda: 10.0))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = 0.0
+    handler._session_deadline_at = 540.0
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": base64.b64encode(b"fake-jpeg").decode("ascii")},
+        ),
+        session,
+        1,
+    )
+
+    assert session.realtime_inputs == [{"video": types.Blob(data=b"fake-jpeg", mime_type="image/jpeg")}]
+    assert handler._session_deadline_at == gemini_live._SESSION_CAMERA_LIMIT_S
+    assert handler._camera_limit_activated is True
     await handler.shutdown()
 
 
@@ -2196,6 +2273,9 @@ async def test_extended_thinking_camera_result_drops_image_at_session_limit(gemi
     response = session.tool_responses[0]["function_responses"][0]
     assert isinstance(response, types.FunctionResponse)
     assert response.response == {"output": {"image_attached": False}}
+    # The dropped frame must not end the session.
+    assert handler._session_deadline_at == 540.0
+    assert handler._camera_limit_activated is False
     await handler.shutdown()
 
 

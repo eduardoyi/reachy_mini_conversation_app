@@ -1079,6 +1079,114 @@ async def test_startup_loop_starts_fresh_handler_after_provider_closes_with_erro
 
 
 @pytest.mark.asyncio
+async def test_startup_loop_continues_conversation_after_provider_ends_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a provider-ended session the fresh handler skips the greeting and gets recent turns as context."""
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    class EndingSessionHandler:
+        """Records continuity settings; the first handler's session is ended by the provider."""
+
+        def __init__(self) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.start_calls = 0
+            self.greeting_enabled = True
+            self.initial_context = ""
+            self.release = asyncio.Event()
+
+        def set_startup_greeting_enabled(self, enabled: bool) -> None:
+            self.greeting_enabled = enabled
+
+        def set_initial_context(self, context: str) -> None:
+            self.initial_context = context
+
+        async def start_up(self) -> None:
+            self.start_calls += 1
+            await self.release.wait()
+            raise RuntimeError("APIError: 1000 None.")
+
+        def _is_connected(self) -> bool:
+            return False
+
+        async def shutdown(self) -> None:
+            return None
+
+        async def receive(self, _frame: Any) -> None:
+            return None
+
+        async def emit(self) -> None:
+            return None
+
+    handlers: list[EndingSessionHandler] = []
+
+    def handler_factory(_voice: str | None) -> EndingSessionHandler:
+        handler = EndingSessionHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler_factory(None), robot, handler_factory=handler_factory)
+    stream._backend_retry_delay = 0.01
+
+    startup_task = asyncio.create_task(stream._run_handler_startup_loop())
+    try:
+        await _wait_until(lambda: handlers[0].start_calls == 1)
+        stream._dispatch_transcript("user", "my name is Sam", True)
+        stream._dispatch_transcript("assistant", "Nice to meet you, Sam.", True)
+        handlers[0].release.set()
+        await _wait_until(lambda: len(handlers) >= 2 and handlers[1].start_calls >= 1)
+
+        assert handlers[1].greeting_enabled is False
+        assert "User: my name is Sam" in handlers[1].initial_context
+        assert "You: Nice to meet you, Sam." in handlers[1].initial_context
+    finally:
+        stream._stop_event.set()
+        for handler in handlers:
+            handler.release.set()
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_requested_restart_starts_a_new_conversation() -> None:
+    """A user-requested rebuild (e.g. a backend change) keeps the normal greeting and no recap."""
+
+    class RecordingHandler:
+        def __init__(self) -> None:
+            self.output_queue: asyncio.Queue[Any] = asyncio.Queue()
+            self.greeting_enabled = True
+            self.initial_context = ""
+
+        def set_startup_greeting_enabled(self, enabled: bool) -> None:
+            self.greeting_enabled = enabled
+
+        def set_initial_context(self, context: str) -> None:
+            self.initial_context = context
+
+    handlers: list[RecordingHandler] = []
+
+    def handler_factory(_voice: str | None) -> RecordingHandler:
+        handler = RecordingHandler()
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler_factory(None), robot, handler_factory=handler_factory)
+    stream._dispatch_transcript("user", "hello", True)
+
+    stream._build_handler_for_current_backend()
+
+    assert handlers[1].greeting_enabled is True
+    assert handlers[1].initial_context == ""
+
+
+@pytest.mark.asyncio
 async def test_startup_loop_does_not_rebuild_after_direct_shutdown_failure() -> None:
     """A failed direct close leaves the old handler fenced from replacement."""
     handler = MagicMock()

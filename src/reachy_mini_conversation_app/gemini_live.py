@@ -80,6 +80,9 @@ _MEMORY_REVIEW_CLOSE_TIMEOUT_S: Final[float] = 2.0
 _PROTOCOL_ERROR_MESSAGE: Final[str] = "[error] Gemini Live protocol status unavailable."
 _INTERACTION_TIMEOUT_MESSAGE: Final[str] = "[error] Gemini Live interaction timed out."
 _SESSION_TIMEOUT_MESSAGE: Final[str] = "[error] Gemini Live session time limit reached."
+_CAMERA_UNAVAILABLE_MESSAGE: Final[str] = (
+    "The camera can only be used early in a live session; it is unavailable for the rest of this one."
+)
 _TOOL_TIMEOUT_MESSAGE: Final[str] = "Tool deadline exceeded"
 _CLEANUP_ERROR_MESSAGE: Final[str] = "[error] Gemini Live cleanup is incomplete."
 _INITIAL_CONTEXT_SECURITY_GUIDANCE: Final[str] = (
@@ -504,8 +507,15 @@ class GeminiLiveHandler(ConversationHandler):
             deadlines.append(self._session_deadline_at - _SESSION_DEADLINE_HEADROOM_S)
         return min(deadlines)
 
+    def _camera_window_closed(self) -> bool:
+        """Return whether sending a first frame now would exceed the camera session-age limit."""
+        if not self._extended_thinking or self._camera_limit_activated or self._session_ready_at is None:
+            return False
+        camera_deadline = self._session_ready_at + _SESSION_CAMERA_LIMIT_S
+        return time.perf_counter() >= camera_deadline - _SESSION_DEADLINE_HEADROOM_S
+
     def _install_camera_session_limit(self, session: AsyncSession, generation: int) -> None:
-        """Install the shorter session-age limit before any camera tool runs."""
+        """Install the shorter session-age limit when the first frame is sent."""
         if not self._extended_thinking or self._camera_limit_activated or self._session_ready_at is None:
             return
         self._camera_limit_activated = True
@@ -1509,8 +1519,20 @@ class GeminiLiveHandler(ConversationHandler):
             self._tool_name_by_call_id[call_id] = tool_name
             self._in_flight_tool_calls.add(call_id)
             if self._extended_thinking:
-                if tool_name == "camera":
-                    self._install_camera_session_limit(session, generation)
+                if tool_name == "camera" and self._camera_window_closed():
+                    # Only a sent frame shortens the session; reject late camera work so the session continues.
+                    await self._handle_tool_result(
+                        ToolNotification(
+                            id=call_id,
+                            tool_name=tool_name,
+                            is_idle_tool_call=False,
+                            status=ToolState.FAILED,
+                            error=_CAMERA_UNAVAILABLE_MESSAGE,
+                        ),
+                        session,
+                        generation,
+                    )
+                    continue
                 self._start_interaction_deadline_if_needed(session, generation)
                 if self._effective_tool_deadline(admitted_at) <= admitted_at:
                     await self._handle_tool_result(
@@ -1740,8 +1762,11 @@ class GeminiLiveHandler(ConversationHandler):
                     model_result, image_bytes = self._prepare_tool_result(completed_tool)
                     if image_bytes is not None:
                         if self._extended_thinking:
-                            self._install_camera_session_limit(session, generation)
-                            if (
+                            # A late first frame is dropped instead of shortening (and ending) the session.
+                            camera_window_closed = self._camera_window_closed()
+                            if not camera_window_closed:
+                                self._install_camera_session_limit(session, generation)
+                            if camera_window_closed or (
                                 self._session_deadline_at is not None
                                 and time.perf_counter() >= self._session_deadline_at - _SESSION_DEADLINE_HEADROOM_S
                             ):

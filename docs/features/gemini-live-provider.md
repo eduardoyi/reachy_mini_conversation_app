@@ -83,10 +83,14 @@ these limits, not just a successful greeting.
 
 Extended Thinking interactions have a fixed 120-second cap. Tools have at most
 30 seconds, shortened to leave two seconds before an interaction/session deadline.
-Audio-only sessions close after nine minutes. The first camera attempt imposes a
-110-second total session-age limit, including time already elapsed; a late camera
-request is rejected without taking/sending a frame. GoAway and expired limits close
-the session without automatic replay or resumption. A new activation starts fresh.
+Audio-only sessions close after nine minutes. The first camera frame actually sent
+to Gemini imposes a 110-second total session-age limit, including time already
+elapsed. A camera call alone, or a camera result without a frame, leaves the
+nine-minute limit in place. Once the 110-second window (less the two-second
+headroom) has passed, a camera request is rejected without taking a frame and a
+late frame is dropped (`image_attached: false`); neither ends the session. GoAway
+and expired limits close the session without automatic replay or resumption. In
+direct mode the next session continues from a short recap (see below).
 These limits apply to the selected Extended Thinking model; the legacy Gemini model
 keeps its existing configuration.
 
@@ -231,7 +235,14 @@ leaves its handler policy-fenced, so the supervisor waits the retry delay and
 then builds a fresh handler instead of retrying the fenced one. The same applies
 when the session ends with an error, such as a provider close surfaced as
 `APIError: 1000`: every failed start in direct mode is retried with a fresh
-handler. The new session starts without the previous conversation context.
+handler. When the conversation already has turns, that fresh handler continues it
+instead of starting over: the supervisor disables the startup greeting and seeds a
+recap of the last 12 turns (bounded by `LOCAL_CONTEXT_MAX_CHARS`) as untrusted
+initial context, telling the model not to greet again. The recap
+(`conversation_recap.py`) is built in memory from final user transcripts and
+assistant transcript chunks; it is never logged or written to disk, and a
+user-requested rebuild (backend, profile or voice change) still starts a new
+conversation with a greeting. Hybrid mode does not use this path.
 
 Parallel Gemini function calls are started through the shared tool manager, but
 their function responses are sent together in the server-provided order. If one
@@ -506,8 +517,9 @@ diagnostic bounds are covered without live credentials.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
-| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
+| `tests/test_gemini_live.py` | Fake client/session lifecycle, managed Google Search plus application tool configuration, 15-second setup timeout/cancellation, setup and server events, input/output audio, transcripts, marker-before-audio and audio-before-marker latency ordering, repeated turns, bounded diagnostics, interruption, ordered parallel tool calls, on-demand camera result, camera session-age limit applied only to a sent frame (late camera calls and frames rejected without ending the session), intentional voice reconnect during setup and initial-context seeding, stale-output/playback clearing, hybrid readiness/state preservation, cancellation, reconnect/stale-session protection, errors, and shutdown without credentials. |
+| `tests/test_conversation_recap.py` | Recap turn merging (cumulative and delta chunks), exclusion of user partials and error notices, newest-first bounding, and truncation. |
+| `tests/test_console.py` | Provider-neutral settings status, environment-only key rule, provider selection, readiness/waiting state, profile/voice reconnect, backend rebuild, conversation recap and no greeting after a provider-ended session, output-rate conversion, bounded capture-worker polling/overflow/stop behavior, and metadata-only capture errors. |
 
 ### Simulator / end-to-end tests
 
@@ -597,6 +609,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-12 | Raised the microphone capture queue from 8 frames (80 ms) to 200 (about 2 s) and replaced first/every-100th drop warnings with one warning per overflow burst giving frames and milliseconds lost. Reachy Mini Lite diagnostics had shown 14 frames of speech dropped silently during a 158 ms loop stall. Regression tests: `test_capture_worker_default_queue_survives_short_event_loop_stall`, `test_capture_worker_reports_each_drop_burst_with_lost_duration`. |
 | 2026-10-12 | Direct mode now rebuilds the handler after a provider-ended session. On the Reachy Mini Lite a Gemini GoAway after ~9.5 minutes left the fenced handler retrying every 5 s with "Restart the conversation", so Reachy stopped responding. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_ends_session`. |
 | 2026-10-12 | Direct mode also rebuilds the handler when start-up fails. On `gemini-3.8-live-extended-thinking`, after the user stopped talking for about a minute, the provider closed the session (`APIError: 1000 None.`); the startup loop kept retrying the fenced handler every 5 s with "Restart the conversation", so Reachy looked asleep. Regression test: `test_startup_loop_starts_fresh_handler_after_provider_closes_with_error`. |
+| 2026-10-13 | Sessions no longer restart because the camera was asked for. In a long Reachy Mini Lite conversation Reachy "started over" four times: three sessions were fenced by `camera_session_age_limit` after camera calls that returned no frame (the camera was not delivering frames), and one ended at Gemini's ~9-minute limit. The 110-second limit is now installed only when a frame is sent; late camera calls and frames are refused without ending the session. After any provider-ended session, direct mode now continues with a recap of recent turns and no greeting. Regression tests: `test_extended_thinking_camera_call_does_not_shorten_session_before_a_frame`, `test_startup_loop_continues_conversation_after_provider_ends_session`. |
 
 ## Shared migration validation — 2026-09-16
 
