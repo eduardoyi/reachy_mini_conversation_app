@@ -58,6 +58,8 @@ class SpotifyControl(Tool):
         """Serialize commands and token refresh without connecting during startup."""
         self._lock = asyncio.Lock()
         self._search_results: dict[str, float] = {}
+        # Track URI -> its album URI from search, so a track can start inside its album.
+        self._track_albums: dict[str, str] = {}
 
     async def __call__(self, deps: ToolDependencies, **kwargs: object) -> dict[str, object]:
         """Execute a bounded request without replaying playback mutations."""
@@ -97,6 +99,9 @@ class SpotifyControl(Tool):
             try:
                 self._search_results = {
                     key: expiry for key, expiry in self._search_results.items() if expiry > time.monotonic()
+                }
+                self._track_albums = {
+                    key: album for key, album in self._track_albums.items() if key in self._search_results
                 }
                 if action in {"play", "queue"} and uri not in self._search_results:
                     return {"error": "Search again before playing or queueing this selection."}
@@ -191,6 +196,12 @@ class SpotifyControl(Tool):
                             )
                             results.append({"name": title[:300], "creators": creators, "uri": found_uri})
                             self._search_results[found_uri] = time.monotonic() + 600
+                            album = item.get("album")
+                            album_uri = album.get("uri") if isinstance(album, dict) else None
+                            if isinstance(album_uri, str) and re.fullmatch(
+                                r"spotify:album:[A-Za-z0-9]{22}", album_uri
+                            ):
+                                self._track_albums[found_uri] = album_uri
                         self._search_results = dict(list(self._search_results.items())[-50:])
                         return {"source": "Spotify", "results": results}
                     response = await client.get("https://api.spotify.com/v1/me/player/devices", headers=headers)
@@ -240,11 +251,16 @@ class SpotifyControl(Tool):
                                 headers=headers,
                             )
                         else:
-                            body = (
-                                {"uris": [uri]}
-                                if uri.startswith(("spotify:track:", "spotify:episode:"))
-                                else {"context_uri": uri}
-                            )
+                            album_uri = self._track_albums.get(uri)
+                            body: dict[str, object]
+                            if album_uri is not None:
+                                # The Mac desktop app accepts a bare track (HTTP 204) but plays nothing, while
+                                # album/artist/playlist contexts play; so start the track inside its album.
+                                body = {"context_uri": album_uri, "offset": {"uri": uri}}
+                            elif uri.startswith(("spotify:track:", "spotify:episode:")):
+                                body = {"uris": [uri]}
+                            else:
+                                body = {"context_uri": uri}
                             response = await client.put(
                                 "https://api.spotify.com/v1/me/player/play",
                                 params={"device_id": device_id},

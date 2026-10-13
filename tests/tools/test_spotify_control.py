@@ -272,3 +272,28 @@ async def test_idle_device_is_activated_before_playback(configured, monkeypatch,
         ("PUT", "/v1/me/player"),
         ("PUT", "/v1/me/player/play"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_track_plays_inside_its_album(configured, monkeypatch):
+    """A searched track starts inside its album; the Mac desktop app ignores bare track plays."""
+    track = "spotify:track:" + "t" * 22
+    album = "spotify:album:" + "b" * 22
+    bodies = []
+
+    def handler(request):
+        if request.url.path.endswith("/search"):
+            item = {"uri": track, "name": "Song", "album": {"uri": album}}
+            return httpx.Response(200, json={"tracks": {"items": [item]}})
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    tool = SpotifyControl()
+    await tool(Mock(spec=ToolDependencies), action="search", query="song", search_type="track")
+    result = await tool(Mock(spec=ToolDependencies), action="play", uri=track)
+
+    assert "status" in result
+    assert bodies == [{"context_uri": album, "offset": {"uri": track}}]

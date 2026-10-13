@@ -86,7 +86,8 @@ httpx request logs. Returned labels are untrusted and enter the active provider.
 
 Play/queue require an exact URI from this tool instance's recent search. A maximum
 of 50 URI entries expire after ten minutes; no search content is saved to disk.
-Tracks and episodes play using uris, artists/albums/playlists via context_uri.
+Tracks and episodes play using uris, artists/albums/playlists via context_uri
+(tracks found by search now start inside their album; see the 2026-10-13 section).
 Queue supports individual tracks/episodes and appends to Spotify's queue; it does
 not promise immediate next position. No mutation retries or device fallback.
 Existing playback scopes suffice; private-library browsing is not added. Podcast
@@ -168,3 +169,19 @@ the reply by about three seconds and made the model hedge. Play and resume now
 return success once Spotify accepts the command (HTTP 204); the idle-device
 activation and the URI-kind log remain. A device that silently fails to start is
 again indistinguishable from success, so the user would notice and say so.
+
+## Tracks start inside their album — 2026-10-13
+
+The remaining Mac failure was specific to single songs: artist and playlist requests
+played, but a track sent as `{"uris": [track]}` returned HTTP 204 and left the
+desktop app with an empty player. Search now remembers each track's album URI
+(`album.uri` in the search result, kept only while the track's search entry is valid)
+and plays a track as `{"context_uri": album, "offset": {"uri": track}}`. Episodes,
+and tracks whose search result has no album, still use `uris`. After the song, the
+rest of its album continues playing instead of playback stopping.
+
+Live check on the Mac with the real tool: the same "Bohemian Rhapsody" search played
+bare left `is_playing=false` with no item, while the album form played the track
+with `context=album` on the configured device. Test:
+`test_track_plays_inside_its_album`; `test_search_then_select` still covers the bare
+`uris` body for results without an album.
