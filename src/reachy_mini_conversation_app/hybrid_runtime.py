@@ -210,7 +210,8 @@ class HybridRuntime:
 
     _MAX_ADDRESSED_TEXT_CHARS = 512
     _ACOUSTIC_WAKE_ACK_TEXT = "Acknowledge the wake word briefly, then listen."
-    _LOCAL_PROCESSING_QUEUE_SIZE = 8
+    # About one second of 10 ms frames, so short event-loop stalls do not drop wake-word audio.
+    _LOCAL_PROCESSING_QUEUE_SIZE = 100
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -335,6 +336,12 @@ class HybridRuntime:
         self._local_processing_queue: asyncio.Queue[LocalProcessingItem] | None = None
         self._local_processing_task: asyncio.Task[None] | None = None
         self._postactivation_speech_observed = False
+        # Per-cloud-session diagnostics, logged once when the session ends (metadata only).
+        self._session_audio_bytes_start = 0
+        self._local_processing_drop_burst = False
+        self._session_video_frames_start = 0
+        self._session_queued_frames = 0
+        self._session_ack_state = "not_needed"
         self._acoustic_ack_vad = RmsEnergyVAD()
         self._pending_acoustic_ack_generation: int | None = None
         self._acoustic_ack_task: asyncio.Task[None] | None = None
@@ -644,6 +651,26 @@ class HybridRuntime:
             elif owner_loop is not loop:
                 raise RuntimeError("HybridRuntime async operation called from a foreign event loop")
 
+    def _log_cloud_session_summary(self, reason: str) -> None:
+        """Log what one cloud session forwarded, to diagnose sessions that never hear the user."""
+        with self._metrics_lock:
+            audio_bytes = self._cloud_audio_bytes_sent - self._session_audio_bytes_start
+            video_frames = self._cloud_video_frames_sent - self._session_video_frames_start
+        with self._lifecycle_lock:
+            ack_task = self._acoustic_ack_task
+            logger.info(
+                "Cloud session summary reason=%s audio_kb_sent=%.0f video_frames=%d queued_frames=%d "
+                "still_queued=%d ack=%s ack_task_running=%s connection_ready=%s",
+                reason,
+                audio_bytes / 1024,
+                video_frames,
+                self._session_queued_frames,
+                len(self._postactivation_frames),
+                self._session_ack_state,
+                ack_task is not None and not ack_task.done(),
+                self._connection_ready,
+            )
+
     def _transition(self, new_mode: RuntimeMode, reason: str) -> None:
         with self._lifecycle_lock:
             old_mode = self._mode
@@ -888,7 +915,12 @@ class HybridRuntime:
                         raise asyncio.CancelledError
                 self._configure_handler(handler, generation)
                 handler.set_initial_context(initial_context)
+                with self._metrics_lock:
+                    self._session_audio_bytes_start = self._cloud_audio_bytes_sent
+                    self._session_video_frames_start = self._cloud_video_frames_sent
                 with self._lifecycle_lock:
+                    self._session_queued_frames = 0
+                    self._session_ack_state = "not_needed"
                     self._active_handler = handler
                     self._connection_ready = False
                     self._connected_since = None
@@ -1196,15 +1228,22 @@ class HybridRuntime:
                 with self._lifecycle_lock:
                     connection_ready = self._connection_ready
                 if not self._is_current_handler(handler, generation) or not connection_ready:
+                    with self._lifecycle_lock:
+                        self._session_ack_state = "skipped_not_ready"
                     return
                 with self._lifecycle_lock:
                     speech_resumed = self._user_speaking or self._postactivation_speech_observed
+                    self._session_ack_state = "skipped_speech_resumed" if speech_resumed else "sending"
                 if not speech_resumed:
                     try:
                         await handler.say(self._ACOUSTIC_WAKE_ACK_TEXT)
+                        with self._lifecycle_lock:
+                            self._session_ack_state = "sent"
                     except asyncio.CancelledError:
                         raise
                     except Exception as error:
+                        with self._lifecycle_lock:
+                            self._session_ack_state = "failed"
                         logger.warning("Acoustic wake acknowledgement failed: %s", type(error).__name__)
                 if self._is_current_handler(handler, generation):
                     await self._flush_postactivation_locked(handler, generation)
@@ -1281,6 +1320,7 @@ class HybridRuntime:
         with self._lifecycle_lock:
             self._postactivation_frames.append((capture_sequence, frame))
             self._postactivation_seconds += duration
+            self._session_queued_frames += 1
             while self._postactivation_seconds > self._POSTACTIVATION_BUFFER_SECONDS:
                 _, oldest = self._postactivation_frames.popleft()
                 self._postactivation_seconds -= self._frame_duration(oldest)
@@ -1453,14 +1493,19 @@ class HybridRuntime:
         try:
             queue.put_nowait((frame, completed, self._acoustic_epoch))
         except asyncio.QueueFull:
+            # The wake detector keeps its stream state across a dropped frame: a short gap barely changes
+            # its score, while a reset would blind it for ~1.3 s and miss a wake word spoken meanwhile.
             completed.cancel()
-            self._acoustic_epoch += 1
             with self._metrics_lock:
                 self._local_processing_frames_dropped += 1
                 dropped_frames = self._local_processing_frames_dropped
-            if dropped_frames == 1 or dropped_frames % 100 == 0:
+                burst_start = not self._local_processing_drop_burst
+                self._local_processing_drop_burst = True
+            if burst_start:
                 logger.warning("Local processing queue full; dropped_frames=%d", dropped_frames)
             return
+        with self._metrics_lock:
+            self._local_processing_drop_burst = False
         if wait_for_completion:
             await asyncio.shield(completed)
 
@@ -1712,6 +1757,7 @@ class HybridRuntime:
                     shutdown_task = self._shutdown_task
                 elif mode is RuntimeMode.CLOUD_CONVERSATION:
                     handler = active_handler
+                    self._log_cloud_session_summary(reason)
                     tasks_to_cancel = (
                         self._activation_task,
                         self._provider_task,

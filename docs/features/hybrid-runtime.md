@@ -144,11 +144,13 @@ counted only after a successful explicitly requested camera send. Ambient
 playback waits on the runtime state wakeup rather than polling while no cloud
 handler exists.
 
-LocalStream hands copied local frames to a bounded eight-frame runtime FIFO and
-does not wait for the processor to finish. One runtime worker consumes that FIFO
+LocalStream hands copied local frames to a bounded 100-frame (about one second)
+runtime FIFO and does not wait for the processor to finish. One runtime worker consumes that FIFO
 sequentially, preserving the order presented to local VAD/STT while the capture
 loop remains available to drain the SDK queue. A full local FIFO drops the newest
-local frame and increments `local_processing_frames_dropped`; this is distinct
+local frame, increments `local_processing_frames_dropped`, and logs one warning per
+drop burst. A drop does not reset the acoustic wake detector's stream: a short gap
+barely changes its score, while a reset blinds it for about 1.3 s; this is distinct
 from capture-worker drops and from the provider handshake FIFO. Runtime close
 cancels the worker and releases queued callers without retaining frame data;
 frames arriving after close are dropped before any observation fallback.
@@ -273,7 +275,7 @@ LLM routing into this boundary.
   activation. Strategy B waits only for its bounded local STT timeout and uses
   keyboard activation because it has no continuous transcript to detect wake.
 - LocalStream no longer waits for local frame observation at the capture
-  boundary. The runtime worker is sequential and bounded to eight queued frames;
+  boundary. The runtime worker is sequential and bounded to 100 queued frames;
   overload is fail-closed by dropping newest local work and reporting
   `local_processing_frames_dropped`. This prevents a slow asynchronous VAD/STT
   call from holding the capture loop, but sustained overload can still drop
@@ -541,3 +543,26 @@ Relevant regression inventory: `tests/test_gemini_live.py`, `tests/test_config.p
 `tests/test_hybrid_runtime.py`, `tests/test_hybrid_smoke.py`, with existing
 `tests/test_openai_live.py`, `tests/test_gemini_sdk_contract.py` and
 `tests/tools/test_spotify_control.py`. Live speaker acceptance remains pending.
+
+### Wake reliability and cloud session diagnostics — 2026-10-13
+
+On the Reachy Mini Lite, real "Reachy" attempts often scored lower in the app (0.44,
+0.97) than in the guided calibration (0.99 in 9 of 10), which feeds the detector
+directly. The local FIFO held only eight 10 ms frames, so an event-loop stall over
+80 ms dropped a frame, and every drop advanced the acoustic epoch: queued frames were
+discarded and the next frame reset the detector, which then scored nothing for about
+1.3 s. Drops were logged only at 1, 100, 200, …, so most went unseen. The FIFO now
+holds about one second, drops no longer reset the detector, and each drop burst logs
+one warning. Mode transitions still advance the epoch and reset it.
+
+The same run showed cloud sessions after a bare wake (the user paused after
+"Reachy") that registered no user speech for 26 s, or not at all before the 60 s
+inactivity close, while sessions where speech followed the wake directly worked. Each
+cloud session now ends with one metadata-only `Cloud session summary` line: reason,
+audio KiB and video frames the provider confirmed sending, frames queued behind
+provider setup or the acknowledgement and still queued, the acknowledgement state
+(`not_needed`, `skipped_speech_resumed`, `skipped_not_ready`, `sending`, `sent`,
+`failed`), whether the acknowledgement task was still running, and connection
+readiness. Tests: `test_dropped_local_frame_does_not_reset_the_acoustic_detector`,
+`test_cloud_session_summary_logs_ack_and_forwarding`.
+

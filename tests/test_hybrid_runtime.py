@@ -1961,6 +1961,7 @@ async def test_local_processing_backpressure_is_bounded_and_private() -> None:
     processor = BlockingLocalProcessor()
     factory = MagicMock(side_effect=AssertionError("cloud must remain closed"))
     runtime = HybridRuntime(factory, local_processor=processor)
+    runtime._LOCAL_PROCESSING_QUEUE_SIZE = 8  # small bound keeps the overflow case short
 
     try:
         await runtime.handle_frame(frame(0), wait_for_local_processing=False)
@@ -2214,6 +2215,32 @@ async def test_bare_acoustic_wake_acknowledges_once_after_provider_readiness() -
 
 
 @pytest.mark.asyncio
+async def test_cloud_session_summary_logs_ack_and_forwarding(caplog: pytest.LogCaptureFixture) -> None:
+    """Ending a cloud session logs whether the wake ack was sent and how many frames were queued."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler)
+    runtime.set_capture_barrier_provider(lambda: 0)
+
+    assert await runtime.activate("acoustic_wake")
+    await handler.started.wait()
+    await runtime.handle_frame(frame(0), capture_sequence=1)
+    handler.set_connected(True)
+    await handler.say_called.wait()
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.hybrid_runtime"):
+        await runtime.deactivate_cloud("test_end")
+
+    summary = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Cloud session summary")]
+    assert len(summary) == 1
+    assert "reason=test_end" in summary[0]
+    assert "queued_frames=1" in summary[0]
+    assert "ack=sent" in summary[0]
+    assert "ack_task_running=False" in summary[0]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_acoustic_activation_with_addressed_text_does_not_add_ack() -> None:
     """An addressed acoustic activation submits its text once without a second ack."""
     handler = FakeHandler()
@@ -2326,6 +2353,60 @@ async def test_acoustic_failure_keeps_manual_activation_available(caplog) -> Non
     assert "manual activation remains available" in caplog.text
     assert await runtime.activate()
     await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_dropped_local_frame_does_not_reset_the_acoustic_detector(caplog: pytest.LogCaptureFixture) -> None:
+    """A local-queue overflow mid-stream keeps the wake detector's state and logs once per drop burst."""
+    gate = asyncio.Event()
+    gate.set()
+
+    class GatedLocalProcessor:
+        """Let the test stall the local worker so its queue overflows."""
+
+        def __init__(self) -> None:
+            self.frames = 0
+
+        async def observe_frame(self, _frame: AudioFrame) -> None:
+            """Wait at the gate, then count the frame."""
+            await gate.wait()
+            self.frames += 1
+
+    processor = GatedLocalProcessor()
+    model = AcousticScoreModel()
+    runtime = HybridRuntime(
+        MagicMock(side_effect=AssertionError("cloud must remain closed")),
+        local_processor=processor,
+        acoustic_wake_detector=OpenWakeWordDetector(model),
+    )
+    runtime._LOCAL_PROCESSING_QUEUE_SIZE = 2
+    silence = (16000, np.zeros(160, dtype=np.int16))
+    try:
+        for _ in range(3):
+            await runtime.handle_frame(silence, wait_for_local_processing=False)
+            await asyncio.sleep(0.02)
+        await wait_until(lambda: processor.frames == 3)
+        resets_while_listening = model.resets
+
+        gate.clear()
+        with caplog.at_level(logging.WARNING, logger="reachy_mini_conversation_app.hybrid_runtime"):
+            for _ in range(8):
+                await runtime.handle_frame(silence, wait_for_local_processing=False)
+        assert runtime.status.local_processing_frames_dropped >= 2
+        assert sum("Local processing queue full" in r.getMessage() for r in caplog.records) == 1
+
+        gate.set()
+        await asyncio.sleep(0.1)
+        frames_after_drain = processor.frames
+        for _ in range(3):
+            await runtime.handle_frame(silence, wait_for_local_processing=False)
+            await asyncio.sleep(0.02)
+        await wait_until(lambda: processor.frames == frames_after_drain + 3)
+
+        assert model.resets == resets_while_listening
+    finally:
+        gate.set()
+        await runtime.close()
 
 
 @pytest.mark.asyncio
