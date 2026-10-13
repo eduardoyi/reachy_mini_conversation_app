@@ -229,9 +229,13 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     # The OpenAI SDK type only includes 24 kHz PCM, but the HF
                     # compatible server uses rate=None for native 16 kHz mode.
                     format=_native_rate_audio_pcm(),  # type: ignore[typeddict-item]
-                    transcription=AudioTranscriptionParam(
-                        model="gpt-4o-transcribe",
-                        language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                    transcription=(
+                        AudioTranscriptionParam(
+                            model="gpt-4o-transcribe",
+                            language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                        )
+                        if config.REALTIME_TRANSCRIPTION_LANGUAGE
+                        else AudioTranscriptionParam(model="gpt-4o-transcribe")
                     ),
                     turn_detection=ServerVad(type="server_vad", interrupt_response=True),
                 ),

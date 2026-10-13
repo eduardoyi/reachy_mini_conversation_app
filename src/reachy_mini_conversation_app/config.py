@@ -290,8 +290,10 @@ def resolve_gemini_thinking_level(model: str | None = None, value: str | None = 
 
 
 def _normalize_transcription_language(value: str | None) -> str:
-    """Return the configured realtime transcription language."""
+    """Return the configured transcription language; "auto" returns "" (no hint, detect per utterance)."""
     candidate = (value or "").strip()
+    if candidate.lower() == "auto":
+        return ""
     return candidate or "en"
 
 

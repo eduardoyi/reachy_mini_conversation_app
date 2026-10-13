@@ -365,6 +365,10 @@ class GeminiLiveHandler(ConversationHandler):
 
     def _start_user_turn(self) -> None:
         """Start a first-audio measurement for a newly detected user turn."""
+        if self._extended_thinking and self._interaction_deadline_at is not None:
+            # New user input supersedes the unfinished interaction (barge-in, or music keeping the model
+            # from IDLE), so the next accepted input starts a fresh 120 s window instead of inheriting it.
+            self._clear_interaction_deadline()
         if self._user_turn_active and self._first_audio_received_at is not None:
             self._record_first_audio_unavailable("new_turn_before_speech_end_marker", reordered=True)
         self._pending_first_audio_at = None

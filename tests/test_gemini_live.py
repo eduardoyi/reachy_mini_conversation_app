@@ -350,6 +350,17 @@ def test_extended_thinking_session_config_enables_resumption_and_compression(gem
     assert resumed_config.session_resumption.handle == "resume-handle"
 
 
+def test_auto_transcription_language_sends_no_language_codes(gemini_config, deps, monkeypatch) -> None:
+    """With no configured language, Gemini detects each utterance's language for transcripts."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "", raising=False)
+    handler = build_handler(deps)
+
+    session_config = handler._build_session_config([])
+
+    assert session_config.input_audio_transcription is not None
+    assert session_config.input_audio_transcription.language_codes is None
+
+
 def test_standard_gemini_model_omits_extended_thinking_setup(gemini_config, deps) -> None:
     """Legacy Gemini sessions keep their existing synchronous tool declaration."""
     handler = build_handler(deps)
@@ -1161,6 +1172,39 @@ async def test_extended_thinking_speech_end_starts_user_deadline(gemini_config, 
 
     assert handler._accepted_input_at is not None
     assert handler._interaction_deadline_at is not None
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extended_thinking_new_user_turn_restarts_the_interaction_deadline(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """A new user turn before IDLE (barge-in, music) starts a fresh cap instead of inheriting the old one."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "medium", raising=False)
+    clock = FakeClock()
+    monkeypatch.setattr(gemini_live, "time", SimpleNamespace(perf_counter=clock))
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    async def voice(activity: types.VoiceActivityType) -> None:
+        await handler._handle_server_message(
+            types.LiveServerMessage(voice_activity=types.VoiceActivity(voice_activity_type=activity)), session, 1
+        )
+
+    await voice(types.VoiceActivityType.ACTIVITY_START)
+    await voice(types.VoiceActivityType.ACTIVITY_END)
+    first_deadline = handler._interaction_deadline_at
+    assert first_deadline is not None
+
+    clock.advance(100.0)
+    await voice(types.VoiceActivityType.ACTIVITY_START)
+    assert handler._interaction_deadline_at is None
+    await voice(types.VoiceActivityType.ACTIVITY_END)
+
+    assert handler._interaction_deadline_at is not None
+    assert handler._interaction_deadline_at >= first_deadline + 100.0
     await handler.shutdown()
 
 

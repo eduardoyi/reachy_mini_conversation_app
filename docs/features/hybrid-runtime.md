@@ -566,3 +566,21 @@ provider setup or the acknowledgement and still queued, the acknowledgement stat
 readiness. Tests: `test_dropped_local_frame_does_not_reset_the_acoustic_detector`,
 `test_cloud_session_summary_logs_ack_and_forwarding`.
 
+### Launcher and multilingual local STT — 2026-10-13
+
+`scripts/start-reachy.sh` starts the local Whisper server (`transformers serve` on
+127.0.0.1:8766, default multilingual `openai/whisper-small`, override with
+`WHISPER_MODEL`), waits until `/v1/models` answers, then runs the app with the given
+arguments (default `--media-backend local`). It reuses a server already listening on
+the port and stops only a server it started; without the `transformers` CLI it runs
+the app without local STT and prints the install command. For the Reachy Mini Lite
+household (English, Spanish, Italian, Portuguese), `REALTIME_TRANSCRIPTION_LANGUAGE=auto`
+removes the language hint from both the local STT request and Gemini's input
+transcription (`language_codes` omitted), so each utterance's language is detected;
+the Hugging Face backend then omits `language`. Unset still means `en`. Tests:
+`test_transcription_language_auto_means_no_hint`,
+`test_auto_transcription_language_sends_no_language_codes`,
+`test_huggingface_session_omits_language_for_auto_detection`. The launcher was checked
+with a stand-in server (start, readiness wait, stop on exit) and with the real server
+already running (reuse).
+

@@ -547,3 +547,13 @@ def test_acoustic_wake_threshold_resolution(monkeypatch: pytest.MonkeyPatch, raw
         monkeypatch.setenv("LOCAL_ACOUSTIC_WAKE_THRESHOLD", raw)
 
     assert resolve_local_acoustic_wake_threshold() == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(None, "en"), ("", "en"), ("es", "es"), ("auto", ""), (" AUTO ", "")])
+def test_transcription_language_auto_means_no_hint(
+    monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: str
+) -> None:
+    """Unset keeps the English default; "auto" gives no hint so each utterance's language is detected."""
+    from reachy_mini_conversation_app.config import _normalize_transcription_language
+
+    assert _normalize_transcription_language(raw) == expected

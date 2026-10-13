@@ -123,7 +123,7 @@ values. This keeps one-off commands such as
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |
 | `OPENAI_LIVE_VOICE` | GPT Live voice, default `marin`. |
-| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
+| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend and local STT. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese, or `auto` for a multilingual household (no hint, the language is detected per utterance; use a multilingual Whisper model locally). |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
@@ -327,6 +327,14 @@ required local transcription endpoint:
 # Local STT terminal; the Reachy daemon already uses port 8000.
 transformers serve --host 127.0.0.1 --port 8766 \
   openai/whisper-small.en
+```
+
+To start the STT server and the app together, use the launcher. It reuses a server
+that is already running and stops one it started when the app exits; set
+`WHISPER_MODEL` to change the model (default multilingual `openai/whisper-small`):
+
+```bash
+scripts/start-reachy.sh
 ```
 
 Then add this to the ignored `.env`:

@@ -81,7 +81,7 @@ flushes and the existing local movement/audio integration. The plan records the
 exact deadlines and conservative image-session limit; human acceptance must include
 these limits, not just a successful greeting.
 
-Extended Thinking interactions have a fixed 120-second cap. Tools have at most
+Extended Thinking interactions have a fixed 120-second cap. A new user turn before IDLE (a barge-in, or music keeping the model from reaching IDLE) clears the unfinished interaction's cap, and the new accepted input starts a fresh one; busy or filler events still never extend it. Tools have at most
 30 seconds, shortened to leave two seconds before an interaction/session deadline.
 Extended Thinking sessions enable sliding-window context window compression and
 session resumption. Compression removes Gemini's session-length limits (15 minutes
@@ -662,6 +662,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-13 | Camera images for `gemini-3.8-live-extended-thinking` now travel inside the function response instead of as a realtime frame sent just before it. In a live tool-flow probe with a colour-bar image, the old path named the wrong colours once and timed out once, while the attached image was described correctly 3 of 3 times (first reply audio 2.4–2.9 s after the response). The probe also showed the model taking 3.5–6 s, including a spoken filler, before calling the camera at all. Regression test: `test_extended_thinking_camera_image_is_attached_to_the_function_response`. |
 | 2026-10-13 | A Reachy Mini Lite run confirmed accurate camera answers and a resumed session at the nine-minute close, but the app's part of each look took ~35 ms while Gemini took 4-12 s to call the camera and 2.7-7.3 s more to answer. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED`) streaming one frame per second while the user is engaged, so the model can answer from the feed without a tool call. Resumable closes now reconnect immediately instead of after the 5 s retry delay, and are logged as a resume rather than a start failure. Regression tests: `test_live_video_is_opt_in_and_requires_compression`, `test_camera_stream_sends_frames_only_while_the_user_is_engaged`, `test_resumable_session_close_reconnects_without_the_retry_delay`. |
 | 2026-10-13 | Live acceptance on the Reachy Mini Lite with `GEMINI_LIVE_VIDEO_ENABLED=1`: the user reported visual answers as much faster than the camera-tool path. The architecture source (`docs/scheme.mmd`) now shows the opt-in live video edge; the generated SVG still needs regenerating with the Mermaid CLI, which is not installed here. |
+| 2026-10-13 | A hybrid session on the Reachy Mini Lite ended with `interaction_deadline` (APIError, provider_failed) about two minutes into a lively exchange: Spotify music played near the robot, the user barged in repeatedly, and the model never reported IDLE, so the cap started by the first request kept running across many later user turns. A new user turn now restarts the cap. Regression test: `test_extended_thinking_new_user_turn_restarts_the_interaction_deadline`. |
 
 ## Shared migration validation — 2026-09-16
 
