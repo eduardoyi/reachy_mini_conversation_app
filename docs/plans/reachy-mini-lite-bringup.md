@@ -108,6 +108,28 @@ frames are non-silent (silence suggests an inverted FPC cable per Pollen docs).
 Acceptance: conversation, tools, movement and camera work; no self-triggering;
 measured RMS levels recorded here.
 
+Measured 2026-10-13 (`.venv/bin/reachy-mic-levels --media-backend local`, normal
+speaker volume, usual seating distance, 10 s per phase, evaluated at threshold 400
+int16 RMS, onset 120 ms, rearm 400 ms):
+
+| Phase | Signal | p50 | p75 | p99 | Peak | ≥ thr | Longest run ms | Onsets |
+|---|---|---|---|---|---|---|---|---|
+| quiet | mixed / channel0 | 127 | 161 | 296 | 409 | 0% | 10 | 0 |
+| speech | mixed / channel0 | 747 | 1992 | 5532 | 7302 | 60% | 1440 | 2 |
+| playback | mixed / channel0 | 33 | 41 | 1473 | 1969 | 4% | 170 | 1 |
+| speech over playback | mixed / channel0 | 816 | 2273 | 7985 | 10193 | 57% | 2850 | 4 |
+
+The `mixed` and `channel0` rows are identical, so the robot delivers the same
+processed signal on both channels and the provider channel-handling difference does
+not matter on this unit. Echo cancellation works: the robot's own test sound reads
+p50 33, below the quiet room, and the user's speech over playback keeps its normal
+level. It leaks short bursts, though (p99 1473, peak 1969, one 170 ms run), which at
+threshold 400 would be one false local barge-in per 10 s of robot speech. The probe
+reports no clean level separation because those bursts overlap ordinary speech, but
+duration separates them: speech runs lasted 1.4–2.9 s against 170 ms for the leak.
+In the quiet room, 400 sits just under the quiet peak (409) with no frames above it.
+Self-triggering: none reported across the long Gemini sessions on 2026-10-12/13.
+
 ### Step 4 — Interruption
 
 1. Enable the provider's local barge-in flag and re-tune its threshold from the
@@ -184,3 +206,4 @@ change, and the README launch section once the Lite procedure is confirmed.
 | 2026-10-13 | Step 3–4 | Reachy run with the new camera path: answers were accurate; capture, downscale and send took ~35 ms, while Gemini took 4-12 s to call the camera and 2.7-7.3 s to answer. At 9 minutes the session closed and resumed ("Resuming the previous Gemini Live session", 0.7 s connect, no greeting), but only after the 5 s retry delay. Resumable closes now reconnect immediately. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED=1`), streaming one frame per second while the user is engaged, to remove the camera-call step. Retest pending. |
 | 2026-10-13 | Step 3–4 | Live video retest: with `GEMINI_LIVE_VIDEO_ENABLED=1` the user reported visual answers as much faster. Live video stays opt-in because it sends camera frames to Google throughout each conversation (about $0.90 per streamed hour). Still to confirm in a long run: the immediate resume at the nine-minute close and continuity after it. |
 | 2026-10-13 | Step 3 (Spotify) | The user found the Mac app fails only for specific songs; artists and playlists play. A direct check with the real tool confirmed it: a bare track play left an empty player, while the same track started inside its album played. Searched tracks now play inside their album (`context_uri` plus `offset`). |
+| 2026-10-13 | Step 3–4 | Recorded the microphone level table (see Step 3). Echo cancellation suppresses the robot's own speech to below room noise but leaks bursts up to RMS ~2000 for up to 170 ms. Step 4 decision: keep the local barge-in flag off; Gemini's server-side interruption was rated good, and a local level trigger at 400 would fire on echo bursts. For Step 5, the hybrid VAD needs margin over the quiet peak (409), and an onset longer than ~200 ms would reject the echo bursts. |
