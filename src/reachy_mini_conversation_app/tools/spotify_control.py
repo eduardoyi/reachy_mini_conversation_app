@@ -9,6 +9,7 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
+from collections.abc import Callable, Awaitable
 
 import httpx
 
@@ -28,6 +29,220 @@ class SpotifySearchLogFilter(logging.Filter):
 
 logging.getLogger("httpx").addFilter(SpotifySearchLogFilter())
 SPOTIFY_TRANSFER_SETTLE_SECONDS = 0.5
+MUSIC_STARTED_IN_CONVERSATION = (
+    "Spotify is playing (quietly while you talk). Reply with only a brief 'Enjoy!' in the user's language and "
+    "nothing else; the conversation closes in a few seconds so the user can listen, unless they say more."
+)
+
+
+_CREDENTIALS_LOCK = asyncio.Lock()
+
+
+async def spotify_access_token(client: httpx.AsyncClient, credentials_path: str) -> str:
+    """Return a valid access token, refreshing and privately persisting it when it is about to expire."""
+    async with _CREDENTIALS_LOCK:
+        path = Path(credentials_path).expanduser()
+        credentials: object = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(credentials, dict):
+            raise ValueError("Invalid credentials")
+        access = credentials.get("access_token")
+        refresh = credentials.get("refresh_token")
+        client_id = credentials.get("client_id")
+        expiry = credentials.get("expires_at")
+        if (
+            not isinstance(access, str)
+            or not access
+            or not isinstance(refresh, str)
+            or not refresh
+            or not isinstance(client_id, str)
+            or not client_id
+            or not isinstance(expiry, (int, float))
+            or not math.isfinite(expiry)
+        ):
+            raise ValueError("Invalid credentials")
+        if expiry > time.time() + 60:
+            return access
+        response = await client.post(
+            "https://accounts.spotify.com/api/token",
+            data={"grant_type": "refresh_token", "refresh_token": refresh, "client_id": client_id},
+        )
+        response.raise_for_status()
+        token: object = response.json()
+        if not isinstance(token, dict):
+            raise ValueError("Invalid token response")
+        access = token.get("access_token")
+        lifetime = token.get("expires_in")
+        refresh = token.get("refresh_token", refresh)
+        if (
+            not isinstance(access, str)
+            or not access
+            or not isinstance(refresh, str)
+            or not refresh
+            or not isinstance(lifetime, (int, float))
+            or not math.isfinite(lifetime)
+            or lifetime <= 0
+        ):
+            raise ValueError("Invalid token response")
+        credentials.update(access_token=access, refresh_token=refresh, expires_at=time.time() + lifetime)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                json.dump(credentials, output)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return access
+
+
+class SpotifyDucker:
+    """Lower Spotify on the configured device during a wake-word conversation and restore it afterwards.
+
+    Like a smart speaker: music playing when the user wakes Reachy (or started during the conversation)
+    drops to a low level so the user can be heard, then returns to its previous level when the
+    conversation ends, unless the user changed the volume meanwhile.
+    """
+
+    def __init__(self, duck_percent: int = 20) -> None:
+        """Create an idle ducker that lowers music to ``duck_percent``."""
+        self._duck_percent = duck_percent
+        self._session_active = False
+        self._restore_to: int | None = None
+        self._ducked_to: int | None = None
+        self._lock = asyncio.Lock()
+        self._tasks: set[asyncio.Task[None]] = set()
+        # Set by the hybrid runtime: close the conversation soon after music starts.
+        self.music_started_callback: Callable[[], None] | None = None
+
+    @property
+    def in_conversation(self) -> bool:
+        """Return whether a wake-word conversation is currently open."""
+        return self._session_active
+
+    @staticmethod
+    def _configuration() -> tuple[str, str] | None:
+        credentials_path = os.getenv("SPOTIFY_CREDENTIALS_FILE", "").strip()
+        device_id = os.getenv("SPOTIFY_DEVICE_ID", "").strip()
+        return (credentials_path, device_id) if credentials_path and device_id else None
+
+    def _spawn(self, coroutine: Awaitable[None]) -> None:
+        task: asyncio.Task[None] = asyncio.ensure_future(coroutine)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def session_started(self) -> None:
+        """Lower music that is already playing when a conversation begins."""
+        self._session_active = True
+        await self._duck(require_playing=True)
+
+    async def session_ended(self) -> None:
+        """Restore the volume lowered during the conversation."""
+        self._session_active = False
+        await self._restore()
+
+    def playback_started(self) -> None:
+        """Lower music started during a conversation and let the conversation wind down."""
+        if not self._session_active:
+            return
+        self._spawn(self._duck(require_playing=False))
+        callback = self.music_started_callback
+        if callback is not None:
+            try:
+                callback()
+            except Exception as error:
+                logger.warning("Music wind-down request failed: %s", type(error).__name__)
+
+    def forget_restore_level(self) -> None:
+        """Keep an explicitly requested volume instead of restoring the pre-conversation level."""
+        self._restore_to = None
+        self._ducked_to = None
+
+    async def _device_volume(self, client: httpx.AsyncClient, headers: dict[str, str], device_id: str) -> int | None:
+        response = await client.get("https://api.spotify.com/v1/me/player/devices", headers=headers)
+        response.raise_for_status()
+        payload: object = response.json()
+        devices = payload.get("devices") if isinstance(payload, dict) else None
+        for device in devices if isinstance(devices, list) else []:
+            if isinstance(device, dict) and device.get("id") == device_id:
+                volume = device.get("volume_percent")
+                if device.get("supports_volume") is False or not isinstance(volume, int):
+                    return None
+                return volume
+        return None
+
+    async def _duck(self, *, require_playing: bool) -> None:
+        configuration = self._configuration()
+        if configuration is None:
+            return
+        credentials_path, device_id = configuration
+        async with self._lock:
+            try:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                    headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}
+                    if require_playing:
+                        response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
+                        response.raise_for_status()
+                        playback: object = response.json() if response.status_code != 204 else None
+                        device = playback.get("device") if isinstance(playback, dict) else None
+                        if (
+                            not isinstance(playback, dict)
+                            or playback.get("is_playing") is not True
+                            or not isinstance(device, dict)
+                            or device.get("id") != device_id
+                        ):
+                            return
+                    volume = await self._device_volume(client, headers, device_id)
+                    if volume is None or volume <= self._duck_percent:
+                        return
+                    response = await client.put(
+                        "https://api.spotify.com/v1/me/player/volume",
+                        params={"device_id": device_id, "volume_percent": self._duck_percent},
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    if self._restore_to is None:
+                        self._restore_to = volume
+                    self._ducked_to = self._duck_percent
+                    logger.info("Spotify lowered for conversation from=%d to=%d", volume, self._duck_percent)
+            except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
+                logger.warning("Spotify lowering failed: %s", type(error).__name__)
+
+    async def _restore(self) -> None:
+        configuration = self._configuration()
+        if configuration is None or self._restore_to is None:
+            return
+        credentials_path, device_id = configuration
+        async with self._lock:
+            restore_to, ducked_to = self._restore_to, self._ducked_to
+            self._restore_to = None
+            self._ducked_to = None
+            if restore_to is None:
+                return
+            try:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                    headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}
+                    if await self._device_volume(client, headers, device_id) != ducked_to:
+                        return  # the user changed the volume during the conversation; keep their choice
+                    response = await client.put(
+                        "https://api.spotify.com/v1/me/player/volume",
+                        params={"device_id": device_id, "volume_percent": restore_to},
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    logger.info("Spotify volume restored to=%d", restore_to)
+            except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
+                logger.warning("Spotify volume restore failed: %s", type(error).__name__)
+
+
+def _duck_percent_from_env() -> int:
+    raw = os.getenv("SPOTIFY_DUCK_VOLUME_PERCENT", "").strip()
+    try:
+        value = int(raw) if raw else 20
+    except ValueError:
+        value = 20
+    return value if 0 <= value <= 100 else 20
+
+
+SPOTIFY_DUCKER = SpotifyDucker(_duck_percent_from_env())
 
 
 class SpotifyControl(Tool):
@@ -36,19 +251,26 @@ class SpotifyControl(Tool):
     name = "spotify_control"
     description = (
         "Control Spotify on the configured device, only when the user asks. "
-        "Actions: search, play, queue, resume, pause, next, status. Search Spotify first, then use an exact returned URI. "
+        "Actions: search, play, queue, resume, pause, next, status, volume. "
+        "Search Spotify first, then use an exact returned URI. "
         "Search types: track, artist, album, episode, playlist. For podcasts search episodes. "
         "For decade requests use year:2000-2009 in the query. Play replaces current playback; queue appends a "
         "track or episode to the queue (not guaranteed immediately next). Ask only if matches are ambiguous. "
-        "Cannot change devices or volume. Never automatically retry failed playback or queue commands."
+        "Volume sets the configured device to volume_percent (0-100); music is lowered automatically while "
+        "you talk and restored afterwards, so only use volume when the user asks for a level. "
+        "Cannot change devices. Never automatically retry failed playback or queue commands."
     )
     parameters_schema = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["search", "play", "queue", "resume", "pause", "next", "status"]},
+            "action": {
+                "type": "string",
+                "enum": ["search", "play", "queue", "resume", "pause", "next", "status", "volume"],
+            },
             "query": {"type": "string", "description": "Spotify search text, required for search."},
             "search_type": {"type": "string", "enum": ["track", "artist", "album", "episode", "playlist"]},
             "uri": {"type": "string", "description": "Exact URI from a recent search, required for play/queue."},
+            "volume_percent": {"type": "integer", "description": "Device volume 0-100, required for volume."},
         },
         "required": ["action"],
         "additionalProperties": False,
@@ -72,8 +294,14 @@ class SpotifyControl(Tool):
             "pause",
             "next",
             "status",
+            "volume",
         }:
-            return {"error": "Choose search, play, queue, resume, pause, next, or status."}
+            return {"error": "Choose search, play, queue, resume, pause, next, status, or volume."}
+        volume_percent = kwargs.get("volume_percent")
+        if action == "volume" and (
+            not isinstance(volume_percent, int) or isinstance(volume_percent, bool) or not 0 <= volume_percent <= 100
+        ):
+            return {"error": "Provide volume_percent between 0 and 100."}
         query = kwargs.get("query", "")
         search_type = kwargs.get("search_type", "track")
         uri = kwargs.get("uri", "")
@@ -105,58 +333,8 @@ class SpotifyControl(Tool):
                 }
                 if action in {"play", "queue"} and uri not in self._search_results:
                     return {"error": "Search again before playing or queueing this selection."}
-                path = Path(credentials_path).expanduser()
-                credentials: object = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(credentials, dict):
-                    raise ValueError("Invalid credentials")
-                access = credentials.get("access_token")
-                refresh = credentials.get("refresh_token")
-                client_id = credentials.get("client_id")
-                expiry = credentials.get("expires_at")
-                if (
-                    not isinstance(access, str)
-                    or not access
-                    or not isinstance(refresh, str)
-                    or not refresh
-                    or not isinstance(client_id, str)
-                    or not client_id
-                    or not isinstance(expiry, (int, float))
-                    or not math.isfinite(expiry)
-                ):
-                    raise ValueError("Invalid credentials")
                 async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-                    if expiry <= time.time() + 60:
-                        response = await client.post(
-                            "https://accounts.spotify.com/api/token",
-                            data={"grant_type": "refresh_token", "refresh_token": refresh, "client_id": client_id},
-                        )
-                        response.raise_for_status()
-                        token: object = response.json()
-                        if not isinstance(token, dict):
-                            raise ValueError("Invalid token response")
-                        access = token.get("access_token")
-                        lifetime = token.get("expires_in")
-                        refresh = token.get("refresh_token", refresh)
-                        if (
-                            not isinstance(access, str)
-                            or not access
-                            or not isinstance(refresh, str)
-                            or not refresh
-                            or not isinstance(lifetime, (int, float))
-                            or not math.isfinite(lifetime)
-                            or lifetime <= 0
-                        ):
-                            raise ValueError("Invalid token response")
-                        credentials.update(
-                            access_token=access, refresh_token=refresh, expires_at=time.time() + lifetime
-                        )
-                        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
-                        try:
-                            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                                json.dump(credentials, output)
-                            os.replace(temporary, path)
-                        finally:
-                            Path(temporary).unlink(missing_ok=True)
+                    access = await spotify_access_token(client, credentials_path)
                     headers = {"Authorization": "Bearer " + access}
                     if action == "search":
                         response = await client.get(
@@ -233,6 +411,17 @@ class SpotifyControl(Tool):
                             "status": "playing" if playback.get("is_playing") else "paused",
                             "track": title if isinstance(title, str) else "Unknown track",
                         }
+                    if action == "volume":
+                        assert isinstance(volume_percent, int)
+                        response = await client.put(
+                            "https://api.spotify.com/v1/me/player/volume",
+                            params={"device_id": device_id, "volume_percent": volume_percent},
+                            headers=headers,
+                        )
+                        response.raise_for_status()
+                        # A level the user asked for is the one to return to after the conversation.
+                        SPOTIFY_DUCKER.forget_restore_level()
+                        return {"status": f"Spotify volume set to {volume_percent}%."}
                     if action in {"play", "resume"} and matches[0].get("is_active") is not True:
                         # An idle desktop app accepts play commands (HTTP 204) without playing; activate it first.
                         response = await client.put(
@@ -270,6 +459,9 @@ class SpotifyControl(Tool):
                         response.raise_for_status()
                         if action == "play":
                             logger.info("Spotify play accepted kind=%s", uri.split(":")[1])
+                            SPOTIFY_DUCKER.playback_started()
+                            if SPOTIFY_DUCKER.in_conversation:
+                                return {"status": MUSIC_STARTED_IN_CONVERSATION}
                         return {"status": "Spotify accepted the " + action + " command."}
                     method, endpoint = {
                         "resume": ("PUT", "play"),
@@ -283,6 +475,8 @@ class SpotifyControl(Tool):
                         headers=headers,
                     )
                     response.raise_for_status()
+                    if action == "resume":
+                        SPOTIFY_DUCKER.playback_started()
                     return {"status": "Spotify accepted the " + action + " command."}
             except httpx.HTTPStatusError as error:
                 code = error.response.status_code

@@ -1542,6 +1542,49 @@ async def test_inactivity_waits_for_connection_and_resets_after_reconnect() -> N
 
 
 @pytest.mark.asyncio
+async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
+    """After music starts, the session closes 5 s after Reachy's reply even though the model thinks someone speaks."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=60, clock=clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime._on_handler_activity(handler, generation, "user_speech_started")  # music heard as speech
+    runtime._on_handler_interaction_busy(handler, generation, True)
+
+    runtime.request_music_wind_down()
+    clock.advance(2)
+    runtime.note_playback_queued(1.0)  # "Enjoy!" plays from t=2 to t=3
+    clock.advance(4)  # t=6: 3 s after the reply, 6 s after the request
+    assert not await runtime.check_inactivity()
+    clock.advance(2.5)  # t=8.5: more than 5 s after both the grace period and the reply
+    assert await runtime.check_inactivity()
+    assert runtime.mode in (RuntimeMode.STOPPING, RuntimeMode.LOCAL_AMBIENT)
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_waits_while_the_user_keeps_talking() -> None:
+    """A final user transcript in the window keeps the conversation open for another quiet window."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=60, clock=clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+
+    runtime.request_music_wind_down()
+    clock.advance(6)
+    runtime._on_handler_transcript(handler, generation, "user", "and turn it up a bit", True)
+    clock.advance(4)
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_inactivity_pauses_during_long_user_utterance_then_counts_from_stop() -> None:
     """Semantic speech boundaries prevent timeout during speech and reset its clock."""
     clock = FakeClock()
@@ -2492,6 +2535,27 @@ async def test_acoustic_wake_without_context_still_marks_the_request_as_addresse
         assert await runtime.activate("acoustic_wake")
         await handler.started.wait()
         assert handler.get_initial_context() == ACTIVATION_CUE
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_cloud_session_observer_is_told_start_and_end_once() -> None:
+    """The observer hears True when a cloud conversation opens and False after it has ended."""
+    events: list[bool] = []
+
+    async def observe(active: bool) -> None:
+        events.append(active)
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler, cloud_session_observer=observe)
+    try:
+        assert await runtime.activate("keyboard")
+        await handler.started.wait()
+        await wait_until(lambda: events == [True])
+        assert await runtime.deactivate_cloud("test_end")
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+        await wait_until(lambda: events == [True, False])
     finally:
         await runtime.close()
 

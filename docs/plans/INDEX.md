@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Local music controls and a local command model](local-music-controls.md) | `in-progress` | 2026-10-14 | V1 music lowering, volume and wind-down accepted on hardware; V2 local music commands and V3 local command model planned |
 | [Reachy Mini Lite hardware bring-up](reachy-mini-lite-bringup.md) | `in-progress` | 2026-10-13 | Stepwise first power-on, robot audio, interruption, hybrid/wake re-tuning; SDK target 1.11 |
 | [TypeSafe judgment exploration](typesafe-judgment-exploration.md) | `draft` | 2026-09-17 | Synthetic evaluation complete; background memory verification proposed, no runtime integration |
 | [Gemini 3.8 Live Extended Thinking migration](gemini-38-live-extended-thinking-migration.md) | `in-progress` | 2026-09-21 | SDK crash fix user-confirmed; wake acknowledgment and opt-in interruption assist implemented; 1,263 tests passed; speaker retest and live transcript parity pending |

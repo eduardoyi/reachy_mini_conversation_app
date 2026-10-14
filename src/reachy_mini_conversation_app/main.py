@@ -287,6 +287,15 @@ def run(
             """Queue a small movement-layer acknowledgment without motor I/O."""
             movement_manager.acknowledge_activation()
 
+        async def lower_music_during_conversation(active: bool) -> None:
+            """Lower Spotify while a wake-word conversation is open and restore it afterwards."""
+            from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+            if active:
+                await SPOTIFY_DUCKER.session_started()
+            else:
+                await SPOTIFY_DUCKER.session_ended()
+
         def silence_local_output() -> None:
             """Stop queued local movement and playback through their owners."""
             movement_manager.clear_move_queue()
@@ -359,12 +368,16 @@ def run(
             action_executor=action_executor,
             local_processing_close_callback=context_processor.close if context_processor is not None else None,
             acknowledgement_callback=queue_activation_acknowledgement,
+            cloud_session_observer=lower_music_during_conversation,
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
         if context_processor is not None:
             # Also needed with acoustic wake: the runtime takes the request after the wake from local STT.
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)
+        from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+        SPOTIFY_DUCKER.music_started_callback = getattr(hybrid_runtime, "request_music_wind_down", None)
         handler: ConversationHandler | HybridRuntime = hybrid_runtime
         logger.info("Hybrid runtime enabled; provider construction deferred until activation")
     else:

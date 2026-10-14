@@ -185,3 +185,43 @@ bare left `is_playing=false` with no item, while the album form played the track
 with `context=album` on the configured device. Test:
 `test_track_plays_inside_its_album`; `test_search_then_select` still covers the bare
 `uris` body for results without an album.
+
+## Volume and lowering music during conversations — 2026-10-13
+
+On the Reachy Mini Lite in wake-word (hybrid) mode, music started by Reachy kept
+playing near the robot microphone; Gemini heard it as ongoing speech, never answered
+the user, and the session never went idle. The tool description had also told the model
+it could not change volume, although the existing `user-modify-playback-state` scope
+allows it.
+
+- New `volume` action: `volume_percent` 0–100 on the configured device
+  (`PUT /me/player/volume`). An explicit level also cancels the pending restore.
+- `SpotifyDucker` (`SPOTIFY_DUCKER`), driven by the hybrid runtime's new
+  `cloud_session_observer`: when a cloud conversation opens, music playing on the
+  configured device drops to `SPOTIFY_DUCK_VOLUME_PERCENT` (default 20); a `play` or
+  `resume` accepted during the conversation is lowered the same way. When the
+  conversation ends, the previous level is restored unless the volume no longer equals
+  the lowered level (the user changed it). Devices reporting `supports_volume: false`
+  are left alone. Failures log only the error type; nothing is retried.
+- Credential loading and refresh moved into `spotify_access_token`, shared by the tool
+  and the ducker under one lock.
+- Direct (non-hybrid) mode does not lower music, because its session never ends.
+
+Tests: `test_volume_action_sets_the_configured_device_volume`,
+`test_ducker_lowers_playing_music_and_restores_it`,
+`test_ducker_keeps_a_volume_the_user_changed`,
+`test_ducker_leaves_paused_music_alone_but_lowers_music_started_mid_conversation`,
+`test_ducker_does_nothing_without_spotify_configuration`, and
+`test_cloud_session_observer_is_told_start_and_end_once` in the hybrid runtime tests.
+
+Wind-down (same day): when `play` succeeds during a wake-word conversation, the tool
+returns `MUSIC_STARTED_IN_CONVERSATION`, asking the model for only a brief "Enjoy!",
+and calls the ducker's `music_started_callback`, which the hybrid runtime sets to
+`request_music_wind_down`. The runtime then closes the conversation
+(`music_wind_down`) once Reachy's queued speech has played and no final user
+transcript has arrived for 5 s, after a 3 s grace for the reply; the volume restore
+follows the close. Plan: [local music controls](../plans/local-music-controls.md).
+Tests: `test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down`,
+`test_music_wind_down_closes_despite_music_heard_as_speech`,
+`test_music_wind_down_waits_while_the_user_keeps_talking`.
+

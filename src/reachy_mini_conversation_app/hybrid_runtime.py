@@ -259,6 +259,12 @@ class HybridRuntime:
     _ACOUSTIC_CONTEXT_SETTLE_S = 3.0
     # A wake segment this short is taken as the wake word alone; the request is the next segment.
     _WAKE_ONLY_MAX_WORDS = 2
+    # After Reachy starts music in a conversation: close once it has finished speaking ("Enjoy!") and the
+    # user has said nothing for this long. Gemini hears music as ongoing speech, so the usual idle rule
+    # never fires while music plays.
+    _MUSIC_WIND_DOWN_SILENCE_S = 5.0
+    # Time allowed for the model to start its short reply after the music starts.
+    _MUSIC_WIND_DOWN_REPLY_GRACE_S = 3.0
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -297,6 +303,7 @@ class HybridRuntime:
         action_executor: LocalActionExecutor | None = None,
         local_processing_close_callback: LocalProcessingCloseCallback | None = None,
         acknowledgement_callback: AcknowledgementCallback | None = None,
+        cloud_session_observer: Callable[[bool], Awaitable[None]] | None = None,
         state_observer: StateObserver | None = None,
         inactivity_timeout_s: float = 0.0,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
@@ -332,6 +339,12 @@ class HybridRuntime:
         self._action_executor = action_executor
         self._local_processing_close_callback = local_processing_close_callback
         self._acknowledgement_callback = acknowledgement_callback
+        # Told True when a cloud conversation starts and False when it has ended (e.g. to lower music).
+        self._cloud_session_observer = cloud_session_observer
+        self._cloud_session_notified = False
+        self._cloud_session_tasks: set[asyncio.Future[None]] = set()
+        self._music_wind_down_requested_at: float | None = None
+        self._last_user_final_transcript_at = 0.0
         self._state_observer = state_observer
         self._activity_observer: ActivityObserver | None = None
         self._transcript_observer: TranscriptObserver | None = None
@@ -1030,6 +1043,8 @@ class HybridRuntime:
                 with self._lifecycle_lock:
                     self._session_queued_frames = 0
                     self._session_ack_state = "not_needed"
+                    self._music_wind_down_requested_at = None
+                    self._last_user_final_transcript_at = 0.0
                     self._active_handler = handler
                     self._connection_ready = False
                     self._connected_since = None
@@ -1039,6 +1054,7 @@ class HybridRuntime:
                     self._playback_until = 0.0
                     self._pending_activation_text = (generation, addressed_text) if addressed_text else None
                 self._transition(RuntimeMode.CLOUD_CONVERSATION, "activation_ready")
+                self._notify_cloud_session(True)
                 provider_task = asyncio.create_task(
                     self._run_provider(handler, generation), name=f"hybrid-provider-{generation}"
                 )
@@ -1267,6 +1283,9 @@ class HybridRuntime:
     ) -> None:
         if not self._is_current_handler(handler, generation):
             return
+        if role == "user" and final and text.strip():
+            with self._lifecycle_lock:
+                self._last_user_final_transcript_at = self._clock()
         observer = self._transcript_observer
         if observer is not None:
             try:
@@ -1768,23 +1787,53 @@ class HybridRuntime:
             return None
         return output
 
+    def request_music_wind_down(self) -> None:
+        """Close the current conversation soon after music starts, unless the user keeps talking."""
+        with self._lifecycle_lock:
+            if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
+                return
+            self._music_wind_down_requested_at = self._clock()
+        logger.info("Music started; conversation will close after %.0f s of quiet", self._MUSIC_WIND_DOWN_SILENCE_S)
+
+    def _music_wind_down_due_locked(self, now: float) -> bool:
+        requested_at = self._music_wind_down_requested_at
+        if requested_at is None or not self._connection_ready or self._active_handler is None:
+            return False
+        if self._playback_is_active_locked(now) or not self._active_handler.output_queue.empty():
+            return False
+        # Gemini's speech/busy flags stay set while it hears music, so they are deliberately ignored here;
+        # only Reachy's own speech and a final user transcript keep the conversation open.
+        quiet_since = max(
+            requested_at + self._MUSIC_WIND_DOWN_REPLY_GRACE_S,
+            self._playback_until if math.isfinite(self._playback_until) else now,
+            self._last_user_final_transcript_at,
+        )
+        return now - quiet_since >= self._MUSIC_WIND_DOWN_SILENCE_S
+
     async def check_inactivity(self) -> bool:
         """Close an inactive cloud session when its configured threshold is reached."""
         self._assert_owner_loop()
         if self._inactivity_timeout_s <= 0:
             return False
+        reason: str | None = None
         async with self._state_lock:
             with self._lifecycle_lock:
                 if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
                     return False
-                if not self._connection_ready or self._user_speaking or self._interaction_busy:
-                    return False
-                if self._playback_is_active_locked(self._clock()) or not self._active_handler.output_queue.empty():
-                    return False
-                inactive_for = self._clock() - self._last_conversation_activity
-            should_deactivate = inactive_for >= self._inactivity_timeout_s
-        if should_deactivate:
-            return await self._deactivate_cloud("inactivity_timeout")
+                now = self._clock()
+                if self._music_wind_down_due_locked(now):
+                    reason = "music_wind_down"
+                elif (
+                    self._connection_ready
+                    and not self._user_speaking
+                    and not self._interaction_busy
+                    and not self._playback_is_active_locked(now)
+                    and self._active_handler.output_queue.empty()
+                    and now - self._last_conversation_activity >= self._inactivity_timeout_s
+                ):
+                    reason = "inactivity_timeout"
+        if reason is not None:
+            return await self._deactivate_cloud(reason)
         return False
 
     async def _monitor_inactivity(self, handler: ConversationHandler, generation: int) -> None:
@@ -2053,9 +2102,24 @@ class HybridRuntime:
     def _shutdown_task_done(self, task: asyncio.Task[None]) -> None:
         self._finalize_shutdown(task)
 
+    def _notify_cloud_session(self, active: bool) -> None:
+        """Tell the observer that a cloud conversation started or ended, once per session, without blocking."""
+        observer = self._cloud_session_observer
+        if observer is None or active == self._cloud_session_notified:
+            return
+        self._cloud_session_notified = active
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task: asyncio.Future[None] = asyncio.ensure_future(observer(active))
+        self._cloud_session_tasks.add(task)
+        task.add_done_callback(self._cloud_session_tasks.discard)
+
     def _finalize_shutdown(self, task: asyncio.Task[None]) -> None:
         event: tuple[RuntimeMode, str, int] | None = None
         failed = False
+        ended = False
         try:
             task.result()
         except BaseException as error:
@@ -2077,6 +2141,9 @@ class HybridRuntime:
                 self._stopping_handler = None
                 self._shutdown_error = None
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "shutdown_complete")
+                ended = True
+        if ended:
+            self._notify_cloud_session(False)
         if event is not None:
             self._notify_state_observer(*event)
 

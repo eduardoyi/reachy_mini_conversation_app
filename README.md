@@ -851,6 +851,11 @@ turn the integration off; revoke Reachy Home in Spotify account settings to
 remove account access. See [Spotify control](docs/features/spotify-control.md)
 for authentication, privacy, limitations and tests.
 
+Reachy can also set the volume when asked. In wake-word (hybrid) mode, music playing
+on the configured device is lowered to `SPOTIFY_DUCK_VOLUME_PERCENT` (default `20`)
+while a conversation is open, including music started during it, and restored when
+the conversation ends unless the volume was changed in the meantime.
+
 ### Supervised audio dropout test
 
 Set `AUDIO_DIAGNOSTICS_ENABLED=1` to log five-second timing/count summaries

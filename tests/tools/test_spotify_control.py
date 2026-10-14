@@ -297,3 +297,132 @@ async def test_track_plays_inside_its_album(configured, monkeypatch):
 
     assert "status" in result
     assert bodies == [{"context_uri": album, "offset": {"uri": track}}]
+
+
+@pytest.mark.asyncio
+async def test_volume_action_sets_the_configured_device_volume(configured, monkeypatch):
+    """The volume action targets the configured device and validates the level."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        assert request.url.path.endswith("/me/player/volume")
+        assert request.url.params["device_id"] == "mac"
+        assert request.url.params["volume_percent"] == "35"
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    tool = SpotifyControl()
+    assert "error" in await tool(Mock(spec=ToolDependencies), action="volume", volume_percent=150)
+    result = await tool(Mock(spec=ToolDependencies), action="volume", volume_percent=35)
+
+    assert result == {"status": "Spotify volume set to 35%."}
+    assert [call.method for call in calls] == ["GET", "PUT"]
+
+
+def _player_handler(state, puts):
+    """Serve player state for the ducker and record volume changes."""
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/me/player/devices"):
+            return httpx.Response(
+                200, json={"devices": [{"id": "mac", "volume_percent": state["volume"], "supports_volume": True}]}
+            )
+        if path.endswith("/me/player/volume"):
+            state["volume"] = int(request.url.params["volume_percent"])
+            puts.append(state["volume"])
+            return httpx.Response(204)
+        if path.endswith("/me/player"):
+            return httpx.Response(200, json={"is_playing": state["playing"], "device": {"id": "mac"}})
+        raise AssertionError(path)
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_ducker_lowers_playing_music_and_restores_it(configured, monkeypatch):
+    """Music playing at the wake drops to the duck level and returns to its level afterwards."""
+    state = {"volume": 60, "playing": True}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    assert state["volume"] == 20
+    await ducker.session_ended()
+
+    assert puts == [20, 60]
+
+
+@pytest.mark.asyncio
+async def test_ducker_keeps_a_volume_the_user_changed(configured, monkeypatch):
+    """If the volume moved during the conversation, it is not overwritten on restore."""
+    state = {"volume": 60, "playing": True}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    state["volume"] = 45
+    await ducker.session_ended()
+
+    assert puts == [20]
+
+
+@pytest.mark.asyncio
+async def test_ducker_leaves_paused_music_alone_but_lowers_music_started_mid_conversation(configured, monkeypatch):
+    """Nothing changes for paused music; a track started during the conversation is lowered then restored."""
+    state = {"volume": 70, "playing": False}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    assert puts == []
+    ducker.playback_started()
+    await asyncio.gather(*ducker._tasks)
+    await ducker.session_ended()
+
+    assert puts == [20, 70]
+
+
+@pytest.mark.asyncio
+async def test_ducker_does_nothing_without_spotify_configuration(monkeypatch):
+    """Without credentials or a device, no request is made."""
+    monkeypatch.delenv("SPOTIFY_CREDENTIALS_FILE", raising=False)
+    monkeypatch.delenv("SPOTIFY_DEVICE_ID", raising=False)
+    install_transport(monkeypatch, lambda request: (_ for _ in ()).throw(AssertionError("no request")))
+    ducker = spotify_control.SpotifyDucker()
+
+    await ducker.session_started()
+    await ducker.session_ended()
+
+
+@pytest.mark.asyncio
+async def test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down(configured, monkeypatch):
+    """A track started mid-conversation tells the model to just say 'Enjoy!' and requests the wind-down."""
+    uri = "spotify:track:" + "w" * 22
+
+    def handler(request):
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json={"tracks": {"items": [{"uri": uri, "name": "Song"}]}})
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    wind_downs: list[bool] = []
+    ducker = spotify_control.SPOTIFY_DUCKER
+    monkeypatch.setattr(ducker, "_session_active", True)
+    monkeypatch.setattr(ducker, "music_started_callback", lambda: wind_downs.append(True))
+    monkeypatch.setattr(ducker, "_spawn", lambda coroutine: coroutine.close())
+    tool = SpotifyControl()
+
+    await tool(Mock(spec=ToolDependencies), action="search", query="song", search_type="track")
+    result = await tool(Mock(spec=ToolDependencies), action="play", uri=uri)
+
+    assert result == {"status": spotify_control.MUSIC_STARTED_IN_CONVERSATION}
+    assert wind_downs == [True]
