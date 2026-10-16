@@ -9,6 +9,7 @@ import pytest
 from reachy_mini_conversation_app.face_identity import (
     MODEL_ID,
     MATCH_THRESHOLD,
+    MAX_UPLOAD_PHOTOS,
     MAX_SAMPLES_PER_PERSON,
     FaceAnalyzer,
     FaceRegistry,
@@ -52,7 +53,9 @@ class _FakeAnalyzer:
     def load(self) -> None:
         self.loaded = True
 
-    def analyze(self, frame: np.ndarray, min_face_px: float = 0) -> list[FaceObservation]:
+    def analyze(
+        self, frame: np.ndarray, min_face_px: float = 0, whole_faces_only: bool = False
+    ) -> list[FaceObservation]:
         embeddings = self.frames.pop(0) if self.frames else []
         return [
             FaceObservation(bbox=(0.0, 0.0, 200.0 - i, 200.0), embedding=e, photo=np.zeros((4, 4, 3), np.uint8))
@@ -67,6 +70,8 @@ def _service(tmp_path: Path, frames: list[list[np.ndarray]], clock: _Clock | Non
         FaceRegistry(tmp_path / "faces"),
         _FakeAnalyzer(frames),  # type: ignore[arg-type]
         encode_jpeg=lambda image: b"\xff\xd8jpeg",
+        # Photos are "decodable" unless their bytes say otherwise.
+        decode_image=lambda data: None if data == b"broken" else np.zeros((8, 8, 3), np.uint8),
         clock=clock,
         sleep=clock.sleep,
     )
@@ -303,3 +308,71 @@ def _wait(predicate: object, timeout: float = 2.0) -> bool:
             return True
         time.sleep(0.01)
     return False
+
+
+# --- photo upload -----------------------------------------------------------------
+
+
+def test_enroll_from_photos_uses_single_face_photos_and_reports_the_rest(tmp_path: Path) -> None:
+    """Good photos enroll; unreadable, empty and group photos are skipped with a reason."""
+    service = _service(tmp_path, [[ANA], [], [ANA, BEN], [_unit(1.0, 0.1)]])
+
+    result = service.enroll_from_photos("Ana", [b"p1", b"broken", b"p3", b"p4", b"p5"])
+
+    assert result.person is not None and result.person.sample_count == 2
+    assert result.skipped == (
+        "photo 2 could not be read",
+        "photo 3 has no clear, uncropped face",
+        "photo 4 has more than one face",
+    )
+    assert service.registry.match(ANA) is not None
+
+
+def test_enroll_from_photos_refuses_mixed_people_and_unusable_uploads(tmp_path: Path) -> None:
+    """Photos of different people, no usable photo, or too many photos enroll nothing."""
+    mixed = _service(tmp_path / "a", [[ANA], [BEN]])
+    assert mixed.enroll_from_photos("Ana", [b"1", b"2"]).error == "the photos seem to show different people"
+
+    unusable = _service(tmp_path / "b", [[]])
+    result = unusable.enroll_from_photos("Ana", [b"broken", b"empty"])
+    assert result.person is None and result.error == "photo 1 could not be read; photo 2 has no clear, uncropped face"
+
+    too_many = _service(tmp_path / "c", [])
+    assert "between 1 and" in (too_many.enroll_from_photos("Ana", [b"x"] * (MAX_UPLOAD_PHOTOS + 1)).error or "")
+    assert "between 1 and" in (too_many.enroll_from_photos("Ana", []).error or "")
+    assert mixed.registry.people() == unusable.registry.people() == []
+
+
+def test_enroll_from_photos_refuses_a_face_known_under_another_name(tmp_path: Path) -> None:
+    """A photo of an enrolled person cannot enroll them under a different name."""
+    service = _service(tmp_path, [[ANA]])
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    assert service.enroll_from_photos("Ben", [b"1"]).error == "this face is already enrolled as Ana"
+
+
+def test_an_odd_photo_out_is_skipped_rather_than_failing_the_upload(tmp_path: Path) -> None:
+    """Three photos of Ana and one of someone else enroll Ana and name the odd photo."""
+    service = _service(tmp_path, [[ANA], [_unit(1.0, 0.2)], [BEN], [_unit(1.0, -0.2)]])
+
+    result = service.enroll_from_photos("Ana", [b"1", b"2", b"3", b"4"])
+
+    assert result.person is not None and result.person.sample_count == 3
+    assert result.skipped == ("photo 3 does not look like the same person",)
+
+
+def test_whole_faces_only_drops_faces_cut_off_by_the_edge() -> None:
+    """A face running off the image gives an unreliable fingerprint, so enrollment ignores it."""
+
+    class Detector:
+        def detect(self, frame: np.ndarray) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(bbox=(10, -5, 60, 70), right_eye=(25, 10), left_eye=(55, 10), nose=(40, 25)),
+                SimpleNamespace(bbox=(150, 50, 60, 70), right_eye=(165, 70), left_eye=(195, 70), nose=(180, 85)),
+            ]
+
+    analyzer = FaceAnalyzer(detector_factory=Detector, embedder_factory=lambda: lambda blob: np.ones(128, np.float32))  # type: ignore[arg-type]
+    frame = np.zeros((480, 640, 3), np.uint8)
+
+    assert len(analyzer.analyze(frame)) == 2
+    assert [face.bbox[0] for face in analyzer.analyze(frame, whole_faces_only=True)] == [300.0]

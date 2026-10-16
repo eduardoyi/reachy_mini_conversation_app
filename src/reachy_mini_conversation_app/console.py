@@ -10,6 +10,7 @@ import json
 import math
 import time
 import queue
+import base64
 import asyncio
 import logging
 import ipaddress
@@ -1135,13 +1136,16 @@ class LocalStream:
                 return Response(status_code=404, headers=no_store)
             return None
 
-        async def _small_json(request: Request, keys: set[str]) -> dict[str, Any] | Response:
+        async def _small_json(
+            request: Request, keys: set[str], *, max_bytes: int = 1_024, string_keys: set[str] | None = None
+        ) -> dict[str, Any] | Response:
+            """Read a JSON object with exactly ``keys``; ``string_keys`` (default: all) must be strings."""
             if request.headers.get("content-type", "").split(";")[0] != "application/json":
                 return Response(status_code=415, headers=no_store)
             body = bytearray()
             async for chunk in request.stream():
                 body.extend(chunk)
-                if len(body) > 1_024:
+                if len(body) > max_bytes:
                     return Response(status_code=413, headers=no_store)
             try:
                 payload: object = json.loads(body)
@@ -1150,7 +1154,7 @@ class LocalStream:
             if (
                 not isinstance(payload, dict)
                 or set(payload) != keys
-                or not all(isinstance(payload[k], str) for k in keys)
+                or not all(isinstance(payload[k], str) for k in (keys if string_keys is None else string_keys))
             ):
                 return Response(status_code=400, headers=no_store)
             return payload
@@ -1202,6 +1206,35 @@ class LocalStream:
             if result.person is None:
                 return JSONResponse({"error": result.error}, status_code=422, headers=no_store)
             return JSONResponse({"person": _person_json(result.person)}, headers=no_store)
+
+        @settings_app.post("/api/faces/upload")
+        async def _faces_upload(request: Request) -> Response:
+            """Enroll from photos: ``{"name": str, "photos": [base64 JPEG/PNG, ...]}``, at most 12 MB."""
+            denied = _denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await _small_json(request, {"name", "photos"}, max_bytes=12 * 1024 * 1024, string_keys={"name"})
+            if isinstance(payload, Response):
+                return payload
+            photos = payload["photos"]
+            if not isinstance(photos, list) or not all(isinstance(photo, str) for photo in photos):
+                return Response(status_code=400, headers=no_store)
+            try:
+                decoded = [base64.b64decode(photo, validate=True) for photo in photos]
+            except ValueError:
+                return Response(status_code=400, headers=no_store)
+            try:
+                result = await asyncio.to_thread(self._face_recognition.enroll_from_photos, payload["name"], decoded)
+            except (OSError, ValueError, RuntimeError):
+                logger.warning("Face photo enrollment unavailable")
+                return JSONResponse({"error": "Photos could not be processed."}, status_code=503, headers=no_store)
+            if result.person is None:
+                return JSONResponse(
+                    {"error": result.error, "skipped": list(result.skipped)}, status_code=422, headers=no_store
+                )
+            return JSONResponse(
+                {"person": _person_json(result.person), "skipped": list(result.skipped)}, headers=no_store
+            )
 
         @settings_app.post("/api/faces/forget")
         async def _faces_forget(request: Request) -> Response:

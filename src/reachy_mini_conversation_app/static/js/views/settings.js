@@ -85,13 +85,36 @@ export async function mountSettingsView({ outlet, signal }) {
   ]);
 }
 
+const MAX_FACE_PHOTOS = 5;
+const FACE_PHOTO_MAX_SIDE = 1600;
+
+/** Shrink a photo (upright, per its EXIF orientation) to a JPEG and return it base64-encoded. */
+async function photoAsJpegBase64(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, FACE_PHOTO_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob((result) => (result ? resolve(result) : reject(new Error("encode failed"))), "image/jpeg", 0.9)
+  );
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
 function buildFacesSection(signal) {
-  const message = h("p", { class: "settings-hint" }, "People Reachy recognizes on camera. Faces stay on this computer.");
+  const message = h("p", { class: "settings-hint" }, "People Reachy recognizes on camera. Type a name, then have them look at Reachy or upload up to 5 photos of only them. Faces stay on this computer.");
   const people = h("div", {});
   const show = h("button", { type: "button", class: "btn" }, "Show faces");
   const nameInput = h("input", { type: "text", name: "face_name", autocomplete: "off", maxlength: "60", placeholder: "Name", class: "settings-input" });
   const enroll = h("button", { type: "button", class: "btn" }, "Remember my face");
-  const enrollRow = h("div", { class: "settings-field-row" }, nameInput, enroll);
+  const upload = h("button", { type: "button", class: "btn" }, "Upload photos");
+  const fileInput = h("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
+  const enrollRow = h("div", { class: "settings-field-row" }, nameInput, enroll, upload, fileInput);
 
   async function request(url, options = {}) {
     const response = await fetch(url, { cache: "no-store", signal, ...options });
@@ -156,6 +179,48 @@ function buildFacesSection(signal) {
     } catch (error) {
       if (!signal.aborted) message.textContent = error.message;
     } finally {
+      enroll.disabled = false;
+    }
+  });
+  upload.addEventListener("click", () => {
+    if (!nameInput.value.trim()) {
+      message.textContent = "Type the name of the person in the photos first.";
+      return;
+    }
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", async () => {
+    const name = nameInput.value.trim();
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = "";
+    if (!files.length) return;
+    if (files.length > MAX_FACE_PHOTOS) {
+      message.textContent = `Choose at most ${MAX_FACE_PHOTOS} photos at a time.`;
+      return;
+    }
+    upload.disabled = true;
+    enroll.disabled = true;
+    message.textContent = `Reading ${files.length} photo${files.length > 1 ? "s" : ""}…`;
+    try {
+      const photos = [];
+      for (const [index, file] of files.entries()) {
+        try {
+          photos.push(await photoAsJpegBase64(file));
+        } catch {
+          throw new Error(`Photo ${index + 1} could not be read; use JPEG or PNG.`);
+        }
+      }
+      const result = await request("/api/faces/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, photos }) });
+      nameInput.value = "";
+      await refresh();
+      if (!signal.aborted) {
+        const skipped = result.skipped.length ? ` Skipped: ${result.skipped.join("; ")}.` : "";
+        message.textContent = `Saved ${result.person.name}'s face from ${photos.length - result.skipped.length} photo(s).${skipped}`;
+      }
+    } catch (error) {
+      if (!signal.aborted) message.textContent = error.message;
+    } finally {
+      upload.disabled = false;
       enroll.disabled = false;
     }
   });

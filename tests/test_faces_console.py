@@ -116,3 +116,61 @@ def test_faces_routes_are_absent_when_disabled(tmp_path: Path, monkeypatch: pyte
     with TestClient(app, **LOCAL) as client:
         assert client.get("/api/faces").status_code == 404
         assert client.post("/api/faces/enroll", json={"name": "Ana"}, headers=SAME_ORIGIN).status_code == 404
+
+
+def test_faces_upload_decodes_photos_and_reports_skipped_ones(faces) -> None:
+    """Photos arrive base64-encoded; the service gets the raw bytes and skipped photos are reported."""
+    import base64
+
+    app, service = faces
+    service.enroll_from_photos.return_value = EnrollResult(
+        service.registry.people()[0], skipped=("photo 2 has no clear face",)
+    )
+    photos = [base64.b64encode(b"\xff\xd8one").decode(), base64.b64encode(b"\xff\xd8two").decode()]
+    with TestClient(app, **LOCAL) as client:
+        response = client.post("/api/faces/upload", json={"name": "Ana", "photos": photos}, headers=SAME_ORIGIN)
+
+    assert response.status_code == 200
+    assert response.json()["person"]["name"] == "Ana"
+    assert response.json()["skipped"] == ["photo 2 has no clear face"]
+    service.enroll_from_photos.assert_called_once_with("Ana", [b"\xff\xd8one", b"\xff\xd8two"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": "Ana", "photos": ["not base64!"]},
+        {"name": "Ana", "photos": "abc"},
+        {"name": "Ana", "photos": [1]},
+        {"name": 3, "photos": []},
+        {"name": "Ana"},
+    ],
+)
+def test_faces_upload_rejects_malformed_requests(faces, payload: dict) -> None:
+    """Bad base64, wrong types or missing fields never reach the service."""
+    app, service = faces
+    with TestClient(app, **LOCAL) as client:
+        assert client.post("/api/faces/upload", json=payload, headers=SAME_ORIGIN).status_code == 400
+    service.enroll_from_photos.assert_not_called()
+
+
+def test_faces_upload_is_local_same_origin_and_size_capped(faces) -> None:
+    """Uploads follow the same locality rules, and oversized bodies are refused before parsing."""
+    app, service = faces
+    huge = {"name": "Ana", "photos": ["A" * (13 * 1024 * 1024)]}
+    with TestClient(app, **LOCAL) as client:
+        assert client.post("/api/faces/upload", json={"name": "Ana", "photos": []}).status_code == 403
+        assert client.post("/api/faces/upload", json=huge, headers=SAME_ORIGIN).status_code == 413
+    service.enroll_from_photos.assert_not_called()
+
+
+def test_faces_upload_failure_explains_why(faces) -> None:
+    """When no photo is usable the reason comes back for the page to show."""
+    app, service = faces
+    service.enroll_from_photos.return_value = EnrollResult(
+        None, "photo 1 has no clear face", skipped=("photo 1 has no clear face",)
+    )
+    with TestClient(app, **LOCAL) as client:
+        response = client.post("/api/faces/upload", json={"name": "Ana", "photos": ["AAAA"]}, headers=SAME_ORIGIN)
+    assert response.status_code == 422
+    assert response.json() == {"error": "photo 1 has no clear face", "skipped": ["photo 1 has no clear face"]}

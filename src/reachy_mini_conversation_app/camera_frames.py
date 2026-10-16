@@ -30,6 +30,43 @@ def capture_frame(media: Any) -> Any:
         return media.get_frame()
 
 
+def decode_image(data: bytes) -> Any:
+    """Decode JPEG or PNG bytes into a BGR ``uint8`` array (EXIF orientation applied), or None on failure."""
+    import numpy as np
+
+    try:
+        import gi
+
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+
+        Gst.init(None)
+        pipeline = Gst.parse_launch(
+            "appsrc name=src ! decodebin ! videoflip video-direction=auto ! videoconvert ! "
+            "video/x-raw,format=BGR ! appsink name=sink sync=false"
+        )
+        try:
+            pipeline.set_state(Gst.State.PLAYING)
+            source = pipeline.get_by_name("src")
+            source.emit("push-buffer", Gst.Buffer.new_wrapped(bytes(data)))
+            source.emit("end-of-stream")
+            sample = pipeline.get_by_name("sink").emit("try-pull-sample", 5 * _PULL_TIMEOUT_NS)
+            if sample is None:
+                raise RuntimeError("no decoded frame")
+            structure = sample.get_caps().get_structure(0)
+            width, height = structure.get_value("width"), structure.get_value("height")
+            buffer = sample.get_buffer()
+            raw = buffer.extract_dup(0, buffer.get_size())
+        finally:
+            pipeline.set_state(Gst.State.NULL)
+        stride = (width * 3 + 3) // 4 * 4
+        rows = np.frombuffer(raw, dtype=np.uint8)[: stride * height].reshape(height, stride)
+        return np.ascontiguousarray(rows[:, : width * 3].reshape(height, width, 3))
+    except Exception as error:
+        logger.warning("Image decode failed: %s", type(error).__name__)
+        return None
+
+
 def _padded_rows(frame_bgr: Any) -> bytes:
     """Return BGR pixel bytes with each row padded to 4 bytes, the stride GStreamer expects."""
     import numpy as np
@@ -54,8 +91,10 @@ def encode_jpeg(frame_bgr: Any, quality: int = MODEL_FRAME_JPEG_QUALITY) -> byte
 
         Gst.init(None)
         pipeline = Gst.parse_launch(
-            f"appsrc name=src caps=video/x-raw,format=BGR,width={width},height={height},framerate=0/1 ! "
-            f"videoconvert ! jpegenc quality={quality} ! appsink name=sink sync=false"
+            f'appsrc name=src caps="video/x-raw,format=BGR,width={width},height={height},framerate=0/1" ! '
+            # jpegenc also takes BGR, but then writes an RGB-coded JPEG, which GStreamer's own decoder
+            # (decode_image) misreads as green; standard YCbCr reads back correctly everywhere.
+            f"videoconvert ! video/x-raw,format=I420 ! jpegenc quality={quality} ! appsink name=sink sync=false"
         )
         try:
             pipeline.set_state(Gst.State.PLAYING)

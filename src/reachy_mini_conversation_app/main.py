@@ -260,7 +260,7 @@ def run(
 
     face_service = None
     if config.FACE_RECOGNITION_ENABLED and not args.no_camera:
-        from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
+        from reachy_mini_conversation_app.camera_frames import encode_jpeg, decode_image, capture_frame
         from reachy_mini_conversation_app.face_identity import FaceRegistry, FaceRecognitionService
         from reachy_mini_conversation_app.household_memory import memory_path_for_instance
 
@@ -268,6 +268,7 @@ def run(
             lambda: capture_frame(robot.media),
             FaceRegistry(memory_path_for_instance(instance_path).parent / "faces"),
             encode_jpeg=encode_jpeg,
+            decode_image=decode_image,
         )
 
     def current_person_id() -> str | None:

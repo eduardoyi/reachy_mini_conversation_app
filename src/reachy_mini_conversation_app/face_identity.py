@@ -44,6 +44,9 @@ DETECT_DOWNSCALE = 2
 MAX_SAMPLES_PER_PERSON = 12
 PHOTO_SIZE = 160
 MAX_NAME_CHARS = 60
+MAX_UPLOAD_PHOTOS = 5
+# Photos of one person agree at least this much even across poses and light; strangers rarely do.
+SAME_PERSON_MIN_SIMILARITY = 0.30
 
 # ArcFace/SFace 112x112 alignment template: right eye (image left), left eye, nose tip.
 _ALIGN_SIZE = 112
@@ -158,8 +161,14 @@ class FaceAnalyzer:
         if self._embed is None:
             self._embed = self._embedder_factory()
 
-    def analyze(self, frame: NDArray[np.uint8], min_face_px: float = MIN_RECOGNIZE_FACE_PX) -> list[FaceObservation]:
-        """Return the faces at least ``min_face_px`` wide, largest first."""
+    def analyze(
+        self, frame: NDArray[np.uint8], min_face_px: float = MIN_RECOGNIZE_FACE_PX, whole_faces_only: bool = False
+    ) -> list[FaceObservation]:
+        """Return the faces at least ``min_face_px`` wide, largest first.
+
+        ``whole_faces_only`` drops faces cut off by the image edge, whose fingerprints are unreliable.
+        """
+        height, width = frame.shape[:2]
         with self._lock:
             self._load_locked()
             assert self._embed is not None
@@ -168,6 +177,10 @@ class FaceAnalyzer:
             for face in self._detector.detect(small):
                 bbox = tuple(float(v) * DETECT_DOWNSCALE for v in face.bbox)
                 if bbox[2] < min_face_px:
+                    continue
+                if whole_faces_only and (
+                    bbox[0] < 0 or bbox[1] < 0 or bbox[0] + bbox[2] > width or bbox[1] + bbox[3] > height
+                ):
                     continue
                 landmarks = np.array([face.right_eye, face.left_eye, face.nose], dtype=np.float64) * DETECT_DOWNSCALE
                 aligned = warp_affine(frame, similarity_transform(landmarks, _ALIGN_TEMPLATE), _ALIGN_SIZE)
@@ -473,6 +486,8 @@ class EnrollResult:
 
     person: EnrolledPerson | None
     error: str | None = None
+    # Uploaded photos that were not used, and why.
+    skipped: tuple[str, ...] = ()
 
 
 class FaceRecognitionService:
@@ -485,6 +500,7 @@ class FaceRecognitionService:
         analyzer: FaceAnalyzer | None = None,
         *,
         encode_jpeg: Callable[[NDArray[np.uint8]], bytes | None] | None = None,
+        decode_image: Callable[[bytes], NDArray[np.uint8] | None] | None = None,
         interval_s: float = 1.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -494,6 +510,7 @@ class FaceRecognitionService:
         self._registry = registry
         self._analyzer = analyzer or FaceAnalyzer()
         self._encode_jpeg = encode_jpeg
+        self._decode_image = decode_image
         self._interval_s = interval_s
         self._clock = clock
         self._sleep = sleep
@@ -582,7 +599,7 @@ class FaceRecognitionService:
         while self._clock() < deadline and len(samples) < max_samples:
             frame = self._capture_frame()
             if frame is not None:
-                faces = self._analyzer.analyze(frame, min_face_px=MIN_ENROLL_FACE_PX)
+                faces = self._analyzer.analyze(frame, min_face_px=MIN_ENROLL_FACE_PX, whole_faces_only=True)
                 if len(faces) == 1:
                     jpeg = self._encode_jpeg(faces[0].photo) if self._encode_jpeg is not None else None
                     samples.append((faces[0].embedding, jpeg))
@@ -593,6 +610,55 @@ class FaceRecognitionService:
             if crowded:
                 return EnrollResult(None, "more than one face was in view; only the person enrolling should be")
             return EnrollResult(None, "no clear face in view; face the robot from about an arm's length to 2 m away")
+        return self._save_samples(name, samples)
+
+    def enroll_from_photos(self, name: str, photos: list[bytes]) -> EnrollResult:
+        """Enroll ``name`` from uploaded JPEG/PNG photos, each showing only that person; blocking.
+
+        Photos without exactly one clear face are skipped (and reported); all usable photos must show
+        the same person.
+        """
+        try:
+            person_id_for(name)
+        except FaceStoreError as error:
+            return EnrollResult(None, str(error))
+        if self._decode_image is None:
+            return EnrollResult(None, "photo upload is unavailable")
+        if not photos or len(photos) > MAX_UPLOAD_PHOTOS:
+            return EnrollResult(None, f"upload between 1 and {MAX_UPLOAD_PHOTOS} photos")
+        candidates: list[tuple[int, NDArray[np.float32], bytes | None]] = []
+        skipped: list[str] = []
+        for number, data in enumerate(photos, start=1):
+            image = self._decode_image(data)
+            if image is None:
+                skipped.append(f"photo {number} could not be read")
+                continue
+            faces = self._analyzer.analyze(image, min_face_px=MIN_ENROLL_FACE_PX, whole_faces_only=True)
+            if len(faces) != 1:
+                reason = "no clear, uncropped face" if not faces else "more than one face"
+                skipped.append(f"photo {number} has {reason}")
+                continue
+            jpeg = self._encode_jpeg(faces[0].photo) if self._encode_jpeg is not None else None
+            candidates.append((number, faces[0].embedding, jpeg))
+        if not candidates:
+            return EnrollResult(None, "; ".join(skipped) or "no usable photos", skipped=tuple(skipped))
+        # Keep the largest group of photos that look like the same person; an odd one out is skipped.
+        agreeing = [
+            [other for other in candidates if float(other[1] @ candidate[1]) >= SAME_PERSON_MIN_SIMILARITY]
+            for candidate in candidates
+        ]
+        group = max(agreeing, key=len)
+        if len(group) * 2 <= len(candidates) and len(candidates) > 1:
+            return EnrollResult(None, "the photos seem to show different people", skipped=tuple(skipped))
+        kept = {number for number, _, _ in group}
+        skipped.extend(
+            f"photo {number} does not look like the same person" for number, _, _ in candidates if number not in kept
+        )
+        skipped.sort(key=lambda reason: int(reason.split()[1]))
+        result = self._save_samples(name, [(embedding, jpeg) for _, embedding, jpeg in group])
+        return EnrollResult(result.person, result.error, skipped=tuple(skipped))
+
+    def _save_samples(self, name: str, samples: list[tuple[NDArray[np.float32], bytes | None]]) -> EnrollResult:
         existing = self._registry.match(samples[0][0])
         if existing is not None and existing.person_id != person_id_for(name):
             return EnrollResult(None, f"this face is already enrolled as {existing.name}")

@@ -28,8 +28,17 @@ Live has no silent context injection; sending text starts a model turn).
   (newest 12 kept). The tool description tells the model to enroll only the
   person asking, under their own name.
 - **Enroll in the web UI** (`--ui`, Settings → Faces Reachy knows): type a name,
-  look at Reachy, press *Remember my face*. *Show faces* lists people with photo
+  look at Reachy, press *Remember my face* — or press *Upload photos* and pick up
+  to 5 photos of only that person. *Show faces* lists people with photo
   thumbnails and a *Forget* button. Same computer only.
+- **Upload rules:** the browser shrinks each photo to 1600 px and re-encodes it
+  as JPEG (upright per EXIF; Safari also converts HEIC). Each photo needs exactly
+  one clear face not cut off by the edge; the largest group of photos that look
+  like the same person (cosine ≥ 0.30 to each other) is enrolled and the others
+  are listed as skipped. With no clear majority nothing is enrolled. Phone photos
+  match Reachy's camera a little less well than a live enrollment, so mixing both
+  works best. Uploads do not prove the person was present, unlike live
+  enrollment.
 - **Forget:** "forget my face" / "forget Ana's face", or *Forget* in the UI,
   deletes the fingerprints and photos.
 - **During a conversation:** recognition runs about once a second from wake
@@ -77,8 +86,8 @@ are encoded with GStreamer (`camera_frames.encode_jpeg`).
 | Tools | `tools/remember_face.py`, `tools/forget_face.py`, `tools/who_is_here.py`; `core_tools.FACE_TOOLS` | Auto-enabled with the flag. |
 | Context | `ConversationHandler.set_identity_hint_provider` | Hint is read when `get_initial_context()` is called and placed first so length limits keep it; never added without base context. |
 | Memory | `ToolDependencies.current_person_id`, `tools/remember.py` | Default `source_person_id`. |
-| Web UI | `console.py` `_register_face_routes`; `static/js/views/settings.js` `buildFacesSection` | `GET /api/faces`, `GET /api/faces/photo?person_id&photo`, `POST /api/faces/enroll {name}`, `POST /api/faces/forget {person_id}`; loopback + same-origin, `no-store`; 404 when disabled. Fingerprints are never returned. |
-| Camera | `camera_frames.capture_frame`, `encode_jpeg` | Frame reads share the capture lock with the Gemini camera stream. |
+| Web UI | `console.py` `_register_face_routes`; `static/js/views/settings.js` `buildFacesSection` | `GET /api/faces`, `GET /api/faces/photo?person_id&photo`, `POST /api/faces/enroll {name}`, `POST /api/faces/upload {name, photos: [base64]}` (≤ 5 photos, ≤ 12 MB, reports `skipped`), `POST /api/faces/forget {person_id}`; loopback + same-origin, `no-store`; 404 when disabled. Fingerprints are never returned. |
+| Camera | `camera_frames.capture_frame`, `encode_jpeg`, `decode_image` | Frame reads share the capture lock with the Gemini camera stream. Photos are encoded as standard YCbCr JPEG (an RGB-coded JPEG reads back green through GStreamer); uploads are decoded with GStreamer, EXIF orientation applied. |
 | Wiring | `main.py` | Builds the service, activates it on wake and for the cloud session, passes it to tools, handlers and the console. |
 | Config | `FACE_RECOGNITION_ENABLED` | Default `0`. |
 
@@ -122,9 +131,10 @@ are encoded with GStreamer (`camera_frames.encode_jpeg`).
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_face_identity.py` | Similarity transform and warp; analyzer downscale, box scaling, small-face filter, unit fingerprints; person IDs; enroll/match/reload/forget with photo deletion; private permissions and model tag; foreign-model store ignored; unknown and ambiguous faces; sample cap; enrollment needs one clear face; refusing a face enrolled under another name; identify/expiry/hint; conversation end clears state; background loop runs only while active. |
+| `tests/test_face_identity.py` | Similarity transform and warp; analyzer downscale, box scaling, small-face filter, unit fingerprints; person IDs; enroll/match/reload/forget with photo deletion; private permissions and model tag; foreign-model store ignored; unknown and ambiguous faces; sample cap; enrollment needs one clear face; refusing a face enrolled under another name; identify/expiry/hint; conversation end clears state; background loop runs only while active; photo enrollment skips unreadable/empty/group/cropped photos and an odd one out, refuses mixed people, too many photos, and faces enrolled under another name. |
 | `tests/tools/test_face_tools.py` | Tools when disabled; enroll turns toward the speaker and relays errors; forget by name; who_is_here output and startup state; `remember` attribution; tool auto-enable flag; identity hint ordering. |
-| `tests/test_faces_console.py` | List/photo locality and no-store, photo ownership and traversal; remote/rebinding rejection; enroll success/failure/origin/body checks; forget; disabled 404s. |
+| `tests/test_faces_console.py` | List/photo locality and no-store, photo ownership and traversal; remote/rebinding rejection; enroll success/failure/origin/body checks; upload decoding, skipped reporting, malformed bodies, locality and 12 MB cap; forget; disabled 404s. |
+| `tests/test_camera_frames.py` | JPEG encode/decode round trip keeps colours and size; PNG decode; garbage rejected. |
 
 ### Live validation (pending)
 
@@ -143,3 +153,4 @@ matched.
 | Date | Change |
 |------|--------|
 | 2026-10-16 | Initial implementation. |
+| 2026-10-16 | Enroll from uploaded photos in Settings; enrollment ignores faces cut off by the image edge; photos saved as standard JPEGs. Verified in a browser against real models with captured frames. |

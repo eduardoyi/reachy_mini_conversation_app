@@ -71,3 +71,44 @@ def test_downscale_failure_returns_the_original(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(Gst, "parse_launch", broken_parse_launch)
 
     assert fit_jpeg_for_model(original) is original
+
+
+def test_jpeg_encode_and_decode_keep_colours_and_size() -> None:
+    """Saved photos are standard JPEGs: encoding then decoding keeps the colours (RGB-coded ones read back green)."""
+    pytest.importorskip("gi")
+    import numpy as np
+
+    from reachy_mini_conversation_app.camera_frames import encode_jpeg, decode_image
+
+    for height, width in [(48, 64), (121, 99)]:
+        image = np.zeros((height, width, 3), np.uint8)
+        image[:, : width // 2] = (255, 0, 0)  # blue left half, BGR
+        jpeg = encode_jpeg(image, quality=95)
+        assert jpeg is not None and jpeg_size(jpeg) == (width, height)
+        decoded = decode_image(jpeg)
+        assert decoded is not None and decoded.shape == (height, width, 3)
+        assert np.allclose(decoded[height // 2, width // 4], (255, 0, 0), atol=40)
+        assert np.allclose(decoded[height // 2, 3 * width // 4], (0, 0, 0), atol=40)
+
+
+def test_decode_image_reads_png_and_rejects_garbage() -> None:
+    """PNG uploads decode too; bytes that are not an image return None."""
+    gi = pytest.importorskip("gi")
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+
+    from reachy_mini_conversation_app.camera_frames import decode_image
+
+    Gst.init(None)
+    pipeline = Gst.parse_launch(
+        "videotestsrc num-buffers=1 ! video/x-raw,width=64,height=48 ! pngenc ! appsink name=sink"
+    )
+    pipeline.set_state(Gst.State.PLAYING)
+    sample = pipeline.get_by_name("sink").emit("try-pull-sample", 1_000_000_000)
+    pipeline.set_state(Gst.State.NULL)
+    buffer = sample.get_buffer()
+
+    decoded = decode_image(bytes(buffer.extract_dup(0, buffer.get_size())))
+
+    assert decoded is not None and decoded.shape == (48, 64, 3)
+    assert decode_image(b"not an image") is None
