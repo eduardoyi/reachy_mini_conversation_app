@@ -663,6 +663,7 @@ class Config:
     OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED = _env_flag("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", default=False)
     MACOS_LOCAL_AUDIO_FLUSH_ENABLED = _env_flag("MACOS_LOCAL_AUDIO_FLUSH_ENABLED", default=False)
     SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
+    SPEAKER_FOLLOWING_ENABLED = _env_flag("SPEAKER_FOLLOWING_ENABLED", default=True)
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -826,6 +827,7 @@ def refresh_runtime_config_from_env() -> None:
     config.OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED = _env_flag("OPENAI_LIVE_LOCAL_BARGE_IN_ENABLED", default=False)
     config.MACOS_LOCAL_AUDIO_FLUSH_ENABLED = _env_flag("MACOS_LOCAL_AUDIO_FLUSH_ENABLED", default=False)
     config.SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
+    config.SPEAKER_FOLLOWING_ENABLED = _env_flag("SPEAKER_FOLLOWING_ENABLED", default=True)
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

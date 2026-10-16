@@ -233,8 +233,14 @@ def test_hybrid_run_defers_provider_factory_until_activation(
     monkeypatch.setattr(main_mod, "setup_logger", lambda _debug: MagicMock())
 
     class FakeMovementManager:
-        def __init__(self, current_robot: object) -> None:
+        def __init__(self, current_robot: object, **_kwargs: object) -> None:
             self.current_robot = current_robot
+
+        def set_conversation_active(self, _active: bool) -> None:
+            return None
+
+        def turn_toward_speaker(self) -> None:
+            return None
 
         def start(self) -> None:
             return None
@@ -321,8 +327,14 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
     monkeypatch.setattr(main_mod, "setup_logger", lambda _debug: MagicMock())
 
     class FakeMovementManager:
-        def __init__(self, current_robot: object) -> None:
+        def __init__(self, current_robot: object, **_kwargs: object) -> None:
             self.current_robot = current_robot
+
+        def set_conversation_active(self, _active: bool) -> None:
+            return None
+
+        def turn_toward_speaker(self) -> None:
+            return None
 
         def start(self) -> None:
             return None

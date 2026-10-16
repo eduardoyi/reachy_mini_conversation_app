@@ -242,7 +242,18 @@ def run(
 
     app_lifecycle.wake_up_if_sleeping(robot, logger)
 
-    movement_manager = MovementManager(current_robot=robot)
+    speaker_direction = None
+    if config.SPEAKER_FOLLOWING_ENABLED:
+        from reachy_mini_conversation_app.speaker_direction import SpeakerDirection
+
+        client = getattr(robot, "client", None)
+        speaker_direction = SpeakerDirection(
+            f"http://{getattr(client, 'host', 'localhost')}:{getattr(client, 'port', 8000)}"
+        )
+    movement_manager = MovementManager(
+        current_robot=robot,
+        speaker_direction=speaker_direction.recent_speech_yaw if speaker_direction is not None else None,
+    )
 
     deps = ToolDependencies(
         reachy_mini=robot,
@@ -284,13 +295,17 @@ def run(
             return build_handler(startup_voice)
 
         def queue_activation_acknowledgement(_reason: str) -> None:
-            """Queue a small movement-layer acknowledgment without motor I/O."""
+            """Queue a small movement-layer acknowledgment without motor I/O, then face the speaker."""
             movement_manager.acknowledge_activation()
+            if config.SPEAKER_FOLLOWING_ENABLED:
+                movement_manager.turn_toward_speaker()
 
-        async def lower_music_during_conversation(active: bool) -> None:
-            """Lower Spotify while a wake-word conversation is open and restore it afterwards."""
+        async def on_cloud_session(active: bool) -> None:
+            """Follow faces and lower Spotify while a wake-word conversation is open; undo both afterwards."""
             from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
 
+            if config.SPEAKER_FOLLOWING_ENABLED:
+                movement_manager.set_conversation_active(active)
             if active:
                 await SPOTIFY_DUCKER.session_started()
             else:
@@ -368,7 +383,7 @@ def run(
             action_executor=action_executor,
             local_processing_close_callback=context_processor.close if context_processor is not None else None,
             acknowledgement_callback=queue_activation_acknowledgement,
-            cloud_session_observer=lower_music_during_conversation,
+            cloud_session_observer=on_cloud_session,
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
@@ -485,6 +500,11 @@ def run(
 
     # Each async service → its own thread/loop
     movement_manager.start()
+    if speaker_direction is not None:
+        speaker_direction.start()
+        if hybrid_runtime is None:
+            # Without the hybrid runtime the conversation is always open.
+            movement_manager.set_conversation_active(True)
     # Audio-reactive head motion follows SDK playback. The explicit simulator
     # output bypass does not feed assistant PCM into this wobbler.
     if config.SPEECH_WOBBLE_ENABLED:
@@ -532,6 +552,8 @@ def run(
         # already in the sleep pose; on a plain stop it stays awake and
         # the daemon returns it to neutral once the process exits.
         movement_manager.stop(reset_to_neutral=False)
+        if speaker_direction is not None:
+            speaker_direction.stop()
         try:
             robot.disable_wobbling()
         except Exception as e:

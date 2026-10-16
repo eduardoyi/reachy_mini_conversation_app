@@ -28,7 +28,7 @@ import time
 import logging
 import threading
 from queue import Empty, Queue
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Callable
 from collections import deque
 from dataclasses import dataclass
 
@@ -39,13 +39,17 @@ from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
 from reachy_mini.utils.interpolation import compose_world_offset, linear_pose_interpolation
-from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, DanceQueueMove, EmotionQueueMove
 
 
 logger = logging.getLogger(__name__)
 
 # Configuration constants
 CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement control loop
+# Speech from a direction this close to where the head already looks does not trigger a turn.
+SPEAKER_TURN_MIN_RAD = np.deg2rad(25.0)
+SPEAKER_TURN_MIN_DURATION_S = 0.5
+SPEAKER_TURN_MAX_DURATION_S = 1.4
 
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
@@ -59,6 +63,7 @@ class BreathingMove(Move):  # type: ignore
         interpolation_start_pose: NDArray[np.float32],
         interpolation_start_antennas: Tuple[float, float],
         interpolation_duration: float = 1.0,
+        base_yaw: float = 0.0,
     ):
         """Initialize breathing move.
 
@@ -66,14 +71,16 @@ class BreathingMove(Move):  # type: ignore
             interpolation_start_pose: 4x4 matrix of current head pose to interpolate from
             interpolation_start_antennas: Current antenna positions to interpolate from
             interpolation_duration: Duration of interpolation to neutral (seconds)
+            base_yaw: World yaw (radians) the head and body breathe around, e.g. toward the last speaker
 
         """
         self.interpolation_start_pose = interpolation_start_pose
         self.interpolation_start_antennas = np.array(interpolation_start_antennas)
         self.interpolation_duration = interpolation_duration
+        self.base_yaw = float(base_yaw)
 
         # Neutral positions for breathing base
-        self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+        self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, self.base_yaw, degrees=False)
         self.neutral_antennas = np.array([-0.1745, 0.1745])  # ~10° offset to reduce shaking
 
         # Breathing parameters
@@ -112,14 +119,16 @@ class BreathingMove(Move):  # type: ignore
 
             # Gentle z-axis breathing
             z_offset = self.breathing_z_amplitude * np.sin(2 * np.pi * self.breathing_frequency * breathing_time)
-            head_pose = create_head_pose(x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=0, degrees=True, mm=False)
+            head_pose = create_head_pose(
+                x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=self.base_yaw, degrees=False, mm=False
+            )
 
             # Antenna sway (opposite directions)
             antenna_sway = self.antenna_sway_amplitude * np.sin(2 * np.pi * self.antenna_frequency * breathing_time)
             antennas = np.array([antenna_sway, -antenna_sway], dtype=np.float64)
 
         # Return in official Move interface format: (head_pose, antennas_array, body_yaw)
-        return (head_pose, antennas, 0.0)
+        return (head_pose, antennas, self.base_yaw)
 
 
 class ActivationAcknowledgementMove(Move):  # type: ignore
@@ -147,6 +156,61 @@ class ActivationAcknowledgementMove(Move):  # type: ignore
         head_pose = compose_world_offset(self._start_pose[0], offset, reorthonormalize=True)
         antennas_array = np.asarray(self._start_pose[1], dtype=np.float64)
         return head_pose, antennas_array, self._start_pose[2]
+
+
+def head_pose_z_bob(move: BreathingMove, t: float) -> float:
+    """Return the breathing move's vertical offset (meters) at time ``t`` after its interpolation phase."""
+    breathing_time = t - move.interpolation_duration
+    return float(move.breathing_z_amplitude * np.sin(2 * np.pi * move.breathing_frequency * breathing_time))
+
+
+def head_world_yaw(head_pose: NDArray[np.float64]) -> float:
+    """Return the yaw (radians, positive = left) the head faces in the world frame."""
+    return float(np.arctan2(head_pose[1, 0], head_pose[0, 0]))
+
+
+def yaw_offset(yaw: float) -> NDArray[np.float64]:
+    """Return a world-frame rotation about the vertical axis."""
+    return np.asarray(create_head_pose(0, 0, 0, 0, 0, yaw, degrees=False), dtype=np.float64)
+
+
+class GazeTurnMove(Move):  # type: ignore
+    """Turn head and body together to face a world yaw, starting from the pose the robot holds when it begins."""
+
+    def __init__(self, target_yaw: float) -> None:
+        """Prepare a turn toward ``target_yaw``; the worker calls ``begin`` when the move starts."""
+        self.target_yaw = float(target_yaw)
+        self._start_pose: FullBodyPose | None = None
+        self._duration = SPEAKER_TURN_MAX_DURATION_S
+        self._target_head = yaw_offset(self.target_yaw)
+
+    @property
+    def duration(self) -> float:
+        """Longer turns take longer, within fixed bounds."""
+        return self._duration
+
+    def begin(self, start_pose: FullBodyPose) -> None:
+        """Capture the pose the turn starts from and size the turn's duration."""
+        self._start_pose = clone_full_body_pose(start_pose)
+        delta = abs(self.target_yaw - head_world_yaw(np.asarray(start_pose[0], dtype=np.float64)))
+        self._duration = float(
+            np.clip(
+                SPEAKER_TURN_MIN_DURATION_S + delta / np.pi * SPEAKER_TURN_MAX_DURATION_S,
+                SPEAKER_TURN_MIN_DURATION_S,
+                SPEAKER_TURN_MAX_DURATION_S,
+            )
+        )
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64] | None, float]:
+        """Ease from the start pose to the neutral pose rotated toward the target yaw."""
+        if self._start_pose is None:
+            return self._target_head.copy(), None, self.target_yaw
+        start_head, start_antennas, start_body_yaw = self._start_pose
+        progress = float(np.clip(t / self._duration, 0.0, 1.0))
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        head = linear_pose_interpolation(np.asarray(start_head, dtype=np.float64), self._target_head, eased)
+        body_yaw = start_body_yaw + (self.target_yaw - start_body_yaw) * eased
+        return head, np.asarray(start_antennas, dtype=np.float64), body_yaw
 
 
 def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
@@ -214,10 +278,22 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
+        speaker_direction: Callable[[], float | None] | None = None,
     ):
-        """Initialize movement manager."""
+        """Initialize movement manager.
+
+        ``speaker_direction`` returns the world yaw recent speech came from, or None; when given,
+        the robot turns toward whoever starts talking.
+        """
         self.current_robot = current_robot
         self._head_tracking = False
+        self._speaker_direction = speaker_direction
+        # World yaw the robot faces when idle: toward the last speaker, 0 when facing forward.
+        self._gaze_yaw = 0.0
+        # Tracking enabled for a conversation (not by the user), so it ends with the conversation.
+        self._tracking_auto = False
+        # Tracking paused while a speaker turn runs, to resume once the turn ends.
+        self._turn_paused_tracking = False
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -242,6 +318,7 @@ class MovementManager:
         # Speaking pauses tracking; the captured look-at pose anchors queued moves.
         self._is_speaking = False
         self._track_anchor: NDArray[np.float64] | None = None
+        self._track_anchor_body_yaw = 0.0
         self._last_commanded_pose: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
         self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
         self._antenna_unfreeze_blend = 1.0
@@ -321,6 +398,17 @@ class MovementManager:
         """Start or stop following the user's face; thread-safe via the command queue."""
         self._command_queue.put(("set_head_tracking", enabled))
 
+    def turn_toward_speaker(self) -> None:
+        """Turn to face where recent speech came from, if it is clearly elsewhere; thread-safe."""
+        self._command_queue.put(("turn_toward_speaker", None))
+
+    def set_conversation_active(self, active: bool) -> None:
+        """Follow faces during a conversation, then stop and face forward again; thread-safe.
+
+        Tracking the user turned on or off themselves (``set_head_tracking``) is left alone at the end.
+        """
+        self._command_queue.put(("set_conversation_active", active))
+
     def set_speaking(self, speaking: bool) -> None:
         """Pause head tracking while the assistant speaks, resume it afterwards.
 
@@ -368,6 +456,7 @@ class MovementManager:
             logger.debug("Queued activation acknowledgment move")
         elif command == "clear_queue":
             self.move_queue.clear()
+            self._end_move(self.state.current_move)
             self.state.current_move = None
             self.state.move_start_time = None
             self._breathing_active = False
@@ -394,6 +483,7 @@ class MovementManager:
             self._is_listening = desired_state
             self._last_listening_blend_time = now
             if desired_state:
+                self._request_speaker_turn()
                 # Freeze: snapshot current commanded antennas and reset blend
                 self._listening_antennas = (
                     float(self._last_commanded_pose[1][0]),
@@ -405,20 +495,21 @@ class MovementManager:
                 self._antenna_unfreeze_blend = 0.0
             self.state.update_activity()
         elif command == "set_head_tracking":
-            enabled = bool(payload)
-            if self._head_tracking == enabled:
-                return
-            self._head_tracking = enabled
-            self._track_anchor = None
-            # set_speaking is gated off while disabled, so its state would go stale across a toggle.
-            self._is_speaking = False
-            try:
-                if enabled:
-                    self.current_robot.start_head_tracking(weight=1.0)
-                else:
-                    self.current_robot.stop_head_tracking()
-            except Exception as e:
-                logger.warning("Head-tracking toggle failed: %s", e)
+            self._tracking_auto = False
+            self._set_head_tracking(bool(payload))
+        elif command == "turn_toward_speaker":
+            self._request_speaker_turn()
+        elif command == "set_conversation_active":
+            if payload:
+                if not self._head_tracking:
+                    self._set_head_tracking(True)
+                    self._tracking_auto = True
+            else:
+                if self._tracking_auto:
+                    self._tracking_auto = False
+                    self._set_head_tracking(False)
+                if self._gaze_yaw != 0.0:
+                    self._queue_gaze_turn(0.0)
         elif command == "set_speaking":
             if not self._head_tracking:
                 return
@@ -429,7 +520,9 @@ class MovementManager:
             try:
                 if speaking and self.current_robot.get_tracked_face(wait=False).detected:
                     # Pause only once a face is locked, else speech blocks acquisition.
-                    self._track_anchor = self.current_robot.get_current_head_pose()
+                    anchor_head, _, anchor_body_yaw = self._present_pose()
+                    self._track_anchor = np.asarray(anchor_head, dtype=np.float64)
+                    self._track_anchor_body_yaw = anchor_body_yaw
                     self.current_robot.start_head_tracking(weight=0.0)
                 elif not speaking:
                     self._track_anchor = None
@@ -438,6 +531,93 @@ class MovementManager:
                 logger.warning("Head-tracking speaking handoff failed: %s", e)
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
+
+    def _set_head_tracking(self, enabled: bool) -> None:
+        """Start or stop daemon face tracking (worker thread only)."""
+        if self._head_tracking == enabled:
+            return
+        self._head_tracking = enabled
+        self._track_anchor = None
+        self._turn_paused_tracking = False
+        # set_speaking is gated off while disabled, so its state would go stale across a toggle.
+        self._is_speaking = False
+        try:
+            if enabled:
+                self.current_robot.start_head_tracking(weight=1.0)
+            else:
+                self.current_robot.stop_head_tracking()
+        except Exception as e:
+            logger.warning("Head-tracking toggle failed: %s", e)
+            return
+        if not enabled:
+            # Tracking left the head wherever the face was; ease back to the idle gaze instead of snapping.
+            self._queue_gaze_turn(self._gaze_yaw)
+
+    def _request_speaker_turn(self) -> None:
+        """Queue a turn toward recent speech when it came from clearly elsewhere (worker thread only)."""
+        if self._speaker_direction is None:
+            return
+        try:
+            yaw = self._speaker_direction()
+        except Exception as e:
+            logger.debug("Speaker direction failed: %s", e)
+            return
+        if yaw is None:
+            return
+        try:
+            facing = head_world_yaw(np.asarray(self.current_robot.get_current_head_pose(), dtype=np.float64))
+        except Exception as e:
+            logger.debug("Speaker turn skipped; head pose unavailable: %s", e)
+            return
+        if abs(yaw - facing) < SPEAKER_TURN_MIN_RAD:
+            return
+        logger.info("Turning toward speaker: %.0f deg (facing %.0f deg)", np.degrees(yaw), np.degrees(facing))
+        self._queue_gaze_turn(yaw)
+
+    def _queue_gaze_turn(self, yaw: float) -> None:
+        """Queue a turn to ``yaw``, replacing any turn that has not started yet."""
+        self.move_queue = deque(move for move in self.move_queue if not isinstance(move, GazeTurnMove))
+        self.move_queue.append(GazeTurnMove(yaw))
+        self.state.update_activity()
+
+    def _present_pose(self) -> FullBodyPose:
+        """Return the robot's measured head pose and body yaw, falling back to the last command."""
+        with self._status_lock:
+            commanded = clone_full_body_pose(self._last_commanded_pose)
+        try:
+            head = np.asarray(self.current_robot.get_current_head_pose(), dtype=np.float64)
+            head_joints, _ = self.current_robot.get_current_joint_positions()
+            return (head, commanded[1], float(head_joints[0]))
+        except Exception as e:
+            logger.debug("Present pose unavailable; using the last command: %s", e)
+            return commanded
+
+    def _begin_move(self, move: Move) -> None:
+        """Prepare a move that has just become current."""
+        if isinstance(move, GazeTurnMove):
+            # A turn pauses tracking so the head can leave the current face, and starts from where the head is.
+            if self._head_tracking and not self._turn_paused_tracking:
+                try:
+                    self.current_robot.start_head_tracking(weight=0.0)
+                    self._turn_paused_tracking = True
+                except Exception as e:
+                    logger.warning("Head-tracking pause for speaker turn failed: %s", e)
+            self._track_anchor = None
+            move.begin(self._present_pose())
+            self._gaze_yaw = move.target_yaw
+        elif isinstance(move, GotoQueueMove):
+            # Explicit head moves (move_head, sweep_look) aim in absolute terms and end facing forward.
+            self._gaze_yaw = 0.0
+
+    def _end_move(self, move: Move | None) -> None:
+        """Clean up after a move finishes or is cleared."""
+        if isinstance(move, GazeTurnMove) and self._turn_paused_tracking:
+            self._turn_paused_tracking = False
+            if self._head_tracking:
+                try:
+                    self.current_robot.start_head_tracking(weight=1.0)
+                except Exception as e:
+                    logger.warning("Head-tracking resume after speaker turn failed: %s", e)
 
     def _publish_shared_state(self) -> None:
         """Expose idle-related state for external threads."""
@@ -451,12 +631,14 @@ class MovementManager:
             self.state.move_start_time is not None
             and current_time - self.state.move_start_time >= self.state.current_move.duration
         ):
+            self._end_move(self.state.current_move)
             self.state.current_move = None
             self.state.move_start_time = None
 
             if self.move_queue:
                 self.state.current_move = self.move_queue.popleft()
                 self.state.move_start_time = current_time
+                self._begin_move(self.state.current_move)
                 # Any real move cancels breathing mode flag
                 self._breathing_active = isinstance(self.state.current_move, BreathingMove)
                 logger.debug(f"Starting new move, duration: {self.state.current_move.duration}s")
@@ -484,6 +666,7 @@ class MovementManager:
                         interpolation_start_pose=current_head_pose,
                         interpolation_start_antennas=current_antennas,
                         interpolation_duration=1.0,
+                        base_yaw=self._gaze_yaw,
                     )
                     self.move_queue.append(breathing_move)
                     logger.debug("Started breathing after %.1fs of inactivity", idle_for)
@@ -514,6 +697,13 @@ class MovementManager:
             if body_yaw is None:
                 body_yaw = 0.0
 
+            move = self.state.current_move
+            anchored_emotion = self._track_anchor is not None and isinstance(move, EmotionQueueMove)
+            if self._gaze_yaw != 0.0 and isinstance(move, (EmotionQueueMove, DanceQueueMove)) and not anchored_emotion:
+                # Emotions and dances are recorded facing forward; play them toward the speaker.
+                body_yaw = float(body_yaw) + self._gaze_yaw
+                head = compose_world_offset(head, yaw_offset(self._gaze_yaw))
+
             antennas_tuple = (float(antennas[0]), float(antennas[1]))
             head_copy = head.copy()
             primary_full_body_pose = (
@@ -531,14 +721,24 @@ class MovementManager:
             primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
 
-        # Speaking pauses tracking: hold the look-at anchor, overlay emotions on it, dance from neutral.
+        # Speaking pauses tracking: hold the look-at anchor (breathing included), overlay emotions on it,
+        # dance from neutral. The body holds where it was too, so neither swings back to forward.
         if self._track_anchor is not None:
             head_pose, antennas, body_yaw = primary_full_body_pose
             move = self.state.current_move
             if move is None:
                 head_pose = self._track_anchor.copy()
+                body_yaw = self._track_anchor_body_yaw
+            elif isinstance(move, BreathingMove):
+                head_pose = self._track_anchor.copy()
+                start = self.state.move_start_time
+                if start is not None and current_time - start >= move.interpolation_duration:
+                    # Keep the gentle breathing bob on top of the anchor.
+                    head_pose[2, 3] += head_pose_z_bob(move, current_time - start)
+                body_yaw = self._track_anchor_body_yaw
             elif isinstance(move, EmotionQueueMove):
                 head_pose = compose_world_offset(self._track_anchor, head_pose)
+                body_yaw = self._track_anchor_body_yaw + float(body_yaw)
             primary_full_body_pose = (head_pose, antennas, body_yaw)
 
         return primary_full_body_pose

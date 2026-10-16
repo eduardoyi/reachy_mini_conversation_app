@@ -119,6 +119,7 @@ values. This keeps one-off commands such as
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
 | `GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED` | Experimental local microphone onset playback clear for Gemini; default `0`. Set `1` for a supervised interruption trial. Noise can trigger it; cloud generation still controls the response. |
 | `GEMINI_LIVE_VIDEO_ENABLED` | Stream the camera to Gemini at 1 frame per second while the user is talking and for 30 seconds after, so visual questions need no camera tool call; default `0`. Requires `gemini-3.8-live-extended-thinking`. Camera frames go to Google during conversations; video costs about $0.90 per streamed hour. |
+| `SPEAKER_FOLLOWING_ENABLED` | Turn head and body toward whoever starts talking (microphone-array direction) and follow their face during conversations; default `1`. See [speaker following](docs/features/speaker-following.md). |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |

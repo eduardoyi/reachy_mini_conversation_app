@@ -8,8 +8,14 @@ import pytest
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
-from reachy_mini_conversation_app.moves import MovementManager, ActivationAcknowledgementMove
-from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+from reachy_mini_conversation_app.moves import (
+    GazeTurnMove,
+    BreathingMove,
+    MovementManager,
+    ActivationAcknowledgementMove,
+    head_world_yaw,
+)
+from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, EmotionQueueMove
 
 
 class _FakeMove:
@@ -140,3 +146,233 @@ def test_activation_acknowledgement_is_worker_owned_relative_and_returns_to_star
     np.testing.assert_array_equal(antennas_peak, start_pose[1])
     np.testing.assert_array_equal(antennas_end, start_pose[1])
     assert (yaw_start, yaw_peak, yaw_end) == (start_pose[2],) * 3
+
+
+def _robot_facing(yaw_deg: float = 0.0, body_yaw: float = 0.0) -> MagicMock:
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = create_head_pose(0, 0, 0, 0, 0, yaw_deg, degrees=True)
+    robot.get_current_joint_positions.return_value = ([body_yaw] + [0.0] * 6, [0.0, 0.0])
+    return robot
+
+
+def _start_next_move(manager: MovementManager, now: float) -> None:
+    manager.state.current_move = None
+    manager._manage_move_queue(now)
+
+
+@pytest.mark.parametrize(("speech_deg", "turns"), [(60.0, True), (-50.0, True), (15.0, False), (None, False)])
+def test_listening_turns_toward_speech_from_clearly_elsewhere(speech_deg: float | None, turns: bool) -> None:
+    """User speech queues a turn only when it came from well away from where the head faces."""
+    robot = _robot_facing(0.0)
+    speech_yaw = None if speech_deg is None else np.radians(speech_deg)
+    manager = MovementManager(robot, speaker_direction=lambda: speech_yaw)
+    manager._last_listening_toggle_time -= 1.0  # past the listening debounce
+
+    manager.set_listening(True)
+    manager._poll_signals(manager._now())
+
+    turns_queued = [move for move in manager.move_queue if isinstance(move, GazeTurnMove)]
+    if turns:
+        assert len(turns_queued) == 1
+        assert turns_queued[0].target_yaw == pytest.approx(speech_yaw)
+    else:
+        assert turns_queued == []
+
+
+def test_speaker_turn_without_direction_source_is_a_no_op() -> None:
+    """Without a direction source the manager behaves as before."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    assert not manager.move_queue
+
+
+def test_newer_speaker_turn_replaces_one_that_has_not_started() -> None:
+    """Two people talking in quick succession produce one pending turn, toward the latest."""
+    robot = _robot_facing(0.0)
+    speech = iter([np.radians(60.0), np.radians(-60.0)])
+    manager = MovementManager(robot, speaker_direction=lambda: next(speech))
+
+    manager.turn_toward_speaker()
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+
+    assert [move.target_yaw for move in manager.move_queue] == [pytest.approx(np.radians(-60.0))]
+
+
+def test_gaze_turn_eases_head_and_body_from_the_present_pose() -> None:
+    """A turn starts exactly at the measured pose and ends with head and body facing the target."""
+    start_head = create_head_pose(0, 0, 0, 0, 10, 20, degrees=True)
+    move = GazeTurnMove(np.radians(70.0))
+    move.begin((start_head, (0.1, -0.1), np.radians(5.0)))
+
+    assert 0.5 <= move.duration <= 1.4
+    head0, antennas0, body0 = move.evaluate(0.0)
+    head_mid, _, body_mid = move.evaluate(move.duration / 2)
+    head1, antennas1, body1 = move.evaluate(move.duration)
+
+    np.testing.assert_allclose(head0, start_head, atol=1e-9)
+    assert body0 == pytest.approx(np.radians(5.0))
+    assert np.radians(20.0) < head_world_yaw(head_mid) < np.radians(70.0)
+    assert np.radians(5.0) < body_mid < np.radians(70.0)
+    assert head_world_yaw(head1) == pytest.approx(np.radians(70.0))
+    np.testing.assert_allclose(head1, create_head_pose(0, 0, 0, 0, 0, 70, degrees=True), atol=1e-9)
+    assert body1 == pytest.approx(np.radians(70.0))
+    np.testing.assert_array_equal(antennas0, [0.1, -0.1])
+    np.testing.assert_array_equal(antennas1, [0.1, -0.1])
+
+
+def test_speaker_turn_pauses_face_tracking_and_resumes_after() -> None:
+    """Tracking lets go during the turn so the head can leave the old face, then picks up whoever is there."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(60.0))
+    manager.set_head_tracking(True)
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    robot.start_head_tracking.reset_mock()
+
+    now = manager._now()
+    _start_next_move(manager, now)
+    turn = manager.state.current_move
+    assert isinstance(turn, GazeTurnMove)
+    assert robot.start_head_tracking.call_args_list == [call(weight=0.0)]
+    assert manager._gaze_yaw == pytest.approx(np.radians(60.0))
+
+    manager._manage_move_queue(now + turn.duration + 0.01)
+    assert robot.start_head_tracking.call_args_list == [call(weight=0.0), call(weight=1.0)]
+
+
+def test_clearing_a_running_turn_resumes_face_tracking() -> None:
+    """An interruption mid-turn must not leave tracking paused."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(-60.0))
+    manager.set_head_tracking(True)
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    _start_next_move(manager, manager._now())
+    robot.start_head_tracking.reset_mock()
+
+    manager.clear_move_queue()
+    manager._poll_signals(manager._now())
+
+    assert robot.start_head_tracking.call_args_list == [call(weight=1.0)]
+
+
+def test_breathing_stays_facing_the_last_speaker() -> None:
+    """Idle breathing happens around the gaze instead of drifting back to forward."""
+    robot = _robot_facing(50.0, body_yaw=np.radians(50.0))
+    manager = MovementManager(robot)
+    manager._gaze_yaw = np.radians(50.0)
+    manager.state.last_activity_time = manager._now() - 10.0
+
+    manager._manage_breathing(manager._now())
+
+    breathing = manager.move_queue[-1]
+    assert isinstance(breathing, BreathingMove)
+    head, _, body_yaw = breathing.evaluate(breathing.interpolation_duration + 3.0)
+    assert head_world_yaw(head) == pytest.approx(np.radians(50.0))
+    assert body_yaw == pytest.approx(np.radians(50.0))
+
+
+def test_emotions_play_toward_the_speaker() -> None:
+    """A forward-recorded emotion is rotated, head and body, toward the gaze."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager._gaze_yaw = np.radians(40.0)
+    emotion_head = create_head_pose(0, 0, 0, 0, 10, 0, degrees=True)
+    recorded = MagicMock()
+    recorded.get.return_value = _FakeMove(emotion_head)
+    manager.state.current_move = EmotionQueueMove("happy", recorded)
+    manager.state.move_start_time = manager._now()
+
+    head, _, body_yaw = manager._get_primary_pose(manager._now())
+
+    assert head_world_yaw(head) == pytest.approx(np.radians(40.0))
+    assert body_yaw == pytest.approx(np.radians(40.0))
+
+
+def test_explicit_head_moves_reset_the_gaze() -> None:
+    """move_head and sweep_look aim in absolute terms, so the speaker gaze no longer applies afterwards."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager._gaze_yaw = np.radians(40.0)
+    manager.move_queue.append(
+        GotoQueueMove(
+            target_head_pose=np.eye(4),
+            start_head_pose=np.eye(4),
+            target_antennas=(0.0, 0.0),
+            start_antennas=(0.0, 0.0),
+            target_body_yaw=0.0,
+            start_body_yaw=0.0,
+            duration=1.0,
+        )
+    )
+
+    _start_next_move(manager, manager._now())
+
+    assert manager._gaze_yaw == 0.0
+
+
+def test_conversation_tracks_faces_then_faces_forward_again() -> None:
+    """A conversation turns tracking on; its end turns it off and eases back to forward."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+
+    manager.set_conversation_active(True)
+    manager._poll_signals(manager._now())
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+
+    manager._gaze_yaw = np.radians(35.0)
+    manager.set_conversation_active(False)
+    manager._poll_signals(manager._now())
+
+    robot.stop_head_tracking.assert_called_once()
+    assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)] == [0.0]
+
+
+def test_conversation_end_keeps_tracking_the_user_turned_on() -> None:
+    """Tracking the user asked for ("look at me") outlives the conversation."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+
+    manager.set_head_tracking(True)
+    manager.set_conversation_active(True)
+    manager.set_conversation_active(False)
+    manager._poll_signals(manager._now())
+
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+    robot.stop_head_tracking.assert_not_called()
+
+
+def test_turning_tracking_off_eases_back_to_the_gaze() -> None:
+    """Stopping tracking hands the head back smoothly rather than snapping to the last command."""
+    robot = _robot_facing(25.0)
+    manager = MovementManager(robot)
+    manager._gaze_yaw = np.radians(-30.0)
+    manager.set_head_tracking(True)
+    manager.set_head_tracking(False)
+    manager._poll_signals(manager._now())
+
+    assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)] == [
+        pytest.approx(np.radians(-30.0))
+    ]
+
+
+def test_speaking_while_breathing_keeps_facing_the_tracked_face() -> None:
+    """Regression: idle breathing used to pull the head and body back to forward as soon as Reachy spoke."""
+    robot = _robot_facing(50.0, body_yaw=np.radians(40.0))
+    robot.get_tracked_face.return_value.detected = True
+    manager = MovementManager(robot)
+    manager.set_head_tracking(True)
+    manager._poll_signals(manager._now())
+    manager.state.last_activity_time = manager._now() - 10.0
+    manager._manage_breathing(manager._now())
+    _start_next_move(manager, manager._now())
+    breathing = manager.state.current_move
+    assert isinstance(breathing, BreathingMove) and breathing.base_yaw == 0.0
+
+    manager.set_speaking(True)
+    manager._poll_signals(manager._now())
+
+    for elapsed in (0.0, breathing.interpolation_duration + 1.3):
+        head, _, body_yaw = manager._get_primary_pose(manager.state.move_start_time + elapsed)
+        assert head_world_yaw(head) == pytest.approx(np.radians(50.0))
+        assert body_yaw == pytest.approx(np.radians(40.0))
