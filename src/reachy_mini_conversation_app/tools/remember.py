@@ -192,6 +192,9 @@ class Remember(Tool):
                 raise ValueError("unknown household memory field")
             subject_id = _required_string(kwargs.get("subject_id"), "subject_id")
             source_person_id = _optional_string(kwargs.get("source_person_id"), "source_person_id")
+            if source_person_id is None and deps.current_person_id is not None:
+                # The face recognized in front of the camera is who told us, unless the model said otherwise.
+                source_person_id = deps.current_person_id()
             kind = _memory_kind(kwargs.get("kind", "note"))
             certainty = _memory_certainty(kwargs.get("certainty", "stated"))
             event_start = _optional_date(kwargs.get("event_start"), "event_start")

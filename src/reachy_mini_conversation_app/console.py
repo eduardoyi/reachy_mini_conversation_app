@@ -352,14 +352,17 @@ class LocalStream:
         startup_voice: Optional[str] = None,
         hybrid_runtime: HybridRuntime | None = None,
         speaker_output_factory: Callable[[int], SpeakerOutput] | None = None,
+        face_recognition: Any = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
         - ``handler_factory``: builds a fresh handler for the currently selected backend.
+        - ``face_recognition``: the ``FaceRecognitionService`` behind the Faces settings, when enabled.
         """
         self._robot = robot
+        self._face_recognition = face_recognition
         self._stop_event = asyncio.Event()
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
@@ -1118,6 +1121,102 @@ class LocalStream:
             "hybrid_metrics": counters,
         }
 
+    def _register_face_routes(
+        self, settings_app: FastAPI, local_access_denied: Callable[..., Response | None]
+    ) -> None:
+        """Faces settings: list, view photos, enroll from the live camera, and delete (same computer only)."""
+        no_store = {"Cache-Control": "no-store"}
+
+        def _denied(request: Request, *, mutation: bool = False) -> Response | None:
+            denied: Response | None = local_access_denied(request, mutation=mutation)
+            if denied is not None:
+                return denied
+            if self._face_recognition is None:
+                return Response(status_code=404, headers=no_store)
+            return None
+
+        async def _small_json(request: Request, keys: set[str]) -> dict[str, Any] | Response:
+            if request.headers.get("content-type", "").split(";")[0] != "application/json":
+                return Response(status_code=415, headers=no_store)
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > 1_024:
+                    return Response(status_code=413, headers=no_store)
+            try:
+                payload: object = json.loads(body)
+            except (ValueError, UnicodeError):
+                return Response(status_code=400, headers=no_store)
+            if (
+                not isinstance(payload, dict)
+                or set(payload) != keys
+                or not all(isinstance(payload[k], str) for k in keys)
+            ):
+                return Response(status_code=400, headers=no_store)
+            return payload
+
+        def _person_json(person: Any) -> dict[str, Any]:
+            return {
+                "id": person.person_id,
+                "name": person.name,
+                "samples": person.sample_count,
+                "photos": list(person.photos),
+                "updated_at": person.updated_at,
+            }
+
+        @settings_app.get("/api/faces")
+        async def _faces_list(request: Request) -> Response:
+            denied = _denied(request)
+            if denied is not None:
+                return denied
+            try:
+                people = await asyncio.to_thread(self._face_recognition.registry.people)
+            except (OSError, ValueError):
+                logger.warning("Face list unavailable")
+                return JSONResponse({"error": "Saved faces are unavailable."}, status_code=503, headers=no_store)
+            return JSONResponse({"people": [_person_json(p) for p in people]}, headers=no_store)
+
+        @settings_app.get("/api/faces/photo")
+        async def _faces_photo(request: Request, person_id: str, photo: str) -> Response:
+            denied = _denied(request)
+            if denied is not None:
+                return denied
+            path = self._face_recognition.registry.photo_path(person_id, photo)
+            if path is None:
+                return Response(status_code=404, headers=no_store)
+            return FileResponse(str(path), media_type="image/jpeg", headers=no_store)
+
+        @settings_app.post("/api/faces/enroll")
+        async def _faces_enroll(request: Request) -> Response:
+            denied = _denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await _small_json(request, {"name"})
+            if isinstance(payload, Response):
+                return payload
+            try:
+                result = await asyncio.to_thread(self._face_recognition.enroll_from_camera, payload["name"])
+            except (OSError, ValueError, RuntimeError):
+                logger.warning("Face enrollment unavailable")
+                return JSONResponse({"error": "The camera is unavailable."}, status_code=503, headers=no_store)
+            if result.person is None:
+                return JSONResponse({"error": result.error}, status_code=422, headers=no_store)
+            return JSONResponse({"person": _person_json(result.person)}, headers=no_store)
+
+        @settings_app.post("/api/faces/forget")
+        async def _faces_forget(request: Request) -> Response:
+            denied = _denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await _small_json(request, {"person_id"})
+            if isinstance(payload, Response):
+                return payload
+            try:
+                removed = await asyncio.to_thread(self._face_recognition.registry.forget, payload["person_id"])
+            except (OSError, ValueError):
+                return Response(status_code=400, headers=no_store)
+            return JSONResponse({"removed": removed is not None}, headers=no_store)
+
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
 
@@ -1213,7 +1312,8 @@ class LocalStream:
                 headers={"Cache-Control": "no-store"},
             )
 
-        def _memory_access_denied(request: Request, *, mutation: bool = False) -> Response | None:
+        def _local_access_denied(request: Request, *, mutation: bool = False) -> Response | None:
+            """Allow only same-computer, same-origin requests for personal data."""
             client_host = request.client.host if request.client is not None else ""
             try:
                 local_client = ipaddress.ip_address(client_host).is_loopback
@@ -1224,6 +1324,12 @@ class LocalStream:
             origin = request.headers.get("origin")
             if (mutation or origin is not None) and origin != f"{request.url.scheme}://{request.url.netloc}":
                 return Response(status_code=403, headers={"Cache-Control": "no-store"})
+            return None
+
+        def _memory_access_denied(request: Request, *, mutation: bool = False) -> Response | None:
+            denied = _local_access_denied(request, mutation=mutation)
+            if denied is not None:
+                return denied
             if not config.HOUSEHOLD_MEMORY_ENABLED:
                 return Response(status_code=404, headers={"Cache-Control": "no-store"})
             return None
@@ -1337,6 +1443,8 @@ class LocalStream:
                 if operation is not None and not operation.done():
                     operation.cancel()
             return JSONResponse({"removed": removed}, headers={"Cache-Control": "no-store"})
+
+        self._register_face_routes(settings_app, _local_access_denied)
 
         # GET / -> index.html
         @settings_app.get("/")

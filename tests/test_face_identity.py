@@ -1,0 +1,305 @@
+import json
+import stat
+from types import SimpleNamespace
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from reachy_mini_conversation_app.face_identity import (
+    MODEL_ID,
+    MATCH_THRESHOLD,
+    MAX_SAMPLES_PER_PERSON,
+    FaceAnalyzer,
+    FaceRegistry,
+    FaceStoreError,
+    FaceObservation,
+    FaceRecognitionService,
+    warp_affine,
+    person_id_for,
+    similarity_transform,
+)
+
+
+def _unit(*values: float) -> np.ndarray:
+    vector = np.zeros(128, dtype=np.float32)
+    vector[: len(values)] = values
+    return vector / np.linalg.norm(vector)
+
+
+ANA = _unit(1.0, 0.0)
+BEN = _unit(0.0, 1.0)
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class _FakeAnalyzer:
+    """Returns queued face lists, one per frame."""
+
+    def __init__(self, frames: list[list[np.ndarray]]) -> None:
+        self.frames = list(frames)
+        self.loaded = False
+
+    def load(self) -> None:
+        self.loaded = True
+
+    def analyze(self, frame: np.ndarray, min_face_px: float = 0) -> list[FaceObservation]:
+        embeddings = self.frames.pop(0) if self.frames else []
+        return [
+            FaceObservation(bbox=(0.0, 0.0, 200.0 - i, 200.0), embedding=e, photo=np.zeros((4, 4, 3), np.uint8))
+            for i, e in enumerate(embeddings)
+        ]
+
+
+def _service(tmp_path: Path, frames: list[list[np.ndarray]], clock: _Clock | None = None) -> FaceRecognitionService:
+    clock = clock or _Clock()
+    return FaceRecognitionService(
+        lambda: np.zeros((8, 8, 3), np.uint8),
+        FaceRegistry(tmp_path / "faces"),
+        _FakeAnalyzer(frames),  # type: ignore[arg-type]
+        encode_jpeg=lambda image: b"\xff\xd8jpeg",
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+
+# --- geometry -----------------------------------------------------------------
+
+
+def test_similarity_transform_recovers_rotation_scale_and_shift() -> None:
+    """Landmarks moved by a known similarity map back exactly onto the template."""
+    template = np.array([[38.3, 51.7], [73.5, 51.5], [56.0, 71.7]])
+    angle, scale, shift = np.radians(20.0), 2.5, np.array([300.0, 120.0])
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    observed = (template @ rotation.T) * scale + shift
+
+    matrix = similarity_transform(observed, template)
+
+    np.testing.assert_allclose(observed @ matrix[:, :2].T + matrix[:, 2], template, atol=1e-9)
+
+
+def test_warp_affine_identity_and_shift() -> None:
+    """The identity copies pixels; a shift moves them."""
+    image = np.arange(10 * 10 * 3, dtype=np.uint8).reshape(10, 10, 3)
+    np.testing.assert_array_equal(warp_affine(image, np.array([[1.0, 0, 0], [0, 1.0, 0]]), 8), image[:8, :8])
+    shifted = warp_affine(image, np.array([[1.0, 0, -2], [0, 1.0, -1]]), 6)
+    np.testing.assert_array_equal(shifted, image[1:7, 2:8])
+
+
+def test_analyzer_aligns_detected_faces_and_normalizes_fingerprints() -> None:
+    """Detection runs on a half-size frame; boxes come back in camera pixels; small faces are dropped."""
+    seen_shapes = []
+
+    class Detector:
+        def detect(self, frame: np.ndarray) -> list[SimpleNamespace]:
+            seen_shapes.append(frame.shape)
+            return [
+                SimpleNamespace(bbox=(10, 10, 60, 70), right_eye=(25, 30), left_eye=(55, 30), nose=(40, 45)),
+                SimpleNamespace(bbox=(200, 10, 10, 12), right_eye=(203, 14), left_eye=(207, 14), nose=(205, 17)),
+            ]
+
+    blobs = []
+
+    def embedder() -> object:
+        def embed(blob: np.ndarray) -> np.ndarray:
+            blobs.append(blob)
+            return np.full(128, 3.0, dtype=np.float32)
+
+        return embed
+
+    analyzer = FaceAnalyzer(detector_factory=Detector, embedder_factory=embedder)  # type: ignore[arg-type]
+    faces = analyzer.analyze(np.full((480, 640, 3), 128, np.uint8))
+
+    assert seen_shapes == [(240, 320, 3)]
+    assert len(faces) == 1
+    assert faces[0].bbox == (20.0, 20.0, 120.0, 140.0)
+    assert blobs[0].shape == (1, 3, 112, 112)
+    assert np.linalg.norm(faces[0].embedding) == pytest.approx(1.0)
+    assert faces[0].photo.shape == (160, 160, 3)
+
+
+# --- store ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("  Ana  María ", "ana maria"), ("BEN", "ben"), ("João", "joao"), ("Niño", "nino"), ("Hélène", "helene")],
+)
+def test_person_ids_are_lower_case_single_spaced_and_accent_free(name: str, expected: str) -> None:
+    """IDs are the trimmed, single-spaced, lower-case name without accents, so transcriptions agree."""
+    assert person_id_for(name) == expected
+
+
+def test_a_name_heard_without_its_accent_finds_the_same_person(tmp_path: Path) -> None:
+    """Enrolled as "María", forgotten as "maria": same person, and the display name keeps the accent."""
+    registry = FaceRegistry(tmp_path / "faces")
+    registry.enroll("María", [(ANA, None)])
+    registry.enroll("Maria", [(ANA, None)])
+
+    assert [(p.person_id, p.name, p.sample_count) for p in registry.people()] == [("maria", "María", 2)]
+    removed = registry.forget("MARÍA")
+    assert removed is not None and registry.people() == []
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 61, "ana\x07ben"])
+def test_invalid_names_are_rejected(name: str) -> None:
+    """Empty, overlong, and control-character names cannot be enrolled."""
+    with pytest.raises(FaceStoreError):
+        person_id_for(name)
+
+
+def test_enroll_match_persist_and_forget(tmp_path: Path) -> None:
+    """Enrolled people are recognized, survive a reload, and forgetting deletes fingerprints and photos."""
+    registry = FaceRegistry(tmp_path / "faces")
+    ana = registry.enroll("Ana", [(ANA, b"jpeg-1"), (_unit(1.0, 0.1), b"jpeg-2")])
+    registry.enroll("Ben", [(BEN, None)])
+
+    assert ana.person_id == "ana" and ana.sample_count == 2 and len(ana.photos) == 2
+    match = registry.match(_unit(1.0, 0.05))
+    assert match is not None and match.name == "Ana" and match.score > MATCH_THRESHOLD
+
+    reloaded = FaceRegistry(tmp_path / "faces")
+    assert [p.name for p in reloaded.people()] == ["Ana", "Ben"]
+    photo = reloaded.photo_path("ana", ana.photos[0])
+    assert photo is not None and photo.read_bytes() == b"jpeg-1"
+    assert reloaded.photo_path("ben", ana.photos[0]) is None
+
+    removed = reloaded.forget("ANA")
+    assert removed is not None and removed.name == "Ana"
+    assert not photo.exists()
+    assert reloaded.match(ANA) is None
+    assert reloaded.forget("ana") is None
+
+
+def test_store_is_private_and_tagged_with_the_model(tmp_path: Path) -> None:
+    """Fingerprints and photos are readable only by this user; the file names the model that made them."""
+    registry = FaceRegistry(tmp_path / "faces")
+    person = registry.enroll("Ana", [(ANA, b"jpeg")])
+
+    faces_file = tmp_path / "faces" / "faces.json"
+    assert stat.S_IMODE(faces_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE((tmp_path / "faces").stat().st_mode) == 0o700
+    assert stat.S_IMODE((tmp_path / "faces" / "photos" / person.photos[0]).stat().st_mode) == 0o600
+    assert json.loads(faces_file.read_text())["model"] == MODEL_ID
+
+
+def test_fingerprints_from_another_model_are_ignored(tmp_path: Path) -> None:
+    """A store written by a different recognition model is not trusted for matching."""
+    (tmp_path / "faces").mkdir()
+    (tmp_path / "faces" / "faces.json").write_text(
+        json.dumps({"version": 1, "model": "other", "people": [{"person_id": "ana", "name": "Ana", "samples": []}]})
+    )
+    assert FaceRegistry(tmp_path / "faces").people() == []
+
+
+def test_unknown_and_ambiguous_faces_do_not_match(tmp_path: Path) -> None:
+    """Faces below the threshold, or close to two people, stay unrecognized."""
+    registry = FaceRegistry(tmp_path / "faces")
+    registry.enroll("Ana", [(ANA, None)])
+    registry.enroll("Ben", [(BEN, None)])
+
+    assert registry.match(_unit(0.0, 0.0, 1.0)) is None
+    assert registry.match(_unit(1.0, 1.0)) is None
+
+
+def test_only_the_newest_samples_are_kept(tmp_path: Path) -> None:
+    """Re-enrolling adds samples up to a cap, deleting the oldest photos."""
+    registry = FaceRegistry(tmp_path / "faces")
+    first = registry.enroll("Ana", [(ANA, b"old")])
+    person = registry.enroll("Ana", [(ANA, b"new")] * MAX_SAMPLES_PER_PERSON)
+
+    assert person.sample_count == MAX_SAMPLES_PER_PERSON
+    assert first.photos[0] not in person.photos
+    assert not (tmp_path / "faces" / "photos" / first.photos[0]).exists()
+
+
+# --- live service -----------------------------------------------------------------
+
+
+def test_enroll_from_camera_needs_one_clear_face(tmp_path: Path) -> None:
+    """Enrollment keeps single-face frames; crowds and empty views fail with a reason."""
+    ok = _service(tmp_path / "a", [[ANA], [], [ANA, BEN], [_unit(1.0, 0.1)]])
+    result = ok.enroll_from_camera("Ana", duration_s=4.0, max_samples=4)
+    assert result.person is not None and result.person.sample_count == 2
+
+    crowded = _service(tmp_path / "b", [[ANA, BEN]] * 6)
+    assert "more than one face" in (crowded.enroll_from_camera("Ana").error or "")
+
+    empty = _service(tmp_path / "c", [[]] * 6)
+    assert "no clear face" in (empty.enroll_from_camera("Ana").error or "")
+
+
+def test_enrolling_a_face_already_known_under_another_name_is_refused(tmp_path: Path) -> None:
+    """One person cannot be enrolled again as someone else."""
+    service = _service(tmp_path, [[ANA], [ANA]])
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    result = service.enroll_from_camera("Ben", duration_s=2.0, max_samples=2)
+
+    assert result.person is None and "already enrolled as Ana" in (result.error or "")
+
+
+def test_identify_now_reports_the_person_in_front_and_expires(tmp_path: Path) -> None:
+    """The largest face is who the robot faces; the recognition expires after ten seconds."""
+    clock = _Clock()
+    service = _service(tmp_path, [[ANA, _unit(0.0, 0.0, 1.0)]], clock)
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    matches = service.identify_now()
+
+    assert [m.name if m else None for m in matches] == ["Ana", None]
+    seen = service.person_in_front()
+    assert seen is not None and seen.match.person_id == "ana"
+    assert "Ana" in (service.identity_hint() or "")
+    clock.now += 11.0
+    assert service.person_in_front() is None and service.identity_hint() is None
+
+
+def test_ending_the_conversation_forgets_who_was_in_front(tmp_path: Path) -> None:
+    """Recognition state does not outlive the conversation."""
+    service = _service(tmp_path, [[ANA]])
+    service.registry.enroll("Ana", [(ANA, None)])
+    service.identify_now()
+
+    service.set_active(False)
+
+    assert service.person_in_front() is None
+
+
+def test_background_loop_recognizes_while_active(tmp_path: Path) -> None:
+    """The thread loads the models, then recognizes only while a conversation is active."""
+    service = FaceRecognitionService(
+        lambda: np.zeros((8, 8, 3), np.uint8),
+        FaceRegistry(tmp_path / "faces"),
+        _FakeAnalyzer([[ANA]] * 1000),  # type: ignore[arg-type]
+        interval_s=0.01,
+    )
+    service.registry.enroll("Ana", [(ANA, None)])
+    service.start()
+    try:
+        assert _wait(lambda: service.ready)
+        assert service.person_in_front() is None
+        service.set_active(True)
+        assert _wait(lambda: service.person_in_front() is not None)
+    finally:
+        service.stop()
+
+
+def _wait(predicate: object, timeout: float = 2.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():  # type: ignore[operator]
+            return True
+        time.sleep(0.01)
+    return False

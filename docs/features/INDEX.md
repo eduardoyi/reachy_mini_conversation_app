@@ -19,6 +19,7 @@ the implementation.
 | Local transcript wake word | [wake-word.md](wake-word.md) | in-progress |
 | Deterministic local intents | [local-intents.md](local-intents.md) | in-progress |
 | Speaker following | [speaker-following.md](speaker-following.md) | in-progress |
+| Face recognition | [face-recognition.md](face-recognition.md) | in-progress |
 
 Do not describe planned architecture as shipped behavior. The living
 implementation plan in [`../plans/reachy-hybrid-household-companion.md`](../plans/reachy-hybrid-household-companion.md)

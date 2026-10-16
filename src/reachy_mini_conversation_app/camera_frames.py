@@ -24,6 +24,57 @@ def capture_jpeg(media: Any) -> bytes | None:
     return jpeg
 
 
+def capture_frame(media: Any) -> Any:
+    """Return the current camera frame as a BGR array (blocking), serialized with ``capture_jpeg``."""
+    with _CAPTURE_LOCK:
+        return media.get_frame()
+
+
+def _padded_rows(frame_bgr: Any) -> bytes:
+    """Return BGR pixel bytes with each row padded to 4 bytes, the stride GStreamer expects."""
+    import numpy as np
+
+    height, width = frame_bgr.shape[:2]
+    stride = (width * 3 + 3) // 4 * 4
+    if stride == width * 3:
+        return bytes(np.ascontiguousarray(frame_bgr, dtype=np.uint8).tobytes())
+    rows = np.zeros((height, stride), dtype=np.uint8)
+    rows[:, : width * 3] = np.asarray(frame_bgr, dtype=np.uint8).reshape(height, width * 3)
+    return rows.tobytes()
+
+
+def encode_jpeg(frame_bgr: Any, quality: int = MODEL_FRAME_JPEG_QUALITY) -> bytes | None:
+    """Encode a BGR ``uint8`` array as JPEG bytes, or return None on failure."""
+    height, width = frame_bgr.shape[:2]
+    try:
+        import gi
+
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+
+        Gst.init(None)
+        pipeline = Gst.parse_launch(
+            f"appsrc name=src caps=video/x-raw,format=BGR,width={width},height={height},framerate=0/1 ! "
+            f"videoconvert ! jpegenc quality={quality} ! appsink name=sink sync=false"
+        )
+        try:
+            pipeline.set_state(Gst.State.PLAYING)
+            source = pipeline.get_by_name("src")
+            source.emit("push-buffer", Gst.Buffer.new_wrapped(_padded_rows(frame_bgr)))
+            source.emit("end-of-stream")
+            sample = pipeline.get_by_name("sink").emit("try-pull-sample", _PULL_TIMEOUT_NS)
+            if sample is None:
+                raise RuntimeError("no encoded frame")
+            buffer = sample.get_buffer()
+            jpeg: bytes = buffer.extract_dup(0, buffer.get_size())
+        finally:
+            pipeline.set_state(Gst.State.NULL)
+    except Exception as error:
+        logger.warning("JPEG encode failed: %s", type(error).__name__)
+        return None
+    return jpeg or None
+
+
 def jpeg_size(jpeg: bytes) -> tuple[int, int] | None:
     """Return ``(width, height)`` from a JPEG's start-of-frame header, or None."""
     if not jpeg.startswith(b"\xff\xd8"):

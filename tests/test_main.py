@@ -303,6 +303,65 @@ def test_hybrid_run_defers_provider_factory_until_activation(
     assert robot.disable_wobbling.call_count >= int(not speech_wobble)
 
 
+def test_face_recognition_is_wired_into_tools_console_wake_and_sessions(monkeypatch) -> None:
+    """With the flag on, the service starts, reaches tools and the console, and follows wake and session end."""
+    import asyncio
+
+    monkeypatch.setattr(config.config, "REALTIME_PROVIDER", config.REALTIME_PROVIDER_HUGGINGFACE)
+    monkeypatch.setattr(config.config, "HYBRID_RUNTIME_ENABLED", True)
+    monkeypatch.setattr(config.config, "LOCAL_STT_BASE_URL", None)
+    monkeypatch.setattr(config.config, "LOCAL_ACOUSTIC_WAKE_ENABLED", False)
+    monkeypatch.setattr(config.config, "FACE_RECOGNITION_ENABLED", True)
+    monkeypatch.setattr(config.config, "SPEAKER_FOLLOWING_ENABLED", False)
+    monkeypatch.setattr(main_mod.app_lifecycle, "wake_up_if_sleeping", lambda *_args: False)
+    monkeypatch.setattr(main_mod.app_lifecycle, "initialize_tools_with_default_fallback", lambda *_args: None)
+    monkeypatch.setattr(config, "resolve_app_timeout_minutes", lambda: None)
+    monkeypatch.setattr(main_mod, "setup_logger", lambda _debug: MagicMock())
+
+    service = MagicMock()
+    service_factory = MagicMock(return_value=service)
+    monkeypatch.setattr("reachy_mini_conversation_app.face_identity.FaceRecognitionService", service_factory)
+    monkeypatch.setattr("reachy_mini_conversation_app.face_identity.FaceRegistry", MagicMock())
+    monkeypatch.setattr("reachy_mini_conversation_app.moves.MovementManager", MagicMock())
+    runtime_kwargs: dict[str, object] = {}
+    stream_kwargs: dict[str, object] = {}
+
+    class FakeHybridRuntime:
+        def __init__(self, _factory: object, **kwargs: object) -> None:
+            runtime_kwargs.update(kwargs)
+
+    class FakeLocalStream:
+        def __init__(self, _handler: object, _robot: object, **kwargs: object) -> None:
+            stream_kwargs.update(kwargs)
+
+        def launch(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("reachy_mini_conversation_app.hybrid_runtime.HybridRuntime", FakeHybridRuntime)
+    monkeypatch.setattr("reachy_mini_conversation_app.console.LocalStream", FakeLocalStream)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tools.spotify_control.SPOTIFY_DUCKER",
+        MagicMock(
+            session_started=MagicMock(side_effect=lambda: asyncio.sleep(0)),
+            session_ended=MagicMock(side_effect=lambda: asyncio.sleep(0)),
+        ),
+    )
+
+    args = SimpleNamespace(debug=False, robot_name=None, media_backend="default", no_camera=False, ui=False)
+    main_mod.run(args, robot=MagicMock())
+
+    assert stream_kwargs["face_recognition"] is service
+    service.start.assert_called_once()
+    service.stop.assert_called_once()
+    runtime_kwargs["acknowledgement_callback"]("wake")  # type: ignore[operator]
+    service.set_active.assert_called_with(True)
+    asyncio.run(runtime_kwargs["cloud_session_observer"](False))  # type: ignore[operator]
+    service.set_active.assert_called_with(False)
+
+
 @pytest.mark.parametrize(("strategy", "voice_wake_enabled"), [("continuous", True), ("activation", False)])
 def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
     monkeypatch, strategy: str, voice_wake_enabled: bool

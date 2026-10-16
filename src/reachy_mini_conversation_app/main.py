@@ -258,22 +258,44 @@ def run(
         speaker_direction=speaker_direction.recent_speech_yaw if speaker_direction is not None else None,
     )
 
+    face_service = None
+    if config.FACE_RECOGNITION_ENABLED and not args.no_camera:
+        from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
+        from reachy_mini_conversation_app.face_identity import FaceRegistry, FaceRecognitionService
+        from reachy_mini_conversation_app.household_memory import memory_path_for_instance
+
+        face_service = FaceRecognitionService(
+            lambda: capture_frame(robot.media),
+            FaceRegistry(memory_path_for_instance(instance_path).parent / "faces"),
+            encode_jpeg=encode_jpeg,
+        )
+
+    def current_person_id() -> str | None:
+        """Return who the camera recognizes in front of the robot, if anyone."""
+        seen = face_service.person_in_front() if face_service is not None else None
+        return seen.match.person_id if seen is not None else None
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_enabled=not args.no_camera,
+        face_recognition=face_service,
+        current_person_id=current_person_id if face_service is not None else None,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""
-        return _build_conversation_handler(
+        handler = _build_conversation_handler(
             deps,
             get_realtime_provider(),
             instance_path=instance_path,
             startup_voice=startup_voice,
             logger=logger,
         )
+        if face_service is not None:
+            handler.set_identity_hint_provider(face_service.identity_hint)
+        return handler
 
     stream_manager: LocalStream | None = None
     hybrid_runtime: HybridRuntime | None = None
@@ -302,6 +324,9 @@ def run(
             movement_manager.acknowledge_activation()
             if config.SPEAKER_FOLLOWING_ENABLED:
                 movement_manager.turn_toward_speaker()
+            if face_service is not None:
+                # Start recognizing now so the name is known when the provider's startup context is sent.
+                face_service.set_active(True)
 
         async def on_cloud_session(active: bool) -> None:
             """Follow faces and lower Spotify while a wake-word conversation is open; undo both afterwards."""
@@ -309,6 +334,8 @@ def run(
 
             if config.SPEAKER_FOLLOWING_ENABLED:
                 movement_manager.set_conversation_active(active)
+            if face_service is not None:
+                face_service.set_active(active)
             if active:
                 await SPOTIFY_DUCKER.session_started()
             else:
@@ -422,6 +449,7 @@ def run(
         handler_factory=None if hybrid_runtime is not None else build_handler,
         startup_voice=startup_settings.voice,
         hybrid_runtime=hybrid_runtime,
+        face_recognition=face_service,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.
@@ -508,6 +536,10 @@ def run(
         if hybrid_runtime is None:
             # Without the hybrid runtime the conversation is always open.
             movement_manager.set_conversation_active(True)
+    if face_service is not None:
+        face_service.start()
+        if hybrid_runtime is None:
+            face_service.set_active(True)
     # Audio-reactive head motion follows SDK playback. The explicit simulator
     # output bypass does not feed assistant PCM into this wobbler.
     if config.SPEECH_WOBBLE_ENABLED:
@@ -557,6 +589,8 @@ def run(
         movement_manager.stop(reset_to_neutral=False)
         if speaker_direction is not None:
             speaker_direction.stop()
+        if face_service is not None:
+            face_service.stop()
         try:
             robot.disable_wobbling()
         except Exception as e:

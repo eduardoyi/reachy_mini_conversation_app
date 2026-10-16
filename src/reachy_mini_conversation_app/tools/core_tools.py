@@ -46,6 +46,9 @@ class ToolDependencies:
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
+    face_recognition: Any = None  # FaceRecognitionService from face_identity.py, when enabled
+    # Recognized person in front of the camera (household person ID), when face recognition is enabled.
+    current_person_id: Callable[[], str | None] | None = None
 
 
 class ToolSpec(TypedDict):
@@ -295,6 +298,10 @@ def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str
     )
 
 
+# Enabled automatically with FACE_RECOGNITION_ENABLED unless the profile's tools were customized.
+FACE_TOOLS = ("remember_face", "forget_face", "who_is_here")
+
+
 # Registry & specs (dynamic)
 def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
     """Read enabled tool names from the active profile's effective toolset."""
@@ -318,6 +325,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
                 len(extra_tools),
                 extra_tools,
             )
+
+    if not config.FACE_RECOGNITION_ENABLED:
+        tool_names = [name for name in tool_names if name not in FACE_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in FACE_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]

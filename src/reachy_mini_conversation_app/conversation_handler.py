@@ -45,6 +45,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     _interaction_busy_observer: InteractionBusyObserver | None = None
     _startup_greeting_enabled: bool = True
     _initial_context: str = ""
+    _identity_hint_provider: Callable[[], str | None] | None = None
     _interaction_busy: bool = False
     _playback_until: float = 0.0
 
@@ -120,9 +121,23 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         """Set bounded locally derived context before provider startup."""
         self._initial_context = context.strip()
 
+    def set_identity_hint_provider(self, provider: Callable[[], str | None] | None) -> None:
+        """Name who the camera recognizes when the startup context is sent (read lazily, at send time)."""
+        self._identity_hint_provider = provider
+
     def get_initial_context(self) -> str:
-        """Return the locally derived context configured for startup."""
-        return self._initial_context
+        """Return the locally derived context configured for startup, led by any recognized-person hint."""
+        context = self._initial_context
+        provider = self._identity_hint_provider
+        if not context or provider is None:
+            return context
+        try:
+            hint = provider()
+        except Exception as error:
+            logger.warning("Identity hint unavailable: %s", type(error).__name__)
+            return context
+        # First, so providers that cut the context to a maximum length keep it.
+        return f"{hint}\n\n{context}" if hint else context
 
     def _emit_traffic(self, kind: TrafficKind, byte_count: int) -> None:
         """Notify observers after a provider media send succeeds."""

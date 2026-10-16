@@ -60,6 +60,7 @@ export async function mountSettingsView({ outlet, signal }) {
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
   const memorySection = buildMemorySection(signal);
+  const facesSection = buildFacesSection(signal);
 
   const view = h(
     "section",
@@ -73,7 +74,8 @@ export async function mountSettingsView({ outlet, signal }) {
     connectionSection.element,
     voiceSection.element,
     statusSection.element,
-    memorySection
+    memorySection,
+    facesSection
   );
   outlet.replaceChildren(view);
 
@@ -81,6 +83,84 @@ export async function mountSettingsView({ outlet, signal }) {
     refreshStatus({ statusSection, connectionSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
+}
+
+function buildFacesSection(signal) {
+  const message = h("p", { class: "settings-hint" }, "People Reachy recognizes on camera. Faces stay on this computer.");
+  const people = h("div", {});
+  const show = h("button", { type: "button", class: "btn" }, "Show faces");
+  const nameInput = h("input", { type: "text", name: "face_name", autocomplete: "off", maxlength: "60", placeholder: "Name", class: "settings-input" });
+  const enroll = h("button", { type: "button", class: "btn" }, "Remember my face");
+  const enrollRow = h("div", { class: "settings-field-row" }, nameInput, enroll);
+
+  async function request(url, options = {}) {
+    const response = await fetch(url, { cache: "no-store", signal, ...options });
+    if (response.status === 404) throw new Error("Face recognition is not enabled (FACE_RECOGNITION_ENABLED=1).");
+    if (response.status === 403) throw new Error("Open these settings on Reachy’s computer to manage faces.");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Faces are unavailable.");
+    return result;
+  }
+
+  async function refresh() {
+    show.disabled = true;
+    try {
+      const result = await request("/api/faces");
+      if (signal.aborted) return;
+      people.replaceChildren();
+      if (!result.people.length) message.textContent = "No saved faces yet. Type a name, look at Reachy, and press the button.";
+      for (const person of result.people) {
+        const forget = h("button", { type: "button", class: "btn" }, "Forget");
+        const thumbs = h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } });
+        for (const photo of person.photos.slice(-4)) {
+          const query = new URLSearchParams({ person_id: person.id, photo });
+          thumbs.append(h("img", { src: `/api/faces/photo?${query}`, alt: person.name, width: "64", height: "64", style: { borderRadius: "8px", objectFit: "cover" } }));
+        }
+        people.append(h("div", { class: "settings-section" }, h("p", {}, `${person.name} · ${person.samples} samples`), thumbs, forget));
+        forget.addEventListener("click", async () => {
+          forget.disabled = true;
+          try {
+            await request("/api/faces/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: person.id }) });
+            await refresh();
+            if (!signal.aborted) message.textContent = `Forgot ${person.name}'s face.`;
+          } catch (error) {
+            if (!signal.aborted) message.textContent = error.message;
+          } finally {
+            forget.disabled = false;
+          }
+        });
+      }
+    } catch (error) {
+      if (!signal.aborted) {
+        people.replaceChildren();
+        message.textContent = error.message;
+      }
+    } finally {
+      show.disabled = false;
+    }
+  }
+
+  enroll.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      message.textContent = "Type the name of the person looking at Reachy first.";
+      return;
+    }
+    enroll.disabled = true;
+    message.textContent = `Look at Reachy for about three seconds, ${name}…`;
+    try {
+      const result = await request("/api/faces/enroll", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      nameInput.value = "";
+      await refresh();
+      if (!signal.aborted) message.textContent = `Saved ${result.person.name}'s face.`;
+    } catch (error) {
+      if (!signal.aborted) message.textContent = error.message;
+    } finally {
+      enroll.disabled = false;
+    }
+  });
+  show.addEventListener("click", refresh);
+  return h("section", { class: "settings-section" }, h("h2", { class: "settings-section-title" }, "Faces Reachy knows"), message, enrollRow, show, people);
 }
 
 function buildMemorySection(signal) {
