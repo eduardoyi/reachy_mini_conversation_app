@@ -338,6 +338,14 @@ that is already running and stops one it started when the app exits; set
 scripts/start-reachy.sh
 ```
 
+On macOS the launcher also tunes the camera, whose factory image is dark and flat
+for Gemini and the face tracker. It builds `scripts/uvc-ctl.c` once with the Xcode
+Command Line Tools and sets `REACHY_CAMERA_BRIGHTNESS` (default `12`, range -64 to
+64), `REACHY_CAMERA_GAMMA` (`130`, 80 to 160), `REACHY_CAMERA_CONTRAST` (`1`, 0 to
+95), and `REACHY_CAMERA_SHARPNESS` (`3`, 0 to 7). Set one empty to leave it alone,
+or `REACHY_CAMERA_TUNING=0` to leave the camera unchanged. If the image stays soft,
+see Pollen's troubleshooting entry "The camera can't focus".
+
 Then add this to the ignored `.env`:
 
 ```env

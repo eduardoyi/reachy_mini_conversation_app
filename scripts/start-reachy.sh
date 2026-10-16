@@ -14,10 +14,52 @@ WHISPER_PORT="${WHISPER_PORT:-8766}"
 WHISPER_URL="http://127.0.0.1:${WHISPER_PORT}/v1/models"
 WHISPER_LOG="${WHISPER_LOG:-${TMPDIR:-/tmp}/reachy-whisper.log}"
 WHISPER_READY_TIMEOUT_S="${WHISPER_READY_TIMEOUT_S:-180}"
+# The camera's factory image is dark (brightness 0) and flat. A small brightness lift plus
+# higher gamma brightens mid-tones without washing out shadows; contrast and sharpness get a
+# nudge. Ranges: brightness -64..64, gamma 80..160, contrast 0..95, sharpness 0..7. Set one
+# empty to leave it alone, or REACHY_CAMERA_TUNING=0 to leave the camera unchanged.
+REACHY_CAMERA_TUNING="${REACHY_CAMERA_TUNING:-1}"
+REACHY_CAMERA_BRIGHTNESS="${REACHY_CAMERA_BRIGHTNESS-12}"
+REACHY_CAMERA_GAMMA="${REACHY_CAMERA_GAMMA-130}"
+REACHY_CAMERA_CONTRAST="${REACHY_CAMERA_CONTRAST-1}"
+REACHY_CAMERA_SHARPNESS="${REACHY_CAMERA_SHARPNESS-3}"
+UVC_CTL_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/reachy-mini-conversation-app"
 
 if [[ $# -eq 0 ]]; then
   set -- --media-backend local
 fi
+
+tune_camera() {
+  [[ "$(uname -s)" == "Darwin" && "$REACHY_CAMERA_TUNING" != "0" ]] || return 0
+  local src="$REPO_DIR/scripts/uvc-ctl.c" bin="$UVC_CTL_DIR/uvc-ctl"
+  if [[ ! -x "$bin" || "$src" -nt "$bin" ]]; then
+    mkdir -p "$UVC_CTL_DIR"
+    if ! clang -O2 -o "$bin" "$src" -framework IOKit -framework CoreFoundation 2>/dev/null; then
+      echo "Could not build $src (needs Xcode Command Line Tools); camera unchanged" >&2
+      return 0
+    fi
+  fi
+  # Reachy Mini camera 38fb:1002, processing unit 2; UVC selectors per control.
+  local name selector value applied=()
+  for name in brightness:2 contrast:3 sharpness:8 gamma:9; do
+    selector="${name#*:}"
+    name="${name%%:*}"
+    case "$name" in
+      brightness) value="$REACHY_CAMERA_BRIGHTNESS" ;;
+      contrast) value="$REACHY_CAMERA_CONTRAST" ;;
+      sharpness) value="$REACHY_CAMERA_SHARPNESS" ;;
+      gamma) value="$REACHY_CAMERA_GAMMA" ;;
+    esac
+    [[ -n "$value" ]] || continue
+    if ! "$bin" 0x38fb 0x1002 2 "$selector" set "$value"; then
+      echo "Could not set camera $name; is the robot connected?" >&2
+      return 0
+    fi
+    applied+=("$name=$value")
+  done
+  echo "Camera tuned: ${applied[*]}"
+}
+tune_camera
 
 whisper_pid=""
 cleanup() {
