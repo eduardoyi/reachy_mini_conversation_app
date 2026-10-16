@@ -69,7 +69,7 @@ the gaze in `_get_primary_pose` before the speaking anchor is applied.
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| DoA sampling | `src/reachy_mini_conversation_app/speaker_direction.py` | `SpeakerDirection(daemon_url).start()/stop()/recent_speech_yaw()`; DoA 0 = left, π/2 = front, π = right → yaw `π/2 − angle`, positive left, clamped to ±90°. |
+| DoA sampling | `src/reachy_mini_conversation_app/speaker_direction.py` | `SpeakerDirection(daemon_url, head_yaw=...).start()/stop()/recent_speech_yaw()`; DoA 0 = left, π/2 = front, π = right → yaw `π/2 − angle` relative to the head (the mic array is in the head, next to the camera), clamped to ±90°, then added to the head's room yaw at the moment of the reading and clamped to ±150°. |
 | Turning and gaze | `src/reachy_mini_conversation_app/moves.py` | `MovementManager(robot, speaker_direction=...)`, `turn_toward_speaker()`, `set_conversation_active(bool)`, `GazeTurnMove`, `BreathingMove(base_yaw=...)`. All state changes run on the worker thread. |
 | Wiring | `src/reachy_mini_conversation_app/main.py` | Builds `SpeakerDirection` from the robot client's host/port; wake acknowledgement also turns; `on_cloud_session` calls `set_conversation_active`. |
 | Config | `SPEAKER_FOLLOWING_ENABLED` | Default `1`. |
@@ -126,3 +126,4 @@ the gaze in `_get_primary_pose` before the speaking anchor is applied.
 |------|--------|
 | 2026-10-16 | Initial implementation. |
 | 2026-10-16 | Speaking holds the tracked face and body even while idle breathing runs. |
+| 2026-10-16 | DoA readings are head-relative; convert to room yaw with the head's yaw (Reachy used to turn back to the front after turning to the speaker). |

@@ -244,11 +244,14 @@ def run(
 
     speaker_direction = None
     if config.SPEAKER_FOLLOWING_ENABLED:
+        from reachy_mini_conversation_app.moves import head_world_yaw
         from reachy_mini_conversation_app.speaker_direction import SpeakerDirection
 
         client = getattr(robot, "client", None)
         speaker_direction = SpeakerDirection(
-            f"http://{getattr(client, 'host', 'localhost')}:{getattr(client, 'port', 8000)}"
+            f"http://{getattr(client, 'host', 'localhost')}:{getattr(client, 'port', 8000)}",
+            # The mic array is in the head, so its directions are relative to where the head faces.
+            head_yaw=lambda: head_world_yaw(robot.get_current_head_pose()),
         )
     movement_manager = MovementManager(
         current_robot=robot,

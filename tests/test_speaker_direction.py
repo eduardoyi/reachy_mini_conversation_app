@@ -3,7 +3,12 @@ from typing import Any
 
 import pytest
 
-from reachy_mini_conversation_app.speaker_direction import SpeakerDirection, doa_angle_to_yaw
+from reachy_mini_conversation_app.speaker_direction import (
+    MAX_SPEAKER_YAW,
+    SpeakerDirection,
+    room_yaw,
+    doa_angle_to_yaw,
+)
 
 
 class _Clock:
@@ -86,4 +91,51 @@ def test_fetch_failures_are_reported_and_recovered(caplog: pytest.LogCaptureFixt
 
     assert sum("unavailable" in record.message for record in caplog.records) == 1
     assert any("available again" in record.message for record in caplog.records)
+    assert direction.recent_speech_yaw() == pytest.approx(math.pi / 2)
+
+
+def test_readings_are_relative_to_where_the_head_faces() -> None:
+    """Regression: after turning to the speaker, "straight ahead" means the speaker, not the room's front."""
+    clock = _Clock()
+    head = {"yaw": math.radians(-30.0)}
+    direction = SpeakerDirection(
+        "http://localhost:8000",
+        head_yaw=lambda: head["yaw"],
+        fetch=lambda: {"angle": math.pi / 2, "speech_detected": True},
+        clock=clock,
+    )
+    direction.poll_once()
+    direction.poll_once()
+    assert direction.recent_speech_yaw() == pytest.approx(math.radians(-30.0))
+
+    head["yaw"] = math.radians(20.0)
+    clock.now += 2.0
+    direction.poll_once()
+    direction.poll_once()
+    assert direction.recent_speech_yaw() == pytest.approx(math.radians(20.0))
+
+
+@pytest.mark.parametrize(
+    ("head_deg", "relative_deg", "expected"),
+    [(0.0, 45.0, math.radians(45.0)), (120.0, 90.0, MAX_SPEAKER_YAW), (-120.0, -90.0, -MAX_SPEAKER_YAW)],
+)
+def test_room_yaw_adds_the_head_direction_and_stays_within_reach(
+    head_deg: float, relative_deg: float, expected: float
+) -> None:
+    """Directions beyond the body's reach are clamped rather than wrapping to the other side."""
+    assert room_yaw(math.radians(head_deg), math.radians(relative_deg)) == pytest.approx(expected)
+
+
+def test_a_failing_head_pose_falls_back_to_forward() -> None:
+    """If the head pose cannot be read, the reading is used as if the head faced forward."""
+
+    def broken() -> float:
+        raise RuntimeError("no pose")
+
+    clock = _Clock()
+    direction = SpeakerDirection(
+        "http://localhost:8000", head_yaw=broken, fetch=lambda: {"angle": 0.0, "speech_detected": True}, clock=clock
+    )
+    direction.poll_once()
+    direction.poll_once()
     assert direction.recent_speech_yaw() == pytest.approx(math.pi / 2)
