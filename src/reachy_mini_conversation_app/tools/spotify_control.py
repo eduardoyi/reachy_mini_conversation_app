@@ -110,8 +110,8 @@ class SpotifyDucker:
         self._ducked_to: int | None = None
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
-        # Set by the hybrid runtime: close the conversation soon after music starts.
-        self.music_started_callback: Callable[[], None] | None = None
+        # Set by the hybrid runtime: close the conversation quickly while music is playing.
+        self.music_playing_callback: Callable[[], None] | None = None
 
     @property
     def in_conversation(self) -> bool:
@@ -130,9 +130,18 @@ class SpotifyDucker:
         task.add_done_callback(self._tasks.discard)
 
     async def session_started(self) -> None:
-        """Lower music that is already playing when a conversation begins."""
+        """Lower music that is already playing when a conversation begins, and close that conversation quickly."""
         self._session_active = True
-        await self._duck(require_playing=True)
+        if await self._duck(require_playing=True):
+            self._notify_music_playing()
+
+    def _notify_music_playing(self) -> None:
+        callback = self.music_playing_callback
+        if callback is not None:
+            try:
+                callback()
+            except Exception as error:
+                logger.warning("Music wind-down request failed: %s", type(error).__name__)
 
     async def session_ended(self) -> None:
         """Restore the volume lowered during the conversation."""
@@ -143,13 +152,11 @@ class SpotifyDucker:
         """Lower music started during a conversation and let the conversation wind down."""
         if not self._session_active:
             return
-        self._spawn(self._duck(require_playing=False))
-        callback = self.music_started_callback
-        if callback is not None:
-            try:
-                callback()
-            except Exception as error:
-                logger.warning("Music wind-down request failed: %s", type(error).__name__)
+        self._spawn(self._duck_quietly())
+        self._notify_music_playing()
+
+    async def _duck_quietly(self) -> None:
+        await self._duck(require_playing=False)
 
     def forget_restore_level(self) -> None:
         """Keep an explicitly requested volume instead of restoring the pre-conversation level."""
@@ -169,10 +176,11 @@ class SpotifyDucker:
                 return volume
         return None
 
-    async def _duck(self, *, require_playing: bool) -> None:
+    async def _duck(self, *, require_playing: bool) -> bool:
+        """Lower the configured device; return whether music is playing there (always True when not checked)."""
         configuration = self._configuration()
         if configuration is None:
-            return
+            return False
         credentials_path, device_id = configuration
         async with self._lock:
             try:
@@ -189,10 +197,10 @@ class SpotifyDucker:
                             or not isinstance(device, dict)
                             or device.get("id") != device_id
                         ):
-                            return
+                            return False
                     volume = await self._device_volume(client, headers, device_id)
                     if volume is None or volume <= self._duck_percent:
-                        return
+                        return True
                     response = await client.put(
                         "https://api.spotify.com/v1/me/player/volume",
                         params={"device_id": device_id, "volume_percent": self._duck_percent},
@@ -203,8 +211,10 @@ class SpotifyDucker:
                         self._restore_to = volume
                     self._ducked_to = self._duck_percent
                     logger.info("Spotify lowered for conversation from=%d to=%d", volume, self._duck_percent)
+                    return True
             except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
                 logger.warning("Spotify lowering failed: %s", type(error).__name__)
+                return False
 
     async def _restore(self) -> None:
         configuration = self._configuration()

@@ -417,7 +417,7 @@ async def test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down(
     wind_downs: list[bool] = []
     ducker = spotify_control.SPOTIFY_DUCKER
     monkeypatch.setattr(ducker, "_session_active", True)
-    monkeypatch.setattr(ducker, "music_started_callback", lambda: wind_downs.append(True))
+    monkeypatch.setattr(ducker, "music_playing_callback", lambda: wind_downs.append(True))
     monkeypatch.setattr(ducker, "_spawn", lambda coroutine: coroutine.close())
     tool = SpotifyControl()
 
@@ -426,3 +426,24 @@ async def test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down(
 
     assert result == {"status": spotify_control.MUSIC_STARTED_IN_CONVERSATION}
     assert wind_downs == [True]
+
+
+@pytest.mark.asyncio
+async def test_ducker_reports_music_playing_at_the_wake(configured, monkeypatch):
+    """Music already playing when a conversation opens switches that conversation to quick closing."""
+    state = {"volume": 15, "playing": True}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+    notified: list[bool] = []
+    ducker.music_playing_callback = lambda: notified.append(True)
+
+    await ducker.session_started()
+
+    assert notified == [True]  # already quiet, so not lowered, but still playing
+    assert puts == []
+    state["playing"] = False
+    ducker2 = spotify_control.SpotifyDucker(duck_percent=20)
+    ducker2.music_playing_callback = lambda: notified.append(False)
+    await ducker2.session_started()
+    assert notified == [True]

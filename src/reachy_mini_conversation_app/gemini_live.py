@@ -82,6 +82,11 @@ _TOOL_CANCEL_TIMEOUT_S: Final[float] = 1.0
 _SESSION_AUDIO_LIMIT_S: Final[float] = 9 * 60.0
 _SESSION_CAMERA_LIMIT_S: Final[float] = 110.0
 _SESSION_DEADLINE_HEADROOM_S: Final[float] = 2.0
+# With compression the conversation outlives one connection: from this age the connection is replaced at
+# the next quiet moment (or at the age limit) and the session resumes on a new one.
+_CONNECTION_ROTATION_AFTER_S: Final[float] = 8 * 60.0
+_CONNECTION_ROTATION_POLL_S: Final[float] = 0.5
+_CONNECTION_QUIET_AFTER_SPEECH_S: Final[float] = 1.0
 _VIDEO_FRAME_INTERVAL_S: Final[float] = 1.0
 _VIDEO_ENGAGED_S: Final[float] = 30.0
 _VIDEO_GUIDANCE: Final[str] = (
@@ -266,6 +271,8 @@ class GeminiLiveHandler(ConversationHandler):
         self._client_closed = False
         self._shutdown_requested = False
         self._reconnect_requested = False
+        # Set when an aging connection is replaced: the next connection resumes without re-sending context.
+        self._resume_after_rotation = False
         self._connection_observer_connected = False
         self._connection_ready_samples: deque[float] = deque(maxlen=_LATENCY_SAMPLE_LIMIT)
         self._first_audio_samples: deque[float] = deque(maxlen=_LATENCY_SAMPLE_LIMIT)
@@ -487,6 +494,12 @@ class GeminiLiveHandler(ConversationHandler):
         self._session_ready_at = time.perf_counter()
         self._session_deadline_at = self._session_ready_at + _SESSION_AUDIO_LIMIT_S
         self._cancel_deadline_task(self._session_deadline_task)
+        if self._context_compression:
+            self._session_deadline_task = asyncio.create_task(
+                self._rotate_connection_when_quiet(session, generation, self._session_deadline_at),
+                name="gemini-connection-rotation",
+            )
+            return
         self._session_deadline_task = asyncio.create_task(
             self._wait_for_deadline(
                 session,
@@ -497,6 +510,62 @@ class GeminiLiveHandler(ConversationHandler):
             ),
             name="gemini-session-deadline",
         )
+
+    def _connection_quiet(self) -> bool:
+        """Return whether no user turn, model turn, tool call or queued output is in progress."""
+        last_speech = self._last_user_speech_at
+        recent_speech = (
+            last_speech is not None and time.perf_counter() - last_speech < _CONNECTION_QUIET_AFTER_SPEECH_S
+        )
+        return (
+            self._accepted_input_at is None
+            and self._interaction_deadline_at is None
+            and not self._in_flight_tool_calls
+            and self.output_queue.empty()
+            and not recent_speech
+        )
+
+    async def _rotate_connection_when_quiet(self, session: AsyncSession, generation: int, deadline: float) -> None:
+        """Replace an aging connection at a quiet moment, or at the age limit, resuming the conversation."""
+        session_ready_at = self._session_ready_at
+        if session_ready_at is None:
+            return
+        await asyncio.sleep(max(0.0, session_ready_at + _CONNECTION_ROTATION_AFTER_S - time.perf_counter()))
+        while self._is_current_session(session, generation):
+            overdue = time.perf_counter() >= deadline
+            if self._resumption_handle is None:
+                if overdue:
+                    # Without a handle the conversation cannot continue on a new connection.
+                    await self._fence_session(session, generation, "session_age_limit", _SESSION_TIMEOUT_MESSAGE)
+                    return
+            elif overdue or self._connection_quiet():
+                await self._rotate_connection(session, generation, "age_limit" if overdue else "age_quiet")
+                return
+            await asyncio.sleep(_CONNECTION_ROTATION_POLL_S)
+
+    async def _rotate_connection(self, session: AsyncSession, generation: int, reason: str) -> None:
+        """Close this connection so the supervisor reconnects and resumes the same conversation."""
+        if not self._is_current_session(session, generation):
+            return
+        logger.info("Gemini Live connection rotating reason=%s; resuming the conversation", reason)
+        self._resume_after_rotation = True
+        self._reconnect_requested = True
+        self._protocol_fenced = True
+        self._fenced_session = session
+        self.connection = None
+        # Playback keeps going: audio already received finishes while the next connection opens.
+        self._cancel_deadline_task(self._session_deadline_task)
+        self._session_deadline_task = None
+        try:
+            await session.close()
+            self._fenced_session = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._close_failed = True
+            self._reconnect_requested = False
+            self._resume_after_rotation = False
+            logger.warning("Gemini session close failed reason=%s error=%s", reason, type(error).__name__)
 
     def _start_interaction_deadline_if_needed(self, session: AsyncSession, generation: int) -> None:
         """Start one fixed interaction deadline after accepted user input."""
@@ -673,6 +742,7 @@ class GeminiLiveHandler(ConversationHandler):
             return
         if not self._reconnect_requested:
             self._terminal_policy_fenced = True
+        logger.warning("Gemini Live session closed reason=%s", reason)
         self._memory_invalidated = True
         self._memory_session.invalidate()
         self.deps.memory_mutation_generation = None
@@ -1173,7 +1243,10 @@ class GeminiLiveHandler(ConversationHandler):
         self._reset_local_barge_in_state()
         self._connection_observer_connected = False
         self._protocol_fenced = False
-        self._startup_greeting_sent = False
+        rotated = self._resume_after_rotation
+        self._resume_after_rotation = False
+        # A rotated connection resumes mid-conversation: the greeting and local context were already sent.
+        self._startup_greeting_sent = rotated
         self._last_user_transcript = None
         self._last_assistant_transcript = None
         self._clear_first_audio_markers(reason="session_restarted")
@@ -1241,6 +1314,7 @@ class GeminiLiveHandler(ConversationHandler):
         connection_started_at = time.perf_counter()
         active_session: AsyncSession | None = None
         resuming = self._resumption_handle is not None
+        rotated = rotated and resuming
         session_ready = False
         video_task: asyncio.Task[None] | None = None
         if resuming:
@@ -1253,7 +1327,8 @@ class GeminiLiveHandler(ConversationHandler):
                     raise asyncio.CancelledError
                 if self._reconnect_requested:
                     return
-                await self._seed_initial_context(session, generation)
+                if not rotated:
+                    await self._seed_initial_context(session, generation)
                 self._spoken_turns.reset()
                 await self._memory_session.start()
                 self._connection_observer_connected = True
@@ -1568,7 +1643,10 @@ class GeminiLiveHandler(ConversationHandler):
 
         if event.go_away is not None:
             logger.warning("Gemini Live server requested connection shutdown: time_left=%s", event.go_away.time_left)
-            await self._fence_session(session, generation, "server_requested_close")
+            if self._context_compression and self._resumption_handle is not None:
+                await self._rotate_connection(session, generation, "server_go_away")
+            else:
+                await self._fence_session(session, generation, "server_requested_close")
             return
 
         error = getattr(event, "error", None)

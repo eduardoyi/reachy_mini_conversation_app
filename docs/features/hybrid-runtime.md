@@ -719,3 +719,25 @@ tells the model to treat other languages as mishearing. Tests:
 `test_is_mostly_latin_accepts_household_languages_and_rejects_cjk`,
 `test_latin_only_drops_non_latin_stt_hallucinations`.
 
+### Long conversations and local backlog — 2026-10-14
+
+A nine-minute conversation on the Reachy Mini Lite ended with `Hybrid provider task
+failed: APIError` (`provider_failed`): the Gemini handler's nine-minute connection
+limit was final, so the conversation stopped. The handler now rotates the connection
+and resumes it from the session handle (see the Gemini Live provider doc), so the
+hybrid runtime only sees a short disconnect: frames go to the post-activation buffer
+and flush on reconnect, and the activation text is not sent again. Provider failures
+now log the error's type and its bounded status text (at most 200 characters), not
+just the type.
+
+Right after that session ended, the local worker dropped more than 1,000 frames over
+20 seconds, so a wake word in that window was likely missed. With the Mac heavily
+loaded (load average around 45 on 10 cores), the wake model took about 8 ms per
+16 ms frame and each frame needed two thread hops (wake model, then VAD), which
+together exceeded real time. The worker now takes any queued backlog in one pass
+(up to 25 frames) and merges consecutive frames with the same sample rate and wake
+epoch into one mono frame (`_merge_local_items`), so the wake model and VAD each run
+once per batch; a lone frame passes through unchanged. Tests:
+`test_local_processing_backlog_is_merged_into_one_pass`,
+`test_merge_local_items_keeps_lone_frames_and_splits_on_rate_or_epoch`,
+`test_provider_setup_failure_returns_to_ambient_and_shutdowns_once`.

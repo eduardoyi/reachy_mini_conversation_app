@@ -11,13 +11,14 @@ import pytest
 
 from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
-from reachy_mini_conversation_app.streaming import AdditionalOutputs
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
 from reachy_mini_conversation_app.local_actions import LocalActionExecutor
 from reachy_mini_conversation_app.hybrid_runtime import (
     RuntimeMode,
     HybridRuntime,
     LocalCommandOutcome,
+    _merge_local_items,
     frame_activation_context,
 )
 from reachy_mini_conversation_app.ambient_context import (
@@ -1450,15 +1451,17 @@ async def test_provider_traffic_hook_counts_only_explicit_successes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_setup_failure_returns_to_ambient_and_shutdowns_once() -> None:
-    """A long-lived provider setup failure does not kill local ambient mode."""
+async def test_provider_setup_failure_returns_to_ambient_and_shutdowns_once(caplog: pytest.LogCaptureFixture) -> None:
+    """A long-lived provider setup failure does not kill local ambient mode and logs why it failed."""
     handler = FakeHandler(fail_start=True)
     runtime = HybridRuntime(lambda: handler)
 
-    assert await runtime.activate()
-    await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+    with caplog.at_level(logging.WARNING, logger="reachy_mini_conversation_app.hybrid_runtime"):
+        assert await runtime.activate()
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
     assert runtime.active_handler is None
     assert handler.shutdown_calls == 1
+    assert "Hybrid provider task failed: RuntimeError provider setup sentinel" in caplog.text
     await runtime.close()
 
 
@@ -1541,12 +1544,17 @@ async def test_inactivity_waits_for_connection_and_resets_after_reconnect() -> N
     await runtime.close()
 
 
-@pytest.mark.asyncio
-async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
-    """After music starts, the session closes 5 s after Reachy's reply even though the model thinks someone speaks."""
-    clock = FakeClock()
+def _music_session(clock: FakeClock) -> tuple[HybridRuntime, "FakeHandler"]:
     handler = FakeHandler()
     runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=60, clock=clock)
+    return runtime, handler
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
+    """With music playing, the session closes 5 s after Reachy's reply even though the model thinks someone speaks."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
     assert await runtime.activate()
     handler.set_connected(True)
     generation = runtime.generation
@@ -1555,29 +1563,67 @@ async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
 
     runtime.request_music_wind_down()
     clock.advance(2)
-    runtime.note_playback_queued(1.0)  # "Enjoy!" plays from t=2 to t=3
-    clock.advance(4)  # t=6: 3 s after the reply, 6 s after the request
+    runtime.note_playback_queued(1.0)  # the reply plays from t=2 to t=3
+    clock.advance(4)  # t=6: 3 s after the reply
     assert not await runtime.check_inactivity()
-    clock.advance(2.5)  # t=8.5: more than 5 s after both the grace period and the reply
+    clock.advance(2.5)  # t=8.5: 5.5 s after the reply
     assert await runtime.check_inactivity()
     assert runtime.mode in (RuntimeMode.STOPPING, RuntimeMode.LOCAL_AMBIENT)
     await runtime.close()
 
 
 @pytest.mark.asyncio
-async def test_music_wind_down_waits_while_the_user_keeps_talking() -> None:
-    """A final user transcript in the window keeps the conversation open for another quiet window."""
+async def test_music_wind_down_waits_for_the_reply_to_a_new_user_turn() -> None:
+    """A user turn restarts the wait: the countdown begins only after Reachy answers it."""
     clock = FakeClock()
-    handler = FakeHandler()
-    runtime = HybridRuntime(lambda: handler, inactivity_timeout_s=60, clock=clock)
+    runtime, handler = _music_session(clock)
     assert await runtime.activate()
     handler.set_connected(True)
     generation = runtime.generation
-
     runtime.request_music_wind_down()
-    clock.advance(6)
-    runtime._on_handler_transcript(handler, generation, "user", "and turn it up a bit", True)
-    clock.advance(4)
+    runtime.note_playback_queued(1.0)
+
+    clock.advance(3)
+    runtime._on_handler_transcript(handler, generation, "user", "and what about tomorrow?", True)
+    clock.advance(8)  # Reachy still thinking: no close
+    assert not await runtime.check_inactivity()
+    runtime.note_playback_queued(2.0)
+    clock.advance(6)  # 4 s after the reply ended
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_gives_ten_seconds_after_a_question() -> None:
+    """When Reachy's reply ends in a question, the user has 10 s to answer."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime.note_playback_queued(1.0)
+    runtime._on_handler_transcript(handler, generation, "assistant", "Which song, the original or the remix?", True)
+
+    clock.advance(8)  # 7 s after the question
+    assert not await runtime.check_inactivity()
+    clock.advance(3.5)  # 10.5 s after the question
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_closes_after_twenty_seconds_without_a_reply() -> None:
+    """If Reachy never answers while music plays, the conversation still closes."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.request_music_wind_down()
+
+    clock.advance(19)
     assert not await runtime.check_inactivity()
     clock.advance(1.5)
     assert await runtime.check_inactivity()
@@ -2056,7 +2102,7 @@ async def test_local_processing_backpressure_is_bounded_and_private() -> None:
             self.frames: list[int] = []
 
         async def observe_frame(self, observed_frame: AudioFrame) -> None:
-            self.frames.append(int(observed_frame[1][0]))
+            self.frames.extend(int(sample) for sample in observed_frame[1])
             self.started.set()
             await self.release.wait()
 
@@ -2084,6 +2130,63 @@ async def test_local_processing_backpressure_is_bounded_and_private() -> None:
     finally:
         processor.release.set()
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_local_processing_backlog_is_merged_into_one_pass() -> None:
+    """Frames queued behind a slow pass are observed together, in order, and each caller completes."""
+
+    class SlowLocalProcessor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.passes: list[list[int]] = []
+
+        async def observe_frame(self, observed_frame: AudioFrame) -> None:
+            self.passes.append([int(sample) for sample in observed_frame[1]])
+            self.started.set()
+            await self.release.wait()
+
+    processor = SlowLocalProcessor()
+    runtime = HybridRuntime(
+        MagicMock(side_effect=AssertionError("cloud must remain closed")), local_processor=processor
+    )
+    try:
+        await runtime.handle_frame(frame(0), wait_for_local_processing=False)
+        await processor.started.wait()
+        waiters = [asyncio.create_task(runtime.handle_frame(frame(value))) for value in range(1, 6)]
+        await asyncio.sleep(0)
+        processor.release.set()
+        await asyncio.wait_for(asyncio.gather(*waiters), timeout=1.0)
+
+        assert processor.passes == [[0], [1, 2, 3, 4, 5]]
+        assert runtime.status.local_processing_frames_dropped == 0
+    finally:
+        processor.release.set()
+        await runtime.close()
+
+
+def test_merge_local_items_keeps_lone_frames_and_splits_on_rate_or_epoch() -> None:
+    """Only consecutive frames sharing a sample rate and wake epoch are joined, as mono int16."""
+    loop = asyncio.new_event_loop()
+    try:
+        lone = frame(7)
+        stereo = (16_000, np.array([[1, 9], [2, 9]], dtype=np.int16))
+        items = [
+            (lone, loop.create_future(), 1),
+            (frame(8, sample_rate=24_000), loop.create_future(), 1),
+            (stereo, loop.create_future(), 2),
+            (frame(3), loop.create_future(), 2),
+        ]
+        merged = _merge_local_items(items)
+    finally:
+        loop.close()
+
+    assert merged[0][0] is lone
+    assert [(f[0], f[1].tolist(), epoch, len(done)) for f, epoch, done in merged[1:]] == [
+        (24_000, [8], 1, 1),
+        (16_000, [*audio_to_mono_int16(stereo[1]).tolist(), 3], 2, 2),
+    ]
 
 
 @pytest.mark.asyncio

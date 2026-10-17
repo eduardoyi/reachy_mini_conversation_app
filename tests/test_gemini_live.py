@@ -491,6 +491,142 @@ async def test_failed_resume_clears_the_handle(gemini_config, deps) -> None:
     await handler.shutdown()
 
 
+async def wait_for(predicate: Callable[[], bool], *, timeout: float = 1.0) -> None:
+    """Poll the event loop until ``predicate`` holds or ``timeout`` elapses."""
+    deadline = time.perf_counter() + timeout
+    while not predicate():
+        if time.perf_counter() > deadline:
+            raise AssertionError("condition did not become true")
+        await asyncio.sleep(0.005)
+
+
+def resumable_handle_event(handle: str = "resume-handle") -> types.LiveServerMessage:
+    """Return a server update that makes the session resumable with ``handle``."""
+    return types.LiveServerMessage(
+        session_resumption_update=types.LiveServerSessionResumptionUpdate(new_handle=handle, resumable=True)
+    )
+
+
+def use_extended_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Select the Extended Thinking model, which enables compression and resumption, without live video."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low", raising=False)
+    monkeypatch.setattr(config, "GEMINI_LIVE_VIDEO_ENABLED", False, raising=False)
+
+
+async def end_rotated_session(handler: gemini_live.GeminiLiveHandler, session: FakeSession) -> None:
+    """End the resumed connection with a terminal close so ``start_up`` returns."""
+    handler.set_resumption_handle(None)
+    await session.events.put(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+
+
+@pytest.mark.asyncio
+async def test_go_away_with_compression_resumes_on_a_new_connection(gemini_config, deps, monkeypatch) -> None:
+    """A server GoAway rotates to a resumed connection without re-sending the context or ending the chat."""
+    use_extended_thinking(monkeypatch)
+    first_session, second_session = FakeSession(), FakeSession()
+    first_session.events.put_nowait(resumable_handle_event())
+    first_session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="5s")))
+    client = RotatingClient([first_session, second_session])
+    handler = build_handler(deps, client)
+    handler.set_initial_context("Wake request: what is the weather?")
+    connection_states: list[bool] = []
+    handler.set_connection_observer(connection_states.append)
+
+    startup = asyncio.create_task(handler.start_up())
+    await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+    await wait_for(lambda: connection_states == [True, False, True])
+    await end_rotated_session(handler, second_session)
+    await asyncio.wait_for(startup, timeout=1.0)
+
+    assert client.aio.live.connect_count == 2
+    resumed_config = client.aio.live.configs[1]
+    assert resumed_config.session_resumption is not None
+    assert resumed_config.session_resumption.handle == "resume-handle"
+    assert len(first_session.client_contents) == 1
+    assert second_session.client_contents == []
+    assert not any(isinstance(item, gemini_live.AdditionalOutputs) for item in queued_messages(handler))
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_aging_connection_rotates_at_a_quiet_moment(gemini_config, deps, monkeypatch, caplog) -> None:
+    """Past the rotation age, an idle connection is replaced and the conversation resumes."""
+    use_extended_thinking(monkeypatch)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_AFTER_S", 0.0)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_POLL_S", 0.01)
+    first_session, second_session = FakeSession(), FakeSession()
+    first_session.events.put_nowait(resumable_handle_event())
+    client = RotatingClient([first_session, second_session])
+    client.aio.live.enter_gates[1].clear()
+    handler = build_handler(deps, client)
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.gemini_live"):
+        startup = asyncio.create_task(handler.start_up())
+        await asyncio.wait_for(client.aio.live.entered[1].wait(), timeout=1.0)
+        monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_AFTER_S", 1000.0)
+        client.aio.live.enter_gates[1].set()
+        await wait_for(lambda: handler.connection is second_session)
+        await end_rotated_session(handler, second_session)
+        await asyncio.wait_for(startup, timeout=1.0)
+
+    assert "Gemini Live connection rotating reason=age_quiet" in caplog.text
+    assert "resume-handle" not in caplog.text
+    assert client.aio.live.configs[1].session_resumption.handle == "resume-handle"
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_aging_connection_waits_for_the_turn_then_rotates_at_the_limit(gemini_config, deps, monkeypatch) -> None:
+    """A turn in progress defers rotation until the age limit, which then rotates regardless."""
+    use_extended_thinking(monkeypatch)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_AFTER_S", 0.0)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_POLL_S", 0.01)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler.set_resumption_handle("resume-handle")
+    handler._session_ready_at = time.perf_counter()
+    handler._accepted_input_at = time.perf_counter()
+    reasons: list[str] = []
+
+    async def record_rotation(_session: object, _generation: int, reason: str) -> None:
+        reasons.append(reason)
+
+    monkeypatch.setattr(handler, "_rotate_connection", record_rotation)
+    started = time.perf_counter()
+    await handler._rotate_connection_when_quiet(session, 1, started + 0.1)
+
+    assert handler._connection_quiet() is False
+    assert reasons == ["age_limit"]
+    assert time.perf_counter() - started >= 0.1
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_aging_connection_without_a_handle_ends_at_the_limit(gemini_config, deps, monkeypatch) -> None:
+    """With no resumption handle the conversation cannot continue, so the age limit closes it."""
+    use_extended_thinking(monkeypatch)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_AFTER_S", 0.0)
+    monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_POLL_S", 0.01)
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    handler._session_ready_at = time.perf_counter()
+
+    await handler._rotate_connection_when_quiet(session, 1, time.perf_counter() + 0.05)
+
+    assert session.closed
+    assert handler._terminal_policy_fenced is True
+    assert handler._resume_after_rotation is False
+    assert any(
+        isinstance(item, gemini_live.AdditionalOutputs)
+        and item.args[0]["content"] == gemini_live._SESSION_TIMEOUT_MESSAGE
+        for item in queued_messages(handler)
+    )
+    await handler.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_session_end_logs_server_event_counts(gemini_config, deps, caplog) -> None:
     """Each session logs how many events of each kind the server sent, without payloads."""

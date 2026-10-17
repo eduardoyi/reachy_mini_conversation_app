@@ -1933,7 +1933,8 @@ async def test_hybrid_record_loop_fences_capture_queue_at_activation(
         release_post.set()
         await asyncio.wait_for(record_task, timeout=1.0)
 
-    assert [int(frame[0]) for frame in local_frames] == [11, 12, 13]
+    # A backlog may reach local processing as one merged frame, so compare the samples in order.
+    assert [int(sample) for frame in local_frames for sample in frame] == [11, 12, 13]
     assert [int(frame[0]) for frame in providers[0].received] == [21, 22]
     assert runtime.metrics.ambient_audio_bytes_sent_to_cloud == 0
     assert not list(tmp_path.iterdir())
@@ -2055,7 +2056,7 @@ async def test_hybrid_capture_flushes_ordered_postactivation_frames_after_delaye
 
     class LocalProcessor:
         def observe_frame(self, frame: tuple[int, np.ndarray]) -> None:
-            local_frames.append(int(frame[1][0]))
+            local_frames.extend(int(sample) for sample in frame[1][::16_000])  # one label per captured frame
 
     providers: list[_HybridTestHandler] = []
 
@@ -2197,8 +2198,8 @@ async def test_hybrid_capture_pressure_keeps_ordered_local_processing_off_captur
         assert worker.dropped_frames == 0
 
         processor.release.set()
-        await _wait_until(lambda: len(processor.frames) == 6)
-        assert [int(frame[0]) for frame in processor.frames] == [0, 1, 2, 3, 4, 5]
+        await _wait_until(lambda: sum(frame.size for frame in processor.frames) == 6)
+        assert [int(sample) for frame in processor.frames for sample in frame] == [0, 1, 2, 3, 4, 5]
     finally:
         processor.release.set()
         release_media.set()

@@ -14,6 +14,8 @@ from collections import deque
 from dataclasses import dataclass
 from collections.abc import Callable, Awaitable
 
+import numpy as np
+
 from reachy_mini_conversation_app.config import (
     MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
     DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
@@ -74,6 +76,32 @@ CaptureBarrierProvider: TypeAlias = Callable[[], int | None]
 Clock: TypeAlias = Callable[[], float]
 PostActivationFrame: TypeAlias = tuple[int | None, AudioFrame]
 LocalProcessingItem: TypeAlias = tuple[AudioFrame, asyncio.Future[None], int]
+
+
+def _merge_local_items(
+    items: list[LocalProcessingItem],
+) -> list[tuple[AudioFrame, int, list[asyncio.Future[None]]]]:
+    """Join consecutive queued frames with the same sample rate and wake epoch into mono frames.
+
+    A lone frame passes through unchanged, so merging only happens while the worker is catching up.
+    """
+    groups: list[tuple[int, int, list[AudioFrame], list[asyncio.Future[None]]]] = []
+    for frame, completed, epoch in items:
+        if groups and groups[-1][0] == frame[0] and groups[-1][1] == epoch:
+            groups[-1][2].append(frame)
+            groups[-1][3].append(completed)
+        else:
+            groups.append((frame[0], epoch, [frame], [completed]))
+    merged: list[tuple[AudioFrame, int, list[asyncio.Future[None]]]] = []
+    for sample_rate, epoch, frames, completions in groups:
+        if len(frames) == 1:
+            merged.append((frames[0], epoch, completions))
+            continue
+        audio = np.concatenate([audio_to_mono_int16(frame[1]) for frame in frames])
+        merged.append(((sample_rate, audio), epoch, completions))
+    return merged
+
+
 LocalProcessingCloseCallback: TypeAlias = Callable[[], CallbackResult]
 
 
@@ -255,16 +283,21 @@ class HybridRuntime:
     _ACOUSTIC_WAKE_ACK_TEXT = "Acknowledge the wake word briefly, then listen."
     # About one second of 10 ms frames, so short event-loop stalls do not drop wake-word audio.
     _LOCAL_PROCESSING_QUEUE_SIZE = 100
+    _PROVIDER_ERROR_DETAIL_CHARS = 200
+    # At most this many queued frames are merged into one local processing pass.
+    _LOCAL_PROCESSING_BATCH_FRAMES = 25
     # Bound on waiting for Whisper to finish the sentence in progress when an acoustic wake fires.
     _ACOUSTIC_CONTEXT_SETTLE_S = 3.0
     # A wake segment this short is taken as the wake word alone; the request is the next segment.
     _WAKE_ONLY_MAX_WORDS = 2
-    # After Reachy starts music in a conversation: close once it has finished speaking ("Enjoy!") and the
-    # user has said nothing for this long. Gemini hears music as ongoing speech, so the usual idle rule
-    # never fires while music plays.
+    # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
+    # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
+    # ongoing speech, so the usual idle rule never fires while music plays.
     _MUSIC_WIND_DOWN_SILENCE_S = 5.0
-    # Time allowed for the model to start its short reply after the music starts.
-    _MUSIC_WIND_DOWN_REPLY_GRACE_S = 3.0
+    # A reply that ends in a question gets longer to answer.
+    _MUSIC_WIND_DOWN_QUESTION_SILENCE_S = 10.0
+    # Close anyway if Reachy has not answered the user's latest turn within this long.
+    _MUSIC_WIND_DOWN_REPLY_CAP_S = 20.0
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -344,7 +377,8 @@ class HybridRuntime:
         self._cloud_session_notified = False
         self._cloud_session_tasks: set[asyncio.Future[None]] = set()
         self._music_wind_down_requested_at: float | None = None
-        self._last_user_final_transcript_at = 0.0
+        self._last_user_turn_at = 0.0
+        self._last_reply_was_question = False
         self._state_observer = state_observer
         self._activity_observer: ActivityObserver | None = None
         self._transcript_observer: TranscriptObserver | None = None
@@ -1044,7 +1078,8 @@ class HybridRuntime:
                     self._session_queued_frames = 0
                     self._session_ack_state = "not_needed"
                     self._music_wind_down_requested_at = None
-                    self._last_user_final_transcript_at = 0.0
+                    self._last_user_turn_at = self._clock()  # the wake request itself is the first turn
+                    self._last_reply_was_question = False
                     self._active_handler = handler
                     self._connection_ready = False
                     self._connected_since = None
@@ -1285,7 +1320,10 @@ class HybridRuntime:
             return
         if role == "user" and final and text.strip():
             with self._lifecycle_lock:
-                self._last_user_final_transcript_at = self._clock()
+                self._last_user_turn_at = self._clock()
+        elif role == "assistant" and text.strip():
+            with self._lifecycle_lock:
+                self._last_reply_was_question = text.rstrip().endswith(("?", "？"))
         observer = self._transcript_observer
         if observer is not None:
             try:
@@ -1522,7 +1560,9 @@ class HybridRuntime:
                 await self._deactivate_cloud("provider_cancelled")
             raise
         except Exception as error:
-            logger.warning("Hybrid provider task failed: %s", type(error).__name__)
+            # Provider errors carry a status code and reason (never conversation content); keep them bounded.
+            detail = " ".join(str(error).split())[: self._PROVIDER_ERROR_DETAIL_CHARS]
+            logger.warning("Hybrid provider task failed: %s %s", type(error).__name__, detail)
             if self._is_current_handler(handler, generation):
                 await self._deactivate_cloud("provider_failed")
         else:
@@ -1671,25 +1711,33 @@ class HybridRuntime:
     async def _run_local_processing(self, queue: asyncio.Queue[LocalProcessingItem]) -> None:
         """Run local observation sequentially so VAD/STT retains capture order."""
         while True:
-            frame, completed, acoustic_epoch = await queue.get()
+            items = [await queue.get()]
+            # Take any backlog in one pass: each frame costs two thread hops (wake model and VAD), and on a
+            # loaded Mac that overhead alone exceeds real time, so per-frame processing never catches up.
+            while len(items) < self._LOCAL_PROCESSING_BATCH_FRAMES and not queue.empty():
+                items.append(queue.get_nowait())
             try:
-                try:
-                    await self._observe_acoustic_frame(frame, acoustic_epoch)
-                    result = self._local_processor.observe_frame(frame)
-                    if inspect.isawaitable(result):
-                        await result
-                    if not completed.done():
-                        completed.set_result(None)
-                except asyncio.CancelledError:
+                for frame, acoustic_epoch, completions in _merge_local_items(items):
+                    try:
+                        await self._observe_acoustic_frame(frame, acoustic_epoch)
+                        result = self._local_processor.observe_frame(frame)
+                        if inspect.isawaitable(result):
+                            await result
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        logger.warning("Local ambient processing failed: %s", type(error).__name__)
+                    for completed in completions:
+                        if not completed.done():
+                            completed.set_result(None)
+            except asyncio.CancelledError:
+                for _, completed, _ in items:
                     if not completed.done():
                         completed.cancel()
-                    raise
-                except Exception as error:
-                    if not completed.done():
-                        completed.set_result(None)
-                    logger.warning("Local ambient processing failed: %s", type(error).__name__)
+                raise
             finally:
-                queue.task_done()
+                for _ in items:
+                    queue.task_done()
 
     async def _observe_acoustic_frame(self, frame: AudioFrame, epoch: int) -> None:
         detector = self._acoustic_wake_detector
@@ -1788,27 +1836,35 @@ class HybridRuntime:
         return output
 
     def request_music_wind_down(self) -> None:
-        """Close the current conversation soon after music starts, unless the user keeps talking."""
+        """Use quick closing for the rest of this conversation because music is playing."""
         with self._lifecycle_lock:
             if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
                 return
+            if self._music_wind_down_requested_at is not None:
+                return
             self._music_wind_down_requested_at = self._clock()
-        logger.info("Music started; conversation will close after %.0f s of quiet", self._MUSIC_WIND_DOWN_SILENCE_S)
+        logger.info(
+            "Music playing; conversation will close %.0f s after Reachy's reply if the user stays quiet",
+            self._MUSIC_WIND_DOWN_SILENCE_S,
+        )
 
     def _music_wind_down_due_locked(self, now: float) -> bool:
-        requested_at = self._music_wind_down_requested_at
-        if requested_at is None or not self._connection_ready or self._active_handler is None:
+        if self._music_wind_down_requested_at is None or not self._connection_ready or self._active_handler is None:
             return False
         if self._playback_is_active_locked(now) or not self._active_handler.output_queue.empty():
             return False
         # Gemini's speech/busy flags stay set while it hears music, so they are deliberately ignored here;
-        # only Reachy's own speech and a final user transcript keep the conversation open.
-        quiet_since = max(
-            requested_at + self._MUSIC_WIND_DOWN_REPLY_GRACE_S,
-            self._playback_until if math.isfinite(self._playback_until) else now,
-            self._last_user_final_transcript_at,
+        # only Reachy's own speech and final user transcripts move the countdown.
+        replied_at = self._playback_until if math.isfinite(self._playback_until) else 0.0
+        if replied_at <= self._last_user_turn_at:
+            # Reachy has not answered the latest turn yet (thinking or using a tool): wait, but not forever.
+            return now - self._last_user_turn_at >= self._MUSIC_WIND_DOWN_REPLY_CAP_S
+        window = (
+            self._MUSIC_WIND_DOWN_QUESTION_SILENCE_S
+            if self._last_reply_was_question
+            else self._MUSIC_WIND_DOWN_SILENCE_S
         )
-        return now - quiet_since >= self._MUSIC_WIND_DOWN_SILENCE_S
+        return now - replied_at >= window
 
     async def check_inactivity(self) -> bool:
         """Close an inactive cloud session when its configured threshold is reached."""

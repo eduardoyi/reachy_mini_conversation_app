@@ -86,11 +86,16 @@ Extended Thinking interactions have a fixed 120-second cap. A new user turn befo
 Extended Thinking sessions enable sliding-window context window compression and
 session resumption. Compression removes Gemini's session-length limits (15 minutes
 audio-only, 2 minutes once an image is sent), so no camera session limit applies.
-Each connection still closes after nine minutes (Gemini ends connections at about
-ten). The handler keeps the latest handle from resumable `session_resumption_update`
-messages; it is never logged. GoAway and expired limits close the connection without
-replaying any tool call. In direct mode the next connection resumes the same session
-from that handle, with full context and no greeting (see below). A live probe on
+Each connection is still replaced before nine minutes (Gemini ends connections at
+about ten). The handler keeps the latest handle from resumable `session_resumption_update`
+messages; it is never logged. From eight minutes the handler rotates the connection at
+the first quiet moment (no user turn, model turn, tool call or queued output, and no
+user speech in the last second), or at nine minutes regardless; a GoAway rotates at
+once. Rotation closes the connection and the same handler reconnects with the handle,
+skipping the initial context and greeting, so the conversation continues in hybrid
+and direct mode alike; audio already received keeps playing. Without a handle the
+nine-minute limit still ends the session, and the direct-mode resume below remains
+the fallback. A live probe on
 2026-10-13 confirmed that `gemini-3.8-live-extended-thinking` accepts both settings
 and recalls earlier turns after resuming; neither is listed on its model card.
 
@@ -663,6 +668,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-13 | A Reachy Mini Lite run confirmed accurate camera answers and a resumed session at the nine-minute close, but the app's part of each look took ~35 ms while Gemini took 4-12 s to call the camera and 2.7-7.3 s more to answer. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED`) streaming one frame per second while the user is engaged, so the model can answer from the feed without a tool call. Resumable closes now reconnect immediately instead of after the 5 s retry delay, and are logged as a resume rather than a start failure. Regression tests: `test_live_video_is_opt_in_and_requires_compression`, `test_camera_stream_sends_frames_only_while_the_user_is_engaged`, `test_resumable_session_close_reconnects_without_the_retry_delay`. |
 | 2026-10-13 | Live acceptance on the Reachy Mini Lite with `GEMINI_LIVE_VIDEO_ENABLED=1`: the user reported visual answers as much faster than the camera-tool path. The architecture source (`docs/scheme.mmd`) now shows the opt-in live video edge; the generated SVG still needs regenerating with the Mermaid CLI, which is not installed here. |
 | 2026-10-13 | A hybrid session on the Reachy Mini Lite ended with `interaction_deadline` (APIError, provider_failed) about two minutes into a lively exchange: Spotify music played near the robot, the user barged in repeatedly, and the model never reported IDLE, so the cap started by the first request kept running across many later user turns. A new user turn now restarts the cap. Regression test: `test_extended_thinking_new_user_turn_restarts_the_interaction_deadline`. |
+| 2026-10-14 | A hybrid conversation on the Reachy Mini Lite ended after exactly nine minutes with `provider_failed` (APIError): the handler's own nine-minute connection limit closed the session as final, and hybrid mode has no resume step, so Reachy went quiet mid-conversation. With compression the handler now rotates the connection itself (at a quiet moment after eight minutes, at nine minutes, or on GoAway) and resumes from the handle without re-sending context. Every fenced close now logs `Gemini Live session closed reason=…`. Regression tests: `test_go_away_with_compression_resumes_on_a_new_connection`, `test_aging_connection_rotates_at_a_quiet_moment`, `test_aging_connection_waits_for_the_turn_then_rotates_at_the_limit`, `test_aging_connection_without_a_handle_ends_at_the_limit`. |
 
 ## Shared migration validation — 2026-09-16
 

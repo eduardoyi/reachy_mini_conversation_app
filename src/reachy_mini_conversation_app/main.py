@@ -423,7 +423,7 @@ def run(
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)
         from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
 
-        SPOTIFY_DUCKER.music_started_callback = getattr(hybrid_runtime, "request_music_wind_down", None)
+        SPOTIFY_DUCKER.music_playing_callback = getattr(hybrid_runtime, "request_music_wind_down", None)
         handler: ConversationHandler | HybridRuntime = hybrid_runtime
         logger.info("Hybrid runtime enabled; provider construction deferred until activation")
     else:

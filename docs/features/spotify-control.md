@@ -225,3 +225,19 @@ Tests: `test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down`,
 `test_music_wind_down_closes_despite_music_heard_as_speech`,
 `test_music_wind_down_waits_while_the_user_keeps_talking`.
 
+Quick closing whenever music plays (2026-10-14): the wind-down now applies to the
+whole conversation whenever music is playing, not only after Reachy starts it. When a
+conversation opens, `SpotifyDucker.session_started` reports music playing on the
+configured device (even if it was already below the lowered level) through
+`music_playing_callback` (renamed from `music_started_callback`), and a `play` or
+`resume` during the conversation does the same. The runtime then closes the
+conversation once Reachy has answered the user's latest turn (the wake request counts
+as the first turn; a final user transcript starts a new one) and the user stays quiet
+for 5 s, or 10 s if that answer ended in a question mark. If Reachy has not answered a
+turn within 20 s, the conversation closes anyway. Music on other devices or other apps
+is not detected and keeps the normal 60 s rule. Tests:
+`test_music_wind_down_waits_for_the_reply_to_a_new_user_turn`,
+`test_music_wind_down_gives_ten_seconds_after_a_question`,
+`test_music_wind_down_closes_after_twenty_seconds_without_a_reply`,
+`test_ducker_reports_music_playing_at_the_wake`.
+

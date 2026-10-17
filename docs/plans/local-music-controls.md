@@ -91,3 +91,5 @@ request.
 |---|---|
 | 2026-10-13 | Plan created. V1 implemented with tests: wake-time music lowering and restore, Spotify `volume` action, and the music wind-down ("Enjoy!", close after 5 s of quiet). Hardware acceptance pending. |
 | 2026-10-14 | V1 accepted on the Reachy Mini Lite: a requested song ended with "Enjoy!" and the conversation closed about 5 s later with the volume restored; music already playing was lowered at the wake; "set the volume to 40" worked. |
+| 2026-10-14 | Quick closing extended to any conversation while Spotify plays on the configured device: close 5 s after Reachy answers the latest turn (10 s after a question, 20 s cap without an answer). |
+| 2026-10-17 | Quick closing accepted on the Reachy Mini Lite: with music playing, a weather question was answered over lowered music, the conversation closed about 5 s later and the volume came back. |
