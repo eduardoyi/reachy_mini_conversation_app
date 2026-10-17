@@ -1199,7 +1199,9 @@ class LocalStream:
             if isinstance(payload, Response):
                 return payload
             try:
-                result = await asyncio.to_thread(self._face_recognition.enroll_from_camera, payload["name"])
+                result = await asyncio.to_thread(
+                    self._face_recognition.enroll_from_camera, payload["name"], trust_name=True
+                )
             except (OSError, ValueError, RuntimeError):
                 logger.warning("Face enrollment unavailable")
                 return JSONResponse({"error": "The camera is unavailable."}, status_code=503, headers=no_store)
@@ -1224,7 +1226,9 @@ class LocalStream:
             except ValueError:
                 return Response(status_code=400, headers=no_store)
             try:
-                result = await asyncio.to_thread(self._face_recognition.enroll_from_photos, payload["name"], decoded)
+                result = await asyncio.to_thread(
+                    self._face_recognition.enroll_from_photos, payload["name"], decoded, trust_name=True
+                )
             except (OSError, ValueError, RuntimeError):
                 logger.warning("Face photo enrollment unavailable")
                 return JSONResponse({"error": "Photos could not be processed."}, status_code=503, headers=no_store)

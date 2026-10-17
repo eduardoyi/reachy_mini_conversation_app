@@ -94,6 +94,7 @@ def test_faces_enroll_from_the_camera(faces) -> None:
     assert cross_origin.status_code == 403 and no_origin.status_code == 403
     assert wrong_keys.status_code == 400
     assert service.enroll_from_camera.call_count == 2
+    service.enroll_from_camera.assert_called_with("Ana", trust_name=True)
 
 
 def test_faces_forget_deletes_the_person(faces) -> None:
@@ -133,7 +134,7 @@ def test_faces_upload_decodes_photos_and_reports_skipped_ones(faces) -> None:
     assert response.status_code == 200
     assert response.json()["person"]["name"] == "Ana"
     assert response.json()["skipped"] == ["photo 2 has no clear face"]
-    service.enroll_from_photos.assert_called_once_with("Ana", [b"\xff\xd8one", b"\xff\xd8two"])
+    service.enroll_from_photos.assert_called_once_with("Ana", [b"\xff\xd8one", b"\xff\xd8two"], trust_name=True)
 
 
 @pytest.mark.parametrize(

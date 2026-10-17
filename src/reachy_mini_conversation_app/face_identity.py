@@ -40,6 +40,11 @@ MATCH_THRESHOLD = 0.40
 CONFIDENT_MATCH_SCORE = 0.50
 # The best person must beat the runner-up by this much, else the face is ambiguous.
 MATCH_MARGIN = 0.05
+# A weaker match (MATCH_THRESHOLD up to CONFIDENT_MATCH_SCORE) counts once it repeats: the same person
+# on top this many passes in a row (about a second apart), or the person already recognized in front.
+# Adriana, enrolled from phone photos, scored 0.40-0.49 for minutes at a time; the toddler mix-up
+# alternated with Eduardo's own confident matches, so it never repeats.
+WEAK_MATCH_STREAK = 3
 # Smallest face (bounding-box width in camera pixels) worth recognizing / enrolling.
 MIN_RECOGNIZE_FACE_PX = 48
 MIN_ENROLL_FACE_PX = 80
@@ -545,6 +550,7 @@ class FaceRecognitionService:
         self._thread: threading.Thread | None = None
         self._state_lock = threading.Lock()
         self._in_front: SeenPerson | None = None
+        self._weak_streak: tuple[str | None, int] = (None, 0)
         self._ready = threading.Event()
 
     @property
@@ -611,8 +617,14 @@ class FaceRecognitionService:
         self._record(matches)
         return matches
 
-    def enroll_from_camera(self, name: str, duration_s: float = 3.0, max_samples: int = 6) -> EnrollResult:
-        """Capture the single face in view for ``duration_s`` and enroll it as ``name``; blocking."""
+    def enroll_from_camera(
+        self, name: str, duration_s: float = 3.0, max_samples: int = 6, *, trust_name: bool = False
+    ) -> EnrollResult:
+        """Capture the single face in view for ``duration_s`` and enroll it as ``name``; blocking.
+
+        ``trust_name`` (the settings page, where someone typed the name) allows a face that resembles
+        another enrolled person, such as a sibling; the voice tool keeps refusing it.
+        """
         try:
             person_id_for(name)
         except FaceStoreError as error:
@@ -635,13 +647,13 @@ class FaceRecognitionService:
             if crowded:
                 return EnrollResult(None, "more than one face was in view; only the person enrolling should be")
             return EnrollResult(None, "no clear face in view; face the robot from about an arm's length to 2 m away")
-        return self._save_samples(name, samples)
+        return self._save_samples(name, samples, trust_name=trust_name)
 
-    def enroll_from_photos(self, name: str, photos: list[bytes]) -> EnrollResult:
+    def enroll_from_photos(self, name: str, photos: list[bytes], *, trust_name: bool = False) -> EnrollResult:
         """Enroll ``name`` from uploaded JPEG/PNG photos, each showing only that person; blocking.
 
         Photos without exactly one clear face are skipped (and reported); all usable photos must show
-        the same person.
+        the same person. ``trust_name`` is as for :meth:`enroll_from_camera`.
         """
         try:
             person_id_for(name)
@@ -680,26 +692,38 @@ class FaceRecognitionService:
             f"photo {number} does not look like the same person" for number, _, _ in candidates if number not in kept
         )
         skipped.sort(key=lambda reason: int(reason.split()[1]))
-        result = self._save_samples(name, [(embedding, jpeg) for _, embedding, jpeg in group])
+        result = self._save_samples(name, [(embedding, jpeg) for _, embedding, jpeg in group], trust_name=trust_name)
         return EnrollResult(result.person, result.error, skipped=tuple(skipped))
 
-    def _save_samples(self, name: str, samples: list[tuple[NDArray[np.float32], bytes | None]]) -> EnrollResult:
-        existing = self._registry.match(samples[0][0])
+    def _save_samples(
+        self, name: str, samples: list[tuple[NDArray[np.float32], bytes | None]], *, trust_name: bool = False
+    ) -> EnrollResult:
+        existing = None if trust_name else self._registry.match(samples[0][0])
         if existing is not None and existing.person_id != person_id_for(name):
             return EnrollResult(None, f"this face is already enrolled as {existing.name}")
         return EnrollResult(self._registry.enroll(name, samples))
 
     def _record(self, matches: list[FaceMatch | None]) -> None:
         # The largest face is the one the robot is looking at.
-        if matches and matches[0] is not None and matches[0].score < CONFIDENT_MATCH_SCORE:
-            logger.info("Unsure match: possibly %s (score %.2f); not acting on it", matches[0].name, matches[0].score)
+        top = matches[0] if matches else None
+        current = self.person_in_front()
+        with self._state_lock:
+            if top is None:
+                self._weak_streak = (None, 0)
+                return
+            last_id, count = self._weak_streak
+            streak = count + 1 if last_id == top.person_id else 1
+            self._weak_streak = (top.person_id, streak)
+        already_in_front = current is not None and current.match.person_id == top.person_id
+        if top.score < CONFIDENT_MATCH_SCORE and streak < WEAK_MATCH_STREAK and not already_in_front:
+            logger.info("Unsure match: possibly %s (score %.2f); not acting on it", top.name, top.score)
             return
-        if matches and matches[0] is not None:
-            with self._state_lock:
-                previous = self._in_front
-                self._in_front = SeenPerson(matches[0], self._clock())
-            if previous is None or previous.match.person_id != matches[0].person_id:
-                logger.info("Recognized %s in front of the camera (score %.2f)", matches[0].name, matches[0].score)
+        with self._state_lock:
+            previous = self._in_front
+            self._in_front = SeenPerson(top, self._clock())
+        if previous is None or previous.match.person_id != top.person_id:
+            how = "" if top.score >= CONFIDENT_MATCH_SCORE else f", {streak} looks in a row"
+            logger.info("Recognized %s in front of the camera (score %.2f%s)", top.name, top.score, how)
 
     def _run(self) -> None:
         try:

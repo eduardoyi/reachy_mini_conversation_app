@@ -351,6 +351,18 @@ def test_enroll_from_photos_refuses_a_face_known_under_another_name(tmp_path: Pa
     assert service.enroll_from_photos("Ben", [b"1"]).error == "this face is already enrolled as Ana"
 
 
+def test_settings_enrollment_trusts_the_typed_name_for_look_alikes(tmp_path: Path) -> None:
+    """Siblings can resemble each other (Enzo and Mara scored 0.54); a name typed in Settings is accepted."""
+    service = _service(tmp_path, [[ANA], [ANA], [ANA]])
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    by_photo = service.enroll_from_photos("Ben", [b"1"], trust_name=True)
+    by_camera = service.enroll_from_camera("Cleo", duration_s=2.0, max_samples=2, trust_name=True)
+
+    assert by_photo.person is not None and by_photo.person.name == "Ben"
+    assert by_camera.person is not None and by_camera.person.name == "Cleo"
+
+
 def test_an_odd_photo_out_is_skipped_rather_than_failing_the_upload(tmp_path: Path) -> None:
     """Three photos of Ana and one of someone else enroll Ana and name the odd photo."""
     service = _service(tmp_path, [[ANA], [_unit(1.0, 0.2)], [BEN], [_unit(1.0, -0.2)]])
@@ -379,17 +391,57 @@ def test_whole_faces_only_drops_faces_cut_off_by_the_edge() -> None:
 
 
 def test_unsure_matches_are_reported_but_not_acted_on(tmp_path: Path) -> None:
-    """A barely-matching face (Eduardo taken for his toddler at 0.41) neither names nor replaces who is in front."""
-    unsure = _unit(0.45, (1 - 0.45**2) ** 0.5)
-    service = _service(tmp_path, [[ANA], [unsure]])
+    """A barely-matching other face (Eduardo taken for his toddler at 0.41) neither names nor replaces who is in front."""
+    unsure_ben = _unit(0.0, 0.45, (1 - 0.45**2) ** 0.5)
+    service = _service(tmp_path, [[ANA], [unsure_ben]])
     service.registry.enroll("Ana", [(ANA, None)])
+    service.registry.enroll("Ben", [(BEN, None)])
 
     service.identify_now()
     matches = service.identify_now()
 
-    assert matches[0] is not None and matches[0].name == "Ana" and matches[0].score < 0.50
+    assert matches[0] is not None and matches[0].name == "Ben" and matches[0].score < 0.50
     seen = service.person_in_front()
-    assert seen is not None and seen.match.score == pytest.approx(1.0)
+    assert seen is not None and seen.match.name == "Ana" and seen.match.score == pytest.approx(1.0)
+
+
+def test_a_repeated_weak_match_is_trusted_but_an_alternating_one_is_not(tmp_path: Path) -> None:
+    """Three weak looks in a row at the same person count (Adriana from phone photos); flip-flopping never does."""
+    weak_ana = _unit(0.45, 0.0, (1 - 0.45**2) ** 0.5)
+    weak_ben = _unit(0.0, 0.45, (1 - 0.45**2) ** 0.5)
+    steady = _service(tmp_path / "a", [[weak_ana]] * 3)
+    flipping = _service(tmp_path / "b", [[weak_ana], [weak_ben], [weak_ana], [weak_ben], [weak_ana]])
+    for service in (steady, flipping):
+        service.registry.enroll("Ana", [(ANA, None)])
+        service.registry.enroll("Ben", [(BEN, None)])
+
+    for _ in range(2):
+        steady.identify_now()
+    assert steady.person_in_front() is None
+    steady.identify_now()
+    seen = steady.person_in_front()
+    assert seen is not None and seen.match.name == "Ana"
+
+    for _ in range(5):
+        flipping.identify_now()
+    assert flipping.person_in_front() is None
+
+
+def test_weak_matches_keep_a_recognized_person_recognized(tmp_path: Path) -> None:
+    """Once someone is recognized, weaker looks at the same face (turned away a little) keep the name current."""
+    clock = _Clock()
+    weak_ana = _unit(0.45, 0.0, (1 - 0.45**2) ** 0.5)
+    service = _service(tmp_path, [[ANA], [weak_ana]], clock)
+    service.registry.enroll("Ana", [(ANA, None)])
+    service.registry.enroll("Ben", [(BEN, None)])
+
+    service.identify_now()
+    clock.now += 8.0
+    service.identify_now()
+    clock.now += 8.0
+
+    seen = service.person_in_front()
+    assert seen is not None and seen.match.name == "Ana"
 
 
 def test_an_unsure_first_match_names_nobody(tmp_path: Path) -> None:

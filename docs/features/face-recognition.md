@@ -1,7 +1,7 @@
 # Feature: Face recognition
 
 - Status: `in-progress` (unit-tested; live accuracy on household faces not yet validated)
-- Last updated: 2026-10-16
+- Last updated: 2026-10-17
 - Plan: none; requested directly. Builds on [speaker following](speaker-following.md).
 
 ## Overview
@@ -24,7 +24,8 @@ Live has no silent context injection; sending text starts a model turn).
 - **Enroll by voice:** "Reachy, remember my face, I'm Ana." The robot turns
   toward the speaker and captures the single face in view for about 3 s (up to 6
   samples). It refuses when no clear face is in view, when several faces are, or
-  when the face is already enrolled under another name. Repeating adds samples
+  when the face is already enrolled under another name (Settings enrollment trusts the
+  typed name instead, because siblings can look alike: Enzo and Mara scored 0.54). Repeating adds samples
   (newest 12 kept). The tool description tells the model to enroll only the
   person asking, under their own name.
 - **Enroll in the web UI** (`--ui`, Settings → Faces Reachy knows): type a name,
@@ -78,7 +79,11 @@ unit vectors; a face matches the enrolled person with the highest cosine
 similarity if it is at least 0.40 (OpenCV uses 0.363) and 0.05 above the
 runner-up. Acting on identity (the startup-context name, crediting captured memories
 to a speaker) needs 0.50: at 0.41–0.43 Eduardo was once taken for his toddler while his
-own matches scored 0.51–0.62. Weaker matches are logged as unsure; `who_is_here` still
+own matches scored 0.51–0.62. A weaker match (0.40–0.50) also counts when it repeats:
+the same person on top for three passes in a row (`WEAK_MATCH_STREAK`, about a second
+apart), or the person already recognized in front of the camera. Adriana, enrolled from
+phone photos, scored 0.40–0.49 for minutes, while the toddler mix-up alternated with
+Eduardo's own matches. Other weak matches are logged as unsure; `who_is_here` still
 reports them with their confidence. No OpenCV or Pillow dependency: alignment and crops are numpy; photos
 are encoded with GStreamer (`camera_frames.encode_jpeg`).
 
@@ -159,6 +164,7 @@ matched.
 | Date | Change |
 |------|--------|
 | 2026-10-16 | Initial implementation. |
+| 2026-10-17 | Repeated weak matches (three in a row, or the person already in front) count as recognized; Settings enrollment no longer refuses look-alikes such as siblings. |
 | 2026-10-17 | Delete a single photo (and its fingerprint) from Settings. |
 | 2026-10-17 | Identity is acted on only at score ≥ 0.50 after a live misrecognition (Eduardo taken for Mara at 0.41–0.43). |
 | 2026-10-16 | Enroll from uploaded photos in Settings; enrollment ignores faces cut off by the image edge; photos saved as standard JPEGs. Verified in a browser against real models with captured frames. |
