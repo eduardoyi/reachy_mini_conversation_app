@@ -35,6 +35,9 @@ MODEL_ID = "sface_2021dec"
 
 # Cosine similarity between unit fingerprints; OpenCV's SFace match threshold is 0.363.
 MATCH_THRESHOLD = 0.40
+# Acting on identity (crediting memories, telling the model who is in front) needs a surer match:
+# at 0.41-0.43 Eduardo was taken for his toddler, while his own matches scored 0.51-0.62.
+CONFIDENT_MATCH_SCORE = 0.50
 # The best person must beat the runner-up by this much, else the face is ambiguous.
 MATCH_MARGIN = 0.05
 # Smallest face (bounding-box width in camera pixels) worth recognizing / enrolling.
@@ -559,7 +562,7 @@ class FaceRecognitionService:
                 self._in_front = None
 
     def person_in_front(self, max_age_s: float = 10.0) -> SeenPerson | None:
-        """Return who was recognized in front of the camera within ``max_age_s`` seconds."""
+        """Return who was confidently recognized in front of the camera within ``max_age_s`` seconds."""
         with self._state_lock:
             seen = self._in_front
         if seen is None or self._clock() - seen.seen_at > max_age_s:
@@ -666,6 +669,9 @@ class FaceRecognitionService:
 
     def _record(self, matches: list[FaceMatch | None]) -> None:
         # The largest face is the one the robot is looking at.
+        if matches and matches[0] is not None and matches[0].score < CONFIDENT_MATCH_SCORE:
+            logger.info("Unsure match: possibly %s (score %.2f); not acting on it", matches[0].name, matches[0].score)
+            return
         if matches and matches[0] is not None:
             with self._state_lock:
                 previous = self._in_front

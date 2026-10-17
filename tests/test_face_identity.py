@@ -376,3 +376,27 @@ def test_whole_faces_only_drops_faces_cut_off_by_the_edge() -> None:
 
     assert len(analyzer.analyze(frame)) == 2
     assert [face.bbox[0] for face in analyzer.analyze(frame, whole_faces_only=True)] == [300.0]
+
+
+def test_unsure_matches_are_reported_but_not_acted_on(tmp_path: Path) -> None:
+    """A barely-matching face (Eduardo taken for his toddler at 0.41) neither names nor replaces who is in front."""
+    unsure = _unit(0.45, (1 - 0.45**2) ** 0.5)
+    service = _service(tmp_path, [[ANA], [unsure]])
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    service.identify_now()
+    matches = service.identify_now()
+
+    assert matches[0] is not None and matches[0].name == "Ana" and matches[0].score < 0.50
+    seen = service.person_in_front()
+    assert seen is not None and seen.match.score == pytest.approx(1.0)
+
+
+def test_an_unsure_first_match_names_nobody(tmp_path: Path) -> None:
+    """With only unsure matches, no speaker is credited and the model is not told a name."""
+    service = _service(tmp_path, [[_unit(0.45, (1 - 0.45**2) ** 0.5)]])
+    service.registry.enroll("Ana", [(ANA, None)])
+
+    service.identify_now()
+
+    assert service.person_in_front() is None and service.identity_hint() is None

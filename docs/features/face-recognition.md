@@ -73,7 +73,10 @@ standard 112x112 template and embedded by OpenCV's SFace (`opencv/face_recogniti
 Apache-2.0, pinned revision), single-threaded on ONNX Runtime. Fingerprints are
 unit vectors; a face matches the enrolled person with the highest cosine
 similarity if it is at least 0.40 (OpenCV uses 0.363) and 0.05 above the
-runner-up. No OpenCV or Pillow dependency: alignment and crops are numpy; photos
+runner-up. Acting on identity (the startup-context name, crediting captured memories
+to a speaker) needs 0.50: at 0.41–0.43 Eduardo was once taken for his toddler while his
+own matches scored 0.51–0.62. Weaker matches are logged as unsure; `who_is_here` still
+reports them with their confidence. No OpenCV or Pillow dependency: alignment and crops are numpy; photos
 are encoded with GStreamer (`camera_frames.encode_jpeg`).
 
 ## Canonical files and contracts
@@ -153,4 +156,5 @@ matched.
 | Date | Change |
 |------|--------|
 | 2026-10-16 | Initial implementation. |
+| 2026-10-17 | Identity is acted on only at score ≥ 0.50 after a live misrecognition (Eduardo taken for Mara at 0.41–0.43). |
 | 2026-10-16 | Enroll from uploaded photos in Settings; enrollment ignores faces cut off by the image edge; photos saved as standard JPEGs. Verified in a browser against real models with captured frames. |
