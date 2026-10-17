@@ -29,7 +29,8 @@ SCHEMA_VERSION = 1
 MAX_FACTS = 60
 MAX_FACT_CHARS = 280
 MEMORY_FILENAME = "memory.v1.json"
-HOUSEHOLD_MEMORY_CONTEXT_MAX_CHARS = 3_000
+# About 1,500 tokens: room for a family's lasting facts plus current plans.
+HOUSEHOLD_MEMORY_CONTEXT_MAX_CHARS = 6_000
 
 _STORE_LOCK = threading.Lock()
 
@@ -288,10 +289,11 @@ def format_household_memory_prompt(instance_path: str | Path | None = None) -> s
         labels = [
             f"id: {entry.id}",
             f"subject: {entry.subject_id}",
-            f"learned_at: {entry.learned_at.isoformat()}",
+            # Day precision: full timestamps cost ~25 characters per memory and add nothing for the model.
+            f"learned: {entry.learned_at.date().isoformat()}",
         ]
-        if entry.updated_at != entry.learned_at:
-            labels.append(f"updated_at: {entry.updated_at.isoformat()}")
+        if entry.updated_at.date() != entry.learned_at.date():
+            labels.append(f"updated: {entry.updated_at.date().isoformat()}")
         if entry.event_start is not None:
             labels.append(f"event_start: {entry.event_start}")
         if entry.event_end is not None:

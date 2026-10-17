@@ -333,7 +333,7 @@ not infer identities or merge similar names. Uncertain fragments remain only in 
 
 The local store performs no network operations and saves no audio or transcript
 archive. Relevant notes become cloud prompt context when a conversation starts,
-as existing memory already did. The 3,000-character prompt cap limits that snapshot. Lasting facts receive a
+as existing memory already did. The 6,000-character prompt cap (raised from 3,000 on 2026-10-17, when 18 seeded household facts did not fit) limits that snapshot; entries are labelled with id, subject and day-precision `learned`/`updated` dates. Lasting facts receive a
 protected share before recent notes fill the remainder; complete entries are
 used, never cut-off fragments.
 
