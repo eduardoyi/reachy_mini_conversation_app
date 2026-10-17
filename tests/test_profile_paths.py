@@ -78,7 +78,9 @@ def test_household_companion_profile_loads_character_and_existing_tools() -> Non
 
     assert "You are Reachy" in profile.instructions
     assert "curious little household companion" in profile.instructions
-    assert "Comfortable silence" in profile.instructions
+    assert "comfortable silence" in profile.instructions
+    assert "## WHEN YOU DID NOT CATCH IT" in profile.instructions
+    assert "## WITH ENZO AND MARA" in profile.instructions
     assert "raw motor control" in profile.instructions
     assert {"move_head", "head_tracking", "remember", "forget"}.issubset(profile.default_tools)
     assert "pollen_robotics_reachy_mini_search_tool__search_web" not in profile.default_tools
