@@ -34,6 +34,15 @@ def decode_image(data: bytes) -> Any:
     """Decode JPEG or PNG bytes into a BGR ``uint8`` array (EXIF orientation applied), or None on failure."""
     import numpy as np
 
+    # A fixed decoder chosen from the file's magic bytes: decodebin plugs its decoder after data flows,
+    # and under load end-of-stream sometimes won that race (about 1 decode in 10 returned nothing).
+    if data.startswith(b"\xff\xd8"):
+        decoder = "jpegparse ! jpegdec"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        decoder = "pngdec"
+    else:
+        logger.warning("Image decode failed: not a JPEG or PNG")
+        return None
     try:
         import gi
 
@@ -42,7 +51,7 @@ def decode_image(data: bytes) -> Any:
 
         Gst.init(None)
         pipeline = Gst.parse_launch(
-            "appsrc name=src ! decodebin ! videoflip video-direction=auto ! videoconvert ! "
+            f"appsrc name=src ! {decoder} ! videoflip video-direction=auto ! videoconvert ! "
             "video/x-raw,format=BGR ! appsink name=sink sync=false"
         )
         try:
