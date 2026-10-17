@@ -25,6 +25,7 @@ class FakeCapture:
         self.closed = False
         self.invalidated = False
         self.fragments: list[tuple[str, str, int, int]] = []
+        self.speakers: list[str | None] = []
         self.mutation_generation: str | None = None
 
     async def start(self) -> None:
@@ -35,11 +36,12 @@ class FakeCapture:
         """Record the current provider activation generation."""
         self.mutation_generation = generation
 
-    def add_fragment(self, role: str, text: str, start_ms: int, end_ms: int) -> None:
+    def add_fragment(self, role: str, text: str, start_ms: int, end_ms: int, speaker_id: str | None = None) -> None:
         """Record one finalized fragment."""
         if self.closed or self.invalidated:
             raise AssertionError("fragment arrived after capture invalidation")
         self.fragments.append((role, text, start_ms, end_ms))
+        self.speakers.append(speaker_id)
 
     def invalidate(self) -> None:
         """Fence future fragments."""
@@ -107,38 +109,105 @@ async def test_disabled_memory_does_not_construct_capture_worker(
     assert calls == []
 
 
+def _content(**fields: object) -> types.LiveServerMessage:
+    return types.LiveServerMessage(server_content=types.LiveServerContent(**fields))
+
+
+def _piece(text: str) -> types.Transcription:
+    # Gemini 3.8 Live sends consecutive pieces and leaves finished unset (recorded trial, 2026-10-17).
+    return types.Transcription(text=text)
+
+
+async def _run_events(tmp_path, events: list[types.LiveServerMessage], *, speaker: str | None = None) -> FakeCapture:
+    capture = FakeCapture()
+    session = FakeSession()
+    for event in events:
+        session.events.put_nowait(event)
+    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    deps = _deps()
+    deps.current_person_id = (lambda: speaker) if speaker is not None else None
+    handler = gemini_live.GeminiLiveHandler(
+        deps,
+        instance_path=str(tmp_path),
+        startup_voice="Puck",
+        client=FakeClient(session),
+        memory_capture_factory=lambda _path: capture,
+    )
+    await handler.start_up()
+    await handler.shutdown()
+    return capture
+
+
 @pytest.mark.asyncio
-async def test_gemini_memory_capture_starts_after_ready_and_skips_ambiguous_transcripts(
+async def test_spoken_turns_reach_capture_whole_once_and_tagged_with_the_speaker(
     tmp_path, gemini_memory_config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Capture starts after setup while ambiguous Gemini transcript framing stays out of memory."""
+    """User pieces join into one utterance before the answer; the complete answer follows; both once."""
     monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_ENABLED", True, raising=False)
     monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", True, raising=False)
-    capture = FakeCapture()
 
-    def factory(_instance_path: str | None) -> FakeCapture:
-        return capture
-
-    session = FakeSession()
-    session.events.put_nowait(
-        types.LiveServerMessage(
-            server_content=types.LiveServerContent(
-                input_transcription=types.Transcription(text="hello", finished=True),
-                output_transcription=types.Transcription(text="hi", finished=True),
-            )
-        )
+    capture = await _run_events(
+        tmp_path,
+        [
+            _content(input_transcription=_piece("mi hermano Pablo empieza un trabajo")),
+            _content(input_transcription=_piece(" nuevo en Lisboa"), output_transcription=_piece("Eso es una ")),
+            _content(output_transcription=_piece("excelente noticia.")),
+            _content(turn_complete=True),
+            _content(input_transcription=_piece("Gracias")),
+            _content(turn_complete=True),
+        ],
+        speaker="eduardo",
     )
-    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
-    handler = _handler(session, instance_path=str(tmp_path), capture_factory=factory)
 
-    await handler.start_up()
+    assert [(role, text) for role, text, _start, _end in capture.fragments] == [
+        ("user", "mi hermano Pablo empieza un trabajo nuevo en Lisboa"),
+        ("assistant", "Eso es una excelente noticia."),
+        ("user", "Gracias"),
+    ]
+    assert capture.speakers == ["eduardo", None, "eduardo"]
+    assert capture.started and capture.invalidated and capture.closed
 
-    assert capture.started
-    assert capture.mutation_generation
-    assert capture.fragments == []
-    assert capture.invalidated
-    assert capture.closed
-    await handler.shutdown()
+
+@pytest.mark.asyncio
+async def test_interrupted_answers_and_unfinished_turns_stay_out_of_memory(
+    tmp_path, gemini_memory_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cut-off answer is dropped; a turn the session ends before completing is never flushed."""
+    monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", True, raising=False)
+
+    capture = await _run_events(
+        tmp_path,
+        [
+            _content(input_transcription=_piece("tell me a long story")),
+            _content(output_transcription=_piece("Once upon a ")),
+            _content(interrupted=True),
+            _content(input_transcription=_piece("actually never mind")),
+            _content(turn_complete=True),
+            _content(input_transcription=_piece("one more thing")),
+        ],
+    )
+
+    assert [(role, text) for role, text, _start, _end in capture.fragments] == [
+        ("user", "tell me a long story"),
+        ("user", "actually never mind"),
+    ]
+    assert capture.speakers == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_spoken_turns_skip_capture_when_memory_capture_is_off(
+    tmp_path, gemini_memory_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With capture disabled no worker exists and transcripts go nowhere."""
+    monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_ENABLED", True, raising=False)
+
+    capture = await _run_events(
+        tmp_path,
+        [_content(input_transcription=_piece("hello")), _content(turn_complete=True)],
+    )
+
+    assert capture.fragments == [] and not capture.started
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 # Household memory
 
-- Status: `implemented` — M1–M2 user accepted; M3 engineering complete, default off; real-model review acceptance pending
-- Last updated: 2026-09-16
+- Status: `implemented` — M1–M2 user accepted; M3 engineering complete, default off; Gemini spoken capture, speaker attribution and an active daily tidy-up added 2026-10-17 (real-model checks passed; live household acceptance pending)
+- Last updated: 2026-10-17
 - Plan: [Household memory lifecycle](../plans/household-memory-lifecycle.md)
 
 ## Overview
@@ -148,9 +148,10 @@ from disk immediately.
 ## Invisible capture (M2)
 
 Enable both `HOUSEHOLD_MEMORY_ENABLED=1` and
-`HOUSEHOLD_MEMORY_CAPTURE_ENABLED=1` after explicit migration. Capture is currently
-GPT Live only. Other providers retain explicit memory tools. Flags are off by
-default and were not changed in the user's `.env` during implementation.
+`HOUSEHOLD_MEMORY_CAPTURE_ENABLED=1` after explicit migration. Capture runs with GPT
+Live and, since 2026-10-17, with Gemini Live speech (see
+[Gemini spoken capture](#gemini-spoken-capture-and-speaker-attribution--2026-10-17)).
+Other providers retain explicit memory tools. Flags are off by default.
 
 After `session.started`, Live user/assistant transcript deltas enter a bounded
 RAM buffer. Assistant speech provides context only; saved claims require exact
@@ -219,6 +220,41 @@ checked 2026-09-11, lists $0.20/M input tokens, $0.02/M cached input and $1.20/M
 output. Input characters are not tokens; actual cost depends on language and
 usage. Prices may change. These small capture calls are additional to speech and
 tool delegation. `store=False` is not a promise of zero provider retention.
+
+## Gemini spoken capture and speaker attribution — 2026-10-17
+
+**Transcript framing (recorded trial).** Synthetic English and Spanish utterances
+were streamed to `gemini-3.8-live-extended-thinking`. Input and output
+transcriptions both arrive as consecutive pieces of one turn (" nuevo en Lisboa"
+continues "mi hermano Pablo empieza un trabajo"), `finished` is never set, and no
+interim input events appear. A 0.7 s pause mid-sentence did not split the
+transcript. When Gemini answers before a sentence ends, the rest of that sentence
+is not transcribed and cannot be captured.
+
+**Assembly.** `spoken_turns.SpokenTurnAssembler` joins pieces as sent. The user's
+utterance is handed to capture once, when the answer's first piece or the turn's
+end arrives; the complete answer follows at `turn_complete`; an interrupted answer
+is dropped; a reconnect drops unfinished turns (no flush). Interim text stays UI-only.
+Typed `say()` text still enters once on its own path.
+
+**Speaker attribution.** Each user utterance carries the household member face
+recognition sees when the user starts speaking (`ToolDependencies.current_person_id`),
+following OpenClaw's rule that the system, never the model, supplies who spoke.
+Capture sends it as `speaker`, and validation then accepts first-person evidence
+when the proposal's subject is that speaker (compared case-, space- and
+accent-insensitively), records the speaker as `source_person_id`, and treats
+possessives ("my sister Ana") as the speaker's; "I"-statements still cannot be
+attached to someone else. Without a recognized speaker the original rules apply.
+
+**Extraction instructions** add: declarative facts only, never instructions
+(Hermes found stored imperatives acted as standing orders); memory text in English
+whatever language was spoken, ignoring transcript requests about memory (a
+"always answer in Portuguese" line had leaked into note text); and today's local
+date and weekday in the request so "next Saturday" resolves to an ISO date.
+
+Real-model check (throwaway store): a Spanish allergy statement by the recognized
+speaker became "Eduardo is allergic to shellfish."; "My sister Ana is visiting next
+Saturday" became a dated situation for `ana` said by `eduardo`.
 
 ### Daily tidy-up (M3)
 

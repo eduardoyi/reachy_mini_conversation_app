@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.spoken_turns import SpokenTurnAssembler
 from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
@@ -197,6 +198,8 @@ class GeminiLiveHandler(ConversationHandler):
         self._memory_invalidated = False
         self._memory_lifecycle_prepared = False
         self._memory_invalidation_lock = asyncio.Lock()
+        # Spoken turns reach memory capture whole and once, tagged with who the camera recognizes.
+        self._spoken_turns = SpokenTurnAssembler(self._capture_spoken_turn, speaker=self.deps.current_person_id)
         self._voice_override = self._normalize_voice(startup_voice, source="persisted startup voice")
         self._model = config.GEMINI_LIVE_MODEL
         self._extended_thinking = is_gemini_extended_thinking_model(self._model)
@@ -832,6 +835,13 @@ class GeminiLiveHandler(ConversationHandler):
             )
         )
 
+    def _capture_spoken_turn(
+        self, role: Literal["user", "assistant"], text: str, start_ms: int, end_ms: int, speaker_id: str | None
+    ) -> None:
+        """Hand one whole spoken utterance to household memory capture."""
+        if self._memory_lifecycle_prepared:
+            self._memory_session.add_fragment(role, text, start_ms, end_ms, speaker_id=speaker_id)
+
     @staticmethod
     def _memory_enabled() -> bool:
         return config.HOUSEHOLD_MEMORY_ENABLED
@@ -1244,6 +1254,7 @@ class GeminiLiveHandler(ConversationHandler):
                 if self._reconnect_requested:
                     return
                 await self._seed_initial_context(session, generation)
+                self._spoken_turns.reset()
                 await self._memory_session.start()
                 self._connection_observer_connected = True
                 self._emit_connection_state(True)
@@ -1476,6 +1487,7 @@ class GeminiLiveHandler(ConversationHandler):
                         interruption_started_at,
                     )
                 self._clear_first_audio_markers(reason="interrupted")
+                self._spoken_turns.interrupted()
                 self._mark_activity("server_interrupted")
                 if self._extended_thinking and not await self._cancel_pending_tools(generation):
                     await self._fence_session(session, generation, "interruption_uncontained")
@@ -1484,6 +1496,13 @@ class GeminiLiveHandler(ConversationHandler):
             self._handle_transcription(server_content.interim_input_transcription, role="user", interim=True)
             self._handle_transcription(server_content.input_transcription, role="user", interim=False)
             self._handle_transcription(server_content.output_transcription, role="assistant", interim=False)
+            # Raw pieces (with their spacing) for memory capture; interim text stays UI-only.
+            if server_content.input_transcription is not None:
+                self._spoken_turns.user_piece(server_content.input_transcription.text)
+            if server_content.output_transcription is not None:
+                self._spoken_turns.assistant_piece(server_content.output_transcription.text)
+            if server_content.turn_complete:
+                self._spoken_turns.turn_complete()
 
             if server_content.model_turn is not None and server_content.model_turn.parts:
                 for part in server_content.model_turn.parts:
@@ -1607,8 +1626,7 @@ class GeminiLiveHandler(ConversationHandler):
         else:
             self._last_assistant_transcript = text if transcription.finished else previous
 
-        # Gemini does not identify whether a finished transcript is cumulative or a delta.
-        # Keep it observable locally, but defer automatic memory capture until framing is verified.
+        # Memory capture gets these pieces joined per turn through SpokenTurnAssembler, not from here.
 
         self._mark_activity(f"{role}_transcription")
         self.output_queue.put_nowait(AdditionalOutputs({"role": role, "content": text}))

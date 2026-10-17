@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Callable
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 from openai.types.responses.response import Response
@@ -1565,3 +1565,167 @@ async def test_review_rebase_preserves_fresh_speech_but_not_unrelated_stale_cont
         assert store.applied == []
         assert client.responses.calls == []
     await capture.close()
+
+
+def _single_proposal(
+    text: str, subject_id: str, *, fragments: slice = slice(-1, None)
+) -> Callable[[dict[str, object]], str]:
+    """Extractor output citing the selected user fragments verbatim."""
+
+    def output(request: dict[str, object]) -> str:
+        payload = json.loads(str(request["input"]))
+        cited = [item for item in payload["fragments"] if item["role"] == "user"][fragments]
+        return json.dumps(
+            {
+                "proposals": [
+                    {
+                        "text": text,
+                        "subject_id": subject_id,
+                        "kind": "fact",
+                        "certainty": "stated",
+                        "evidence": [{"fragment_id": item["id"], "quote": item["text"]} for item in cited],
+                    }
+                ]
+            }
+        )
+
+    return output
+
+
+async def _run_capture(
+    tmp_path: Path, output: Callable[[dict[str, object]], str], fragments: list[tuple[str, str, str | None]]
+) -> tuple[_FakeStore, list[dict[str, object]]]:
+    client = _FakeClient(output)
+    capture, store = _capture(tmp_path, client)
+    await capture.start()
+    for index, (role, text, speaker) in enumerate(fragments):
+        capture.add_fragment(role, text, index * 100, index * 100 + 90, speaker_id=speaker)  # type: ignore[arg-type]
+    await asyncio.wait_for(client.responses.started.wait(), timeout=1.0)
+    await asyncio.sleep(0.01)
+    await capture.close()
+    return store, [json.loads(str(request["input"])) for request in client.responses.calls]
+
+
+@pytest.mark.asyncio
+async def test_recognized_speaker_owns_their_first_person_statements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With face recognition, "I like jazz" is the speaker's own fact without a self-introduction."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, requests = await _run_capture(
+        tmp_path, _single_proposal("Eduardo likes jazz", "Eduardo"), [("user", "I like jazz.", "eduardo")]
+    )
+
+    assert requests[0]["fragments"][0]["speaker"] == "eduardo"
+    assert [(item["subject_id"], item["source_person_id"]) for item in store.applied] == [("Eduardo", "eduardo")]
+
+
+@pytest.mark.asyncio
+async def test_a_recognized_speaker_cannot_lend_first_person_words_to_someone_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eduardo saying "I like tea" never becomes a fact about Clara."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, _requests = await _run_capture(
+        tmp_path, _single_proposal("Clara likes tea", "clara"), [("user", "I like tea.", "eduardo")]
+    )
+
+    assert store.applied == []
+
+
+@pytest.mark.asyncio
+async def test_facts_about_others_record_the_recognized_speaker_as_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A named third-party fact keeps the usual checks and notes who said it."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, _requests = await _run_capture(
+        tmp_path, _single_proposal("Ana loves figs", "ana"), [("user", "Ana loves figs.", "eduardo")]
+    )
+
+    assert [(item["subject_id"], item["source_person_id"]) for item in store.applied] == [("ana", "eduardo")]
+
+
+@pytest.mark.asyncio
+async def test_evidence_from_two_speakers_falls_back_to_the_usual_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When cited fragments come from different recognized people, no one is assumed to be the speaker."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, _requests = await _run_capture(
+        tmp_path,
+        _single_proposal("Eduardo likes green tea", "eduardo", fragments=slice(0, 2)),
+        [("user", "I like green", "eduardo"), ("user", " tea.", "ana")],
+    )
+
+    assert store.applied == []
+
+
+@pytest.mark.asyncio
+async def test_speaker_is_only_accepted_on_user_fragments(tmp_path: Path) -> None:
+    """Assistant text has no speaker, and an empty speaker is a caller bug."""
+    capture, _store = _capture(tmp_path, _FakeClient(lambda _request: '{"proposals":[]}'))
+    await capture.start()
+    with pytest.raises(ValueError):
+        capture.add_fragment("assistant", "Hello.", 0, 10, speaker_id="eduardo")
+    with pytest.raises(ValueError):
+        capture.add_fragment("user", "Hello.", 0, 10, speaker_id=" ")
+    await capture.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("said", "accepted"),
+    [
+        ("My sister Ana loves fresh figs.", True),
+        ("Mi hermana Ana adora los higos.", True),
+        ("I told Ana I love figs.", False),
+    ],
+)
+async def test_a_recognized_speaker_may_say_my_about_a_named_person(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, said: str, accepted: bool
+) -> None:
+    """Possessives point at the known speaker, so "my sister Ana" is about Ana; "I" statements still are not."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, _requests = await _run_capture(
+        tmp_path, _single_proposal("Ana loves figs", "ana"), [("user", said, "eduardo")]
+    )
+
+    assert [(item["subject_id"], item["source_person_id"]) for item in store.applied] == (
+        [("ana", "eduardo")] if accepted else []
+    )
+
+
+@pytest.mark.asyncio
+async def test_without_a_recognized_speaker_my_still_blocks_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The original conservative rule holds when nobody is recognized."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    store, _requests = await _run_capture(
+        tmp_path, _single_proposal("Ana loves figs", "ana"), [("user", "My sister Ana loves fresh figs.", None)]
+    )
+
+    assert store.applied == []
+
+
+@pytest.mark.asyncio
+async def test_extractor_is_told_today_so_relative_dates_can_be_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'Next Saturday' needs a reference date; the request carries today's local date and weekday."""
+    monkeypatch.setattr(capture_module, "SETTLING_DELAY_S", 0.0)
+
+    _store, requests = await _run_capture(
+        tmp_path, lambda _request: '{"proposals":[]}', [("user", "Ana visits next Saturday.", "eduardo")]
+    )
+
+    today = requests[0]["today"]
+    assert set(today) == {"date", "weekday"}
+    assert date.fromisoformat(today["date"]).strftime("%A") == today["weekday"]

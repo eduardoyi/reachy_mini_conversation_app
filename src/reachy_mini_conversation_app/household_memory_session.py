@@ -76,8 +76,8 @@ class MemoryCaptureWorker(Protocol):
     def bind_mutation_generation(self, generation: str) -> None:
         """Attach the active session generation to future local writes."""
 
-    def add_fragment(self, role: Role, text: str, start_ms: int, end_ms: int) -> None:
-        """Queue one finalized transcript fragment."""
+    def add_fragment(self, role: Role, text: str, start_ms: int, end_ms: int, speaker_id: str | None = None) -> None:
+        """Queue one finalized transcript fragment, with the recognized speaker of a user fragment."""
 
     def invalidate(self) -> None:
         """Discard buffered work and fence late provider results."""
@@ -602,13 +602,16 @@ class MemorySession:
             return not self._fenced
         return self._consume_receipts()
 
-    def add_fragment(self, role: Role, text: str, start_ms: int, end_ms: int) -> None:
-        """Forward finalized transcript text to active capture."""
+    def add_fragment(self, role: Role, text: str, start_ms: int, end_ms: int, speaker_id: str | None = None) -> None:
+        """Forward finalized transcript text (and a user fragment's recognized speaker) to active capture."""
         capture = self._capture
         if not self.active or self._capture_paused or not self._capture_started or capture is None:
             return
         try:
-            capture.add_fragment(role, text, start_ms, end_ms)
+            if speaker_id is None:
+                capture.add_fragment(role, text, start_ms, end_ms)
+            else:
+                capture.add_fragment(role, text, start_ms, end_ms, speaker_id=speaker_id)
         except (TypeError, ValueError) as exc:
             logger.debug("Household memory fragment rejected error=%s", type(exc).__name__)
 
