@@ -106,6 +106,8 @@ OPENAI_LIVE_AVAILABLE_VOICES: tuple[str, ...] = (
 )
 HYBRID_RUNTIME_ENABLED_ENV = "HYBRID_RUNTIME_ENABLED"
 HYBRID_CLOUD_INACTIVITY_SECONDS_ENV = "HYBRID_CLOUD_INACTIVITY_SECONDS"
+HYBRID_FOLLOW_UP_SECONDS_ENV = "HYBRID_FOLLOW_UP_SECONDS"
+HYBRID_ADDRESSEE_CHECK_ENABLED_ENV = "HYBRID_ADDRESSEE_CHECK_ENABLED"
 HYBRID_AMBIENT_BUFFER_SECONDS_ENV = "HYBRID_AMBIENT_BUFFER_SECONDS"
 LOCAL_CONTEXT_STRATEGY_ENV = "LOCAL_CONTEXT_STRATEGY"
 LOCAL_STT_BASE_URL_ENV = "LOCAL_STT_BASE_URL"
@@ -133,6 +135,8 @@ AUDIO_OUTPUT_BACKEND_GSTREAMER = "gstreamer"
 DEFAULT_AUDIO_OUTPUT_BACKEND = AUDIO_OUTPUT_BACKEND_SDK
 DEFAULT_HYBRID_RUNTIME_ENABLED = False
 DEFAULT_HYBRID_CLOUD_INACTIVITY_SECONDS = 60.0
+# Like Gemini on Google speakers (about 15 s): how long Reachy keeps listening for a follow-up after he replies.
+DEFAULT_HYBRID_FOLLOW_UP_SECONDS = 15.0
 DEFAULT_HYBRID_AMBIENT_BUFFER_SECONDS = 20.0
 MAX_HYBRID_AMBIENT_BUFFER_SECONDS = 20.0
 LOCAL_CONTEXT_CONTINUOUS = "continuous"
@@ -326,6 +330,11 @@ def resolve_hybrid_cloud_inactivity_seconds() -> float | None:
         DEFAULT_HYBRID_CLOUD_INACTIVITY_SECONDS,
     )
     return None if value == 0 else value
+
+
+def resolve_hybrid_follow_up_seconds() -> float:
+    """Read how long a conversation stays open after Reachy's last reply; zero disables the window."""
+    return _resolve_non_negative_seconds(HYBRID_FOLLOW_UP_SECONDS_ENV, DEFAULT_HYBRID_FOLLOW_UP_SECONDS) or 0.0
 
 
 def resolve_hybrid_ambient_buffer_seconds() -> float:
@@ -629,6 +638,8 @@ class Config:
     OPENAI_LIVE_VOICE = (os.getenv(OPENAI_LIVE_VOICE_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_VOICE
     HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
     HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
+    HYBRID_FOLLOW_UP_SECONDS = resolve_hybrid_follow_up_seconds()
+    HYBRID_ADDRESSEE_CHECK_ENABLED = _env_flag(HYBRID_ADDRESSEE_CHECK_ENABLED_ENV, default=True)
     HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
     LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
     LOCAL_STT_BASE_URL = resolve_local_stt_base_url()
@@ -794,6 +805,8 @@ def refresh_runtime_config_from_env() -> None:
     config.OPENAI_LIVE_VOICE = (os.getenv(OPENAI_LIVE_VOICE_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_VOICE
     config.HYBRID_RUNTIME_ENABLED = is_hybrid_runtime_enabled()
     config.HYBRID_CLOUD_INACTIVITY_SECONDS = resolve_hybrid_cloud_inactivity_seconds()
+    config.HYBRID_FOLLOW_UP_SECONDS = resolve_hybrid_follow_up_seconds()
+    config.HYBRID_ADDRESSEE_CHECK_ENABLED = _env_flag(HYBRID_ADDRESSEE_CHECK_ENABLED_ENV, default=True)
     config.HYBRID_AMBIENT_BUFFER_SECONDS = resolve_hybrid_ambient_buffer_seconds()
     config.LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
     config.LOCAL_STT_BASE_URL = resolve_local_stt_base_url()

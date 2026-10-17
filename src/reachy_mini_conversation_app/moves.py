@@ -38,6 +38,7 @@ from numpy.typing import NDArray
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
+from reachy_mini.reachy_mini import SLEEP_HEAD_POSE, INIT_ANTENNAS_JOINT_POSITIONS, SLEEP_ANTENNAS_JOINT_POSITIONS
 from reachy_mini.utils.interpolation import compose_world_offset, linear_pose_interpolation
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, DanceQueueMove, EmotionQueueMove
 
@@ -213,6 +214,61 @@ class GazeTurnMove(Move):  # type: ignore
         return head, np.asarray(start_antennas, dtype=np.float64), body_yaw
 
 
+SLEEP_TRANSITION_S = 2.0
+WAKE_TRANSITION_S = 1.5
+
+
+class PoseTransitionMove(Move):  # type: ignore
+    """Ease from the pose the robot holds when it begins to a fixed pose, optionally holding it until cleared."""
+
+    def __init__(
+        self,
+        target_head: NDArray[np.float64],
+        target_antennas: Tuple[float, float],
+        *,
+        transition_s: float,
+        hold: bool = False,
+    ) -> None:
+        """Prepare a transition; the worker calls ``begin`` when the move starts."""
+        self._target_head = np.asarray(target_head, dtype=np.float64).copy()
+        self._target_antennas = np.asarray(target_antennas, dtype=np.float64)
+        self._transition_s = transition_s
+        self._hold = hold
+        self._start_pose: FullBodyPose | None = None
+
+    @property
+    def duration(self) -> float:
+        """A held pose lasts until the queue is cleared."""
+        return float("inf") if self._hold else self._transition_s
+
+    def begin(self, start_pose: FullBodyPose) -> None:
+        """Capture the pose the transition starts from."""
+        self._start_pose = clone_full_body_pose(start_pose)
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+        """Ease head, antennas and body (to facing forward) toward the target, then hold it."""
+        if self._start_pose is None:
+            return self._target_head.copy(), self._target_antennas.copy(), 0.0
+        start_head, start_antennas, start_body_yaw = self._start_pose
+        progress = float(np.clip(t / self._transition_s, 0.0, 1.0))
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        head = linear_pose_interpolation(np.asarray(start_head, dtype=np.float64), self._target_head, eased)
+        antennas = np.asarray(start_antennas, dtype=np.float64) * (1.0 - eased) + self._target_antennas * eased
+        return head, antennas, start_body_yaw * (1.0 - eased)
+
+
+def sleep_move() -> PoseTransitionMove:
+    """Lower into the SDK's sleep pose and stay there until woken."""
+    sleep_antennas = (float(SLEEP_ANTENNAS_JOINT_POSITIONS[0]), float(SLEEP_ANTENNAS_JOINT_POSITIONS[1]))
+    return PoseTransitionMove(SLEEP_HEAD_POSE, sleep_antennas, transition_s=SLEEP_TRANSITION_S, hold=True)
+
+
+def wake_move() -> PoseTransitionMove:
+    """Rise from the sleep pose back to the neutral pose."""
+    neutral_antennas = (float(INIT_ANTENNAS_JOINT_POSITIONS[0]), float(INIT_ANTENNAS_JOINT_POSITIONS[1]))
+    return PoseTransitionMove(np.eye(4), neutral_antennas, transition_s=WAKE_TRANSITION_S)
+
+
 def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
     """Create a deep copy of a full body pose tuple."""
     head, antennas, body_yaw = pose
@@ -294,6 +350,9 @@ class MovementManager:
         self._tracking_auto = False
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
+        # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
+        self._sleeping = False
+        self._sleep_hold: PoseTransitionMove | None = None
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -350,8 +409,20 @@ class MovementManager:
         self._command_queue.put(("queue_move", move))
 
     def acknowledge_activation(self) -> None:
-        """Queue a relative activation acknowledgment on the movement worker."""
+        """Queue a relative activation acknowledgment on the movement worker (waking up first if asleep)."""
         self._command_queue.put(("acknowledge_activation", None))
+
+    def go_to_sleep(self) -> None:
+        """Lower into the sleep pose and hold it until woken; thread-safe.
+
+        While asleep, other moves and speaker turns are ignored; an activation acknowledgement, a new
+        conversation, or ``wake_up`` raises the head first.
+        """
+        self._command_queue.put(("go_to_sleep", None))
+
+    def wake_up(self) -> None:
+        """Rise from the sleep pose if asleep; thread-safe."""
+        self._command_queue.put(("wake_up", None))
 
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
@@ -429,6 +500,8 @@ class MovementManager:
 
     def _handle_command(self, command: str, payload: Any, current_time: float) -> None:
         """Handle a single cross-thread command."""
+        if self._sleeping and self._handle_sleeping_command(command, payload):
+            return
         if command == "queue_move":
             if isinstance(payload, Move):
                 self.move_queue.append(payload)
@@ -510,6 +583,10 @@ class MovementManager:
                     self._set_head_tracking(False)
                 if self._gaze_yaw != 0.0:
                     self._queue_gaze_turn(0.0)
+        elif command == "go_to_sleep":
+            self._fall_asleep()
+        elif command == "wake_up":
+            pass  # already awake
         elif command == "set_speaking":
             if not self._head_tracking:
                 return
@@ -531,6 +608,52 @@ class MovementManager:
                 logger.warning("Head-tracking speaking handoff failed: %s", e)
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
+
+    def _handle_sleeping_command(self, command: str, payload: Any) -> bool:
+        """Apply a command while asleep; return True when it is fully handled here (worker thread only)."""
+        if command in ("acknowledge_activation", "wake_up") or (command == "set_conversation_active" and payload):
+            self._wake()
+            return command == "wake_up"  # the acknowledgement and conversation start still run, after waking
+        if command == "clear_queue":
+            # Stopping a conversation keeps the sleep pose, even when it has not started yet.
+            self.move_queue = deque(move for move in self.move_queue if move is self._sleep_hold)
+            return True
+        if command == "set_conversation_active":
+            self._tracking_auto = False  # tracking already stopped when he fell asleep; stay facing forward
+            return True
+        if command in ("queue_move", "turn_toward_speaker", "set_listening", "set_head_tracking", "go_to_sleep"):
+            logger.debug("Asleep; ignoring %s", command)
+            return True
+        return False
+
+    def _fall_asleep(self) -> None:
+        """Stop tracking and other moves, then lower into the sleep pose (worker thread only)."""
+        self._tracking_auto = False
+        self._set_head_tracking(False)
+        self.move_queue.clear()
+        self._end_move(self.state.current_move)
+        self.state.current_move = None
+        self.state.move_start_time = None
+        self._breathing_active = False
+        self._is_listening = False
+        self._gaze_yaw = 0.0
+        self._sleeping = True
+        self._sleep_hold = sleep_move()
+        self.move_queue.append(self._sleep_hold)
+        self.state.update_activity()
+        logger.info("Going to sleep until someone says my name")
+
+    def _wake(self) -> None:
+        """Leave the sleep pose for the neutral pose (worker thread only)."""
+        self._sleeping = False
+        self._sleep_hold = None
+        self.move_queue.clear()
+        self._end_move(self.state.current_move)
+        self.state.current_move = None
+        self.state.move_start_time = None
+        self.move_queue.append(wake_move())
+        self.state.update_activity()
+        logger.info("Waking up")
 
     def _set_head_tracking(self, enabled: bool) -> None:
         """Start or stop daemon face tracking (worker thread only)."""
@@ -607,6 +730,10 @@ class MovementManager:
             self._gaze_yaw = move.target_yaw
         elif isinstance(move, GotoQueueMove):
             # Explicit head moves (move_head, sweep_look) aim in absolute terms and end facing forward.
+            self._gaze_yaw = 0.0
+        elif isinstance(move, PoseTransitionMove):
+            # Sleeping and waking start from wherever the head is and end facing forward.
+            move.begin(self._present_pose())
             self._gaze_yaw = 0.0
 
     def _end_move(self, move: Move | None) -> None:
@@ -941,6 +1068,7 @@ class MovementManager:
         return {
             "queue_size": len(self.move_queue),
             "is_listening": self._is_listening,
+            "sleeping": self._sleeping,
             "breathing_active": self._breathing_active,
             "last_commanded_pose": {
                 "head": head_matrix,

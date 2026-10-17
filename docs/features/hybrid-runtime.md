@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-09-21
+- Last updated: 2026-10-17
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -175,6 +175,8 @@ Configuration is defined in `config.py`:
 |---|---:|---|
 | `HYBRID_RUNTIME_ENABLED` | `0` | Opt into the local ambient runtime. |
 | `HYBRID_CLOUD_INACTIVITY_SECONDS` | `60` | Close an inactive cloud session; `0` disables this close. |
+| `HYBRID_FOLLOW_UP_SECONDS` | `15` | Keep listening for a follow-up this long after Reachy's reply; unanswered speech for this long also closes the session. `0` disables. |
+| `HYBRID_ADDRESSEE_CHECK_ENABLED` | `1` | With `OPENAI_API_KEY`, ask the backend model whether unanswered speech after a reply was for Reachy, and close early when it clearly was not. |
 | `HYBRID_AMBIENT_BUFFER_SECONDS` | `20` | Raw PCM RAM ring duration, capped at 20 seconds. |
 | `LOCAL_CONTEXT_WINDOW_SECONDS` | `60` | Finalized local transcript retention in seconds; text-only and independent from the PCM ring. |
 | `LOCAL_CONTEXT_STRATEGY` | `continuous` | Use a rolling local transcript, or `activation` to transcribe the RAM snapshot after keyboard activation. |
@@ -741,3 +743,80 @@ once per batch; a lone frame passes through unchanged. Tests:
 `test_local_processing_backlog_is_merged_into_one_pass`,
 `test_merge_local_items_keeps_lone_frames_and_splits_on_rate_or_epoch`,
 `test_provider_setup_failure_returns_to_ambient_and_shutdowns_once`.
+
+### Ending conversations and standby — 2026-10-17
+
+Reachy kept joining side conversations because any speech reset the 60-second
+inactivity close, so a cloud session stayed open while people talked among
+themselves and only Gemini's proactive audio kept him quiet. Research on the same
+problem: Alexa Follow-Up Mode listens about 5 s after a reply, Google Assistant
+about 8 s, and Gemini on Google speakers up to about 15 s. Apple's follow-up
+device-directed speech detection judges the next utterance against the previous
+exchange. Google Look and Talk and Alexa Conversation Mode add camera head
+orientation.
+
+A conversation now ends in one of these ways, checked in this order by
+`check_inactivity`:
+
+1. **Reachy asks to close it.** The `end_conversation` tool (a goodbye, or people
+   clearly talking among themselves) and `go_to_sleep` call `request_close`. The close
+   waits at least 1 s and until his reply has played and the provider is no longer
+   busy, at most 12 s.
+2. **The addressee check says it was not for him.** After a reply, user transcript
+   pieces since that reply are joined. Once there are at least 4 words and a 1.5 s
+   pause, `AddresseeCheck` sends Reachy's last reply and that text to
+   `OPENAI_LIVE_BACKEND_MODEL`, re-checking after 4 more words and at most 3 times per
+   stretch. A clear `no` closes the session at once, unless Reachy has started
+   answering by then. `yes`, `unsure` and errors change nothing. The check cannot veto
+   Gemini's own replies, because Gemini answers straight from the audio. The same text
+   already reaches OpenAI when memory capture is enabled.
+3. **Music wind-down** (unchanged).
+4. **The follow-up window** (`HYBRID_FOLLOW_UP_SECONDS`, 15 s), outside music:
+   - The session closes 15 s after Reachy's reply ends if nobody spoke.
+   - When people speak and he does not answer for 15 s, it closes at the next 2 s
+     pause, or at 30 s regardless.
+   - A busy provider (thinking, a tool) holds the close up to 30 s.
+   - Each reply restarts the window.
+5. **The inactivity timeout** (unchanged) is the backstop.
+
+The monitor task now always runs, so requested closes work even with both timeouts
+disabled.
+
+`go_to_sleep` is now standby. With the hybrid runtime, `ToolDependencies.standby`
+calls `MovementManager.go_to_sleep()` and `request_close("go_to_sleep")`. The movement
+manager stops tracking and other moves and eases into the SDK sleep pose
+(`PoseTransitionMove`, held until cleared). While asleep it ignores queued moves,
+speaker turns, listening and tracking, and closing the conversation keeps the pose.
+An activation acknowledgement, a new conversation or `wake_up()` raises the head to
+neutral first. Without the hybrid runtime, `go_to_sleep` still stops the app.
+
+Asleep, waking is stricter. The first live test woke him repeatedly on ordinary
+conversation: the acoustic model scored that talk 0.95–0.99, as high as real wakes,
+and the transcript detector caught people talking about him. `request_close("go_to_sleep")`
+sets `_asleep`. While it is set:
+- An acoustic wake does not acknowledge, so the head stays down, until local STT
+  confirms the name opened the utterance or one of its sentences (`_name_leads`:
+  "Reachy, ...", "hey Reachy", "ok. Reachy, ...").
+- Without that confirmation the runtime returns to ambient
+  (`unconfirmed_wake_while_asleep`) without moving or opening the cloud.
+- A transcript wake needs the name first in the same way.
+- Any confirmed wake, or a keyboard activation, clears `_asleep`. After that chat
+  he stays awake in the idle pose.
+
+The new `turn_off` tool keeps the old sleep-and-stop behavior, and the shutdown path
+(`run_go_to_sleep_tool`) now uses it. With the hybrid runtime, `end_conversation`
+and `turn_off` load next to `go_to_sleep` unless the profile's tools were
+customized. The household profile tells Reachy to stay out of side conversations
+and when to use each tool.
+
+Tests:
+- `test_follow_up_window_closes_15_s_after_reachys_reply`
+- `test_side_conversation_closes_the_follow_up_window_at_a_pause`
+- `test_follow_up_window_waits_while_reachy_is_working_and_restarts_after_his_answer`
+- `test_a_requested_close_waits_for_the_goodbye_to_play`
+- `test_addressee_check_closes_early_when_people_talk_among_themselves`
+- `test_addressee_verdicts_that_keep_him_or_come_too_late_do_not_close`
+- `test_sleep_holds_the_pose_until_an_activation_wakes_him`
+- the `asleep` wake tests and `test_name_leads_only_when_the_name_opens_a_sentence`
+- `tests/test_addressee_check.py`
+- the standby tool tests in `tests/tools/test_go_to_sleep.py`

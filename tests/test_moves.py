@@ -376,3 +376,52 @@ def test_speaking_while_breathing_keeps_facing_the_tracked_face() -> None:
         head, _, body_yaw = manager._get_primary_pose(manager.state.move_start_time + elapsed)
         assert head_world_yaw(head) == pytest.approx(np.radians(50.0))
         assert body_yaw == pytest.approx(np.radians(40.0))
+
+
+def test_sleep_holds_the_pose_until_an_activation_wakes_him() -> None:
+    """Asleep, moves and speaker turns are ignored and closing a conversation keeps the pose; a wake raises the head."""
+    from reachy_mini_conversation_app.moves import PoseTransitionMove
+
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(60.0))
+    manager.set_conversation_active(True)
+    manager.go_to_sleep()
+    manager._poll_signals(manager._now())
+
+    assert manager._sleeping
+    robot.stop_head_tracking.assert_called_once()
+    [sleep] = manager.move_queue
+    assert isinstance(sleep, PoseTransitionMove) and sleep.duration == float("inf")
+
+    manager.queue_move(_FakeMove(np.eye(4)))
+    manager.turn_toward_speaker()
+    manager.clear_move_queue()
+    manager.set_conversation_active(False)
+    manager._poll_signals(manager._now())
+    manager._manage_move_queue(manager._now())
+    assert manager.state.current_move is sleep and not manager.move_queue
+
+    manager.acknowledge_activation()
+    manager._poll_signals(manager._now())
+    assert not manager._sleeping
+    wake, ack = manager.move_queue
+    assert isinstance(wake, PoseTransitionMove) and wake.duration < float("inf")
+    assert isinstance(ack, ActivationAcknowledgementMove)
+
+
+def test_sleep_and_wake_ease_between_the_sleep_and_neutral_poses() -> None:
+    """The sleep move ends on the SDK sleep pose facing forward; waking ends on the neutral pose."""
+    from reachy_mini.reachy_mini import SLEEP_HEAD_POSE, SLEEP_ANTENNAS_JOINT_POSITIONS
+    from reachy_mini_conversation_app.moves import wake_move, sleep_move
+
+    sleep = sleep_move()
+    sleep.begin((np.eye(4), (0.0, 0.0), 0.5))
+    head, antennas, body_yaw = sleep.evaluate(10.0)
+    assert np.allclose(head, SLEEP_HEAD_POSE, atol=1e-3)
+    assert np.allclose(antennas, SLEEP_ANTENNAS_JOINT_POSITIONS)
+    assert body_yaw == pytest.approx(0.0)
+    assert sleep.evaluate(0.0)[2] == pytest.approx(0.5)
+
+    wake = wake_move()
+    wake.begin((np.asarray(SLEEP_HEAD_POSE), (-3.05, 3.05), 0.0))
+    assert np.allclose(wake.evaluate(wake.duration)[0], np.eye(4), atol=1e-3)

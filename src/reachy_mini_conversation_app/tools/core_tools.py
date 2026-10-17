@@ -45,7 +45,12 @@ class ToolDependencies:
     memory_mutation_generation: str | None = None
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
+    # Sleep pose, then stop the app (also the shutdown path).
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
+    # Hybrid runtime only: sleep pose and back to waiting for the wake word, with the app still running.
+    standby: Callable[[], dict[str, Any]] | None = None
+    # Hybrid runtime only: close the conversation after Reachy's goodbye and wait for the wake word.
+    end_conversation: Callable[[], dict[str, Any]] | None = None
     face_recognition: Any = None  # FaceRecognitionService from face_identity.py, when enabled
     # Recognized person in front of the camera (household person ID), when face recognition is enabled.
     current_person_id: Callable[[], str | None] | None = None
@@ -95,7 +100,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -286,7 +291,9 @@ def _build_tool_registry(
     return {tool.name: tool for tool in tool_instances}
 
 
-def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None, bool]:
+def _tool_registry_signature(
+    instance_path: str | Path | None,
+) -> tuple[str, str, str | None, bool, str | None, bool, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -295,11 +302,15 @@ def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str
         bool(config.AUTOLOAD_EXTERNAL_TOOLS),
         _normalize_signature_path(instance_path),
         config.HOUSEHOLD_MEMORY_ENABLED,
+        bool(config.HYBRID_RUNTIME_ENABLED),
     )
 
 
 # Enabled automatically with FACE_RECOGNITION_ENABLED unless the profile's tools were customized.
 FACE_TOOLS = ("remember_face", "forget_face", "who_is_here")
+# With the hybrid runtime, go_to_sleep means standby; these end a conversation or turn the app off.
+# Added next to go_to_sleep unless the profile's tools were customized.
+STANDBY_TOOLS = ("end_conversation", "turn_off")
 
 
 # Registry & specs (dynamic)
@@ -330,6 +341,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in FACE_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in FACE_TOOLS if name not in tool_names)
+
+    if not config.HYBRID_RUNTIME_ENABLED:
+        tool_names = [name for name in tool_names if name != "end_conversation"]
+    elif "go_to_sleep" in tool_names and read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in STANDBY_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]

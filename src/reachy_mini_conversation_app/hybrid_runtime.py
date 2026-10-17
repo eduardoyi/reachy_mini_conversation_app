@@ -103,6 +103,16 @@ def _merge_local_items(
 
 
 LocalProcessingCloseCallback: TypeAlias = Callable[[], CallbackResult]
+# (what Reachy last said, what people said after it) -> False when clearly not for him, None when unsure.
+AddresseeChecker: TypeAlias = Callable[[str, str], Awaitable[bool | None]]
+
+
+def _append_capped(parts: list[str], text: str, max_chars: int) -> list[str]:
+    """Append ``text`` and drop the oldest parts beyond ``max_chars`` in total (the newest always stays)."""
+    parts = [*parts, text]
+    while len(parts) > 1 and sum(len(part) + 1 for part in parts) > max_chars:
+        parts.pop(0)
+    return parts
 
 
 @dataclass(frozen=True)
@@ -251,6 +261,19 @@ _WAKE_WORD_VARIANTS = (
     r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi"
 )
 _WAKE_WORD_TRANSCRIPT_PATTERN = re.compile(rf"\b(?:{_WAKE_WORD_VARIANTS})\b", re.IGNORECASE)
+# While asleep, the name must lead the utterance ("Reachy, ...", "hey Reachy"), not appear mid-sentence.
+_NAME_FIRST_WORDS = 2
+
+
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
+
+
+def _name_leads(text: str) -> bool:
+    """Return whether the wake word opens ``text`` or one of its sentences ("ok. Reachy, ...")."""
+    return any(
+        _WAKE_WORD_TRANSCRIPT_PATTERN.search(" ".join(sentence.split()[:_NAME_FIRST_WORDS])) is not None
+        for sentence in _SENTENCE_BREAK.split(text)
+    )
 
 
 def frame_activation_context(transcript: str, max_chars: int) -> str:
@@ -302,6 +325,20 @@ class HybridRuntime:
     _MUSIC_WIND_DOWN_TURN_CAP_S = 60.0
     # User speech that starts after Reachy's reply holds the close this long, until its transcript arrives.
     _MUSIC_WIND_DOWN_SPEECH_HOLD_S = 3.0
+    # Follow-up window (outside music): people speaking since Reachy's reply without him answering for
+    # the whole window closes the conversation at the next pause this long; twice the window closes it
+    # regardless (a side conversation or a TV can talk without pauses).
+    _FOLLOW_UP_SPEECH_GAP_S = 2.0
+    # A close Reachy asked for (end_conversation, go_to_sleep) waits for his goodbye to finish playing:
+    # at least this long, and at most the cap if the provider stays busy.
+    _CLOSE_REQUEST_GRACE_S = 1.0
+    _CLOSE_REQUEST_CAP_S = 12.0
+    # The addressee check runs on unanswered speech after a reply once it has this many words and the
+    # room pauses this long; it re-checks when this many new words arrive, a few times per stretch.
+    _ADDRESSEE_MIN_WORDS = 4
+    _ADDRESSEE_PAUSE_S = 1.5
+    _ADDRESSEE_MAX_CHECKS = 3
+    _ADDRESSEE_TEXT_CHARS = 800
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -343,6 +380,8 @@ class HybridRuntime:
         cloud_session_observer: Callable[[bool], Awaitable[None]] | None = None,
         state_observer: StateObserver | None = None,
         inactivity_timeout_s: float = 0.0,
+        follow_up_window_s: float = 0.0,
+        addressee_check: AddresseeChecker | None = None,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         clock: Clock = time.monotonic,
         monitor_interval_s: float = 0.1,
@@ -350,6 +389,8 @@ class HybridRuntime:
         """Initialize an idle runtime without constructing a provider handler."""
         if inactivity_timeout_s < 0:
             raise ValueError("Inactivity timeout must not be negative")
+        if follow_up_window_s < 0 or not math.isfinite(follow_up_window_s):
+            raise ValueError("Follow-up window must be finite and not negative")
         if (
             wake_followup_timeout_s <= 0
             or not math.isfinite(wake_followup_timeout_s)
@@ -385,6 +426,22 @@ class HybridRuntime:
         self._user_turn_started_at = 0.0
         self._last_user_speech_start_at = -math.inf
         self._last_reply_was_question = False
+        self._follow_up_window_s = float(follow_up_window_s)
+        # (reason, requested_at) for a close Reachy asked for; it happens once his goodbye has played.
+        self._close_requested: tuple[str, float] | None = None
+        # Told to go to sleep: until a wake is confirmed by local STT hearing the name first, acoustic
+        # detections and mid-sentence mentions do not wake him (they fire on ordinary conversation).
+        self._asleep = False
+        self._addressee_check = addressee_check
+        self._addressee_task: asyncio.Task[None] | None = None
+        self._reply_parts: list[str] = []
+        self._last_assistant_text_at = -math.inf
+        self._unanswered_parts: list[str] = []
+        self._unanswered_reply_marker = -math.inf
+        self._addressee_checked_words = 0
+        self._addressee_checks = 0
+        # (generation, unanswered marker) the addressee check judged not meant for Reachy.
+        self._not_addressed: tuple[int, float] | None = None
         self._state_observer = state_observer
         self._activity_observer: ActivityObserver | None = None
         self._transcript_observer: TranscriptObserver | None = None
@@ -872,6 +929,11 @@ class HybridRuntime:
         if detection is None:
             return
         detector.consume_detection()
+        with self._lifecycle_lock:
+            asleep = self._asleep
+        if asleep and not (detection.wake_word_is_first_word or _name_leads(segment.text)):
+            logger.info("Asleep; ignoring the name mentioned mid-sentence")
+            return
         followup_waiter: asyncio.Future[TranscriptSegment] | None = None
         if not detection.remaining_text:
             try:
@@ -995,9 +1057,15 @@ class HybridRuntime:
                         self._wake_followup_after_sequence = processor.latest_sequence
                         if open_at_wake:
                             wake_segment_sequence = processor.latest_sequence
+                    asleep = self._asleep
+                    # Asleep, an acoustic wake raises the head only once local STT confirms the name came first.
+                    confirm_wake = asleep and transcribe_request
+                    if asleep and not confirm_wake:
+                        self._asleep = False
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
 
-            await self._invoke_acknowledgement(reason)
+            if not confirm_wake:
+                await self._invoke_acknowledgement(reason)
             with self._lifecycle_lock:
                 closed = self._closed
             if closed:
@@ -1056,6 +1124,13 @@ class HybridRuntime:
                     wake_word_found,
                     len(followup_text),
                 )
+                if confirm_wake:
+                    leading_text = wake_text if wake_word_found else followup_text
+                    if not _name_leads(leading_text):
+                        return await self._stay_asleep(generation)
+                    with self._lifecycle_lock:
+                        self._asleep = False
+                    await self._invoke_acknowledgement(reason)
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             initial_context = frame_activation_context(ambient_text, config.LOCAL_CONTEXT_MAX_CHARS)
 
@@ -1084,6 +1159,8 @@ class HybridRuntime:
                     self._session_queued_frames = 0
                     self._session_ack_state = "not_needed"
                     self._music_wind_down_requested_at = None
+                    self._close_requested = None
+                    self._reset_addressee_state_locked()
                     self._last_user_turn_at = self._clock()  # the wake request itself is the first turn
                     self._user_turn_started_at = self._last_user_turn_at
                     self._last_user_speech_start_at = -math.inf
@@ -1103,11 +1180,11 @@ class HybridRuntime:
                 )
                 with self._lifecycle_lock:
                     self._provider_task = provider_task
-                    if self._inactivity_timeout_s > 0:
-                        self._inactivity_task = asyncio.create_task(
-                            self._monitor_inactivity(handler, generation),
-                            name=f"hybrid-inactivity-{generation}",
-                        )
+                    # Always monitored: closes Reachy asks for (goodbye, sleep) need it even without timeouts.
+                    self._inactivity_task = asyncio.create_task(
+                        self._monitor_inactivity(handler, generation),
+                        name=f"hybrid-inactivity-{generation}",
+                    )
 
             await asyncio.sleep(0)
             return True
@@ -1150,6 +1227,18 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._activation_task is asyncio.current_task():
                     self._activation_task = None
+
+    async def _stay_asleep(self, generation: int) -> bool:
+        """Drop an acoustic wake that local STT did not confirm, without moving or opening the cloud."""
+        async with self._state_lock:
+            with self._lifecycle_lock:
+                if self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation:
+                    self._pending_acoustic_ack_generation = None
+                    self._clear_wake_followup_waiter()
+                    self._clear_postactivation_queue()
+                    self._transition(RuntimeMode.LOCAL_AMBIENT, "unconfirmed_wake_while_asleep")
+        logger.info("Asleep; staying asleep because the name was not heard first")
+        return False
 
     async def _invoke_acknowledgement(self, reason: str) -> None:
         callback = self._acknowledgement_callback
@@ -1330,10 +1419,26 @@ class HybridRuntime:
         if role == "user" and text.strip():
             # Partial transcripts count: the user is mid-sentence long before Gemini finalizes the turn.
             with self._lifecycle_lock:
-                self._note_user_turn_locked(self._clock())
+                now = self._clock()
+                self._note_user_turn_locked(now)
+                replied_at = self._replied_at_locked()
+                if replied_at > self._unanswered_reply_marker:
+                    # First speech since Reachy's latest reply: a new stretch for the addressee check.
+                    self._unanswered_reply_marker = replied_at
+                    self._unanswered_parts = []
+                    self._addressee_checked_words = 0
+                    self._addressee_checks = 0
+                self._unanswered_parts = _append_capped(
+                    self._unanswered_parts, text.strip(), self._ADDRESSEE_TEXT_CHARS
+                )
         elif role == "assistant" and text.strip():
             with self._lifecycle_lock:
                 self._last_reply_was_question = text.rstrip().endswith(("?", "？"))
+                now = self._clock()
+                if self._last_assistant_text_at < self._last_user_turn_at:
+                    self._reply_parts = []  # a new reply after the user spoke
+                self._last_assistant_text_at = now
+                self._reply_parts = _append_capped(self._reply_parts, text.strip(), self._ADDRESSEE_TEXT_CHARS)
         observer = self._transcript_observer
         if observer is not None:
             try:
@@ -1875,6 +1980,111 @@ class HybridRuntime:
             self._last_conversation_activity = self._clock()
         logger.info("Music paused; conversation uses the normal inactivity timeout again")
 
+    def request_close(self, reason: str) -> bool:
+        """Close the conversation once Reachy's reply has finished playing; thread-safe.
+
+        Used when Reachy decides the conversation is over or is told to go to sleep. Returns whether a
+        conversation was open to close.
+        """
+        with self._lifecycle_lock:
+            if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
+                return False
+            if self._close_requested is None:
+                self._close_requested = (reason, self._clock())
+            if reason == "go_to_sleep":
+                self._asleep = True
+        logger.info("Conversation will close after Reachy's reply reason=%s", reason)
+        return True
+
+    def _close_requested_due_locked(self, now: float) -> bool:
+        if self._close_requested is None or self._active_handler is None:
+            return False
+        waited = now - self._close_requested[1]
+        if waited >= self._CLOSE_REQUEST_CAP_S:
+            return True
+        if waited < self._CLOSE_REQUEST_GRACE_S or self._interaction_busy:
+            return False
+        return not self._playback_is_active_locked(now) and self._active_handler.output_queue.empty()
+
+    def _follow_up_due_locked(self, now: float) -> bool:
+        """Close once nobody has been talking with Reachy for the follow-up window."""
+        window = self._follow_up_window_s
+        if window <= 0 or not self._connection_ready or self._active_handler is None:
+            return False
+        if self._playback_is_active_locked(now) or not self._active_handler.output_queue.empty():
+            return False
+        replied_at = self._replied_at_locked()
+        if replied_at <= self._last_user_turn_at:
+            # People have spoken since his last reply (or since the wake) and he has not answered.
+            unanswered_for = now - self._user_turn_started_at
+            if unanswered_for >= 2 * window:
+                return True  # busy and transcripts can both stick while a room keeps talking
+            if self._interaction_busy:
+                return False  # thinking or running a tool
+            return unanswered_for >= window and now - self._last_user_turn_at >= self._FOLLOW_UP_SPEECH_GAP_S
+        silent_for = now - replied_at
+        if self._interaction_busy and silent_for < 2 * window:
+            return False  # he said "let me check" and is still working
+        speech_start = self._last_user_speech_start_at
+        if speech_start > replied_at and now - speech_start < self._MUSIC_WIND_DOWN_SPEECH_HOLD_S:
+            return False  # the user may be starting a follow-up; its transcript is on the way
+        return silent_for >= window
+
+    def _reset_addressee_state_locked(self) -> None:
+        self._reply_parts = []
+        self._last_assistant_text_at = -math.inf
+        self._unanswered_parts = []
+        self._unanswered_reply_marker = -math.inf
+        self._addressee_checked_words = 0
+        self._addressee_checks = 0
+        self._not_addressed = None
+
+    def _not_addressed_due_locked(self, now: float) -> bool:
+        verdict = self._not_addressed
+        if verdict is None:
+            return False
+        if verdict != (self._generation, self._unanswered_reply_marker):
+            self._not_addressed = None  # Reachy has replied since; the verdict is stale
+            return False
+        replied_at = self._replied_at_locked()
+        # Only while he is still silent: if he started answering, Gemini judged it was for him.
+        return replied_at <= self._last_user_turn_at and not self._playback_is_active_locked(now)
+
+    def _maybe_start_addressee_check_locked(self, now: float) -> None:
+        check = self._addressee_check
+        if check is None or self._addressee_checks >= self._ADDRESSEE_MAX_CHECKS:
+            return
+        if self._addressee_task is not None and not self._addressee_task.done():
+            return
+        replied_at = self._replied_at_locked()
+        # Judge only what followed a real reply, once the room pauses and nobody hears him speaking.
+        if replied_at <= 0 or replied_at > self._last_user_turn_at or not self._reply_parts:
+            return
+        if self._playback_is_active_locked(now) or now - self._last_user_turn_at < self._ADDRESSEE_PAUSE_S:
+            return
+        people_said = " ".join(self._unanswered_parts)
+        words = len(people_said.split())
+        if words < self._ADDRESSEE_MIN_WORDS or words - self._addressee_checked_words < self._ADDRESSEE_MIN_WORDS:
+            return
+        self._addressee_checked_words = words
+        self._addressee_checks += 1
+        stretch = (self._generation, self._unanswered_reply_marker)
+        self._addressee_task = asyncio.create_task(
+            self._run_addressee_check(check, " ".join(self._reply_parts), people_said, stretch),
+            name="hybrid-addressee-check",
+        )
+
+    async def _run_addressee_check(
+        self, check: AddresseeChecker, reachy_said: str, people_said: str, stretch: tuple[int, float]
+    ) -> None:
+        verdict = await check(reachy_said, people_said)
+        if verdict is not False:
+            return
+        with self._lifecycle_lock:
+            if stretch == (self._generation, self._unanswered_reply_marker):
+                self._not_addressed = stretch
+                logger.info("People are talking among themselves; closing the conversation")
+
     def _replied_at_locked(self) -> float:
         return self._playback_until if math.isfinite(self._playback_until) else 0.0
 
@@ -1915,18 +2125,24 @@ class HybridRuntime:
     async def check_inactivity(self) -> bool:
         """Close an inactive cloud session when its configured threshold is reached."""
         self._assert_owner_loop()
-        if self._inactivity_timeout_s <= 0:
-            return False
         reason: str | None = None
         async with self._state_lock:
             with self._lifecycle_lock:
                 if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
                     return False
                 now = self._clock()
-                if self._music_wind_down_due_locked(now):
+                if self._close_requested_due_locked(now):
+                    assert self._close_requested is not None
+                    reason = self._close_requested[0]
+                elif self._not_addressed_due_locked(now):
+                    reason = "not_addressed"
+                elif self._music_wind_down_due_locked(now):
                     reason = "music_wind_down"
+                elif self._music_wind_down_requested_at is None and self._follow_up_due_locked(now):
+                    reason = "follow_up_window"
                 elif (
-                    self._connection_ready
+                    self._inactivity_timeout_s > 0
+                    and self._connection_ready
                     and not self._user_speaking
                     and not self._interaction_busy
                     and not self._playback_is_active_locked(now)
@@ -1934,6 +2150,8 @@ class HybridRuntime:
                     and now - self._last_conversation_activity >= self._inactivity_timeout_s
                 ):
                     reason = "inactivity_timeout"
+                else:
+                    self._maybe_start_addressee_check_locked(now)
         if reason is not None:
             return await self._deactivate_cloud(reason)
         return False
@@ -2060,6 +2278,7 @@ class HybridRuntime:
                         self._postactivation_flush_task,
                         self._activation_text_task,
                         self._acoustic_ack_task,
+                        self._addressee_task,
                     )
                     self._generation += 1
                     self._active_handler = None
@@ -2069,6 +2288,8 @@ class HybridRuntime:
                     self._postactivation_flush_task = None
                     self._activation_text_task = None
                     self._acoustic_ack_task = None
+                    self._addressee_task = None
+                    self._close_requested = None
                     self._pending_activation_text = None
                     self._pending_acoustic_ack_generation = None
                     self._postactivation_speech_observed = False

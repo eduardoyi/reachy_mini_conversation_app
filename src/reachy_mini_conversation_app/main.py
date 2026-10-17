@@ -403,6 +403,15 @@ def run(
         else:
             logger.info("Local STT endpoint not configured; keyboard/acoustic activation needs no STT")
 
+        addressee_check = None
+        if config.HYBRID_ADDRESSEE_CHECK_ENABLED and (config.OPENAI_API_KEY or "").strip():
+            from reachy_mini_conversation_app.addressee_check import AddresseeCheck
+
+            addressee_check = AddresseeCheck(
+                api_key=(config.OPENAI_API_KEY or "").strip(), model=config.OPENAI_LIVE_BACKEND_MODEL
+            )
+            logger.info("Addressee check enabled: side conversations close the conversation early")
+
         hybrid_runtime = HybridRuntime(
             build_hybrid_handler,
             ambient_buffer=AmbientAudioBuffer(max_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS),
@@ -416,8 +425,25 @@ def run(
             acknowledgement_callback=queue_activation_acknowledgement,
             cloud_session_observer=on_cloud_session,
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
+            follow_up_window_s=config.HYBRID_FOLLOW_UP_SECONDS,
+            addressee_check=addressee_check,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
+        runtime_for_tools = hybrid_runtime
+
+        def go_to_standby() -> dict[str, Any]:
+            """Sleep pose, then close the conversation after the good night; the wake word still works."""
+            movement_manager.go_to_sleep()
+            runtime_for_tools.request_close("go_to_sleep")
+            return {"status": "sleeping", "wakes_on_name": True}
+
+        def end_conversation() -> dict[str, Any]:
+            """Close the conversation after Reachy's goodbye; the wake word starts a new one."""
+            closing = runtime_for_tools.request_close("assistant_ended")
+            return {"status": "ending" if closing else "no_conversation"}
+
+        deps.standby = go_to_standby
+        deps.end_conversation = end_conversation
         if context_processor is not None:
             # Also needed with acoustic wake: the runtime takes the request after the wake from local STT.
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)

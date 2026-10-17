@@ -3087,3 +3087,266 @@ async def test_close_discards_late_acoustic_detection() -> None:
     finally:
         release.set()
         await runtime.close()
+
+
+def _follow_up_session(clock: FakeClock, addressee_check: object = None) -> tuple[HybridRuntime, "FakeHandler"]:
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        inactivity_timeout_s=60,
+        follow_up_window_s=15,
+        addressee_check=addressee_check,  # type: ignore[arg-type]
+        clock=clock,
+    )
+    return runtime, handler
+
+
+@pytest.mark.asyncio
+async def test_follow_up_window_closes_15_s_after_reachys_reply() -> None:
+    """Without a follow-up, the conversation closes 15 s after the reply instead of after 60 s of silence."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    clock.advance(15.5)  # t=15.5
+    assert not await runtime.check_inactivity()
+    clock.advance(1)  # t=16.5: 15.5 s after the reply
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_side_conversation_closes_the_follow_up_window_at_a_pause() -> None:
+    """People talking on without Reachy answering close it after the window, once they pause."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    for _ in range(16):  # t=3..18: people keep talking, one transcript piece a second
+        clock.advance(1)
+        runtime._on_handler_transcript(handler, generation, "user", "and then she said", False)
+    assert not await runtime.check_inactivity()  # mid-sentence
+    clock.advance(2.5)  # a pause
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_follow_up_window_waits_while_reachy_is_working_and_restarts_after_his_answer() -> None:
+    """A busy provider (thinking, a tool) holds the close, and each answer starts a new window."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.note_playback_queued(1.0)
+    clock.advance(2)
+    runtime._on_handler_transcript(handler, generation, "user", "what's the weather tomorrow?", True)
+    runtime._on_handler_interaction_busy(handler, generation, True)
+
+    clock.advance(16)  # t=18: still searching
+    assert not await runtime.check_inactivity()
+    runtime._on_handler_interaction_busy(handler, generation, False)
+    runtime.note_playback_queued(2.0)  # the answer, t=18..20
+    clock.advance(14)  # t=32: 12 s after the answer
+    assert not await runtime.check_inactivity()
+    clock.advance(4)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_requested_close_waits_for_the_goodbye_to_play() -> None:
+    """end_conversation and go_to_sleep close only after Reachy's reply has finished playing."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+
+    assert runtime.request_close("go_to_sleep")
+    assert not await runtime.check_inactivity()  # within the grace period
+    runtime.note_playback_queued(2.0)  # "Good night!" t=0..2
+    clock.advance(1.5)
+    assert not await runtime.check_inactivity()
+    clock.advance(1)  # t=2.5: played
+    assert await runtime.check_inactivity()
+    assert not runtime.request_close("go_to_sleep")  # nothing left to close
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_addressee_check_closes_early_when_people_talk_among_themselves() -> None:
+    """Unanswered speech judged not for Reachy closes the conversation before the window ends."""
+    clock = FakeClock()
+    calls: list[tuple[str, str]] = []
+
+    async def judge(reachy_said: str, people_said: str) -> bool | None:
+        calls.append((reachy_said, people_said))
+        return False
+
+    runtime, handler = _follow_up_session(clock, judge)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime._on_handler_transcript(handler, generation, "assistant", "It will be sunny tomorrow.", False)
+    runtime.note_playback_queued(1.0)
+    clock.advance(2)
+    runtime._on_handler_transcript(handler, generation, "user", "ok so what should we", False)
+    runtime._on_handler_transcript(handler, generation, "user", "have for dinner tonight", False)
+    clock.advance(2)  # a pause
+
+    assert not await runtime.check_inactivity()  # starts the check
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert calls == [("It will be sunny tomorrow.", "ok so what should we have for dinner tonight")]
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_addressee_verdicts_that_keep_him_or_come_too_late_do_not_close() -> None:
+    """A "for Reachy" verdict leaves the window alone, and a stale "not for him" is dropped once he answers."""
+    clock = FakeClock()
+    verdicts = [True, False]
+    release = asyncio.Event()
+
+    async def judge(_reachy_said: str, _people_said: str) -> bool | None:
+        verdict = verdicts.pop(0)
+        if verdict is False:
+            await release.wait()
+        return verdict
+
+    runtime, handler = _follow_up_session(clock, judge)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime._on_handler_transcript(handler, generation, "assistant", "Want another song?", False)
+    runtime.note_playback_queued(1.0)
+    clock.advance(2)
+    runtime._on_handler_transcript(handler, generation, "user", "yes please play something", False)
+    clock.advance(2)
+    assert not await runtime.check_inactivity()  # judged: for Reachy
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not await runtime.check_inactivity()
+
+    runtime._on_handler_transcript(handler, generation, "user", "maybe some jazz or blues", False)
+    clock.advance(2)
+    assert not await runtime.check_inactivity()  # second check starts and waits
+    runtime._on_handler_transcript(handler, generation, "assistant", "Jazz it is!", False)
+    runtime.note_playback_queued(1.0)  # he answered meanwhile
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("text", "leads"),
+    [
+        ("Reachy, wake up", True),
+        ("hey Reachy what's up", True),
+        ("ok vale. Reachy, despierta", True),
+        ("¿Reachy, estás?", True),
+        ("I told Reachy that he was asleep", False),
+        ("this weekend, Reachy, can you check?", False),
+        ("", False),
+    ],
+)
+def test_name_leads_only_when_the_name_opens_a_sentence(text: str, leads: bool) -> None:
+    """While asleep, a name that opens the utterance or a sentence wakes him; one mid-sentence does not."""
+    from reachy_mini_conversation_app.hybrid_runtime import _name_leads
+
+    assert _name_leads(text) is leads
+
+
+@pytest.mark.asyncio
+async def test_asleep_an_acoustic_wake_mid_sentence_stays_asleep_without_moving() -> None:
+    """After "go to sleep", an acoustic hit on talk about Reachy neither acknowledges nor opens the cloud."""
+    processor = _processor_with_open_wake_segment("I told Reachy that")
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        wake_followup_timeout_s=0.1,
+    )
+    runtime._asleep = True
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert acknowledged == [] and not handler.started.is_set()
+        assert runtime._asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_asleep_the_name_first_wakes_him_and_he_stays_awake() -> None:
+    """A wake that starts with his name acknowledges (raising the head) and ends sleep mode."""
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        wake_followup_timeout_s=2.0,
+    )
+    runtime._asleep = True
+    try:
+        await _activate_and_collect(runtime, handler, TranscriptSegment("are you awake?", 2, 3, 3))
+        assert acknowledged == ["acoustic_wake"]
+        assert not runtime._asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_go_to_sleep_close_puts_the_runtime_to_sleep() -> None:
+    """Only the go_to_sleep close turns on the stricter wake; ending a chat does not."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.request_close("assistant_ended")
+    assert not runtime._asleep
+    await runtime.close()
+
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.request_close("go_to_sleep")
+    assert runtime._asleep
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_asleep_a_transcript_mention_mid_sentence_does_not_wake_him() -> None:
+    """Talking about Reachy while he sleeps leaves him asleep; starting with his name wakes him."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector("Reachy", cooldown_seconds=0),
+        wake_followup_timeout_s=0.1,
+    )
+    runtime._asleep = True
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("look, I think Reachy is sleeping", 1, 2, 1))
+        await asyncio.sleep(0.05)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, wake up", 3, 4, 2))
+        await wait_until(lambda: runtime.mode is not RuntimeMode.LOCAL_AMBIENT)
+        assert not runtime._asleep
+    finally:
+        await runtime.close()
