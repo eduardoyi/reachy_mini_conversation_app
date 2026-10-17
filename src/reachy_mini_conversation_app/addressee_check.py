@@ -14,6 +14,8 @@ from typing import Any, Final, Protocol
 
 from openai import AsyncOpenAI
 
+from reachy_mini_conversation_app.usage_costs import record_openai_usage
+
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,7 @@ class AddresseeCheck:
                 ),
                 timeout=REQUEST_TIMEOUT_S,
             )
+            record_openai_usage("addressee_check", self._model, response)
             verdict = json.loads(response.output_text)["to_reachy"]
         except asyncio.CancelledError:
             raise

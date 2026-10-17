@@ -1499,6 +1499,17 @@ class LocalStream:
 
         self._register_face_routes(settings_app, _local_access_denied)
 
+        @settings_app.get("/api/usage")
+        async def _usage_summary(request: Request) -> Response:
+            """Estimated AI spend: today, 7 and 30 days, by feature and latest conversations (same computer only)."""
+            denied = _local_access_denied(request)
+            if denied is not None:
+                return denied
+            from reachy_mini_conversation_app.usage_costs import get_ledger
+
+            summary = await asyncio.to_thread(get_ledger().summary)
+            return JSONResponse(summary, headers={"Cache-Control": "no-store"})
+
         # GET / -> index.html
         @settings_app.get("/")
         def _root() -> FileResponse:

@@ -21,6 +21,7 @@ from openai.types.responses.response import Response
 from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 
+from reachy_mini_conversation_app.usage_costs import record_openai_usage
 from reachy_mini_conversation_app.household_memory import (
     MemoryKind,
     MemoryEntry,
@@ -818,7 +819,9 @@ class MemoryCapture:
             if not done:
                 provider_task.cancel()
                 return None
-            return provider_task.result()
+            response = provider_task.result()
+            record_openai_usage("memory_capture", self._model, response)
+            return response
         except asyncio.CancelledError:
             provider_task.cancel()
             raise

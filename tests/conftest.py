@@ -18,3 +18,14 @@ os.environ["REACHY_MINI_SKIP_DOTENV"] = "1"
 os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", None)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _private_usage_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests from writing cost records into the developer's real usage ledger."""
+    from reachy_mini_conversation_app import usage_costs
+
+    monkeypatch.setattr(usage_costs, "_ledger", usage_costs.UsageLedger(tmp_path / "usage.jsonl"))

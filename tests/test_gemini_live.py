@@ -3238,3 +3238,29 @@ async def test_a_prompt_reply_or_more_speech_skips_the_thinking_gesture(gemini_c
     await asyncio.sleep(0.1)
     assert thinking_cues == []
     await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_turn_usage_is_summed_into_one_cost_record_per_connection(gemini_config, deps) -> None:
+    """Each turn's usage report adds up; the connection's total is written once to the cost ledger."""
+    from reachy_mini_conversation_app.usage_costs import get_ledger
+
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    for prompt in (2951, 3030):
+        usage = types.UsageMetadata(
+            prompt_token_count=prompt,
+            prompt_tokens_details=[types.ModalityTokenCount(modality=types.MediaModality.AUDIO, token_count=200)],
+            response_token_count=50,
+            response_tokens_details=[types.ModalityTokenCount(modality=types.MediaModality.AUDIO, token_count=50)],
+        )
+        await handler._handle_server_message(types.LiveServerMessage(usage_metadata=usage), session, 1)
+
+    handler._record_usage()
+    handler._record_usage()  # nothing new: no second record
+
+    [entry] = get_ledger().entries()
+    assert entry["feature"] == "conversation" and entry["turns"] == 2
+    assert entry["tokens"] == {"input_audio": 400, "input_text": 5581, "output_audio": 100}
+    await handler.shutdown()

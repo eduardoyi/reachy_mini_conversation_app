@@ -61,6 +61,7 @@ export async function mountSettingsView({ outlet, signal }) {
   const statusSection = buildStatusSection();
   const memorySection = buildMemorySection(signal);
   const facesSection = buildFacesSection(signal);
+  const costsSection = buildCostsSection(signal);
 
   const view = h(
     "section",
@@ -75,7 +76,8 @@ export async function mountSettingsView({ outlet, signal }) {
     voiceSection.element,
     statusSection.element,
     memorySection,
-    facesSection
+    facesSection,
+    costsSection
   );
   outlet.replaceChildren(view);
 
@@ -252,6 +254,63 @@ function buildFacesSection(signal) {
   });
   show.addEventListener("click", refresh);
   return h("section", { class: "settings-section" }, h("h2", { class: "settings-section-title" }, "Faces Reachy knows"), message, enrollRow, show, people);
+}
+
+const FEATURE_LABELS = Object.freeze({
+  conversation: "Conversations (Gemini)",
+  memory_capture: "Saving memories",
+  memory_review: "Daily memory tidy-up",
+  addressee_check: "Side-conversation check",
+});
+
+function formatUsd(value) {
+  if (typeof value !== "number") return "unknown";
+  return value < 0.01 && value > 0 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+function buildCostsSection(signal) {
+  const message = h("p", { class: "settings-hint" }, "Estimated from the tokens each provider reports and their list prices. Your Google and OpenAI bills are the exact numbers.");
+  const details = h("div", {});
+  const show = h("button", { type: "button", class: "btn" }, "Show costs");
+  async function refresh() {
+    show.disabled = true;
+    try {
+      const response = await fetch("/api/usage", { cache: "no-store", signal });
+      if (response.status === 403) throw new Error("Open these settings on Reachy’s computer to see costs.");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Costs are unavailable.");
+      if (signal.aborted) return;
+      const totals = result.totals;
+      const lines = [
+        h("p", {}, `Today ${formatUsd(totals.today)} · Last 7 days ${formatUsd(totals.last_7_days)} · Last 30 days ${formatUsd(totals.last_30_days)}`),
+      ];
+      const features = Object.entries(result.by_feature);
+      if (features.length) {
+        lines.push(h("small", {}, "Last 30 days by feature"));
+        for (const [feature, cost] of features) lines.push(h("p", {}, `${FEATURE_LABELS[feature] || feature}: ${formatUsd(cost)}`));
+      }
+      if (result.recent_conversations.length) {
+        lines.push(h("small", {}, "Latest conversations"));
+        for (const item of result.recent_conversations) {
+          const when = new Date(item.ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+          const minutes = typeof item.duration_s === "number" ? ` · ${Math.max(1, Math.round(item.duration_s / 60))} min` : "";
+          lines.push(h("p", {}, `${when}${minutes} · ${item.turns ?? "?"} turns · ${formatUsd(item.cost_usd)}`));
+        }
+      } else {
+        lines.push(h("p", {}, "No conversations recorded yet."));
+      }
+      details.replaceChildren(...lines);
+    } catch (error) {
+      if (!signal.aborted) {
+        details.replaceChildren();
+        message.textContent = error.message || "Costs are unavailable.";
+      }
+    } finally {
+      show.disabled = false;
+    }
+  }
+  show.addEventListener("click", refresh);
+  return h("section", { class: "settings-section" }, h("h2", { class: "settings-section-title" }, "AI costs"), message, show, details);
 }
 
 function buildMemorySection(signal) {

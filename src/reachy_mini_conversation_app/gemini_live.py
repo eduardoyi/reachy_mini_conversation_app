@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.usage_costs import add_tokens, get_ledger, gemini_turn_tokens
 from reachy_mini_conversation_app.spoken_turns import SpokenTurnAssembler
 from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
@@ -260,6 +261,10 @@ class GeminiLiveHandler(ConversationHandler):
         self._interaction_deadline_at: float | None = None
         self._interaction_deadline_task: asyncio.Task[None] | None = None
         self._thinking_cue_task: asyncio.Task[None] | None = None
+        # Token usage reported this connection (one report per turn), recorded when it ends.
+        self._usage_tokens: dict[str, int] = {}
+        self._usage_turns = 0
+        self._usage_started_at: float | None = None
         self._accepted_input_at: float | None = None
         self._protocol_fenced = False
         self._terminal_policy_fenced = False
@@ -484,6 +489,25 @@ class GeminiLiveHandler(ConversationHandler):
         """Cancel a provider deadline task unless it is already complete."""
         if task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
+
+    def _record_usage(self) -> None:
+        """Write this connection's token usage to the cost ledger and log the estimate."""
+        tokens, turns, started = self._usage_tokens, self._usage_turns, self._usage_started_at
+        self._usage_tokens, self._usage_turns, self._usage_started_at = {}, 0, None
+        if not tokens:
+            return
+        duration = round(time.perf_counter() - started, 1) if started is not None else None
+        try:
+            cost = get_ledger().record("conversation", self._model, tokens, turns=turns, duration_s=duration)
+        except Exception as error:  # usage tracking must never break a conversation
+            logger.debug("Usage tracking failed: %s", type(error).__name__)
+            return
+        logger.info(
+            "Gemini session usage est_cost=%s turns=%d %s",
+            "unknown" if cost is None else f"${cost:.4f}",
+            turns,
+            " ".join(f"{kind}={count}" for kind, count in sorted(tokens.items())),
+        )
 
     def _arm_thinking_cue(self, generation: int) -> None:
         """Show a thinking gesture if no reply audio starts soon after the user stops talking."""
@@ -1407,6 +1431,7 @@ class GeminiLiveHandler(ConversationHandler):
                     "Gemini session events %s",
                     " ".join(f"{key}={value}" for key, value in sorted(self._server_event_counts.items())) or "none",
                 )
+            self._record_usage()
             if video_task is not None:
                 video_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -1538,6 +1563,12 @@ class GeminiLiveHandler(ConversationHandler):
         if not self._is_current_session(session, generation):
             return
         self._count_server_event(event)
+        if self._usage_started_at is None:
+            self._usage_started_at = time.perf_counter()  # this connection's first message
+        usage = getattr(event, "usage_metadata", None)
+        if usage is not None:
+            add_tokens(self._usage_tokens, gemini_turn_tokens(usage))
+            self._usage_turns += 1
         if event.setup_complete is not None:
             logger.debug("Gemini Live setup complete")
 
