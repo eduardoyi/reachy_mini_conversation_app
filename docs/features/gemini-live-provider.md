@@ -1,7 +1,7 @@
 # Feature: Gemini Live provider
 
 - Status: `in-progress`
-- Last updated: 2026-09-16
+- Last updated: 2026-10-17
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -237,6 +237,16 @@ Native Google Search is available in every Gemini session, including sessions
 using the hybrid runtime, independently of the selected profile's custom tool
 access. Gemini handles that search server-side; only application function calls
 enter the shared local tool manager and require a client function response.
+
+Thinking and tool calls can leave Gemini silent for several seconds after the
+user stops talking. Two things show that Reachy heard. The
+`household_companion` profile asks for a two-to-four-word acknowledgement
+("Let me check") before a tool or search. If no reply audio has started
+`_THINKING_CUE_DELAY_S` (2 s) after Gemini reports speech end, the handler
+queues the recorded `thinking` emotion through `queue_intent_move`. Reply
+audio, renewed user speech, an interruption, or the session ending cancels the
+pending gesture. Typical replies start within about 1.5 s, so the gesture only
+appears on slow turns.
 
 The `camera` tool is on-demand. By default a camera frame is sent to Gemini only
 as the result of an explicit camera-tool call, not merely because a camera exists.
@@ -645,6 +655,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 
 | Date | Change |
 |------|--------|
+| 2026-10-17 | Added the spoken acknowledgement instruction and the 2-second thinking gesture so slow thinking or tool turns show the user they were heard. |
 | 2026-09-01 | Enabled Gemini Live's managed `google_search` tool alongside profile-selected application function declarations; retained the custom Pollen MCP search, weather, and time tools for dedicated application lookups. |
 | 2026-08-31 | Documented and tested project `.env` precedence: explicit process/terminal values win while unset Gemini configuration continues to load from the ignored `.env`. |
 | 2026-08-31 | Made profile and voice changes intentional reconnects across setup and initial-history races, drained stale provider/playback output, and preserved hybrid cloud state while the replacement session becomes ready. |

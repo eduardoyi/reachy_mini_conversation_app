@@ -34,6 +34,7 @@ from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalO
 from reachy_mini_conversation_app.spoken_turns import SpokenTurnAssembler
 from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
+from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
 from reachy_mini_conversation_app.local_audio_backends import (
     LOCAL_BARGE_IN_ONSET_MS,
@@ -97,6 +98,9 @@ _VIDEO_GUIDANCE: Final[str] = (
 )
 _LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
 _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
+# If Reachy stays silent this long after the user stops talking (thinking or running a tool),
+# a thinking gesture shows that he heard; ordinary replies start well within it.
+_THINKING_CUE_DELAY_S: Final[float] = 2.0
 _MEMORY_REVISION_POLL_S: Final[float] = 0.25
 _MEMORY_CAPTURE_CLOSE_TIMEOUT_S: Final[float] = 2.0
 _MEMORY_REVIEW_CLOSE_TIMEOUT_S: Final[float] = 2.0
@@ -255,6 +259,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._camera_limit_activated = False
         self._interaction_deadline_at: float | None = None
         self._interaction_deadline_task: asyncio.Task[None] | None = None
+        self._thinking_cue_task: asyncio.Task[None] | None = None
         self._accepted_input_at: float | None = None
         self._protocol_fenced = False
         self._terminal_policy_fenced = False
@@ -479,6 +484,26 @@ class GeminiLiveHandler(ConversationHandler):
         """Cancel a provider deadline task unless it is already complete."""
         if task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
+
+    def _arm_thinking_cue(self, generation: int) -> None:
+        """Show a thinking gesture if no reply audio starts soon after the user stops talking."""
+        self._cancel_thinking_cue()
+        self._thinking_cue_task = asyncio.create_task(self._thinking_cue_after_delay(generation))
+
+    def _cancel_thinking_cue(self) -> None:
+        """Drop a pending thinking gesture (reply audio arrived, the user spoke again, or the session ended)."""
+        self._cancel_deadline_task(self._thinking_cue_task)
+        self._thinking_cue_task = None
+
+    async def _thinking_cue_after_delay(self, generation: int) -> None:
+        """Queue the thinking gesture once the delay passes without a reply."""
+        await asyncio.sleep(_THINKING_CUE_DELAY_S)
+        if self._active_generation != generation:
+            return
+        self._thinking_cue_task = None
+        move = await asyncio.to_thread(queue_intent_move, self.deps.movement_manager, "thinking")
+        if move is not None:
+            logger.info("No reply %.0f s after the user stopped; showing %s", _THINKING_CUE_DELAY_S, move)
 
     def _clear_interaction_deadline(self) -> None:
         """Clear the fixed interaction deadline after authoritative IDLE."""
@@ -1250,6 +1275,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._last_user_transcript = None
         self._last_assistant_transcript = None
         self._clear_first_audio_markers(reason="session_restarted")
+        self._cancel_thinking_cue()
         self._cancel_deadline_task(self._session_deadline_task)
         self._cancel_deadline_task(self._interaction_deadline_task)
         self._session_deadline_task = None
@@ -1401,6 +1427,7 @@ class GeminiLiveHandler(ConversationHandler):
             self._clear_interaction_deadline()
             self._emit_interaction_busy(False)
             self._clear_first_audio_markers(reason="session_closed")
+            self._cancel_thinking_cue()
             self._reset_local_barge_in_state()
             self.deps.movement_manager.set_listening(False)
             if self.connection is active_session:
@@ -1523,6 +1550,7 @@ class GeminiLiveHandler(ConversationHandler):
                 self._start_user_turn()
                 if self._extended_thinking and self._accepted_input_at is None:
                     self._accepted_input_at = time.perf_counter()
+                self._cancel_thinking_cue()
                 await self._clear_playback_for_interrupt()
                 self.deps.movement_manager.set_listening(True)
             elif activity_type == types.VoiceActivityType.ACTIVITY_END:
@@ -1530,6 +1558,7 @@ class GeminiLiveHandler(ConversationHandler):
                 self._mark_user_turn_end("voice_activity_end")
                 self._start_interaction_deadline_if_needed(session, generation)
                 self.deps.movement_manager.set_listening(False)
+                self._arm_thinking_cue(generation)
 
         server_content = event.server_content
         if server_content is not None:
@@ -1562,6 +1591,7 @@ class GeminiLiveHandler(ConversationHandler):
                         interruption_started_at,
                     )
                 self._clear_first_audio_markers(reason="interrupted")
+                self._cancel_thinking_cue()
                 self._spoken_turns.interrupted()
                 self._mark_activity("server_interrupted")
                 if self._extended_thinking and not await self._cancel_pending_tools(generation):
@@ -1619,6 +1649,7 @@ class GeminiLiveHandler(ConversationHandler):
                         )
                         self._camera_frame_sent_at = None
                     self._mark_activity("assistant_audio_delta")
+                    self._cancel_thinking_cue()
                     self.deps.movement_manager.set_speaking(True)
                     playable = self._audio_chunks.push(audio_data)
                     if playable is not None:

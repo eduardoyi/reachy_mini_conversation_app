@@ -228,3 +228,30 @@ async def test_play_emotion_queues_random_for_unknown_emotion(
     assert "play_emotion: 'contento' did not resolve; using random curated" in caplog.text
     queued_move = movement_manager.queue_move.call_args.args[0]
     assert queued_move.emotion_name == "confused1"
+
+
+def test_queue_intent_move_queues_the_gesture_and_survives_a_broken_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The thinking cue queues its recorded move, and a library failure never breaks the conversation."""
+
+    class FakeRecordedMoves:
+        def list_moves(self) -> list[str]:
+            return ["thoughtful1", "attentive1"]
+
+    class FakeEmotionQueueMove:
+        def __init__(self, emotion_name: str, recorded_moves: FakeRecordedMoves) -> None:
+            self.emotion_name = emotion_name
+
+    monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
+    monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
+    monkeypatch.setattr(play_emotion_module, "_cue_library", FakeRecordedMoves())
+    movement_manager = MagicMock()
+
+    assert play_emotion_module.queue_intent_move(movement_manager, "thinking") == "thoughtful1"
+    assert movement_manager.queue_move.call_args.args[0].emotion_name == "thoughtful1"
+
+    def broken(_name: str) -> None:
+        raise OSError("dataset unavailable")
+
+    monkeypatch.setattr(play_emotion_module, "_cue_library", None)
+    monkeypatch.setattr(play_emotion_module, "RecordedMoves", broken)
+    assert play_emotion_module.queue_intent_move(MagicMock(), "thinking") is None

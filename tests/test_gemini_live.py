@@ -3172,3 +3172,69 @@ async def test_shutdown_discards_unfinished_audio_before_reactivation(gemini_con
     await handler.shutdown()
     assert handler._audio_chunks.finish() is None
     assert handler.output_queue.empty()
+
+
+async def _voice(
+    handler: gemini_live.GeminiLiveHandler, session: FakeSession, activity: types.VoiceActivityType
+) -> None:
+    await handler._handle_server_message(
+        types.LiveServerMessage(voice_activity=types.VoiceActivity(voice_activity_type=activity)), session, 1
+    )
+
+
+async def _reply_audio(handler: gemini_live.GeminiLiveHandler, session: FakeSession) -> None:
+    audio = types.Part(inline_data=types.Blob(data=np.array([1, 2], dtype=np.int16).tobytes(), mime_type="audio/pcm"))
+    await handler._handle_server_message(
+        types.LiveServerMessage(server_content=types.LiveServerContent(model_turn=types.Content(parts=[audio]))),
+        session,
+        1,
+    )
+
+
+@pytest.fixture
+def thinking_cues(monkeypatch) -> list[str]:
+    """Record thinking gestures instead of loading the emotion library, with a short delay."""
+    cues: list[str] = []
+
+    def record(_movement_manager: object, intent: str) -> str:
+        cues.append(intent)
+        return "thoughtful1"
+
+    monkeypatch.setattr(gemini_live, "queue_intent_move", record)
+    monkeypatch.setattr(gemini_live, "_THINKING_CUE_DELAY_S", 0.02)
+    return cues
+
+
+@pytest.mark.asyncio
+async def test_silence_after_the_user_stops_shows_a_thinking_gesture(gemini_config, deps, thinking_cues) -> None:
+    """While Gemini thinks or runs a tool without speaking, Reachy shows that he heard."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_START)
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_END)
+    await asyncio.sleep(0.1)
+
+    assert thinking_cues == ["thinking"]
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_reply_or_more_speech_skips_the_thinking_gesture(gemini_config, deps, thinking_cues) -> None:
+    """Reply audio before the delay, or the user talking again, cancels the gesture."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_START)
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_END)
+    await _reply_audio(handler, session)
+    await asyncio.sleep(0.1)
+    assert thinking_cues == []
+
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_END)
+    await _voice(handler, session, types.VoiceActivityType.ACTIVITY_START)
+    await asyncio.sleep(0.1)
+    assert thinking_cues == []
+    await handler.shutdown()

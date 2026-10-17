@@ -286,3 +286,27 @@ class PlayEmotion(Tool):
         except Exception as e:
             logger.exception("Failed to play emotion")
             return {"error": f"Failed to play emotion: {e!s}"}
+
+
+_cue_library: "RecordedMoves | None" = None
+
+
+def queue_intent_move(movement_manager: Any, intent: str) -> str | None:
+    """Queue the recorded move for ``intent`` (e.g. "thinking") outside a tool call; return its name or None.
+
+    Blocks while the emotion library loads the first time, so call it from a worker thread.
+    """
+    global _cue_library
+    if not EMOTION_AVAILABLE:
+        return None
+    try:
+        if _cue_library is None:
+            _cue_library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+        emotion_name = resolve_emotion_name(intent, _cue_library.list_moves())
+        if emotion_name is None:
+            return None
+        movement_manager.queue_move(EmotionQueueMove(emotion_name, _cue_library))
+        return emotion_name
+    except Exception as error:
+        logger.warning("Could not queue %s move: %s", intent, type(error).__name__)
+        return None
