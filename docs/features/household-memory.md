@@ -198,7 +198,7 @@ or end-of-day job is created.
 | Output | 1,000 tokens; at most six proposals |
 | Request interval | At least 10 seconds within an activation, after a user-text pause |
 | Timeout / retries | 20 seconds / no automatic retries |
-| Daily allowance | 60 attempts and 60,000 reserved output tokens |
+| Daily allowance | 300 attempts and 300,000 reserved output tokens (raised from 60 on 2026-10-17 after a lively evening used them up in about an hour) |
 
 `memory.capture-budget.v1.json` stores date and counters only. Reservations are
 written before requests, including failed/cancelled attempts, and survive
@@ -285,8 +285,8 @@ and promoted, and three lasting notes were promoted to facts.
 
 One attempt per activation, at most two reserved attempts per local day, at most
 one successful daily review. Each request is capped at 20,000 input characters,
-2,000 output tokens and 30 seconds. With capture's independent 60,000-token cap,
-combined background output reservations are at most 64,000 tokens per local day.
+2,000 output tokens and 30 seconds. With capture's independent 300,000-token cap,
+combined background output reservations are at most 304,000 tokens per local day.
 This does not include normal speech/delegation and is not a dollar budget.
 
 Standby, forgetting or shutdown fences pending work. A revision change while the

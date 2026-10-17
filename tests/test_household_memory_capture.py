@@ -1182,7 +1182,14 @@ async def test_exhausted_budget_blocks_requests_and_resumes_next_day(
     client = _FakeClient(_proposal_for_request)
     capture, store = _capture(tmp_path, client)
     capture.budget_path.write_text(
-        json.dumps({"version": 1, "local_date": "2026-09-11", "calls": 60, "reserved_output_tokens": 60000}),
+        json.dumps(
+            {
+                "version": 1,
+                "local_date": "2026-09-11",
+                "calls": capture_module.BUDGET_CALL_LIMIT,
+                "reserved_output_tokens": capture_module.BUDGET_OUTPUT_TOKEN_LIMIT,
+            }
+        ),
         encoding="utf-8",
     )
     with caplog.at_level(logging.INFO):
@@ -1192,7 +1199,8 @@ async def test_exhausted_budget_blocks_requests_and_resumes_next_day(
         await capture.close()
     assert client.responses.calls == []
     assert capture.stats.budget_blocked == 1
-    assert "reserved_calls=60 limit=60" in caplog.text
+    limit = capture_module.BUDGET_CALL_LIMIT
+    assert f"reserved_calls={limit} limit={limit}" in caplog.text
     assert "resumes on the next local day" in caplog.text
     assert "Eduardo likes jazz" not in caplog.text
 

@@ -44,8 +44,9 @@ REQUEST_TIMEOUT_S: Final[float] = 20.0
 REQUEST_INTERVAL_S: Final[float] = 10.0
 SETTLING_DELAY_S: Final[float] = 2.0
 _MAX_EVIDENCE_GAP_MS: Final[int] = 3_000
-BUDGET_CALL_LIMIT: Final[int] = 60
-BUDGET_OUTPUT_TOKEN_LIMIT: Final[int] = 60_000
+# A lively evening with the kids used all of the earlier 60 calls in about an hour (2026-10-17).
+BUDGET_CALL_LIMIT: Final[int] = 300
+BUDGET_OUTPUT_TOKEN_LIMIT: Final[int] = 300_000
 BUDGET_FILENAME: Final[str] = "memory.capture-budget.v1.json"
 _CANCEL_WAIT_TIMEOUT_S: Final[float] = 1.0
 _UNKNOWN_SUBJECTS: Final[frozenset[str]] = frozenset({"", "none", "null", "unknown", "unknown_subject", "n/a"})
