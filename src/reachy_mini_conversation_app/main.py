@@ -424,6 +424,7 @@ def run(
         from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
 
         SPOTIFY_DUCKER.music_playing_callback = getattr(hybrid_runtime, "request_music_wind_down", None)
+        SPOTIFY_DUCKER.music_stopped_callback = getattr(hybrid_runtime, "cancel_music_wind_down", None)
         handler: ConversationHandler | HybridRuntime = hybrid_runtime
         logger.info("Hybrid runtime enabled; provider construction deferred until activation")
     else:
@@ -602,6 +603,12 @@ def run(
             robot.media.close()
         except Exception as e:
             logger.debug(f"Error closing media during shutdown: {e}")
+
+        # A conversation open at exit leaves Spotify lowered or an episode paused; put it back.
+        if hybrid_runtime is not None:
+            from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+            SPOTIFY_DUCKER.restore_on_exit()
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()

@@ -1559,7 +1559,6 @@ async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
     handler.set_connected(True)
     generation = runtime.generation
     runtime._on_handler_activity(handler, generation, "user_speech_started")  # music heard as speech
-    runtime._on_handler_interaction_busy(handler, generation, True)
 
     runtime.request_music_wind_down()
     clock.advance(2)
@@ -1627,6 +1626,183 @@ async def test_music_wind_down_closes_after_twenty_seconds_without_a_reply() -> 
     assert not await runtime.check_inactivity()
     clock.advance(1.5)
     assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_keeps_a_follow_up_open_from_its_partial_transcript() -> None:
+    """A follow-up still being spoken (only partial transcripts so far) is not cut off by the countdown."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime.note_playback_queued(1.0)  # Reachy answers the wake request, t=0..1
+
+    clock.advance(4)  # t=4: the user starts a follow-up
+    runtime._on_handler_activity(handler, generation, "user_speech_started")
+    runtime._on_handler_transcript(handler, generation, "user", "and what about", False)
+    clock.advance(3)  # t=7: 6 s after the reply, still talking
+    runtime._on_handler_transcript(handler, generation, "user", "tomorrow in Rome", False)
+    assert not await runtime.check_inactivity()
+    clock.advance(5)  # t=12: Reachy thinking about the follow-up
+    assert not await runtime.check_inactivity()
+    runtime.note_playback_queued(1.0)  # answer plays t=12..13
+    clock.advance(5.5)  # t=17.5: 4.5 s after the answer
+    assert not await runtime.check_inactivity()
+    clock.advance(1)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_holds_briefly_when_speech_starts_after_the_reply() -> None:
+    """Speech starting near the end of the window holds the close until its transcript can arrive."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    clock.advance(5.5)  # t=5.5: speech starts just before the 5 s window ends
+    runtime._on_handler_activity(handler, generation, "user_speech_started")
+    clock.advance(1)  # t=6.5: past the window, but held
+    assert not await runtime.check_inactivity()
+    clock.advance(2.1)  # t=8.6: no transcript followed (likely music), so close
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_started_mid_conversation_waits_for_reachys_short_reply() -> None:
+    """When Reachy starts music, its "Enjoy!" comes first and the countdown follows it."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.note_playback_queued(1.0)  # an earlier reply, t=0..1
+
+    clock.advance(10)  # t=10: the play tool succeeds
+    runtime.request_music_wind_down()
+    clock.advance(0.5)
+    assert not await runtime.check_inactivity()
+    runtime.note_playback_queued(1.0)  # "Enjoy!" plays t=10.5..11.5
+    clock.advance(5)  # t=15.5: 4 s after "Enjoy!"
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)  # 5.5 s after "Enjoy!"
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_waits_for_the_answer_after_let_me_check() -> None:
+    """A "let me check" while Gemini is still busy (a tool running) does not start the countdown."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime._on_handler_interaction_busy(handler, generation, True)
+    runtime.note_playback_queued(1.0)  # "let me check", t=0..1
+
+    clock.advance(8)  # t=8: the weather tool is still running
+    assert not await runtime.check_inactivity()
+    runtime.note_playback_queued(2.0)  # the answer, t=8..10
+    clock.advance(2)
+    runtime._on_handler_interaction_busy(handler, generation, False)
+    clock.advance(4)  # t=14: 4 s after the answer
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_busy_flag_stuck_on_music_only_holds_up_to_the_cap() -> None:
+    """If the busy flag never clears (music heard as speech), the close comes 20 s after the reply."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime._on_handler_interaction_busy(handler, generation, True)
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    clock.advance(20)  # t=20: 19 s after the reply
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_new_song_over_music_already_playing_waits_for_reachys_short_reply() -> None:
+    """A song Reachy starts while music was already playing at the wake still gets its "Enjoy!"."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.request_music_wind_down()  # music playing at the wake
+    runtime.note_playback_queued(1.0)  # "Sure, putting it on", t=0..1
+
+    clock.advance(4)  # t=4: the new song starts
+    runtime.request_music_wind_down()
+    clock.advance(3)  # t=7: past 5 s after the first reply, but waiting for "Enjoy!"
+    assert not await runtime.check_inactivity()
+    runtime.note_playback_queued(1.0)  # "Enjoy!", t=7..8
+    clock.advance(5.5)  # t=12.5: 4.5 s after "Enjoy!"
+    assert not await runtime.check_inactivity()
+    clock.advance(1)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_pausing_the_music_returns_the_conversation_to_the_normal_timeout() -> None:
+    """After "pause the music" the user can keep chatting: the 60 s rule applies again."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.request_music_wind_down()
+    clock.advance(2)
+    runtime.cancel_music_wind_down()
+    runtime.note_playback_queued(1.0)  # "Paused." t=2..3
+
+    clock.advance(30)
+    assert not await runtime.check_inactivity()
+    clock.advance(31)
+    assert await runtime.check_inactivity()
+    assert runtime.mode in (RuntimeMode.STOPPING, RuntimeMode.LOCAL_AMBIENT)
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_music_wind_down_closes_when_lyrics_keep_arriving_as_user_text() -> None:
+    """Endless partial transcripts (lyrics heard as speech) cannot hold the session past the turn cap."""
+    clock = FakeClock()
+    runtime, handler = _music_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.request_music_wind_down()
+    runtime.note_playback_queued(1.0)
+
+    clock.advance(2)
+    closed = False
+    for _ in range(40):
+        runtime._on_handler_transcript(handler, generation, "user", "la la la", False)
+        clock.advance(2)
+        if await runtime.check_inactivity():
+            closed = True
+            break
+    assert closed
+    assert 60 <= clock() <= 64
     await runtime.close()
 
 

@@ -241,3 +241,57 @@ is not detected and keeps the normal 60 s rule. Tests:
 `test_music_wind_down_closes_after_twenty_seconds_without_a_reply`,
 `test_ducker_reports_music_playing_at_the_wake`.
 
+Follow-ups and "Enjoy!" (2026-10-17): on the Reachy Mini Lite, conversations with music
+playing closed while the user was speaking a follow-up, and a song Reachy started closed
+the conversation before its "Enjoy!". Two causes: only a finished user transcript counted
+as a new turn, and Gemini finishes the transcript only after the user stops, so the 5 s
+countdown expired mid-sentence; and when music started mid-conversation, Reachy's earlier
+reply already counted as the answer. Now any user transcript text, partial or final,
+starts or extends a turn; user speech that starts after Reachy's reply holds the close
+for 3 s so its transcript can arrive; and music starting mid-conversation counts as a
+turn, so the countdown starts after Reachy's short reply. A turn without an answer closes
+20 s after the user's last words, and at most 60 s after it began, so lyrics transcribed
+as speech cannot hold the conversation open. Tests:
+`test_music_wind_down_keeps_a_follow_up_open_from_its_partial_transcript`,
+`test_music_wind_down_holds_briefly_when_speech_starts_after_the_reply`,
+`test_music_started_mid_conversation_waits_for_reachys_short_reply`,
+`test_music_wind_down_closes_when_lyrics_keep_arriving_as_user_text`.
+
+"Let me check" (2026-10-17): with music playing, "what's the weather in Caracas" got
+"let me check that", and the conversation closed while the weather tool ran, before the
+answer. The interim sentence counted as Reachy's reply, and Gemini's busy flag was
+ignored because loud music used to keep it set. Busy now holds the close (up to 20 s
+after Reachy last spoke, so a flag stuck on music cannot hold it open), so the
+countdown starts after the real answer. A song Reachy starts while music was already
+playing at the wake also waits for its "Enjoy!" again; only the first music report per
+conversation used to count. Tests: `test_music_wind_down_waits_for_the_answer_after_let_me_check`,
+`test_music_wind_down_busy_flag_stuck_on_music_only_holds_up_to_the_cap`,
+`test_new_song_over_music_already_playing_waits_for_reachys_short_reply`.
+
+Podcasts, pauses and failed restores (2026-10-17):
+
+- A podcast or audiobook episode playing at the wake (`currently_playing_type` is
+  `episode`) is paused instead of lowered, because its voices would be heard as the
+  user. It resumes when the conversation ends, unless something else was played or
+  resumed meanwhile. The conversation still closes quickly. An episode Reachy starts
+  during a conversation is lowered as before.
+- "Pause the music" (the tool's `pause` action) calls `SpotifyDucker.playback_paused`.
+  Playback stays paused afterwards, and the runtime's `cancel_music_wind_down` switches
+  the conversation back to the normal inactivity timeout. A later `play` or `resume`
+  switches quick closing back on.
+- A failed restore (volume or episode) is retried once after 1 s. If that also fails,
+  the saved level is kept and the next conversation end tries again, so the music no
+  longer stays lowered for good.
+- Quitting the app mid-conversation runs `SpotifyDucker.restore_on_exit` in the
+  shutdown path (in its own short event loop, 5 s limit), so Spotify is not left lowered
+  or paused.
+
+Tests: `test_ducker_pauses_an_episode_and_resumes_it_afterwards`,
+`test_ducker_does_not_resume_an_episode_after_something_else_played`,
+`test_user_pause_keeps_the_episode_paused_and_stops_quick_closing`,
+`test_pause_action_reports_the_pause_to_the_ducker`,
+`test_ducker_retries_a_failed_restore_once`,
+`test_ducker_keeps_the_level_when_restore_keeps_failing_and_restores_next_time`,
+`test_restore_on_exit_puts_the_volume_back_after_the_event_loop_ended`,
+`test_pausing_the_music_returns_the_conversation_to_the_normal_timeout`.
+

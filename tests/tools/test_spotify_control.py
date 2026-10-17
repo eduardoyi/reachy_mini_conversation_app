@@ -447,3 +447,179 @@ async def test_ducker_reports_music_playing_at_the_wake(configured, monkeypatch)
     ducker2.music_playing_callback = lambda: notified.append(False)
     await ducker2.session_started()
     assert notified == [True]
+
+
+def _episode_handler(state, calls):
+    """Serve an episode (or track) player for the ducker and record pause/play/volume commands."""
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/me/player/devices"):
+            return httpx.Response(
+                200, json={"devices": [{"id": "mac", "volume_percent": state["volume"], "supports_volume": True}]}
+            )
+        if path.endswith("/me/player/pause"):
+            state["playing"] = False
+            calls.append("pause")
+            return httpx.Response(204)
+        if path.endswith("/me/player/play"):
+            state["playing"] = True
+            calls.append("play")
+            return httpx.Response(204)
+        if path.endswith("/me/player/volume"):
+            state["volume"] = int(request.url.params["volume_percent"])
+            calls.append(state["volume"])
+            return httpx.Response(204)
+        if path.endswith("/me/player"):
+            return httpx.Response(
+                200,
+                json={
+                    "is_playing": state["playing"],
+                    "currently_playing_type": state["type"],
+                    "item": {"uri": state["uri"]},
+                    "device": {"id": "mac"},
+                },
+            )
+        raise AssertionError(path)
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_ducker_pauses_an_episode_and_resumes_it_afterwards(configured, monkeypatch):
+    """A podcast is paused (its voices would be heard as the user), not lowered, and resumed after."""
+    state = {"volume": 60, "playing": True, "type": "episode", "uri": "spotify:episode:" + "e" * 22}
+    calls: list[object] = []
+    install_transport(monkeypatch, _episode_handler(state, calls))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+    notified: list[bool] = []
+    ducker.music_playing_callback = lambda: notified.append(True)
+
+    await ducker.session_started()
+    assert calls == ["pause"]
+    assert notified == [True]  # still a quick close: the user is waiting to get back to the episode
+    await ducker.session_ended()
+
+    assert calls == ["pause", "play"]
+    assert state["volume"] == 60
+
+
+@pytest.mark.asyncio
+async def test_ducker_does_not_resume_an_episode_after_something_else_played(configured, monkeypatch):
+    """If other audio was started during the conversation, the paused episode stays paused."""
+    state = {"volume": 60, "playing": True, "type": "episode", "uri": "spotify:episode:" + "e" * 22}
+    calls: list[object] = []
+    install_transport(monkeypatch, _episode_handler(state, calls))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    state.update(playing=False, type="track", uri="spotify:track:" + "t" * 22)  # a song, paused again
+    await ducker.session_ended()
+
+    assert calls == ["pause"]
+
+
+@pytest.mark.asyncio
+async def test_user_pause_keeps_the_episode_paused_and_stops_quick_closing(configured, monkeypatch):
+    """Pausing on request keeps playback paused after the conversation and ends the quick close."""
+    state = {"volume": 60, "playing": True, "type": "episode", "uri": "spotify:episode:" + "e" * 22}
+    calls: list[object] = []
+    install_transport(monkeypatch, _episode_handler(state, calls))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+    stopped: list[bool] = []
+    ducker.music_stopped_callback = lambda: stopped.append(True)
+
+    await ducker.session_started()
+    ducker.playback_paused()
+    await ducker.session_ended()
+
+    assert calls == ["pause"]
+    assert stopped == [True]
+
+
+@pytest.mark.asyncio
+async def test_pause_action_reports_the_pause_to_the_ducker(configured, monkeypatch):
+    """The tool's pause action tells the ducker, so a conversation stops closing quickly."""
+
+    def handler(request):
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    ducker = spotify_control.SPOTIFY_DUCKER
+    stopped: list[bool] = []
+    monkeypatch.setattr(ducker, "_session_active", True)
+    monkeypatch.setattr(ducker, "music_stopped_callback", lambda: stopped.append(True))
+
+    result = await SpotifyControl()(Mock(spec=ToolDependencies), action="pause")
+
+    assert result == {"status": "Spotify accepted the pause command."}
+    assert stopped == [True]
+
+
+@pytest.mark.asyncio
+async def test_ducker_retries_a_failed_restore_once(configured, monkeypatch):
+    """A transient Spotify error on restore is retried, so the music does not stay lowered."""
+    state = {"volume": 60, "playing": True}
+    puts: list[int] = []
+    base = _player_handler(state, puts)
+    failures = {"left": 0}
+
+    def handler(request):
+        if request.url.path.endswith("/me/player/volume") and failures["left"]:
+            failures["left"] -= 1
+            return httpx.Response(503)
+        return base(request)
+
+    install_transport(monkeypatch, handler)
+    monkeypatch.setattr(spotify_control.SpotifyDucker, "_RESTORE_RETRY_DELAY_S", 0.0)
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    failures["left"] = 1
+    await ducker.session_ended()
+
+    assert puts == [20, 60]
+
+
+@pytest.mark.asyncio
+async def test_ducker_keeps_the_level_when_restore_keeps_failing_and_restores_next_time(configured, monkeypatch):
+    """After two failures the original level is kept, and the next conversation end restores it."""
+    state = {"volume": 60, "playing": True}
+    puts: list[int] = []
+    base = _player_handler(state, puts)
+    failures = {"left": 0}
+
+    def handler(request):
+        if request.url.path.endswith("/me/player/volume") and failures["left"]:
+            failures["left"] -= 1
+            return httpx.Response(503)
+        return base(request)
+
+    install_transport(monkeypatch, handler)
+    monkeypatch.setattr(spotify_control.SpotifyDucker, "_RESTORE_RETRY_DELAY_S", 0.0)
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    failures["left"] = 2
+    await ducker.session_ended()
+    assert state["volume"] == 20
+
+    await ducker.session_started()  # already at the low level: nothing to lower, original level kept
+    await ducker.session_ended()
+    assert puts == [20, 60]
+
+
+def test_restore_on_exit_puts_the_volume_back_after_the_event_loop_ended(configured, monkeypatch):
+    """Quitting mid-conversation restores the lowered volume from the shutdown path (no running loop)."""
+    state = {"volume": 60, "playing": True}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+    asyncio.run(ducker.session_started())  # the app's loop lowers the music, then ends without a restore
+
+    ducker.restore_on_exit()
+    ducker.restore_on_exit()  # nothing left to do
+
+    assert puts == [20, 60]

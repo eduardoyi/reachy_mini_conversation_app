@@ -296,8 +296,12 @@ class HybridRuntime:
     _MUSIC_WIND_DOWN_SILENCE_S = 5.0
     # A reply that ends in a question gets longer to answer.
     _MUSIC_WIND_DOWN_QUESTION_SILENCE_S = 10.0
-    # Close anyway if Reachy has not answered the user's latest turn within this long.
+    # Close anyway if Reachy has not answered within this long after the user's last words, or this long
+    # after the unanswered turn began (music lyrics transcribed as speech would otherwise hold it open).
     _MUSIC_WIND_DOWN_REPLY_CAP_S = 20.0
+    _MUSIC_WIND_DOWN_TURN_CAP_S = 60.0
+    # User speech that starts after Reachy's reply holds the close this long, until its transcript arrives.
+    _MUSIC_WIND_DOWN_SPEECH_HOLD_S = 3.0
     _SHUTDOWN_TIMEOUT_S = 15.0
     # Keep enough live PCM for the bounded provider setup handshake (15 s) and
     # leave a small margin for scheduling jitter, while still bounding memory.
@@ -378,6 +382,8 @@ class HybridRuntime:
         self._cloud_session_tasks: set[asyncio.Future[None]] = set()
         self._music_wind_down_requested_at: float | None = None
         self._last_user_turn_at = 0.0
+        self._user_turn_started_at = 0.0
+        self._last_user_speech_start_at = -math.inf
         self._last_reply_was_question = False
         self._state_observer = state_observer
         self._activity_observer: ActivityObserver | None = None
@@ -1079,6 +1085,8 @@ class HybridRuntime:
                     self._session_ack_state = "not_needed"
                     self._music_wind_down_requested_at = None
                     self._last_user_turn_at = self._clock()  # the wake request itself is the first turn
+                    self._user_turn_started_at = self._last_user_turn_at
+                    self._last_user_speech_start_at = -math.inf
                     self._last_reply_was_question = False
                     self._active_handler = handler
                     self._connection_ready = False
@@ -1298,6 +1306,7 @@ class HybridRuntime:
         with self._lifecycle_lock:
             if reason in self._SPEECH_STARTED_REASONS:
                 self._user_speaking = True
+                self._last_user_speech_start_at = self._clock()
             elif reason in self._SPEECH_STOPPED_REASONS:
                 self._user_speaking = False
             self._last_conversation_activity = self._clock()
@@ -1318,9 +1327,10 @@ class HybridRuntime:
     ) -> None:
         if not self._is_current_handler(handler, generation):
             return
-        if role == "user" and final and text.strip():
+        if role == "user" and text.strip():
+            # Partial transcripts count: the user is mid-sentence long before Gemini finalizes the turn.
             with self._lifecycle_lock:
-                self._last_user_turn_at = self._clock()
+                self._note_user_turn_locked(self._clock())
         elif role == "assistant" and text.strip():
             with self._lifecycle_lock:
                 self._last_reply_was_question = text.rstrip().endswith(("?", "？"))
@@ -1840,25 +1850,61 @@ class HybridRuntime:
         with self._lifecycle_lock:
             if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
                 return
+            now = self._clock()
+            # Music Reachy just started (even a new song over music already playing) still gets its short
+            # reply ("Enjoy!") before the countdown begins.
+            self._note_user_turn_locked(now)
             if self._music_wind_down_requested_at is not None:
                 return
-            self._music_wind_down_requested_at = self._clock()
+            self._music_wind_down_requested_at = now
         logger.info(
             "Music playing; conversation will close %.0f s after Reachy's reply if the user stays quiet",
             self._MUSIC_WIND_DOWN_SILENCE_S,
         )
+
+    def cancel_music_wind_down(self) -> None:
+        """Use the normal inactivity rule for the rest of this conversation, because the user paused the music."""
+        with self._lifecycle_lock:
+            if (
+                self._mode is not RuntimeMode.CLOUD_CONVERSATION
+                or self._active_handler is None
+                or self._music_wind_down_requested_at is None
+            ):
+                return
+            self._music_wind_down_requested_at = None
+            self._last_conversation_activity = self._clock()
+        logger.info("Music paused; conversation uses the normal inactivity timeout again")
+
+    def _replied_at_locked(self) -> float:
+        return self._playback_until if math.isfinite(self._playback_until) else 0.0
+
+    def _note_user_turn_locked(self, now: float) -> None:
+        """Record something Reachy should answer before a music wind-down countdown starts."""
+        if self._last_user_turn_at < self._replied_at_locked():
+            self._user_turn_started_at = now  # first input since Reachy's latest reply
+        self._last_user_turn_at = max(self._last_user_turn_at, now)
 
     def _music_wind_down_due_locked(self, now: float) -> bool:
         if self._music_wind_down_requested_at is None or not self._connection_ready or self._active_handler is None:
             return False
         if self._playback_is_active_locked(now) or not self._active_handler.output_queue.empty():
             return False
-        # Gemini's speech/busy flags stay set while it hears music, so they are deliberately ignored here;
-        # only Reachy's own speech and final user transcripts move the countdown.
-        replied_at = self._playback_until if math.isfinite(self._playback_until) else 0.0
+        # Gemini's speech flag can stay set while it hears music, so it is ignored; busy only holds the
+        # close up to a cap. Reachy's speech and user transcripts move the countdown.
+        replied_at = self._replied_at_locked()
         if replied_at <= self._last_user_turn_at:
             # Reachy has not answered the latest turn yet (thinking or using a tool): wait, but not forever.
-            return now - self._last_user_turn_at >= self._MUSIC_WIND_DOWN_REPLY_CAP_S
+            return (
+                now - self._last_user_turn_at >= self._MUSIC_WIND_DOWN_REPLY_CAP_S
+                or now - self._user_turn_started_at >= self._MUSIC_WIND_DOWN_TURN_CAP_S
+            )
+        speech_start = self._last_user_speech_start_at
+        if speech_start > replied_at and now - speech_start < self._MUSIC_WIND_DOWN_SPEECH_HOLD_S:
+            return False  # the user may be starting a follow-up; its transcript is on the way
+        if self._interaction_busy and now - replied_at < self._MUSIC_WIND_DOWN_REPLY_CAP_S:
+            # Reachy said something ("let me check") but is still working on the answer (a tool, or more
+            # thinking). Busy can stick while it hears music, so it only holds the close up to the cap.
+            return False
         window = (
             self._MUSIC_WIND_DOWN_QUESTION_SILENCE_S
             if self._last_reply_was_question

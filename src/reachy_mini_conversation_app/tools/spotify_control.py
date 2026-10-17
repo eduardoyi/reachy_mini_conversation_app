@@ -99,8 +99,14 @@ class SpotifyDucker:
 
     Like a smart speaker: music playing when the user wakes Reachy (or started during the conversation)
     drops to a low level so the user can be heard, then returns to its previous level when the
-    conversation ends, unless the user changed the volume meanwhile.
+    conversation ends, unless the user changed the volume meanwhile. A podcast or audiobook episode is
+    paused instead (its voices would be heard as the user) and resumed afterwards.
     """
+
+    # A failed restore is retried once; if that fails too, the state is kept for the next conversation end.
+    _RESTORE_ATTEMPTS = 2
+    _RESTORE_RETRY_DELAY_S = 1.0
+    _EXIT_RESTORE_TIMEOUT_S = 5.0
 
     def __init__(self, duck_percent: int = 20) -> None:
         """Create an idle ducker that lowers music to ``duck_percent``."""
@@ -108,10 +114,14 @@ class SpotifyDucker:
         self._session_active = False
         self._restore_to: int | None = None
         self._ducked_to: int | None = None
+        # The episode paused for the conversation (its URI, or "" when Spotify did not report one).
+        self._paused_episode: str | None = None
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
-        # Set by the hybrid runtime: close the conversation quickly while music is playing.
+        # Set by the hybrid runtime: close the conversation quickly while music is playing, and stop doing
+        # so when the user pauses it.
         self.music_playing_callback: Callable[[], None] | None = None
+        self.music_stopped_callback: Callable[[], None] | None = None
 
     @property
     def in_conversation(self) -> bool:
@@ -136,17 +146,38 @@ class SpotifyDucker:
             self._notify_music_playing()
 
     def _notify_music_playing(self) -> None:
-        callback = self.music_playing_callback
+        self._notify(self.music_playing_callback)
+
+    @staticmethod
+    def _notify(callback: Callable[[], None] | None) -> None:
         if callback is not None:
             try:
                 callback()
             except Exception as error:
-                logger.warning("Music wind-down request failed: %s", type(error).__name__)
+                logger.warning("Music wind-down callback failed: %s", type(error).__name__)
 
     async def session_ended(self) -> None:
         """Restore the volume lowered during the conversation."""
         self._session_active = False
         await self._restore()
+
+    def playback_paused(self) -> None:
+        """Keep user-paused playback paused afterwards and stop closing the conversation quickly."""
+        if not self._session_active:
+            return
+        self._paused_episode = None
+        self._notify(self.music_stopped_callback)
+
+    def restore_on_exit(self) -> None:
+        """Undo lowering or pausing left by a conversation the app quit during, after its event loop ended."""
+        if self._restore_to is None and self._paused_episode is None:
+            return
+        self._session_active = False
+        self._lock = asyncio.Lock()  # the lock belonged to the app's event loop, which is gone
+        try:
+            asyncio.run(asyncio.wait_for(self._restore(), self._EXIT_RESTORE_TIMEOUT_S))
+        except (TimeoutError, RuntimeError) as error:
+            logger.warning("Spotify restore at exit failed: %s", type(error).__name__)
 
     def playback_started(self) -> None:
         """Lower music started during a conversation and let the conversation wind down."""
@@ -198,6 +229,9 @@ class SpotifyDucker:
                             or device.get("id") != device_id
                         ):
                             return False
+                        if playback.get("currently_playing_type") == "episode":
+                            await self._pause_episode(client, headers, device_id, playback)
+                            return True
                     volume = await self._device_volume(client, headers, device_id)
                     if volume is None or volume <= self._duck_percent:
                         return True
@@ -216,31 +250,80 @@ class SpotifyDucker:
                 logger.warning("Spotify lowering failed: %s", type(error).__name__)
                 return False
 
+    async def _pause_episode(
+        self, client: httpx.AsyncClient, headers: dict[str, str], device_id: str, playback: dict[str, object]
+    ) -> None:
+        """Pause a playing podcast or audiobook episode: lowered speech would still be heard as the user."""
+        response = await client.put(
+            "https://api.spotify.com/v1/me/player/pause", params={"device_id": device_id}, headers=headers
+        )
+        response.raise_for_status()
+        item = playback.get("item")
+        uri = item.get("uri") if isinstance(item, dict) else None
+        self._paused_episode = uri if isinstance(uri, str) else ""
+        logger.info("Spotify episode paused for conversation")
+
     async def _restore(self) -> None:
         configuration = self._configuration()
-        if configuration is None or self._restore_to is None:
+        if configuration is None or (self._restore_to is None and self._paused_episode is None):
             return
         credentials_path, device_id = configuration
         async with self._lock:
-            restore_to, ducked_to = self._restore_to, self._ducked_to
-            self._restore_to = None
-            self._ducked_to = None
-            if restore_to is None:
-                return
-            try:
-                async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-                    headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}
-                    if await self._device_volume(client, headers, device_id) != ducked_to:
-                        return  # the user changed the volume during the conversation; keep their choice
-                    response = await client.put(
-                        "https://api.spotify.com/v1/me/player/volume",
-                        params={"device_id": device_id, "volume_percent": restore_to},
-                        headers=headers,
-                    )
-                    response.raise_for_status()
-                    logger.info("Spotify volume restored to=%d", restore_to)
-            except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
-                logger.warning("Spotify volume restore failed: %s", type(error).__name__)
+            for attempt in range(1, self._RESTORE_ATTEMPTS + 1):
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                        headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}
+                        await self._restore_volume(client, headers, device_id)
+                        await self._resume_episode(client, headers, device_id)
+                    return
+                except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
+                    if attempt == self._RESTORE_ATTEMPTS:
+                        # Keep the state: the next conversation end (or app exit) tries again.
+                        logger.warning("Spotify restore failed after %d attempts: %s", attempt, type(error).__name__)
+                        return
+                    logger.info("Spotify restore failed (%s); retrying", type(error).__name__)
+                    await asyncio.sleep(self._RESTORE_RETRY_DELAY_S)
+
+    async def _restore_volume(self, client: httpx.AsyncClient, headers: dict[str, str], device_id: str) -> None:
+        restore_to, ducked_to = self._restore_to, self._ducked_to
+        if restore_to is None:
+            return
+        if await self._device_volume(client, headers, device_id) != ducked_to:
+            self.forget_restore_level()  # the user changed the volume during the conversation; keep it
+            return
+        response = await client.put(
+            "https://api.spotify.com/v1/me/player/volume",
+            params={"device_id": device_id, "volume_percent": restore_to},
+            headers=headers,
+        )
+        response.raise_for_status()
+        self.forget_restore_level()
+        logger.info("Spotify volume restored to=%d", restore_to)
+
+    async def _resume_episode(self, client: httpx.AsyncClient, headers: dict[str, str], device_id: str) -> None:
+        paused = self._paused_episode
+        if paused is None:
+            return
+        response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
+        response.raise_for_status()
+        playback: object = response.json() if response.status_code != 204 else None
+        item = playback.get("item") if isinstance(playback, dict) else None
+        device = playback.get("device") if isinstance(playback, dict) else None
+        if (
+            not isinstance(playback, dict)
+            or playback.get("is_playing") is True
+            or not isinstance(device, dict)
+            or device.get("id") != device_id
+            or (paused and (not isinstance(item, dict) or item.get("uri") != paused))
+        ):
+            self._paused_episode = None  # something else was played or resumed meanwhile; leave it
+            return
+        response = await client.put(
+            "https://api.spotify.com/v1/me/player/play", params={"device_id": device_id}, headers=headers
+        )
+        response.raise_for_status()
+        self._paused_episode = None
+        logger.info("Spotify episode resumed after conversation")
 
 
 def _duck_percent_from_env() -> int:
@@ -487,6 +570,8 @@ class SpotifyControl(Tool):
                     response.raise_for_status()
                     if action == "resume":
                         SPOTIFY_DUCKER.playback_started()
+                    elif action == "pause":
+                        SPOTIFY_DUCKER.playback_paused()
                     return {"status": "Spotify accepted the " + action + " command."}
             except httpx.HTTPStatusError as error:
                 code = error.response.status_code
