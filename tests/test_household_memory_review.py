@@ -654,3 +654,54 @@ async def test_failed_requests_never_commit_and_have_two_attempt_limit(
         assert result.status == ("budget_blocked" if attempt == 2 else "failed")
         assert store.review_checkpoint() is None
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_valid_proposals_apply_even_when_others_are_rejected(tmp_path: Path) -> None:
+    """One unsafe proposal no longer throws away the day's grounded maintenance."""
+    now = datetime(2026, 9, 13, 12, tzinfo=timezone.utc)
+    store = _FakeStore(tmp_path, (_entry("m1", learned_at=now), _entry("m2", learned_at=now, certainty="tentative")))
+    client = _FakeClient(
+        lambda _request: json.dumps(
+            {
+                "proposals": [
+                    {"action": "promote", "memory_id": "m1", "target_kind": "fact", "evidence_ids": ["m1"]},
+                    {"action": "promote", "memory_id": "m2", "target_kind": "fact", "evidence_ids": ["m2"]},
+                ]
+            }
+        )
+    )
+    review = _review(store, client, _MutableClock(now))
+    review.activate()
+
+    result = await review.run_once()
+
+    assert result.status == "applied"
+    assert [type(operation).__name__ for operation in store.apply_calls[0]] == ["ReviewPromote"]
+    assert store.apply_calls[0][0].memory_id == "m1"
+    assert review.stats.proposals_rejected == 1
+    await review.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("promote_first", [False, True])
+async def test_merge_then_promote_of_the_kept_note_is_one_review(tmp_path: Path, promote_first: bool) -> None:
+    """The kept note of a merge may also be promoted; merges always apply before promotions."""
+    now = datetime(2026, 9, 13, 12, tzinfo=timezone.utc)
+    store = _FakeStore(tmp_path, (_entry("m1", learned_at=now), _entry("m2", learned_at=now)))
+    merge = {"action": "merge", "keep_id": "m1", "merge_ids": ["m2"], "evidence_ids": ["m1", "m2"]}
+    promote = {"action": "promote", "memory_id": "m1", "target_kind": "fact", "evidence_ids": ["m1"]}
+    proposals = [promote, merge] if promote_first else [merge, promote]
+    client = _FakeClient(lambda _request: json.dumps({"proposals": proposals}))
+    review = _review(store, client, _MutableClock(now))
+    review.activate()
+
+    result = await review.run_once()
+
+    if promote_first:
+        # The promotion claimed m1 first, so the merge conflicts and is dropped; the promotion still applies.
+        assert [type(operation).__name__ for operation in store.apply_calls[0]] == ["ReviewPromote"]
+    else:
+        assert [type(operation).__name__ for operation in store.apply_calls[0]] == ["ReviewMerge", "ReviewPromote"]
+    assert result.status == "applied"
+    await review.close()

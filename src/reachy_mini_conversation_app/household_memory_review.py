@@ -57,8 +57,13 @@ _MODEL_INSTRUCTIONS: Final[str] = (
     "active and deletion deadlines. Promote may change an existing note to kind fact or situation only when its "
     "certainty stays exactly unchanged and the supplied text already supports that durable fact. Never create a "
     "memory, invent evidence, rewrite text, change ownership, change dates, resolve a current entry, reopen a "
-    "resolved or superseded entry, delete a memory, or upgrade certainty. Use an empty proposals list when no "
-    "safe maintenance is grounded."
+    "resolved or superseded entry, delete a memory, or upgrade certainty. "
+    "This is the household's daily tidy-up, so do the maintenance that is grounded rather than leaving it: "
+    "merge records that say the same thing about the same subject even when worded differently, keeping the clearest "
+    "and most complete one; promote notes that describe lasting traits, preferences, relationships, routines, "
+    "allergies or other stable facts to fact (ordinary notes otherwise expire within days), and notes about a "
+    "time-bound happening to situation. Leave everything else out of the list. Use an empty proposals list only "
+    "when no record qualifies."
 )
 
 
@@ -236,11 +241,6 @@ def _string_list(value: object, *, required: bool = True) -> tuple[str, ...] | N
     return items
 
 
-def _deadline_covers(kept: datetime | None, duplicate: datetime | None) -> bool:
-    """Return whether the kept deadline is at least as durable as a duplicate's."""
-    return duplicate is None and kept is None or duplicate is not None and (kept is None or kept >= duplicate)
-
-
 def _merge_compatible(kept: MemoryEntry | None, duplicate: MemoryEntry | None) -> bool:
     """Check the store's unchanged-text merge constraints before applying a batch."""
     if kept is None or duplicate is None:
@@ -251,8 +251,6 @@ def _merge_compatible(kept: MemoryEntry | None, duplicate: MemoryEntry | None) -
         and duplicate.certainty == kept.certainty
         and duplicate.event_start == kept.event_start
         and duplicate.event_end == kept.event_end
-        and _deadline_covers(kept.active_until, duplicate.active_until)
-        and _deadline_covers(kept.delete_after, duplicate.delete_after)
     )
 
 
@@ -582,6 +580,8 @@ class HouseholdMemoryReview:
         by_id = {entry.id: entry for entry in entries}
         parsed_proposals: list[_ParsedProposal] = []
         touched: set[str] = set()
+        # A note kept by a merge may still be promoted once ("two notes about Ana's figs become one fact").
+        merged_keep_ids: set[str] = set()
         rejected = 0
         for raw in raw_proposals:
             proposal = _as_mapping(raw)
@@ -646,6 +646,8 @@ class HouseholdMemoryReview:
                 assert evidence_ids is not None
                 operation = ReviewMerge(keep_id, merge_ids, evidence_ids)
                 operation_ids = frozenset(evidence_ids)
+                if not touched.intersection(operation_ids):
+                    merged_keep_ids.add(keep_id)
             elif action == "promote":
                 allowed = {"action", "memory_id", "target_kind", "evidence_ids"}
                 memory_id = proposal.get("memory_id")
@@ -676,11 +678,22 @@ class HouseholdMemoryReview:
             else:
                 rejected += 1
                 continue
-            if touched.intersection(operation_ids):
+            promoted_merge_keep = (
+                operation.memory_id
+                if isinstance(operation, ReviewPromote)
+                and operation_ids == {operation.memory_id}
+                and operation.memory_id in merged_keep_ids
+                else None
+            )
+            if touched.intersection(operation_ids) and promoted_merge_keep is None:
                 rejected += 1
                 continue
+            if promoted_merge_keep is not None:
+                merged_keep_ids.discard(promoted_merge_keep)
             touched.update(operation_ids)
             parsed_proposals.append(_ParsedProposal(operation, operation_ids))
+        # Merges (and keeps) go first so a promotion applies to the note a merge kept.
+        parsed_proposals.sort(key=lambda proposal: isinstance(proposal.operation, ReviewPromote))
         return tuple(parsed_proposals), rejected, False
 
     async def run_once(self) -> ReviewResult:
@@ -804,9 +817,11 @@ class HouseholdMemoryReview:
             self._failures += 1
             logger.info("Household memory review output_malformed=1")
             return ReviewResult("failed")
-        if rejected:
+        if rejected and not proposals:
+            # Nothing usable: leave the notes unreviewed so the day's second attempt can try again.
             self._failures += 1
             return ReviewResult("failed")
+        # Each proposal is validated on its own, so invalid ones are dropped and the grounded rest still applies.
         if not self._active or generation != self._generation:
             self._failures += 1
             return ReviewResult("cancelled")

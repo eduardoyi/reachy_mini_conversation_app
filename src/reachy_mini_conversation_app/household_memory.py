@@ -10,8 +10,8 @@ import threading
 from typing import Literal
 from pathlib import Path
 from datetime import date, datetime, timezone, timedelta
-from dataclasses import field, dataclass
-from collections.abc import Mapping, Callable, Sequence
+from dataclasses import field, replace, dataclass
+from collections.abc import Mapping, Callable, Iterable, Sequence
 
 from reachy_mini_conversation_app.household_memory_receipts import (
     MutationSource,
@@ -757,6 +757,16 @@ def _write_envelope(
                 logger.warning("Failed to remove temporary household memory file at %s: %s", temporary_path, exc)
 
 
+def _longest_deadline(deadlines: Iterable[datetime | None]) -> datetime | None:
+    """Return the latest deadline, where None (never expires) beats any date."""
+    latest: datetime | None = None
+    for deadline in deadlines:
+        if deadline is None:
+            return None
+        latest = deadline if latest is None or deadline > latest else latest
+    return latest
+
+
 class HouseholdMemoryStore:
     """Manage bounded v2 household memory in the existing local JSON file."""
 
@@ -1146,13 +1156,6 @@ class HouseholdMemoryStore:
         return tuple(replacements.get(entry.id, entry) for entry in entries)
 
     @staticmethod
-    def _review_deadline_covers(kept: datetime | None, duplicate: datetime | None) -> bool:
-        """Return whether a kept deadline is at least as durable as a duplicate's."""
-        if duplicate is None:
-            return kept is None
-        return kept is None or kept >= duplicate
-
-    @staticmethod
     def _checkpoint_for_entries(
         checkpoint: ReviewCheckpoint | None,
         entries: tuple[MemoryEntry, ...],
@@ -1199,18 +1202,20 @@ class HouseholdMemoryStore:
             if any(entry.subject_id != keep.subject_id or entry.certainty != keep.certainty for entry in evidence):
                 raise MemoryValidationError("review merge requires one subject and certainty")
             if any(
-                entry.kind != keep.kind
-                or entry.event_start != keep.event_start
-                or entry.event_end != keep.event_end
-                or not self._review_deadline_covers(keep.active_until, entry.active_until)
-                or not self._review_deadline_covers(keep.delete_after, entry.delete_after)
+                entry.kind != keep.kind or entry.event_start != keep.event_start or entry.event_end != keep.event_end
                 for entry in evidence
                 if entry.id != keep.id
             ):
-                raise MemoryValidationError("review merge requires compatible kind, dates, and retention")
+                raise MemoryValidationError("review merge requires compatible kind and dates")
 
             replacements: dict[str, MemoryEntry] = {}
             changed = False
+            # The kept record lives as long as the longest-lived record merged into it (no expiry wins).
+            active_until = _longest_deadline(entry.active_until for entry in evidence)
+            delete_after = _longest_deadline(entry.delete_after for entry in evidence)
+            if (active_until, delete_after) != (keep.active_until, keep.delete_after):
+                replacements[keep.id] = replace(keep, active_until=active_until, delete_after=delete_after)
+                changed = True
             for memory_id in merge_ids:
                 duplicate = self._review_entry(entries, memory_id)
                 if duplicate.status != "current":

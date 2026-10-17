@@ -272,6 +272,17 @@ Situation classification preserves the original note deadlines; lasting fact pro
 removes expiry only for stated, known-owner notes. Expiry cleanup follows existing retention dates. Review is not fresh evidence and
 must not reset evidence dates or repeatedly extend a temporary note's life.
 
+Since 2026-10-17 the instructions describe the job as active housekeeping (merge
+records that say the same thing even when worded differently; promote lasting
+traits, preferences, routines and allergies to facts, time-bound happenings to
+situations), because the earlier wording led the model to return nothing and notes
+expired within days. Code validation is unchanged except: a merge may be followed
+by promoting the note it kept, merges apply before promotions, a merge gives the
+kept note the longest retention in the group (no expiry wins), and invalid
+proposals are dropped while valid ones apply. A batch with no valid proposal still
+fails without a checkpoint. Real-model check: duplicate notes about Ana were merged
+and promoted, and three lasting notes were promoted to facts.
+
 One attempt per activation, at most two reserved attempts per local day, at most
 one successful daily review. Each request is capped at 20,000 input characters,
 2,000 output tokens and 30 seconds. With capture's independent 60,000-token cap,

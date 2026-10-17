@@ -293,8 +293,8 @@ def test_review_merge_rejects_incompatible_kind_or_event_dates(
     assert store.snapshot() == before
 
 
-def test_review_merge_rejects_shorter_kept_retention(tmp_path: Path) -> None:
-    """Review cannot keep an older deadline while superseding newer evidence."""
+def test_review_merge_keeps_the_longest_retention(tmp_path: Path) -> None:
+    """Keeping an older note while superseding a newer one extends the kept note to the newer deadlines."""
     clock = FakeClock(datetime(2026, 9, 13, 10, tzinfo=UTC))
     store = HouseholdMemoryStore(tmp_path, clock=clock)
     kept = store.remember("An earlier note", subject_id="household")
@@ -302,13 +302,40 @@ def test_review_merge_rejects_shorter_kept_retention(tmp_path: Path) -> None:
     duplicate = store.remember("A later note", subject_id="household")
     before = store.snapshot()
 
-    with pytest.raises(MemoryValidationError):
-        store.apply_review(
-            [ReviewMerge(kept.id, (duplicate.id,), (kept.id, duplicate.id))],
-            expected_revision=before.revision,
-            checkpoint=_checkpoint(store, "2026-09-13", before.entries),
-        )
-    assert store.snapshot() == before
+    store.apply_review(
+        [ReviewMerge(kept.id, (duplicate.id,), (kept.id, duplicate.id))],
+        expected_revision=before.revision,
+        checkpoint=_checkpoint(store, "2026-09-13", before.entries),
+    )
+
+    entries = {entry.id: entry for entry in store.list_entries(include_inactive=True)}
+    assert entries[kept.id].text == "An earlier note" and entries[kept.id].status == "current"
+    assert entries[kept.id].active_until == duplicate.active_until
+    assert entries[kept.id].delete_after == duplicate.delete_after
+    assert entries[duplicate.id].status == "superseded"
+
+
+def test_review_can_merge_notes_and_promote_the_kept_one(tmp_path: Path) -> None:
+    """Two notes saying the same lasting thing become one fact in a single review."""
+    clock = FakeClock(datetime(2026, 9, 13, 10, tzinfo=UTC))
+    store = HouseholdMemoryStore(tmp_path, clock=clock)
+    kept = store.remember("Ana likes fresh figs", subject_id="ana")
+    duplicate = store.remember("Ana really loves figs", subject_id="ana")
+    before = store.snapshot()
+
+    store.apply_review(
+        [
+            ReviewMerge(kept.id, (duplicate.id,), (kept.id, duplicate.id)),
+            ReviewPromote(kept.id, "fact", (kept.id,)),
+        ],
+        expected_revision=before.revision,
+        checkpoint=_checkpoint(store, "2026-09-13", before.entries),
+    )
+
+    current = store.list_entries()
+    assert [(entry.text, entry.kind, entry.active_until) for entry in current] == [
+        ("Ana likes fresh figs", "fact", None)
+    ]
 
 
 def test_review_cannot_reopen_resolved_entry(tmp_path: Path) -> None:
