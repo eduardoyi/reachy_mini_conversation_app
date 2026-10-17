@@ -28,6 +28,9 @@ dependencies = [
     "reachy_mini_dances_library",
     "reachy-mini>=1.11.0,<1.13",
     "mcp>=1.27.1,<2",
+
+    #Tuya smart lights and plugs over the local network
+    "tinytuya>=1.16,<2",
 ]
 
 [dependency-groups]

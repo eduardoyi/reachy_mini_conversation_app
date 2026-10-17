@@ -676,6 +676,13 @@ class Config:
     SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
     SPEAKER_FOLLOWING_ENABLED = _env_flag("SPEAKER_FOLLOWING_ENABLED", default=True)
     FACE_RECOGNITION_ENABLED = _env_flag("FACE_RECOGNITION_ENABLED", default=False)
+    # IKEA DIRIGERA hub for lights and plugs; set by `python -m reachy_mini_conversation_app.dirigera_hub pair`.
+    DIRIGERA_HOST = (os.getenv("DIRIGERA_HOST") or "").strip() or None
+    DIRIGERA_TOKEN = (os.getenv("DIRIGERA_TOKEN") or "").strip() or None
+    # Smart Life devices with local keys, from TinyTuya's wizard (kept outside the repository).
+    TUYA_DEVICES_FILE = os.path.expanduser(os.getenv("TUYA_DEVICES_FILE") or "~/.config/reachy-tuya/devices.json")
+    # Rooms for devices whose system has none, and areas within rooms ("Dining"), for home_lights.
+    HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -843,6 +850,12 @@ def refresh_runtime_config_from_env() -> None:
     config.SPEECH_WOBBLE_ENABLED = _env_flag("SPEECH_WOBBLE_ENABLED", default=True)
     config.SPEAKER_FOLLOWING_ENABLED = _env_flag("SPEAKER_FOLLOWING_ENABLED", default=True)
     config.FACE_RECOGNITION_ENABLED = _env_flag("FACE_RECOGNITION_ENABLED", default=False)
+    config.DIRIGERA_HOST = (os.getenv("DIRIGERA_HOST") or "").strip() or None
+    config.DIRIGERA_TOKEN = (os.getenv("DIRIGERA_TOKEN") or "").strip() or None
+    config.TUYA_DEVICES_FILE = os.path.expanduser(
+        os.getenv("TUYA_DEVICES_FILE") or "~/.config/reachy-tuya/devices.json"
+    )
+    config.HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

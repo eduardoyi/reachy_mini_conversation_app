@@ -31,6 +31,28 @@ if TYPE_CHECKING:
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
 
+def _build_home_devices() -> Any:
+    """Merge the configured light systems (IKEA hub, Tuya), or return None when there are none."""
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.home_devices import HomeLayout, HomeDevices
+    from reachy_mini_conversation_app.tuya_devices import TuyaHome
+
+    log = logging.getLogger(__name__)
+    providers: dict[str, Any] = {}
+    if config.DIRIGERA_HOST and config.DIRIGERA_TOKEN:
+        from reachy_mini_conversation_app.dirigera_hub import DirigeraHub
+
+        providers["dirigera"] = DirigeraHub(config.DIRIGERA_HOST, config.DIRIGERA_TOKEN)
+    tuya = TuyaHome(Path(config.TUYA_DEVICES_FILE))
+    if tuya.configured:
+        tuya.start_listening()
+        providers["tuya"] = tuya
+    if not providers:
+        return None
+    log.info("Home lights available from %s", ", ".join(providers))
+    return HomeDevices(providers, HomeLayout.load(Path(config.HOME_LAYOUT_FILE)))
+
+
 def _start_inactivity_timeout_thread(
     timeout_minutes: float,
     stream_manager: LocalStream,
@@ -284,6 +306,7 @@ def run(
         face_recognition=face_service,
         current_person_id=current_person_id if face_service is not None else None,
     )
+    deps.home_hub = _build_home_devices()
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""
