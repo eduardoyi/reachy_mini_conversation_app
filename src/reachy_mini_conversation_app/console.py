@@ -1236,6 +1236,22 @@ class LocalStream:
                 {"person": _person_json(result.person), "skipped": list(result.skipped)}, headers=no_store
             )
 
+        @settings_app.post("/api/faces/forget-photo")
+        async def _faces_forget_photo(request: Request) -> Response:
+            """Delete one photo and its fingerprint; the person goes too if it was their last."""
+            denied = _denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await _small_json(request, {"person_id", "photo"})
+            if isinstance(payload, Response):
+                return payload
+            found, person = await asyncio.to_thread(
+                self._face_recognition.registry.forget_photo, payload["person_id"], payload["photo"]
+            )
+            if not found:
+                return Response(status_code=404, headers=no_store)
+            return JSONResponse({"person": _person_json(person) if person is not None else None}, headers=no_store)
+
         @settings_app.post("/api/faces/forget")
         async def _faces_forget(request: Request) -> Response:
             denied = _denied(request, mutation=True)

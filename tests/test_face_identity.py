@@ -400,3 +400,24 @@ def test_an_unsure_first_match_names_nobody(tmp_path: Path) -> None:
     service.identify_now()
 
     assert service.person_in_front() is None and service.identity_hint() is None
+
+
+def test_forget_photo_removes_one_sample_and_its_file(tmp_path: Path) -> None:
+    """One bad photo can go without re-enrolling; the last photo takes the person with it."""
+    registry = FaceRegistry(tmp_path / "faces")
+    person = registry.enroll("Ana", [(ANA, b"one"), (_unit(1.0, 0.1), b"two")])
+    first, second = person.photos
+    photos_dir = tmp_path / "faces" / "photos"
+
+    found, after = registry.forget_photo("ana", first)
+
+    assert found and after is not None and after.photos == (second,) and after.sample_count == 1
+    assert not (photos_dir / first).exists() and (photos_dir / second).exists()
+    assert FaceRegistry(tmp_path / "faces").people()[0].photos == (second,)
+
+    assert registry.forget_photo("ana", first) == (False, after)
+    assert registry.forget_photo("ben", second) == (False, None)
+
+    found, after = registry.forget_photo("ana", second)
+    assert found and after is None
+    assert registry.people() == [] and not (photos_dir / second).exists()

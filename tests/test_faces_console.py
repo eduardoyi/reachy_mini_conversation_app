@@ -174,3 +174,23 @@ def test_faces_upload_failure_explains_why(faces) -> None:
         response = client.post("/api/faces/upload", json={"name": "Ana", "photos": ["AAAA"]}, headers=SAME_ORIGIN)
     assert response.status_code == 422
     assert response.json() == {"error": "photo 1 has no clear face", "skipped": ["photo 1 has no clear face"]}
+
+
+def test_faces_forget_photo_deletes_one_photo(faces) -> None:
+    """Deleting a thumbnail removes that sample; unknown photos are 404; the last photo removes the person."""
+    app, service = faces
+    service.registry.enroll("Ana", [(np.eye(128, dtype=np.float32)[0], b"\xff\xd8two")])
+    first, second = service.registry.people()[0].photos
+    with TestClient(app, **LOCAL) as client:
+        one = client.post("/api/faces/forget-photo", json={"person_id": "ana", "photo": first}, headers=SAME_ORIGIN)
+        missing = client.post(
+            "/api/faces/forget-photo", json={"person_id": "ana", "photo": first}, headers=SAME_ORIGIN
+        )
+        cross = client.post("/api/faces/forget-photo", json={"person_id": "ana", "photo": second})
+        last = client.post("/api/faces/forget-photo", json={"person_id": "ana", "photo": second}, headers=SAME_ORIGIN)
+
+    assert one.status_code == 200 and one.json()["person"]["photos"] == [second]
+    assert missing.status_code == 404
+    assert cross.status_code == 403
+    assert last.status_code == 200 and last.json() == {"person": None}
+    assert service.registry.people() == []

@@ -29,8 +29,11 @@ Live has no silent context injection; sending text starts a model turn).
   person asking, under their own name.
 - **Enroll in the web UI** (`--ui`, Settings → Faces Reachy knows): type a name,
   look at Reachy, press *Remember my face* — or press *Upload photos* and pick up
-  to 5 photos of only that person. *Show faces* lists people with photo
-  thumbnails and a *Forget* button. Same computer only.
+  to 5 photos of only that person. *Show faces* lists people with all their photo
+  thumbnails, an × on each to delete that one photo and its fingerprint (deleting
+  the last photo forgets the person), and a *Forget* button. Same computer only.
+  Re-enrolling under the same name adds fingerprints; each is matched separately
+  (best match wins) and the newest 12 per person are kept.
 - **Upload rules:** the browser shrinks each photo to 1600 px and re-encodes it
   as JPEG (upright per EXIF; Safari also converts HEIC). Each photo needs exactly
   one clear face not cut off by the edge; the largest group of photos that look
@@ -89,7 +92,7 @@ are encoded with GStreamer (`camera_frames.encode_jpeg`).
 | Tools | `tools/remember_face.py`, `tools/forget_face.py`, `tools/who_is_here.py`; `core_tools.FACE_TOOLS` | Auto-enabled with the flag. |
 | Context | `ConversationHandler.set_identity_hint_provider` | Hint is read when `get_initial_context()` is called and placed first so length limits keep it; never added without base context. |
 | Memory | `ToolDependencies.current_person_id`, `tools/remember.py` | Default `source_person_id`. |
-| Web UI | `console.py` `_register_face_routes`; `static/js/views/settings.js` `buildFacesSection` | `GET /api/faces`, `GET /api/faces/photo?person_id&photo`, `POST /api/faces/enroll {name}`, `POST /api/faces/upload {name, photos: [base64]}` (≤ 5 photos, ≤ 12 MB, reports `skipped`), `POST /api/faces/forget {person_id}`; loopback + same-origin, `no-store`; 404 when disabled. Fingerprints are never returned. |
+| Web UI | `console.py` `_register_face_routes`; `static/js/views/settings.js` `buildFacesSection` | `GET /api/faces`, `GET /api/faces/photo?person_id&photo`, `POST /api/faces/enroll {name}`, `POST /api/faces/upload {name, photos: [base64]}` (≤ 5 photos, ≤ 12 MB, reports `skipped`), `POST /api/faces/forget-photo {person_id, photo}` (404 if not theirs; `person: null` when it was the last), `POST /api/faces/forget {person_id}`; loopback + same-origin, `no-store`; 404 when disabled. Fingerprints are never returned. |
 | Camera | `camera_frames.capture_frame`, `encode_jpeg`, `decode_image` | Frame reads share the capture lock with the Gemini camera stream. Photos are encoded as standard YCbCr JPEG (an RGB-coded JPEG reads back green through GStreamer); uploads are decoded with GStreamer, EXIF orientation applied. |
 | Wiring | `main.py` | Builds the service, activates it on wake and for the cloud session, passes it to tools, handlers and the console. |
 | Config | `FACE_RECOGNITION_ENABLED` | Default `0`. |
@@ -156,5 +159,6 @@ matched.
 | Date | Change |
 |------|--------|
 | 2026-10-16 | Initial implementation. |
+| 2026-10-17 | Delete a single photo (and its fingerprint) from Settings. |
 | 2026-10-17 | Identity is acted on only at score ≥ 0.50 after a live misrecognition (Eduardo taken for Mara at 0.41–0.43). |
 | 2026-10-16 | Enroll from uploaded photos in Settings; enrollment ignores faces cut off by the image edge; photos saved as standard JPEGs. Verified in a browser against real models with captured frames. |

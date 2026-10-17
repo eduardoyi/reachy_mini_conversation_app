@@ -365,6 +365,28 @@ class FaceRegistry:
             self._delete_photos(person.samples)
             return self._public(person)
 
+    def forget_photo(self, person_id: str, photo: str) -> tuple[bool, EnrolledPerson | None]:
+        """Delete one enrolled sample (fingerprint and photo); return (found, the person afterwards).
+
+        Removing a person's last sample removes the person, so the second value is then None.
+        """
+        with self._lock:
+            people = self._load()
+            person = people.get(person_id)
+            if person is None:
+                return False, None
+            removed = [sample for sample in person.samples if sample.photo == photo]
+            if not removed:
+                return False, self._public(person)
+            person.samples = [sample for sample in person.samples if sample.photo != photo]
+            if person.samples:
+                person.updated_at = _now_iso()
+            else:
+                people.pop(person_id)
+            self._save(people)
+            self._delete_photos(removed)
+            return True, self._public(person) if person.samples else None
+
     def match(self, embedding: NDArray[np.float32]) -> FaceMatch | None:
         """Return the enrolled person this fingerprint belongs to, or None when unknown or ambiguous."""
         with self._lock:

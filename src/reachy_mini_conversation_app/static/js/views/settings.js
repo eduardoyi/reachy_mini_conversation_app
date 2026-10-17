@@ -135,9 +135,35 @@ function buildFacesSection(signal) {
       for (const person of result.people) {
         const forget = h("button", { type: "button", class: "btn" }, "Forget");
         const thumbs = h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } });
-        for (const photo of person.photos.slice(-4)) {
+        for (const photo of person.photos) {
           const query = new URLSearchParams({ person_id: person.id, photo });
-          thumbs.append(h("img", { src: `/api/faces/photo?${query}`, alt: person.name, width: "64", height: "64", style: { borderRadius: "8px", objectFit: "cover" } }));
+          const remove = h(
+            "button",
+            { type: "button", class: "btn", title: "Delete this photo", "aria-label": `Delete this photo of ${person.name}`, style: { position: "absolute", top: "2px", right: "2px", padding: "0 6px", lineHeight: "18px", minHeight: "0" } },
+            "×"
+          );
+          remove.addEventListener("click", async () => {
+            const last = person.photos.length === 1;
+            const prompt = last ? `This is ${person.name}'s last photo. Delete it and forget ${person.name}?` : `Delete this photo of ${person.name}?`;
+            if (!window.confirm(prompt)) return;
+            remove.disabled = true;
+            try {
+              await request("/api/faces/forget-photo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: person.id, photo }) });
+              await refresh();
+              if (!signal.aborted) message.textContent = last ? `Forgot ${person.name}'s face.` : `Deleted one photo of ${person.name}.`;
+            } catch (error) {
+              if (!signal.aborted) message.textContent = error.message;
+              remove.disabled = false;
+            }
+          });
+          thumbs.append(
+            h(
+              "div",
+              { style: { position: "relative" } },
+              h("img", { src: `/api/faces/photo?${query}`, alt: person.name, width: "64", height: "64", style: { borderRadius: "8px", objectFit: "cover" } }),
+              remove
+            )
+          );
         }
         people.append(h("div", { class: "settings-section" }, h("p", {}, `${person.name} · ${person.samples} samples`), thumbs, forget));
         forget.addEventListener("click", async () => {
