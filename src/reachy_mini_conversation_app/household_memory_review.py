@@ -62,8 +62,8 @@ _MODEL_INSTRUCTIONS: Final[str] = (
     "merge records that say the same thing about the same subject even when worded differently, keeping the clearest "
     "and most complete one; promote notes that describe lasting traits, preferences, relationships, routines, "
     "allergies or other stable facts to fact (ordinary notes otherwise expire within days), and notes about a "
-    "time-bound happening to situation. Leave everything else out of the list. Use an empty proposals list only "
-    "when no record qualifies."
+    "time-bound happening to situation. Only notes can be promoted: never propose promoting a fact, plan or "
+    "situation. Leave everything else out of the list. Use an empty proposals list only when no record qualifies."
 )
 
 

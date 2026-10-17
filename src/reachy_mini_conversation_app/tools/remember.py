@@ -90,11 +90,18 @@ def _remember_description() -> str:
             "(passwords, addresses, payment info, health diagnoses) or fleeting details. Use this silently in the "
             'background; acknowledge naturally without saying "I will remember that".'
         )
-    return (
+    description = (
         "Save one grounded household memory with an explicit subject_id. "
         "Use note, situation, plan, or fact as appropriate; skip unknown subjects and never infer identity. "
         "Do not save sensitive data or ask a memory-management question."
     )
+    if config.HOUSEHOLD_MEMORY_CAPTURE_ENABLED:
+        # Background capture already saves what people mention; two writers would store the same fact twice.
+        description = (
+            "Things people mention are saved to household memory automatically in the background, so do not call "
+            "this for them. Call it only when someone explicitly asks you to remember something. " + description
+        )
+    return description
 
 
 def _optional_string(value: object, field_name: str) -> str | None:

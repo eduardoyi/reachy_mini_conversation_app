@@ -226,3 +226,17 @@ async def test_manager_dispatch_metadata_is_not_treated_as_memory_input(
 
     assert updated["updated"] == "Prefers classical"
     assert forgotten["removed"] == "Prefers classical"
+
+
+@pytest.mark.parametrize("capture_enabled", [True, False])
+def test_remember_defers_to_background_capture_when_it_is_on(
+    monkeypatch: pytest.MonkeyPatch, capture_enabled: bool
+) -> None:
+    """With capture on, the model saves only explicit requests, so one fact is not stored twice."""
+    monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_ENABLED", True)
+    monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", capture_enabled)
+
+    description = Remember().description
+
+    assert ("only when someone explicitly asks you to remember" in description) is capture_enabled
+    assert "explicit subject_id" in description
