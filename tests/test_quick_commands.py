@@ -1,0 +1,400 @@
+"""Tests for everyday commands answered without the cloud conversation."""
+
+from typing import Any
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
+
+from reachy_mini_conversation_app.weather import Forecast, DayForecast
+from reachy_mini_conversation_app.android_tv import TVState
+from reachy_mini_conversation_app.home_devices import HubDevice
+from reachy_mini_conversation_app.quick_commands import (
+    QuickCommands,
+    parse,
+    say_date,
+    say_time,
+    normalize,
+    resolve_light_target,
+)
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "language", "args"),
+    [
+        ("Turn off the lights.", "power", "en", {"on": False, "target": "the lights"}),
+        (
+            "Can you turn on the living room lights, please?",
+            "power",
+            "en",
+            {"on": True, "target": "the living room lights"},
+        ),
+        ("lights off", "power", "en", {"on": False, "target": "lights"}),
+        ("Apaga las luces", "power", "es", {"on": False, "target": "las luces"}),
+        ("apaga a luz", "power", "pt", {"on": False, "target": "a luz"}),
+        ("spegni le luci", "power", "it", {"on": False, "target": "le luci"}),
+        ("desliga as luzes", "power", "pt", {"on": False, "target": "as luzes"}),
+        ("pon la tele", "power", "es", {"on": True, "target": "tv"}),
+        ("dim the lights", "brightness", "en", {"level": 30, "target": "the lights"}),
+        ("pon las luces al 50 por ciento", "brightness", "es", {"level": 50, "target": "las luces"}),
+        ("make the TV lights blue", "color", "en", {"color": "blue", "target": "the tv lights"}),
+        ("pon las luces azules", "color", "es", {"color": "blue", "target": "las luces"}),
+        ("metti le luci rosse", "color", "it", {"color": "red", "target": "le luci"}),
+        ("What time is it?", "time", "en", {}),
+        ("¿Qué hora es?", "time", "es", {}),
+        ("que horas são", "time", "pt", {}),
+        ("che ore sono", "time", "it", {}),
+        ("what's the date today", "date", "en", {}),
+        ("¿Va a llover mañana?", "weather", "es", {"tomorrow": True, "place": None, "rain_only": True}),
+        ("what's the weather in Madrid", "weather", "en", {"tomorrow": False, "place": "madrid", "rain_only": False}),
+        ("che tempo fa domani", "weather", "it", {"tomorrow": True, "place": None, "rain_only": False}),
+        ("pause", "pause", "en", {}),
+        ("siguiente canción", "next", "es", {}),
+        ("play some music", "resume", "en", {}),
+        ("pon a Bad Bunny", "play", "es", {"query": "bad bunny"}),
+        ("play despacito by luis fonsi", "play", "en", {"query": "despacito by luis fonsi"}),
+        ("turn up the tv", "volume", "en", {"direction": "up", "device": "tv"}),
+        ("set the volume to 40", "volume", "en", {"level": 40, "device": None}),
+        ("baja la música", "volume", "es", {"direction": "down", "device": "music"}),
+        ("go to sleep", "sleep", "en", {}),
+        ("vete a dormir", "sleep", "es", {}),
+        ("never mind", "cancel", "en", {}),
+        ("put Bluey on YouTube", "youtube", "en", {"query": "bluey"}),
+        ("abre Netflix", "open_app", "es", {"app": "netflix"}),
+    ],
+)
+def test_everyday_commands_are_recognized(text: str, kind: str, language: str, args: dict[str, Any]) -> None:
+    """Common requests in the household's four languages map to one command."""
+    command = parse(text)
+    assert command is not None
+    assert (command.kind, command.language, command.args) == (kind, language, args)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "tell me a story about dinosaurs",
+        "what's the capital of France",
+        "play with me",
+        "play hide and seek",
+        "is it true that sharks sleep",
+        "turn off the lights and tell me a joke about cats and dogs and elephants please now",
+        "can you tell me what you see",
+        "play that song again",
+        "play my favorite song",
+        "pon esa canción otra vez",
+        # Negations, questions and remarks about the lights are not commands.
+        "don't turn the lights off",
+        "no apagues la luz",
+        "non spegnere la luce",
+        "não desligues a luz",
+        "who turned the lights off?",
+        "is the TV on?",
+        "we should turn off the lights",
+        # Everyday phrases that share a word with a command.
+        "I can't sleep",
+        "it's story time",
+        "no tengo tiempo",
+        "pon la mesa",
+        "pon un temporizador de cinco minutos",
+        "put on your shoes",
+        "put on a movie",
+        "what's next",
+        "hagamos una pausa",
+        "salta",
+        "baja",
+    ],
+)
+def test_conversation_requests_are_left_to_gemini(text: str) -> None:
+    """Questions, games and long requests are not commands."""
+    assert parse(text) is None
+
+
+def test_normalize_drops_accents_apostrophes_and_punctuation() -> None:
+    """Whisper's punctuation and accents do not matter."""
+    assert normalize("¿Qué hora es?") == "que hora es"
+    assert normalize("What's the time?") == "whats the time"
+    assert normalize("Che ore sono? L'ora!") == "che ore sono lora"
+
+
+def _light(name: str, room: str | None = "Living room", areas: tuple[str, ...] = (), **kwargs: Any) -> HubDevice:
+    return HubDevice(name, "light", name, room, False, True, brightness=50, areas=areas, **kwargs)
+
+
+HOME = [
+    _light("Living light 1", areas=("Living",)),
+    _light("Dining light 1", areas=("Dining",)),
+    _light("TV Lights", areas=("Living",), colors=True, source="tuya"),
+    _light("Living lamp", areas=("Living",)),
+    _light("Dining lamp", areas=("Dining",)),
+]
+
+
+@pytest.mark.parametrize(
+    ("phrase", "name", "devices"),
+    [
+        ("the lights", "all", ()),
+        ("la luz", "all", ()),
+        ("everything", "all", ()),
+        ("the living room lights", "Living room", ()),
+        ("el salon", "Living room", ()),
+        ("the dining lights", "Dining", ()),
+        ("la luz del comedor", "Dining", ()),
+        ("la luce della sala da pranzo", "Dining", ()),
+        ("the tv lights", None, ("TV Lights",)),
+        ("las luces de la tele", None, ("TV Lights",)),
+        ("the lamps", None, ("Living lamp", "Dining lamp")),
+    ],
+)
+def test_light_targets_resolve_across_languages(phrase: str, name: str | None, devices: tuple[str, ...]) -> None:
+    """Rooms, areas and devices match in English, Spanish and Italian."""
+    target = resolve_light_target(phrase, HOME)
+    assert target is not None
+    assert (target.name, target.devices) == (name, devices)
+
+
+def test_an_unknown_light_target_is_not_guessed() -> None:
+    """A name that matches nothing goes to the conversation."""
+    assert resolve_light_target("the garage", HOME) is None
+
+
+def test_time_and_date_sentences() -> None:
+    """The clock is read in the request's language."""
+    morning = datetime(2026, 10, 18, 9, 5, tzinfo=timezone.utc)
+    one = datetime(2026, 10, 18, 1, 30, tzinfo=timezone.utc)
+    assert say_time(morning, "en") == "It's 9:05 AM."
+    assert say_time(morning, "es") == "Son las 9:05."
+    assert say_time(one, "es") == "Es la 1:30."
+    assert say_time(morning, "it") == "Sono le 9:05."
+    assert say_time(morning, "pt") == "São 9:05."
+    assert say_date(morning, "en") == "Today is Sunday, October 18."
+    assert say_date(morning, "es") == "Hoy es domingo, 18 de octubre."
+
+
+class _Tool:
+    def __init__(self, responses: dict[str, Any] | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.responses = responses or {}
+
+    async def __call__(self, _deps: Any, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        response = self.responses.get(kwargs.get("action"), {"ok": True})
+        return response(kwargs) if callable(response) else response
+
+
+class _Home:
+    async def devices(self) -> list[HubDevice]:
+        return HOME
+
+
+class _TV:
+    def __init__(self, state: TVState) -> None:
+        self._state = state
+
+    async def state(self) -> TVState:
+        return self._state
+
+
+def _runner(**kwargs: Any) -> tuple[QuickCommands, dict[str, _Tool], Any]:
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), home_hub=_Home())
+    deps.tv = kwargs.pop("tv", None)
+    tools = {
+        "lights": kwargs.pop("lights", _Tool({"set": lambda call: {"ok": True, "changed": [call["target"]]}})),
+        "spotify": kwargs.pop("spotify", _Tool({"status": {"status": "No current playback.", "volume_percent": 40}})),
+        "tv": kwargs.pop("tv_tool", _Tool()),
+    }
+    runner = QuickCommands(
+        deps,
+        lights=tools["lights"],
+        spotify=tools["spotify"],
+        tv=tools["tv"],
+        spotify_configured=lambda: True,
+        clock=lambda: datetime(2026, 10, 18, 9, 5, tzinfo=timezone.utc),
+        **kwargs,
+    )
+    return runner, tools, deps
+
+
+@pytest.mark.asyncio
+async def test_lights_off_runs_home_lights_and_says_okay() -> None:
+    """Saying "Apaga las luces" switches everything off and answers in Spanish."""
+    runner, tools, _ = _runner()
+    reply = await runner.handle("apaga las luces")
+    assert reply is not None and reply.text == "Listo."
+    assert tools["lights"].calls == [{"action": "set", "target": "all", "on": False}]
+
+
+@pytest.mark.asyncio
+async def test_a_device_list_target_changes_each_device() -> None:
+    """Saying "the lamps" sets both lamps by name."""
+    runner, tools, _ = _runner()
+    await runner.handle("turn on the lamps")
+    assert [call["target"] for call in tools["lights"].calls] == ["Living lamp", "Dining lamp"]
+
+
+@pytest.mark.asyncio
+async def test_lights_that_did_not_respond_are_named() -> None:
+    """A partial failure says which light did not respond."""
+    lights = _Tool({"set": {"ok": True, "changed": ["Living light 1"], "unreachable": ["Dining lamp"]}})
+    runner, _, _ = _runner(lights=lights)
+    reply = await runner.handle("turn off the lights")
+    assert reply is not None and reply.text == "Done, but Dining lamp didn't respond."
+
+
+@pytest.mark.asyncio
+async def test_unknown_light_name_goes_to_the_conversation() -> None:
+    """Nothing matched locally: the conversation takes the request."""
+    runner, tools, _ = _runner()
+    assert await runner.handle("turn on the garage") is None
+    assert tools["lights"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_tv_power_goes_to_the_tv_tool() -> None:
+    """Saying "turn off the TV" means the TV, not the TV lights."""
+    runner, tools, _ = _runner(tv=_TV(TVState(True, "com.netflix.ninja", 20, False)))
+    reply = await runner.handle("turn off the tv")
+    assert reply is not None and reply.text == "Okay."
+    assert tools["tv"].calls == [{"action": "power", "on": False}]
+    assert tools["lights"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_play_searches_then_plays_after_the_reply() -> None:
+    """The artist is announced first; playback starts in the follow-up."""
+    spotify = _Tool(
+        {
+            "search": lambda call: {
+                "results": [{"name": "Bad Bunny", "creators": [], "uri": "spotify:artist:" + "a" * 22}]
+                if call["search_type"] == "artist"
+                else [{"name": "Tití Me Preguntó", "creators": ["Bad Bunny"], "uri": "spotify:track:" + "b" * 22}]
+            },
+            "play": {"status": "ok"},
+        }
+    )
+    runner, _, _ = _runner(spotify=spotify)
+    reply = await runner.handle("pon a Bad Bunny")
+    assert reply is not None and reply.text == "Pongo Bad Bunny."
+    assert not any(call["action"] == "play" for call in spotify.calls)
+    assert reply.after is not None and await reply.after() is None
+    assert spotify.calls[-1] == {"action": "play", "uri": "spotify:artist:" + "a" * 22}
+
+
+@pytest.mark.asyncio
+async def test_play_a_genre_searches_playlists() -> None:
+    """Saying "play some jazz" plays a jazz playlist, not an artist called Jazz."""
+    spotify = _Tool(
+        {"search": {"results": [{"name": "Jazz Classics", "creators": [], "uri": "spotify:playlist:" + "c" * 22}]}}
+    )
+    runner, _, _ = _runner(spotify=spotify)
+    reply = await runner.handle("play some jazz")
+    assert reply is not None and reply.text == "Playing Jazz Classics."
+    assert spotify.calls == [{"action": "search", "query": "jazz", "search_type": "playlist"}]
+
+
+@pytest.mark.asyncio
+async def test_volume_goes_to_the_tv_when_nothing_plays_on_spotify() -> None:
+    """With Spotify idle and the TV on, "volume up" is the TV's."""
+    runner, tools, _ = _runner(tv=_TV(TVState(True, "com.google.android.youtube.tv", 20, False)))
+    reply = await runner.handle("volume up")
+    assert reply is not None and reply.text is None
+    assert tools["tv"].calls == [{"action": "volume", "change": "up"}]
+
+
+@pytest.mark.asyncio
+async def test_volume_steps_spotify_from_its_current_level() -> None:
+    """While music plays, "louder" raises Spotify by 15."""
+    spotify = _Tool({"status": {"status": "playing", "volume_percent": 40}})
+    runner, _, _ = _runner(spotify=spotify)
+    await runner.handle("louder")
+    assert spotify.calls[-1] == {"action": "volume", "volume_percent": 55}
+
+
+@pytest.mark.asyncio
+async def test_pause_with_nothing_playing_is_silent() -> None:
+    """Nothing to pause: no tool call and no words."""
+    runner, tools, _ = _runner()
+    reply = await runner.handle("pause")
+    assert reply is not None and reply.text is None
+    assert [call["action"] for call in tools["spotify"].calls] == ["status"]
+
+
+@pytest.mark.asyncio
+async def test_set_the_tv_to_a_number_is_its_volume() -> None:
+    """Saying "set the TV to 20" changes the TV volume, not the lights near it."""
+    runner, tools, _ = _runner(tv=_TV(TVState(True, "com.netflix.ninja", 30, False)))
+    await runner.handle("set the TV to 20")
+    assert tools["tv"].calls == [{"action": "volume", "level": 20}]
+    assert tools["lights"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_pause_reports_a_spotify_error_instead_of_doing_nothing() -> None:
+    """When Spotify's state cannot be read, music may be playing: say it did not work."""
+    runner, _, _ = _runner(spotify=_Tool({"status": {"error": "Reconnect Spotify authorization."}}))
+    reply = await runner.handle("pause")
+    assert reply is not None and reply.text == "Sorry, that didn't work."
+
+
+@pytest.mark.asyncio
+async def test_resume_with_nothing_to_resume_goes_to_the_conversation() -> None:
+    """No recent playback: Gemini can pick something to play."""
+    spotify = _Tool({"status": {"status": "No current playback."}, "resume": {"error": "Start a song first."}})
+    runner, _, _ = _runner(spotify=spotify)
+    assert await runner.handle("play some music") is None
+
+
+@pytest.mark.asyncio
+async def test_a_spotify_search_error_is_not_reported_as_not_found() -> None:
+    """A failed search says it did not work."""
+    runner, _, _ = _runner(spotify=_Tool({"search": {"error": "Reconnect Spotify authorization."}}))
+    reply = await runner.handle("play Bad Bunny")
+    assert reply is not None and reply.text == "Sorry, that didn't work."
+
+
+@pytest.mark.asyncio
+async def test_sleep_lowers_the_head_after_good_night() -> None:
+    """Saying "go to sleep" says good night, then the follow-up lowers the head."""
+    runner, _, deps = _runner()
+    reply = await runner.handle("go to sleep")
+    assert reply is not None and reply.sleep and reply.text == "Good night!"
+    deps.movement_manager.go_to_sleep.assert_not_called()
+    assert reply.after is not None
+    await reply.after()
+    deps.movement_manager.go_to_sleep.assert_called_once()
+
+
+class _Weather:
+    def __init__(self) -> None:
+        self.places: list[Any] = []
+
+    async def geocode(self, name: str, language: str = "en") -> Any:
+        return name.title()
+
+    async def forecast(self, place: Any = None) -> Forecast:
+        self.places.append(place)
+        return Forecast("Lisbon", 18.4, 2, DayForecast(2, 24.6, 16.2, 10), DayForecast(61, 20, 14, 80))
+
+    async def home_name(self, language: str) -> str:
+        return {"es": "Lisboa"}.get(language, "Lisbon")
+
+
+@pytest.mark.asyncio
+async def test_weather_is_answered_from_the_forecast_in_the_local_name() -> None:
+    """Home weather uses the city's name in the request's language."""
+    weather = _Weather()
+    runner, _, _ = _runner(weather=weather)
+    reply = await runner.handle("¿va a llover mañana?")
+    assert reply is not None and reply.text == "Sí, probablemente llueva mañana en Lisboa: 80% de probabilidad."
+    reply = await runner.handle("what's the weather")
+    assert (
+        reply is not None and reply.text == "In Lisbon it's 18 degrees and partly cloudy. Today's high is 25, low 16."
+    )
+
+
+@pytest.mark.asyncio
+async def test_weather_without_a_home_goes_to_the_conversation() -> None:
+    """No HOME_LOCATION: Gemini answers weather as before."""
+    runner, _, _ = _runner()
+    assert await runner.handle("what's the weather") is None

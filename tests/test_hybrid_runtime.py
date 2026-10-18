@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import threading
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from collections.abc import Callable
 
@@ -3350,3 +3351,169 @@ async def test_asleep_a_transcript_mention_mid_sentence_does_not_wake_him() -> N
         assert not runtime._asleep
     finally:
         await runtime.close()
+
+
+class _QuickReply:
+    def __init__(self, text: str | None, *, sleep: bool = False, after: Callable[[], Any] | None = None) -> None:
+        self.text = text
+        self.language = "en"
+        self.kind = "lights"
+        self.sleep = sleep
+        self.after = after
+
+
+def _quick_runtime(
+    reply: _QuickReply | None, handler: FakeHandler, spoken: list[str], seen: list[str]
+) -> HybridRuntime:
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return reply
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    return HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+
+
+@pytest.mark.asyncio
+async def test_quick_command_answers_locally_without_opening_the_cloud() -> None:
+    """A recognized command runs, its reply is queued for playback, and Gemini never starts."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    seen: list[str] = []
+    runtime = _quick_runtime(_QuickReply("Okay."), handler, spoken, seen)
+
+    assert await runtime.activate("acoustic_wake", addressed_text="Reachy, turn off the lights")
+
+    assert seen == ["turn off the lights"]  # the request after the wake word
+    assert spoken == ["Okay."]
+    assert not handler.started.is_set()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert runtime.status.local_commands_executed == 1
+    outputs = [await runtime.emit() for _ in range(3)]
+    assert isinstance(outputs[0], AdditionalOutputs) and outputs[0].args[0]["role"] == "user"
+    assert isinstance(outputs[1], AdditionalOutputs) and outputs[1].args[0]["content"] == "Okay."
+    assert isinstance(outputs[2], tuple) and outputs[2][0] == 24_000
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_request_still_opens_the_conversation() -> None:
+    """When quick commands decline, the request goes to Gemini as before."""
+    handler = FakeHandler()
+    runtime = _quick_runtime(None, handler, [], [])
+
+    assert await runtime.activate("acoustic_wake", addressed_text="tell me a story")
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+    assert handler.say_texts == ["tell me a story"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_quick_reply_follow_up_runs_after_speech_and_sleep_is_remembered() -> None:
+    """The follow-up (start music, lower the head) runs after the reply; "go to sleep" leaves Reachy asleep."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    events: list[str] = []
+
+    async def after() -> str | None:
+        events.append(f"after:{len(spoken)}")
+        return "Sorry, that didn't work."
+
+    runtime = _quick_runtime(_QuickReply("Good night!", sleep=True, after=after), handler, spoken, [])
+    assert await runtime.activate("acoustic_wake", addressed_text="go to sleep")
+
+    assert events == ["after:1"]
+    assert spoken == ["Good night!", "Sorry, that didn't work."]
+    assert runtime._asleep is True
+    assert not handler.started.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_quick_command_falls_back_to_the_conversation() -> None:
+    """An exception in the quick path never loses the request."""
+    handler = FakeHandler()
+
+    async def quick(_text: str) -> None:
+        raise RuntimeError("bug")
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick)
+    assert await runtime.activate("acoustic_wake", addressed_text="turn off the lights")
+    await handler.started.wait()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_slow_quick_command_is_not_repeated_by_the_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A command that times out may have half run, so the cloud does not get it again."""
+    handler = FakeHandler()
+
+    async def quick(_text: str) -> None:
+        await asyncio.sleep(10)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick)
+    monkeypatch.setattr(runtime, "_QUICK_COMMAND_TIMEOUT_S", 0.01)
+    assert await runtime.activate("acoustic_wake", addressed_text="next song")
+    assert not handler.started.is_set()
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_reply_stream_does_not_block_the_wake_word(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Speech that stops arriving is abandoned and Reachy listens again."""
+    handler = FakeHandler()
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply("Okay.")
+
+    async def stalled(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+        await asyncio.sleep(10)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=stalled)
+    monkeypatch.setattr(runtime, "_QUICK_REPLY_BASE_S", 0.05)
+    monkeypatch.setattr(runtime, "_QUICK_REPLY_PER_CHAR_S", 0.0)
+    assert await asyncio.wait_for(runtime.activate("acoustic_wake", addressed_text="lights off"), 2)
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_quick_commands_only_get_words_after_the_name() -> None:
+    """Overheard speech never runs a quick command: only what follows "Reachy" does."""
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply("Okay.")
+
+    async def speak(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    for sentence, expected in (
+        ("we were talking. Reachy, turn off the lights", ["turn off the lights"]),
+        ("we should turn off the lights", []),  # acoustic wake, but no name in the transcript
+    ):
+        seen.clear()
+        processor = _processor_with_open_wake_segment(sentence)
+        handler = FakeHandler()
+        runtime = HybridRuntime(
+            lambda: handler,
+            context_processor=processor,
+            local_processing_close_callback=processor.close,
+            quick_commands=quick,
+            reply_speaker=speak,
+            wake_followup_timeout_s=0.05,
+        )
+        try:
+            await runtime.activate("acoustic_wake")
+            await wait_until(lambda: runtime.mode is not RuntimeMode.LOCAL_COMMAND, attempts=2000)
+            assert seen == expected
+            assert handler.started.is_set() == (not expected)
+        finally:
+            await runtime.close()

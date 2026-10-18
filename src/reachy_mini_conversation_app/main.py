@@ -64,6 +64,32 @@ def _build_tv() -> Any:
     return AndroidTV(config.ANDROID_TV_HOST, Path(config.ANDROID_TV_CERT_DIR))
 
 
+def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
+    """Return the quick-command handler and its reply voice, or (None, None) when disabled."""
+    from reachy_mini_conversation_app.config import config
+
+    if not config.QUICK_COMMANDS_ENABLED:
+        return None, None
+    from reachy_mini_conversation_app.weather import Place, WeatherService
+    from reachy_mini_conversation_app.local_speech import LocalSpeech
+    from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
+
+    home = None
+    if config.HOME_LOCATION and config.HOME_LATITUDE is not None and config.HOME_LONGITUDE is not None:
+        home = Place(config.HOME_LOCATION, config.HOME_LATITUDE, config.HOME_LONGITUDE)
+    weather = WeatherService(home, home_name=config.HOME_LOCATION) if config.HOME_LOCATION else None
+    speech = LocalSpeech(
+        (config.GEMINI_API_KEY or "").strip() or None,
+        config.GEMINI_VOICE,
+        model=config.LOCAL_SPEECH_MODEL,
+        cacheable=FIXED_PHRASES,
+    )
+    logging.getLogger(__name__).info(
+        "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
+    )
+    return QuickCommands(deps, weather=weather).handle, speech.stream
+
+
 def _start_inactivity_timeout_thread(
     timeout_minutes: float,
     stream_manager: LocalStream,
@@ -447,6 +473,8 @@ def run(
             )
             logger.info("Addressee check enabled: side conversations close the conversation early")
 
+        quick_commands, reply_speaker = _build_quick_commands(deps)
+
         hybrid_runtime = HybridRuntime(
             build_hybrid_handler,
             ambient_buffer=AmbientAudioBuffer(max_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS),
@@ -462,6 +490,9 @@ def run(
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
             follow_up_window_s=config.HYBRID_FOLLOW_UP_SECONDS,
             addressee_check=addressee_check,
+            quick_commands=quick_commands,
+            reply_speaker=reply_speaker,
+            speaking_callback=getattr(movement_manager, "set_speaking", None),
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
         runtime_for_tools = hybrid_runtime

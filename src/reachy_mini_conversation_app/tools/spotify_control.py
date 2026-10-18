@@ -488,10 +488,12 @@ class SpotifyControl(Tool):
                     if len(matches) != 1 or matches[0].get("is_restricted") is not False:
                         return {"error": "Open Spotify on the configured device; it is unavailable or restricted."}
                     if action == "status":
+                        device_volume = matches[0].get("volume_percent")
+                        volume_info = {"volume_percent": device_volume} if isinstance(device_volume, int) else {}
                         response = await client.get("https://api.spotify.com/v1/me/player", headers=headers)
                         response.raise_for_status()
                         if response.status_code == 204:
-                            return {"status": "No current playback."}
+                            return {"status": "No current playback.", **volume_info}
                         playback: object = response.json()
                         if not isinstance(playback, dict):
                             raise ValueError("Invalid playback response")
@@ -503,6 +505,7 @@ class SpotifyControl(Tool):
                         return {
                             "status": "playing" if playback.get("is_playing") else "paused",
                             "track": title if isinstance(title, str) else "Unknown track",
+                            **volume_info,
                         }
                     if action == "volume":
                         assert isinstance(volume_percent, int)

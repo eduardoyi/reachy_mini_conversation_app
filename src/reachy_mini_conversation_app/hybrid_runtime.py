@@ -10,9 +10,10 @@ import weakref
 import threading
 from enum import Enum
 from typing import TypeAlias
+from contextlib import aclosing
 from collections import deque
 from dataclasses import dataclass
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable, Awaitable, AsyncIterator
 
 import numpy as np
 
@@ -22,7 +23,7 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
-from reachy_mini_conversation_app.streaming import audio_to_mono_int16
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
 from reachy_mini_conversation_app.ambient_context import (
@@ -299,6 +300,13 @@ def request_after_wake(text: str) -> str:
     return text[matches[-1].end() :].lstrip(" ,.;:!?¡¿-").strip()
 
 
+# Everyday commands answered without the cloud (quick_commands.QuickCommands.handle): returns a reply
+# with ``text``, ``language``, ``kind``, ``sleep`` and ``after``, or None to open the conversation.
+QuickCommandHandler: TypeAlias = Callable[[str], Awaitable[object | None]]
+# Speaks reply text: yields (sample_rate, PCM16 frame) pieces (local_speech.LocalSpeech.stream).
+ReplySpeaker: TypeAlias = Callable[[str, str], AsyncIterator[tuple[int, np.ndarray]]]
+
+
 class HybridRuntime:
     """Coordinate local ambient capture with one on-demand cloud handler."""
 
@@ -311,6 +319,14 @@ class HybridRuntime:
     _LOCAL_PROCESSING_BATCH_FRAMES = 25
     # Bound on waiting for Whisper to finish the sentence in progress when an acoustic wake fires.
     _ACOUSTIC_CONTEXT_SETTLE_S = 3.0
+    # A quick command (device action plus the start of its reply) must finish within this, or the
+    # conversation takes over.
+    _QUICK_COMMAND_TIMEOUT_S = 8.0
+    # Margin after a quick reply's audio before listening for the wake word again.
+    _QUICK_REPLY_TAIL_S = 0.4
+    # Cap on one quick reply (synthesis plus playback): about 0.07 s of speech per character.
+    _QUICK_REPLY_BASE_S = 6.0
+    _QUICK_REPLY_PER_CHAR_S = 0.12
     # A wake segment this short is taken as the wake word alone; the request is the next segment.
     _WAKE_ONLY_MAX_WORDS = 2
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
@@ -382,6 +398,9 @@ class HybridRuntime:
         inactivity_timeout_s: float = 0.0,
         follow_up_window_s: float = 0.0,
         addressee_check: AddresseeChecker | None = None,
+        quick_commands: QuickCommandHandler | None = None,
+        reply_speaker: ReplySpeaker | None = None,
+        speaking_callback: Callable[[bool], None] | None = None,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         clock: Clock = time.monotonic,
         monitor_interval_s: float = 0.1,
@@ -415,6 +434,11 @@ class HybridRuntime:
         self._acoustic_stream_epoch: int | None = None
         self._intent_router = intent_router
         self._action_executor = action_executor
+        self._quick_commands = quick_commands
+        self._reply_speaker = reply_speaker
+        self._speaking_callback = speaking_callback
+        # Spoken replies to quick commands, played while no cloud handler exists.
+        self._local_output: deque[AudioFrame | AdditionalOutputs] = deque()
         self._local_processing_close_callback = local_processing_close_callback
         self._acknowledgement_callback = acknowledgement_callback
         # Told True when a cloud conversation starts and False when it has ended (e.g. to lower music).
@@ -1031,6 +1055,7 @@ class HybridRuntime:
                         return self._mode is RuntimeMode.CLOUD_CONVERSATION and not self._closed
                     self._generation += 1
                     generation = self._generation
+                    self._local_output.clear()
                     barrier_provider = self._capture_barrier_provider
                     self._activation_capture_barrier = barrier_provider() if barrier_provider is not None else None
                     self._clear_postactivation_queue()
@@ -1092,7 +1117,10 @@ class HybridRuntime:
                         self._transition(RuntimeMode.LOCAL_AMBIENT, "local_command_completed")
                 return True
 
+            # What quick commands may act on: only words addressed to Reachy, never an overheard sentence.
+            quick_text = (request_after_wake(addressed_text) or addressed_text) if addressed_text else ""
             if reason == "acoustic_wake" and self._context_processor is not None:
+                quick_text = ""
                 await self._settle_local_transcript()
                 wake_text = self._segment_text(wake_segment_sequence)
                 wake_word_found = _WAKE_WORD_TRANSCRIPT_PATTERN.search(wake_text) is not None
@@ -1109,6 +1137,10 @@ class HybridRuntime:
                 # what it refers to) without depending on how local STT spelled the wake word.
                 parts = (wake_text, followup_text) if followup_text else ((wake_text,) if wake_text_is_request else ())
                 request_text = " ".join(part for part in parts if part).strip()
+                if wake_word_found:
+                    quick_text = " ".join(part for part in (request_after_wake(wake_text), followup_text) if part)
+                elif followup_text and not wake_text_is_request:
+                    quick_text = followup_text  # the next sentence after "Reachy" alone
                 if request_text:
                     addressed_text = request_text[: self._MAX_ADDRESSED_TEXT_CHARS]
                     with self._lifecycle_lock:
@@ -1131,6 +1163,9 @@ class HybridRuntime:
                     with self._lifecycle_lock:
                         self._asleep = False
                     await self._invoke_acknowledgement(reason)
+            if quick_text and await self._try_quick_command(quick_text, generation):
+                return True
+
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             initial_context = frame_activation_context(ambient_text, config.LOCAL_CONTEXT_MAX_CHARS)
 
@@ -1284,6 +1319,117 @@ class HybridRuntime:
             LocalCommandOutcome.LOCAL_EXECUTED if executed else LocalCommandOutcome.LOCAL_EXECUTION_FAILED
         )
         return executed
+
+    def _quick_generation_current(self, generation: int) -> bool:
+        with self._lifecycle_lock:
+            return not self._closed and self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
+
+    async def _try_quick_command(self, addressed_text: str, generation: int) -> bool:
+        """Answer an everyday command locally; returns whether the cloud conversation can stay closed.
+
+        ``addressed_text`` is only what was said to Reachy (after his name, or the next sentence).
+        """
+        quick = self._quick_commands
+        if quick is None:
+            return False
+        request = addressed_text
+        started_at = self._clock()
+        try:
+            reply = await asyncio.wait_for(quick(request), self._QUICK_COMMAND_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            # The action may have half run (TV keys, a skipped song); the conversation would repeat it.
+            logger.warning("Quick command timed out; not repeating it in the conversation")
+            await self._finish_quick_command(generation, sleep=False)
+            return True
+        except Exception as error:
+            logger.warning("Quick command failed: %s", type(error).__name__)
+            return False
+        if reply is None:
+            return False
+        if not self._quick_generation_current(generation):
+            return True  # it ran; the activation was superseded meanwhile
+        kind = str(getattr(reply, "kind", "command"))
+        language = str(getattr(reply, "language", "en"))
+        logger.info(
+            "Quick command kind=%s language=%s handled_ms=%.0f", kind, language, (self._clock() - started_at) * 1000
+        )
+        with self._lifecycle_lock:
+            self._pending_acoustic_ack_generation = None
+        self._clear_postactivation_queue()
+        self._local_output.append(AdditionalOutputs({"role": "user", "content": request}))
+        await self._speak_locally(getattr(reply, "text", None), language, generation)
+        after = getattr(reply, "after", None)
+        if after is not None and self._quick_generation_current(generation):
+            try:
+                follow_up = await asyncio.wait_for(after(), self._QUICK_COMMAND_TIMEOUT_S)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Quick command follow-up failed: %s", type(error).__name__)
+                follow_up = None
+            await self._speak_locally(follow_up, language, generation)
+        await self._finish_quick_command(generation, sleep=bool(getattr(reply, "sleep", False)))
+        logger.info("Quick command kind=%s done_ms=%.0f", kind, (self._clock() - started_at) * 1000)
+        return True
+
+    async def _finish_quick_command(self, generation: int, *, sleep: bool) -> None:
+        """Return to listening for the wake word after a quick command."""
+        async with self._state_lock:
+            with self._lifecycle_lock:
+                still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
+                if still_command and sleep:
+                    self._asleep = True
+            if still_command:
+                self._clear_postactivation_queue()
+                self._transition(RuntimeMode.LOCAL_AMBIENT, "quick_command_completed")
+        with self._metrics_lock:
+            self._local_commands_executed += 1
+
+    async def _speak_locally(self, text: object, language: str, generation: int) -> None:
+        """Queue a spoken reply for playback and wait until it has been heard."""
+        speaker = self._reply_speaker
+        if not isinstance(text, str) or not text.strip() or speaker is None:
+            return
+        self._local_output.append(AdditionalOutputs({"role": "assistant", "content": text}))
+        started_at = self._clock()
+        try:
+            async with asyncio.timeout(self._QUICK_REPLY_BASE_S + len(text) * self._QUICK_REPLY_PER_CHAR_S):
+                await self._queue_reply_audio(speaker(text, language), generation, started_at)
+        except TimeoutError:
+            logger.warning("Quick reply speech took too long; listening again")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Quick reply speech failed: %s", type(error).__name__)
+
+    async def _queue_reply_audio(
+        self, stream: AsyncIterator[tuple[int, np.ndarray]], generation: int, started_at: float
+    ) -> None:
+        """Queue reply audio as it arrives, then wait until it has played."""
+        queued_s = 0.0
+        speaking = False
+        try:
+            async with aclosing(stream) as pieces:  # type: ignore[type-var]
+                async for sample_rate, frame in pieces:
+                    if not self._quick_generation_current(generation):
+                        break
+                    if not speaking:
+                        started_at = self._clock()  # playback starts with the first piece
+                        if self._speaking_callback is not None:
+                            self._speaking_callback(True)
+                    speaking = True
+                    self._local_output.append((sample_rate, frame))
+                    self._output_wakeup_event.set()
+                    queued_s += frame.shape[-1] / sample_rate
+            # Stay in the command state (no new wake from Reachy's own voice) until the reply has played.
+            remaining = started_at + queued_s + self._QUICK_REPLY_TAIL_S - self._clock()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+        finally:
+            if speaking and self._speaking_callback is not None:
+                self._speaking_callback(False)
 
     def _record_local_command_outcome(
         self,
@@ -1930,7 +2076,11 @@ class HybridRuntime:
                 handler = self._active_handler
                 generation = self._generation
         if handler is None:
+            if self._local_output:
+                return self._local_output.popleft()
             await self._wait_for_output_wakeup()
+            if self._local_output:
+                return self._local_output.popleft()
             async with self._state_lock:
                 with self._lifecycle_lock:
                     handler = self._active_handler
@@ -2171,6 +2321,8 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._active_handler is not None or self._closed or self._mode is RuntimeMode.STOPPING:
                     return
+            if self._local_output:
+                return
             await self._output_wakeup_event.wait()
             self._output_wakeup_event.clear()
 
@@ -2483,6 +2635,7 @@ class HybridRuntime:
                 close_task = asyncio.create_task(self._finish_close(), name="hybrid-close")
                 self._close_task = close_task
         self._local_start_event.set()
+        self._local_output.clear()
         self._output_wakeup_event.set()
 
         try:

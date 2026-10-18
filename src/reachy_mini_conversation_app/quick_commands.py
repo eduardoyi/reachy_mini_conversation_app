@@ -1,0 +1,992 @@
+"""Answer everyday requests without a cloud conversation, the way a smart speaker does.
+
+"Reachy, turn off the lights", "pause", "what time is it?", "qué tiempo hace?": the local transcript
+of the request is matched against a small multilingual grammar (English, Spanish, Italian,
+Portuguese). A match runs the existing tool (home_lights, spotify_control, tv) or answers from the
+clock or Open-Meteo, and Reachy replies with a short sentence in the request's language. Anything
+else, or anything the grammar is unsure of, returns ``None`` and goes to the Gemini conversation as
+before. Measured 2026-10-18 before this module: about 8-9 s from the wake word to Reachy's answer,
+most of it opening the Gemini session and its thinking.
+"""
+
+from __future__ import annotations
+import re
+import asyncio
+import logging
+import unicodedata
+from typing import Any, Final, Callable
+from datetime import datetime
+from dataclasses import field, replace, dataclass
+from collections.abc import Awaitable
+
+from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
+
+
+logger = logging.getLogger(__name__)
+
+LANGUAGES: Final[tuple[str, ...]] = ("en", "es", "it", "pt")
+# A request longer than this is a conversation, not a command.
+MAX_COMMAND_WORDS: Final[int] = 14
+SPOTIFY_VOLUME_STEP: Final[int] = 15
+
+
+@dataclass(frozen=True)
+class QuickCommand:
+    """One recognized request."""
+
+    kind: str
+    language: str
+    args: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class QuickReply:
+    """What Reachy says, and what runs after he says it (its own optional reply)."""
+
+    text: str | None
+    language: str
+    kind: str
+    sleep: bool = False
+    after: Callable[[], Awaitable[str | None]] | None = None
+
+
+# ---------------------------------------------------------------------------------------------
+# Text normalization
+
+
+def normalize(text: str) -> str:
+    """Lowercase, drop accents and punctuation ("¿Qué hora es?" -> "que hora es")."""
+    folded = unicodedata.normalize("NFKD", text.casefold()).encode("ascii", "ignore").decode("ascii")
+    folded = re.sub(r"['\u2019`]", "", folded).replace("%", " percent ")
+    return " ".join(re.sub(r"[^\w\s]", " ", folded).split())
+
+
+_PREFIX = re.compile(
+    r"^(?:(?:hey|hi|ok|okay|so|and|please|now|can you|could you|would you|will you|i want you to|"
+    r"oye|eh|vale|bueno|y|por favor|puedes|podrias|me puedes|quiero que|"
+    r"ehi|allora|e|per favore|puoi|potresti|mi puoi|"
+    r"olha|entao|podes|pode|voce pode|consegues)\s+)+"
+)
+_SUFFIX = re.compile(
+    r"(?:\s+(?:please|now|for me|thanks|thank you|right now|"
+    r"por favor|ahora|gracias|ya|porfa|"
+    r"per favore|adesso|ora|grazie|"
+    r"agora|obrigado|obrigada|ja))+$"
+)
+
+
+def strip_politeness(text: str) -> str:
+    """Remove "please", "can you", "por favor"... around a normalized command."""
+    return _SUFFIX.sub("", _PREFIX.sub("", text)).strip()
+
+
+_SPANISH_MARKERS = frozenset({"el", "la", "los", "las", "del", "que", "es", "hace", "cancion", "luces", "y", "hoy"})
+_PORTUGUESE_MARKERS = frozenset({"o", "a", "os", "as", "da", "do", "das", "dos", "na", "no", "luzes", "sao", "hoje"})
+_ITALIAN_MARKERS = frozenset({"il", "lo", "le", "gli", "della", "delle", "che", "luci", "canzone", "sono"})
+
+
+# ---------------------------------------------------------------------------------------------
+# Grammar
+
+_TIME = {
+    "en": r"(?:what time is it|whats the time|what is the time|tell me the time|do you know what time it is|"
+    r"what time is it now|whats the time now)",
+    "es": r"(?:que hora es|que horas son|la hora|dime la hora|me dices la hora|sabes que hora es)",
+    "it": r"(?:che ore sono|che ora e|lora|dimmi lora|sai che ore sono|mi dici lora)",
+    "pt": r"(?:que horas sao|que horas e|as horas|diz me as horas|sabes que horas sao)",
+}
+_DATE = {
+    "en": r"(?:what day is it(?: today)?|what day is today|whats the date(?: today)?|what is the date(?: today)?|"
+    r"whats todays date|what is todays date|whats today|what is today)",
+    "es": r"(?:que dia es(?: hoy)?|que fecha es(?: hoy)?|a que estamos(?: hoy)?|a cuanto estamos(?: hoy)?)",
+    "it": r"(?:che giorno e(?: oggi)?|che data e(?: oggi)?|quanti ne abbiamo(?: oggi)?)",
+    "pt": r"(?:que dia e(?: hoje)?|que data e(?: hoje)?|em que dia estamos)",
+}
+_WHEN = r"(?:\s+(?P<when>today|tomorrow|now|outside|hoy|manana|ahora|fuera|oggi|domani|fuori|hoje|amanha|la fora))?"
+_WEATHER = {
+    "en": [
+        rf"(?:whats|what is|hows|how is|what s)?\s*the weather(?: like)?(?: going to be(?: like)?)?{_WHEN}"
+        rf"(?:\s+in\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
+        rf"(?:whats|what is)?\s*the forecast{_WHEN}(?:\s+for\s+(?P<place>[a-z ]+?))?",
+        rf"what will the weather be(?: like)?{_WHEN}(?:\s+in\s+(?P<place>[a-z ]+?))?",
+        r"(?:weather|forecast)(?:\s+(?P<when>today|tomorrow))?",
+        r"how (?:hot|cold|warm) is it(?: outside)?(?: today)?",
+        r"whats the temperature(?: outside)?|what is the temperature(?: outside)?",
+    ],
+    "es": [
+        rf"(?:como esta|como va a estar|que tal) el tiempo{_WHEN}(?:\s+en\s+(?P<place>[a-z ]+?))?"
+        rf"{_WHEN.replace('when', 'when2')}",
+        rf"que tiempo (?:hace|hara|va a hacer){_WHEN}(?:\s+en\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
+        r"(?:que temperatura hace|cuantos grados hace|hace frio|hace calor)(?: fuera)?(?: hoy)?",
+        r"(?:el tiempo|el pronostico)(?: de)? (?:hoy|manana)|el pronostico",
+    ],
+    "it": [
+        rf"che tempo (?:fa|fara){_WHEN}(?:\s+a\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
+        rf"(?:come il tempo|il meteo|meteo){_WHEN}",
+        r"(?:che temperatura ce|quanti gradi ci sono|fa freddo|fa caldo)(?: fuori)?(?: oggi)?",
+    ],
+    "pt": [
+        rf"(?:como esta|como vai estar|como vai ficar) o tempo{_WHEN}(?:\s+em\s+(?P<place>[a-z ]+?))?"
+        rf"{_WHEN.replace('when', 'when2')}",
+        rf"que tempo (?:faz|vai fazer){_WHEN}(?:\s+em\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
+        r"(?:qual e a temperatura|quantos graus estao|esta frio|esta calor)(?: la fora)?(?: hoje)?",
+        r"(?:a previsao do tempo|a previsao)(?: para)?(?: hoje| amanha)?",
+    ],
+}
+_RAIN = {
+    "en": rf"(?:(?:is it|will it|is it going to|does it look like its going to) rain(?:ing)?|"
+    rf"do i need an umbrella|any rain){_WHEN}",
+    "es": rf"(?:va a llover|llueve|esta lloviendo|llovera|necesito paraguas){_WHEN}",
+    "it": rf"(?:piove|piovera|sta piovendo|serve lombrello){_WHEN}",
+    "pt": rf"(?:vai chover|chove|esta a chover|preciso de guarda chuva){_WHEN}",
+}
+_SLEEP = {
+    "en": r"(?:go to sleep|go to bed|time to sleep|good night|goodnight|take a nap)",
+    "es": r"(?:a dormir|vete a dormir|ve a dormir|duermete|buenas noches)",
+    "it": r"(?:vai a dormire|a nanna|buonanotte|buona notte|vai a nanna)",
+    "pt": r"(?:vai dormir|boa noite|vai para a cama)",
+}
+_CANCEL = {
+    "en": r"(?:never mind|nevermind|nothing|cancel|forget it|no thanks|nothing thanks|not you|sorry|my bad|"
+    r"i wasnt talking to you|wrong robot)",
+    "es": r"(?:nada|olvidalo|da igual|dejalo|no importa|cancela|perdon|no es contigo|no te hablaba a ti)",
+    "it": r"(?:niente|lascia stare|lascia perdere|annulla|non importa|scusa|non parlavo con te)",
+    "pt": r"(?:nada|esquece|deixa|cancela|deixa estar|nao importa|desculpa|nao e contigo)",
+}
+_PAUSE = {
+    "en": r"(?:pause|pause it|stop the music|stop music|pause the music|pause music|stop the song|pause the song)",
+    "es": r"(?:pausa|pausala|pon pausa|para la musica|para musica|deten la musica|pausa la musica|para la cancion)",
+    "it": r"(?:pausa|metti in pausa|ferma la musica|pausa la musica|ferma la canzone)",
+    "pt": r"(?:pausa|pausar|para a musica|pausa a musica|pare a musica)",
+}
+_STOP = {"en": r"(?:stop|stop it|enough)", "es": r"(?:para|basta|alto|stop|parale)",
+         "it": r"(?:basta|ferma|fermati|stop)", "pt": r"(?:para|pare|chega|basta|stop)"}  # fmt: skip
+_RESUME = {
+    "en": r"(?:resume|continue|unpause|keep playing|play|play music|play some music|put some music on|put on some music|"
+    r"resume the music|continue the music|play the music)",
+    "es": r"(?:continua|reanuda|sigue|quita la pausa|pon musica|pon la musica|pon algo de musica|continua la musica|"
+    r"sigue la musica|ponme musica)",
+    "it": r"(?:riprendi|continua|metti musica|metti la musica|metti un po di musica|riprendi la musica)",
+    "pt": r"(?:continua|retoma|toca musica|poe musica|poe uma musica|continua a musica|retoma a musica)",
+}
+_NEXT = {
+    "en": r"(?:next|skip|next song|next track|skip this|skip this song|skip song|skip it|play the next song|another song)",
+    "es": r"(?:siguiente|la siguiente|siguiente cancion|pasa la cancion|salta la cancion|cambia la cancion|"
+    r"otra cancion|pon la siguiente)",
+    "it": r"(?:prossima|la prossima|prossima canzone|salta la canzone|cambia canzone|unaltra canzone|metti la prossima)",
+    "pt": r"(?:proxima|a proxima|proxima musica|passa a musica|pula a musica|muda a musica|outra musica|poe a proxima)",
+}
+_VOLUME_TARGET = r"(?:\s+(?:of\s+)?(?:the\s+|el\s+|la\s+|il\s+|o\s+|a\s+|da\s+|de\s+la\s+|della\s+)?(?P<device>tv|tele|television|televisione|televisao|music|musica|spotify))?"
+_VOLUME_UP = {
+    "en": rf"(?:volume up|louder|turn it up|turn the volume up|turn up the volume|raise the volume|"
+    rf"turn up the (?:music|tv)|turn the (?:music|tv) up|increase the volume){_VOLUME_TARGET}(?: a bit| a little)?",
+    "es": rf"(?:sube(?:le)?(?: el)? volumen|mas alto|mas fuerte|sube la musica|sube la tele|subele el volumen)"
+    rf"{_VOLUME_TARGET}(?: un poco)?",
+    "it": rf"(?:alza(?: il)? volume|piu forte|piu alto|aumenta(?: il)? volume|alza la musica){_VOLUME_TARGET}"
+    rf"(?: un po)?",
+    "pt": rf"(?:aumenta(?: o)? volume|sobe(?: o)? volume|mais alto|aumenta a musica){_VOLUME_TARGET}(?: um pouco)?",
+}
+_VOLUME_DOWN = {
+    "en": rf"(?:volume down|quieter|softer|turn it down|turn the volume down|turn down the volume|lower the volume|"
+    rf"turn down the (?:music|tv)|turn the (?:music|tv) down|decrease the volume){_VOLUME_TARGET}(?: a bit| a little)?",
+    "es": rf"(?:baja(?:le)?(?: el)? volumen|mas bajo|mas despacio|baja la musica|baja la tele|bajale el volumen)"
+    rf"{_VOLUME_TARGET}(?: un poco)?",
+    "it": rf"(?:abbassa(?: il)? volume|piu piano|piu basso|abbassa la musica){_VOLUME_TARGET}(?: un po)?",
+    "pt": rf"(?:baixa(?: o)? volume|diminui(?: o)? volume|mais baixo|baixa a musica){_VOLUME_TARGET}(?: um pouco)?",
+}
+_VOLUME_SET = {
+    "en": rf"(?:set (?:the )?)?volume{_VOLUME_TARGET} (?:to |at )?(?P<level>\d{{1,3}})(?: percent)?",
+    "es": rf"(?:pon )?(?:el )?volumen{_VOLUME_TARGET} (?:al|a|en) (?P<level>\d{{1,3}})(?: por ciento| percent)?",
+    "it": rf"(?:metti )?(?:il )?volume{_VOLUME_TARGET} (?:al|a) (?P<level>\d{{1,3}})(?: per cento| percent)?",
+    "pt": rf"(?:poe )?(?:o )?volume{_VOLUME_TARGET} (?:a|em|no|nos) (?P<level>\d{{1,3}})(?: por cento| percent)?",
+}
+_ON_OFF = [
+    ("en", re.compile(r"^(?:turn|switch|shut)\s+(?P<state>on|off)\s+(?P<target>.+)$")),
+    ("en", re.compile(r"^(?:turn|switch|shut)\s+(?P<target>.+?)\s+(?P<state>on|off)$")),
+    ("en", re.compile(r"^(?P<target>.+?)\s+(?P<state>on|off)$")),
+    ("en", re.compile(r"^(?P<target>lights)\s+(?P<state>out)$")),
+    ("es", re.compile(r"^(?P<verb>enciend\w*|encend\w*|prend\w*|apag\w*)\s+(?P<target>.+)$")),
+    ("it", re.compile(r"^(?P<verb>accend\w*|speg\w*|spent\w*)\s+(?P<target>.+)$")),
+    ("pt", re.compile(r"^(?P<verb>deslig\w*|lig\w*|acend\w*)\s+(?P<target>.+)$")),
+]
+_DIM_WORDS = r"(?:dim|lower|dim down)"
+_BRIGHT_WORDS = r"(?:brighten|brighten up|raise)"
+_PERCENT = r"(?:\s*(?:percent|por ciento|per cento|por cento))?"
+_BRIGHTNESS = [
+    ("en", re.compile(rf"^{_DIM_WORDS}\s+(?P<target>.+?)(?:\s+to\s+(?P<level>\d{{1,3}}){_PERCENT})?$"), "dim"),
+    ("en", re.compile(rf"^{_BRIGHT_WORDS}\s+(?P<target>.+?)(?:\s+to\s+(?P<level>\d{{1,3}}){_PERCENT})?$"), "bright"),
+    ("en", re.compile(rf"^(?:set|put|turn)\s+(?P<target>.+?)\s+(?:to|at)\s+(?P<level>\d{{1,3}}){_PERCENT}$"), "level"),
+    ("en", re.compile(rf"^(?P<target>.+?)\s+(?:to|at)\s+(?P<level>\d{{1,3}}){_PERCENT}$"), "level"),
+    ("en", re.compile(r"^(?:make\s+)?(?P<target>.+?)\s+(?:dimmer|darker|less bright)$"), "dim"),
+    ("en", re.compile(r"^(?:make\s+)?(?P<target>.+?)\s+brighter$"), "bright"),
+    (
+        "es",
+        re.compile(rf"^(?:pon|deja|ajusta)\s+(?P<target>.+?)\s+(?:al|a|en)\s+(?P<level>\d{{1,3}}){_PERCENT}$"),
+        "level",
+    ),
+    ("es", re.compile(rf"^(?P<target>.+?)\s+al\s+(?P<level>\d{{1,3}}){_PERCENT}$"), "level"),
+    ("es", re.compile(r"^(?:baja|bajale|atenua)\s+(?P<target>.+)$"), "dim"),
+    ("es", re.compile(r"^(?:sube|subele)\s+(?P<target>.+)$"), "bright"),
+    ("it", re.compile(rf"^(?:metti|imposta)\s+(?P<target>.+?)\s+(?:al|a)\s+(?P<level>\d{{1,3}}){_PERCENT}$"), "level"),
+    ("it", re.compile(r"^(?:abbassa|attenua)\s+(?P<target>.+)$"), "dim"),
+    ("it", re.compile(r"^(?:alza)\s+(?P<target>.+)$"), "bright"),
+    (
+        "pt",
+        re.compile(rf"^(?:poe|deixa|mete)\s+(?P<target>.+?)\s+(?:a|em|no|nos)\s+(?P<level>\d{{1,3}}){_PERCENT}$"),
+        "level",
+    ),
+    ("pt", re.compile(r"^(?:baixa|diminui|reduz)\s+(?P<target>.+)$"), "dim"),
+    ("pt", re.compile(r"^(?:aumenta|sobe)\s+(?P<target>.+)$"), "bright"),
+]
+DIM_LEVEL: Final[int] = 30
+BRIGHT_LEVEL: Final[int] = 100
+_COLOR_WORDS: Final[dict[str, str]] = {
+    **dict.fromkeys(("red", "rojo", "roja", "rojas", "rojos", "rosso", "rossa", "rossi", "rosse", "vermelho",
+                     "vermelha", "vermelhos", "vermelhas"), "red"),
+    **dict.fromkeys(("orange", "naranja", "naranjas", "arancione", "arancioni", "laranja", "laranjas"), "orange"),
+    **dict.fromkeys(("yellow", "amarillo", "amarilla", "amarillos", "amarillas", "giallo", "gialla", "gialli",
+                     "gialle", "amarelo", "amarela", "amarelos", "amarelas"), "yellow"),
+    **dict.fromkeys(("green", "verde", "verdes", "verdi"), "green"),
+    **dict.fromkeys(("cyan", "turquoise", "celeste", "turquesa", "azzurro", "azzurra", "azzurri", "azzurre",
+                     "ciano"), "cyan"),
+    **dict.fromkeys(("blue", "azul", "azules", "blu", "azuis"), "blue"),
+    **dict.fromkeys(("purple", "violet", "morado", "morada", "morados", "moradas", "violeta", "viola", "lila",
+                     "roxo", "roxa", "roxos", "roxas"), "purple"),
+    **dict.fromkeys(("pink", "rosa", "rosado", "rosada", "rosas", "rosados"), "pink"),
+    **dict.fromkeys(("white", "blanco", "blanca", "blancos", "blancas", "bianco", "bianca", "bianchi", "bianche",
+                     "branco", "branca", "brancos", "brancas"), "white"),
+}  # fmt: skip
+_COLOR = [
+    ("en", re.compile(r"^(?:make|turn|set|change|put)\s+(?P<target>.+?)\s+(?:to\s+|in\s+)?(?P<color>\w+)$")),
+    ("es", re.compile(r"^(?:pon|cambia|haz|deja)(?:me)?\s+(?P<target>.+?)\s+(?:en\s+|de\s+(?:color\s+)?|a\s+|color\s+)?(?P<color>\w+)$")),
+    ("it", re.compile(r"^(?:metti|fai|cambia|rendi)\s+(?P<target>.+?)\s+(?:in\s+|di\s+(?:colore\s+)?|a\s+)?(?P<color>\w+)$")),
+    ("pt", re.compile(r"^(?:poe|muda|coloca|mete|deixa)\s+(?P<target>.+?)\s+(?:em\s+|de\s+(?:cor\s+)?|a\s+|para\s+)?(?P<color>\w+)$")),
+    # Last: no verb at all ("TV lights red").
+    ("en", re.compile(r"^(?P<target>.+?)\s+(?:to\s+)?(?P<color>\w+)$")),
+]  # fmt: skip
+_YOUTUBE = [
+    ("en", re.compile(r"^(?:play|put on|put|show|search for|search|find)\s+(?P<q>.+?)\s+on\s+(?:youtube|the tv|tv|the television)$")),
+    ("en", re.compile(r"^(?:search youtube for|youtube)\s+(?P<q>.+)$")),
+    ("es", re.compile(r"^(?:pon|ponme|busca|reproduce)\s+(?P<q>.+?)\s+en\s+(?:youtube|la tele|la tv|la television)$")),
+    ("it", re.compile(r"^(?:metti|mettimi|cerca|fammi vedere)\s+(?P<q>.+?)\s+(?:su youtube|sulla tv|sulla televisione|in tv|in televisione)$")),
+    ("pt", re.compile(r"^(?:poe|coloca|procura|mete)\s+(?P<q>.+?)\s+(?:no youtube|na tv|na televisao)$")),
+]  # fmt: skip
+_OPEN_APP = [
+    ("en", re.compile(r"^(?:open|launch|start|put on|put)\s+(?P<app>.+?)(?:\s+on the tv)?$")),
+    ("es", re.compile(r"^(?:abre|abreme|pon|ponme)\s+(?P<app>.+?)(?:\s+en la tele| en la tv)?$")),
+    ("it", re.compile(r"^(?:apri|metti|avvia)\s+(?P<app>.+?)(?:\s+sulla tv| sulla televisione)?$")),
+    ("pt", re.compile(r"^(?:abre|poe|coloca|mete)\s+(?P<app>.+?)(?:\s+na tv| na televisao)?$")),
+]
+_PLAY = [
+    ("en", re.compile(r"^(?:play|put on)\s+(?P<q>.+?)(?:\s+on spotify)?$")),
+    ("es", re.compile(r"^(?:pon|ponme|reproduce|toca|tocame)\s+(?P<q>.+?)(?:\s+en spotify)?$")),
+    ("it", re.compile(r"^(?:metti|mettimi|suona|riproduci)\s+(?P<q>.+?)(?:\s+su spotify)?$")),
+    ("pt", re.compile(r"^(?:toca|poe|coloca|reproduz|mete)\s+(?P<q>.+?)(?:\s+no spotify)?$")),
+]
+# "Play with me", "play hide and seek": a game, not music.
+_NOT_MUSIC = re.compile(
+    r"^(?:with|a game|game|games|hide|tag|catch|pretend|together|outside|dead|con|com)\b|"
+    r"\b(?:game|games|juego|gioco|jogo|chess|ajedrez|scacchi|xadrez|scissors|tijera|tijeras|story|stories|cuento|"
+    r"storia|historia|timer|temporizador|alarm|alarma|allarme|alarme|reminder|recordatorio|mesa|table|tavola|"
+    r"atencion|attention|cuidado|movie|movies|film|peli|pelicula|cartoons|cartoon|dibujos|cartoni|desenhos|news|"
+    r"noticias|notizie|telediario|shoes|zapatos|scarpe|sapatos|coat|abrigo|chaqueta|pijama|pyjamas|pajamas|guitar|"
+    r"guitarra|chitarra|piano|piano|drums|bateria|tambor|ball|pelota|palla|bola|dress|vestido|ropa|clothes)\b"
+)
+# "Play that song again", "my favorite": needs the conversation or memory, not a literal search.
+_NEEDS_CONTEXT = re.compile(
+    r"\b(?:that|this|it|again|same|favorite|favourite|eso|esa|ese|esto|esta|otra vez|favorita|favorito|"
+    r"quella|quello|questa|questo|ancora|preferita|preferito|isso|essa|esse|isto|outra vez|preferida)\b"
+)
+_MUSIC_ONLY = frozenset(
+    {"music", "some music", "the music", "musica", "la musica", "algo de musica", "un poco de musica",
+     "un po di musica", "a musica", "uma musica", "something", "algo", "qualcosa", "alguma coisa"}
+)  # fmt: skip
+_TV_WORDS = frozenset({"tv", "tele", "television", "televisor", "televisione", "televisore", "televisao"})
+
+
+def _full(pattern: str) -> re.Pattern[str]:
+    return re.compile(rf"^(?:{pattern})$")
+
+
+_TIME_RE = {language: _full(pattern) for language, pattern in _TIME.items()}
+_DATE_RE = {language: _full(pattern) for language, pattern in _DATE.items()}
+_WEATHER_RE = {language: [_full(pattern) for pattern in patterns] for language, patterns in _WEATHER.items()}
+_RAIN_RE = {language: _full(pattern) for language, pattern in _RAIN.items()}
+_SLEEP_RE = {language: _full(pattern) for language, pattern in _SLEEP.items()}
+_CANCEL_RE = {language: _full(pattern) for language, pattern in _CANCEL.items()}
+_PAUSE_RE = {language: _full(pattern) for language, pattern in _PAUSE.items()}
+_STOP_RE = {language: _full(pattern) for language, pattern in _STOP.items()}
+_RESUME_RE = {language: _full(pattern) for language, pattern in _RESUME.items()}
+_NEXT_RE = {language: _full(pattern) for language, pattern in _NEXT.items()}
+_VOLUME_UP_RE = {language: _full(pattern) for language, pattern in _VOLUME_UP.items()}
+_VOLUME_DOWN_RE = {language: _full(pattern) for language, pattern in _VOLUME_DOWN.items()}
+_VOLUME_SET_RE = {language: _full(pattern) for language, pattern in _VOLUME_SET.items()}
+_TOMORROW = frozenset({"tomorrow", "manana", "domani", "amanha"})
+
+
+def _first_match(table: dict[str, re.Pattern[str]], text: str) -> tuple[str, re.Match[str]] | None:
+    for language, pattern in table.items():
+        match = pattern.match(text)
+        if match:
+            return language, match
+    return None
+
+
+# First words shared by Spanish and Portuguese (and some Italian): the rest of the sentence decides.
+_SHARED_FIRST_WORDS = frozenset(
+    {"apaga", "apagar", "pausa", "pausar", "para", "parar", "nada", "continua", "toca", "basta", "stop", "cancela",
+     "que", "aumenta", "salta", "sube", "baja"}
+)  # fmt: skip
+
+
+def _language(language: str, text: str) -> str:
+    """Refine a Romance-language guess: "apaga la luz" is Spanish, "apaga a luz" Portuguese."""
+    words = text.split()
+    if language == "en" or not words or words[0] not in _SHARED_FIRST_WORDS:
+        return language
+    counts = {
+        "es": sum(word in _SPANISH_MARKERS for word in words[1:]),
+        "pt": sum(word in _PORTUGUESE_MARKERS for word in words[1:]),
+        "it": sum(word in _ITALIAN_MARKERS for word in words[1:]),
+    }
+    best = max(counts, key=lambda candidate: counts[candidate])
+    return best if counts[best] > counts.get(language, 0) else language
+
+
+def _volume_device(match: re.Match[str]) -> str | None:
+    device = match.groupdict().get("device")
+    if device in _TV_WORDS:
+        return "tv"
+    if device:
+        return "music"
+    text = match.group(0)
+    if any(word in text.split() for word in _TV_WORDS):
+        return "tv"
+    if "music" in text or "musica" in text:
+        return "music"
+    return None
+
+
+# "Don't turn the lights off", "no apagues la luz": never act on a negation.
+_NEGATIONS = frozenset(
+    {"dont", "not", "never", "didnt", "doesnt", "cant", "wont", "shouldnt", "nunca", "non", "mai", "nao",
+     "ni", "nem", "jamas"}
+)  # fmt: skip
+# A device command starts with its verb or target, not a question or a statement about someone
+# ("is the TV on?", "who turned the lights off?", "we should turn off the lights").
+_NOT_A_COMMAND_START = frozenset(
+    {"is", "are", "was", "were", "did", "do", "does", "who", "why", "what", "when", "where", "how", "which", "we",
+     "i", "you", "they", "he", "she", "it", "mom", "mommy", "dad", "daddy", "papa", "mama", "leave", "keep",
+     "should", "if", "maybe", "quien", "por", "porque", "cuando", "donde", "como", "yo", "tu", "nosotros", "el",
+     "ella", "chi", "perche", "quando", "dove", "come", "io", "noi", "lui", "lei", "quem", "onde", "eu", "nos",
+     "ele", "ela", "se", "si", "que", "cual"}
+)  # fmt: skip
+
+
+def parse(text: str) -> QuickCommand | None:
+    """Recognize one everyday command in ``text`` (the request after the wake word), or return None."""
+    command = strip_politeness(normalize(text))
+    if not command or len(command.split()) > MAX_COMMAND_WORDS:
+        return None
+    found = _first_match(_CANCEL_RE, command)
+    if found:
+        return QuickCommand("cancel", _language(found[0], command))
+    words = command.split()
+    # Portuguese "no" also means "in the" ("no YouTube"), so "no" counts only as the first word.
+    if words[0] == "no" or any(word in _NEGATIONS for word in words):
+        return None
+    for table, kind in ((_SLEEP_RE, "sleep"), (_TIME_RE, "time"), (_DATE_RE, "date")):
+        found = _first_match(table, command)
+        if found:
+            return QuickCommand(kind, _language(found[0], command))
+    for language, patterns in _WEATHER_RE.items():
+        for pattern in patterns:
+            match = pattern.match(command)
+            if match:
+                groups = match.groupdict()
+                when = groups.get("when") or groups.get("when2")
+                place = (groups.get("place") or "").strip() or None
+                return QuickCommand(
+                    "weather", language, {"tomorrow": when in _TOMORROW, "place": place, "rain_only": False}
+                )
+    found = _first_match(_RAIN_RE, command)
+    if found:
+        when = found[1].groupdict().get("when")
+        return QuickCommand("weather", found[0], {"tomorrow": when in _TOMORROW, "place": None, "rain_only": True})
+    if words[0] in _NOT_A_COMMAND_START:
+        return None
+    for table, kind in ((_PAUSE_RE, "pause"), (_NEXT_RE, "next"), (_RESUME_RE, "resume"), (_STOP_RE, "stop")):
+        found = _first_match(table, command)
+        if found:
+            return QuickCommand(kind, _language(found[0], command))
+    for table, direction in ((_VOLUME_UP_RE, "up"), (_VOLUME_DOWN_RE, "down")):
+        found = _first_match(table, command)
+        if found:
+            return QuickCommand(
+                "volume", _language(found[0], command), {"direction": direction, "device": _volume_device(found[1])}
+            )
+    found = _first_match(_VOLUME_SET_RE, command)
+    if found:
+        level = int(found[1].group("level"))
+        if 0 <= level <= 100:
+            return QuickCommand(
+                "volume", _language(found[0], command), {"level": level, "device": _volume_device(found[1])}
+            )
+    for language, pattern in _ON_OFF:
+        match = pattern.match(command)
+        if not match:
+            continue
+        groups = match.groupdict()
+        verb = groups.get("verb")
+        if verb is None:
+            on = groups["state"] == "on"
+        else:
+            on = not verb.startswith(("apag", "speg", "spent", "deslig"))
+        return QuickCommand("power", _language(language, command), {"on": on, "target": groups["target"]})
+    for language, pattern, mode in _BRIGHTNESS:
+        match = pattern.match(command)
+        if match:
+            raw_level = match.groupdict().get("level")
+            value = int(raw_level) if raw_level else (DIM_LEVEL if mode == "dim" else BRIGHT_LEVEL)
+            if 1 <= value <= 100:
+                return QuickCommand(
+                    "brightness", _language(language, command), {"level": value, "target": match.group("target")}
+                )
+    for language, pattern in _COLOR:
+        match = pattern.match(command)
+        if match and match.group("color") in _COLOR_WORDS:
+            return QuickCommand(
+                "color", _language(language, command),
+                {"color": _COLOR_WORDS[match.group("color")], "target": match.group("target")},
+            )  # fmt: skip
+    for language, pattern in _YOUTUBE:
+        match = pattern.match(command)
+        if match:
+            return QuickCommand("youtube", _language(language, command), {"query": match.group("q")})
+    for language, pattern in _OPEN_APP:
+        match = pattern.match(command)
+        if match:
+            from reachy_mini_conversation_app.android_tv import resolve_app
+
+            app = match.group("app")
+            if app in _TV_WORDS or app in {"the tv", "la tele", "la tv", "a tv", "la television", "a televisao"}:
+                return QuickCommand("power", _language(language, command), {"on": True, "target": "tv"})
+            if resolve_app(app) is not None:
+                return QuickCommand("open_app", _language(language, command), {"app": app})
+    for language, pattern in _PLAY:
+        match = pattern.match(command)
+        if match:
+            query = match.group("q").strip()
+            if query in _MUSIC_ONLY:
+                return QuickCommand("resume", _language(language, command))
+            if (
+                _NOT_MUSIC.search(query)
+                or _NEEDS_CONTEXT.search(query)
+                or "podcast" in query
+                or target_tokens(query)[1]
+            ):
+                return None
+            if language == "es" and query.startswith("a "):
+                query = query[2:]  # "pon a Bad Bunny": the personal "a"
+            return QuickCommand("play", _language(language, command), {"query": query})
+    return None
+
+
+# ---------------------------------------------------------------------------------------------
+# Light targets
+
+_LIGHT_WORDS = frozenset(
+    {"light", "lights", "luz", "luces", "luce", "luci", "luzes", "lampadina", "lampadine", "bulb", "bulbs"}
+)
+_FILLERS = frozenset(
+    {"the", "a", "an", "of", "in", "on", "my", "el", "la", "los", "las", "de", "del", "en", "mi", "mis", "il", "lo",
+     "le", "gli", "i", "di", "della", "delle", "dello", "nel", "nella", "o", "os", "as", "da", "do", "das", "dos",
+     "no", "na", "em", "meu", "minha", "area", "zone", "zona", "parte", "part", "side"}
+)  # fmt: skip
+_PHRASES = (
+    ("sala de estar", "living room"),
+    ("sala de jantar", "dining"),
+    ("sala da pranzo", "dining"),
+    ("living room", "living room"),
+    ("dining room", "dining"),
+)
+_TRANSLATIONS: Final[dict[str, str]] = {
+    **dict.fromkeys(("tele", "tv", "television", "televisor", "televisione", "televisore", "televisao"), "tv"),
+    **dict.fromkeys(("comedor", "jantar", "pranzo", "dining"), "dining"),
+    **dict.fromkeys(("salon", "sala", "soggiorno", "salotto"), "living room"),
+    **dict.fromkeys(("lampara", "lamparas", "lampada", "lampade", "candeeiro", "candeeiros", "abajur", "lamps", "lamp"), "lamp"),
+    **dict.fromkeys(("todo", "todas", "todos", "tutte", "tutti", "tutto", "tudo", "everything", "every", "all",
+                     "casa", "house"), "all"),
+    **dict.fromkeys(("plug", "plugs", "enchufe", "presa", "tomada"), "plug"),
+}  # fmt: skip
+
+
+def target_tokens(phrase: str) -> tuple[frozenset[str], bool]:
+    """Return the meaningful words of a light target in English, and whether it said "light(s)"."""
+    text = f" {normalize(phrase)} "
+    for source, replacement in _PHRASES:
+        text = text.replace(f" {source} ", f" {replacement} ")
+    words: list[str] = []
+    for word in text.split():
+        words.extend(_TRANSLATIONS.get(word, word).split())
+    light_word = any(word in _LIGHT_WORDS for word in words)
+    return frozenset(word for word in words if word not in _FILLERS and word not in _LIGHT_WORDS), light_word
+
+
+@dataclass(frozen=True)
+class LightTarget:
+    """Where a light change goes: "all", a room or area name, or device names."""
+
+    name: str | None = None
+    devices: tuple[str, ...] = ()
+
+
+def resolve_light_target(phrase: str, devices: list[Any]) -> LightTarget | None:
+    """Match a spoken target to the home's rooms, areas and devices (``HubDevice`` list)."""
+    tokens, light_word = target_tokens(phrase)
+    if not tokens or tokens <= {"all"}:
+        return LightTarget(name="all") if light_word or tokens else None
+    tokens = tokens - {"all"}
+
+    def core(name: str) -> frozenset[str]:
+        return target_tokens(name)[0] - {"all"}
+
+    rooms = {device.room for device in devices if device.room}
+    for room in rooms:
+        if core(room) == tokens:
+            return LightTarget(name=room)
+    areas = {area for device in devices for area in device.areas}
+    for area in areas:
+        if core(area) == tokens:
+            return LightTarget(name=area)
+    exact = tuple(device.name for device in devices if core(device.name) == tokens)
+    if exact:
+        return LightTarget(devices=exact)
+    partial = tuple(device.name for device in devices if tokens <= core(device.name))
+    if partial:
+        return LightTarget(devices=tuple(dict.fromkeys(partial)))
+    return None
+
+
+# ---------------------------------------------------------------------------------------------
+# Replies
+
+_OK = {"en": "Okay.", "es": "Listo.", "it": "Fatto.", "pt": "Pronto."}
+_FAILED = {
+    "en": "Sorry, that didn't work.",
+    "es": "Lo siento, no ha funcionado.",
+    "it": "Scusa, non ha funzionato.",
+    "pt": "Desculpa, não funcionou.",
+}
+_PARTLY = {
+    "en": "Done, but {names} didn't respond.",
+    "es": "Hecho, pero {names} no respondió.",
+    "it": "Fatto, ma {names} non ha risposto.",
+    "pt": "Feito, mas {names} não respondeu.",
+}
+_GOOD_NIGHT = {"en": "Good night!", "es": "¡Buenas noches!", "it": "Buonanotte!", "pt": "Boa noite!"}
+_PLAYING_TRACK = {"en": "Playing {name} by {artist}.", "es": "Pongo {name}, de {artist}.",
+                  "it": "Metto {name}, di {artist}.", "pt": "A tocar {name}, de {artist}."}  # fmt: skip
+_PLAYING = {"en": "Playing {name}.", "es": "Pongo {name}.", "it": "Metto {name}.", "pt": "A tocar {name}."}
+_NOT_FOUND = {
+    "en": "I couldn't find that on Spotify.",
+    "es": "No lo encontré en Spotify.",
+    "it": "Non l'ho trovato su Spotify.",
+    "pt": "Não encontrei isso no Spotify.",
+}
+_SEARCHING_TV = {"en": "Here's {query} on YouTube.", "es": "Aquí tienes {query} en YouTube.",
+                 "it": "Ecco {query} su YouTube.", "pt": "Aqui está {query} no YouTube."}  # fmt: skip
+_WEEKDAYS = {
+    "en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    "es": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"),
+    "it": ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"),
+    "pt": ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"),
+}
+_MONTHS = {
+    "en": ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+           "November", "December"),
+    "es": ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+           "noviembre", "diciembre"),
+    "it": ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
+           "novembre", "dicembre"),
+    "pt": ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro",
+           "novembro", "dezembro"),
+}  # fmt: skip
+
+
+def say_time(now: datetime, language: str) -> str:
+    """Return the time as a short sentence."""
+    if language == "en":
+        hour = now.hour % 12 or 12
+        return f"It's {hour}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}."
+    clock = f"{now.hour}:{now.minute:02d}"
+    if language == "es":
+        return f"Es la {clock}." if now.hour == 1 else f"Son las {clock}."
+    if language == "it":
+        return f"È l'{clock}." if now.hour == 1 else f"Sono le {clock}."
+    return f"É {clock}." if now.hour == 1 else f"São {clock}."
+
+
+def say_date(now: datetime, language: str) -> str:
+    """Return today's date as a short sentence."""
+    weekday = _WEEKDAYS[language][now.weekday()]
+    month = _MONTHS[language][now.month - 1]
+    if language == "en":
+        return f"Today is {weekday}, {month} {now.day}."
+    if language == "es":
+        return f"Hoy es {weekday}, {now.day} de {month}."
+    if language == "it":
+        return f"Oggi è {weekday} {now.day} {month}."
+    return f"Hoje é {weekday}, {now.day} de {month}."
+
+
+def _names(names: list[str], language: str) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    joiner = {"en": " and ", "es": " y ", "it": " e ", "pt": " e "}[language]
+    return ", ".join(names[:-1]) + joiner + names[-1]
+
+
+# ---------------------------------------------------------------------------------------------
+# Execution
+
+
+class QuickCommands:
+    """Run recognized commands through the existing tools."""
+
+    def __init__(
+        self,
+        deps: Any,
+        *,
+        weather: WeatherService | None = None,
+        clock: Callable[[], datetime] | None = None,
+        lights: Any = None,
+        spotify: Any = None,
+        tv: Any = None,
+        spotify_configured: Callable[[], bool] | None = None,
+    ) -> None:
+        """Use tool dependencies ``deps``; the tool instances can be replaced in tests."""
+        from reachy_mini_conversation_app.tools.tv import TV
+        from reachy_mini_conversation_app.tools.home_lights import HomeLights
+        from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
+
+        self._deps = deps
+        self._weather = weather
+        self._clock = clock or (lambda: datetime.now().astimezone())
+        self._lights = lights or HomeLights()
+        self._spotify = spotify or SpotifyControl()
+        self._tv = tv or TV()
+        self._spotify_configured = spotify_configured or _spotify_configured
+
+    async def handle(self, text: str) -> QuickReply | None:
+        """Run ``text`` if it is an everyday command; return None to leave it to the conversation."""
+        command = parse(text)
+        if command is None:
+            return None
+        try:
+            return await self.run(command)
+        except Exception as error:  # a tool bug must not break the wake; the conversation can try
+            logger.warning("Quick command %s failed: %s", command.kind, type(error).__name__)
+            return None
+
+    async def run(self, command: QuickCommand) -> QuickReply | None:
+        """Execute one command; None when it needs the conversation after all."""
+        language = command.language
+        kind = command.kind
+        if kind == "cancel":
+            return QuickReply(None, language, kind)
+        if kind == "sleep":
+
+            async def fall_asleep() -> str | None:
+                self._deps.movement_manager.go_to_sleep()
+                return None
+
+            return QuickReply(_GOOD_NIGHT[language], language, kind, sleep=True, after=fall_asleep)
+        if kind == "time":
+            return QuickReply(say_time(self._clock(), language), language, kind)
+        if kind == "date":
+            return QuickReply(say_date(self._clock(), language), language, kind)
+        if kind == "weather":
+            return await self._weather_reply(command)
+        if kind in ("pause", "stop", "resume", "next"):
+            return await self._media(command)
+        if kind == "volume":
+            return await self._volume(command)
+        if kind in ("power", "brightness", "color"):
+            return await self._lights_or_tv(command)
+        if kind == "open_app":
+            return await self._tv_action(command, action="open", app=command.args["app"])
+        if kind == "youtube":
+            query = command.args["query"]
+            reply = await self._tv_action(command, action="youtube", query=query)
+            if reply is not None and reply.text == _OK[language]:
+                return QuickReply(_SEARCHING_TV[language].format(query=query), language, kind)
+            return reply
+        if kind == "play":
+            return await self._play(command)
+        return None
+
+    async def _weather_reply(self, command: QuickCommand) -> QuickReply | None:
+        weather = self._weather
+        if weather is None:
+            return None
+        language = command.language
+        try:
+            place: Place | None = None
+            if command.args.get("place"):
+                place = await weather.geocode(command.args["place"], language)
+            forecast = await weather.forecast(place)
+            if place is None:
+                local_name = await weather.home_name(language)
+                if local_name:
+                    forecast = replace(forecast, place=local_name)
+        except WeatherError as error:
+            logger.info("Quick weather unavailable (%s); leaving it to the conversation", error)
+            return None
+        text = describe(
+            forecast,
+            language,
+            tomorrow=bool(command.args.get("tomorrow")),
+            rain_only=bool(command.args.get("rain_only")),
+        )
+        return QuickReply(text, language, command.kind)
+
+    # Media ---------------------------------------------------------------------------------------
+
+    async def _spotify_status(self) -> dict[str, Any] | None:
+        """Spotify's status, ``{"error": ...}`` when it could not be read, or None when Spotify is not set up."""
+        if not self._spotify_configured():
+            return None
+        result = await self._spotify(self._deps, action="status")
+        return result if isinstance(result, dict) else {"error": "invalid status"}
+
+    async def _tv_state(self) -> Any:
+        tv = getattr(self._deps, "tv", None)
+        if tv is None:
+            return None
+        try:
+            return await tv.state()
+        except Exception:
+            return None
+
+    async def _media(self, command: QuickCommand) -> QuickReply | None:
+        kind, language = command.kind, command.language
+        status = await self._spotify_status()
+        playing = bool(status and status.get("status") == "playing")
+        spotify_failed = status is not None and "error" in status
+        if kind in ("pause", "stop"):
+            if playing:
+                result = await self._spotify(self._deps, action="pause")
+                return QuickReply(None if "error" not in result else _FAILED[language], language, kind)
+            tv_state = await self._tv_state()
+            if (
+                tv_state is not None
+                and tv_state.is_on
+                and tv_state.app_name not in (None, "com.google.android.tvlauncher")
+            ):
+                result = await self._tv(self._deps, action="media", key="pause")
+                return QuickReply(None if result.get("ok") else _FAILED[language], language, kind)
+            if spotify_failed:
+                return QuickReply(_FAILED[language], language, kind)  # music may be playing out of reach
+            if kind == "stop":
+                self._deps.movement_manager.clear_move_queue()
+            return QuickReply(None, language, kind)  # nothing is playing: nothing to pause
+        if status is None:
+            return None
+        if spotify_failed:
+            return QuickReply(_FAILED[language], language, kind)
+        if kind == "resume":
+            result = await self._spotify(self._deps, action="resume")
+            # Nothing to resume (no recent playback): the conversation can pick something to play.
+            return None if "error" in result else QuickReply(None, language, kind)
+        if kind == "next":
+            result = await self._spotify(self._deps, action="next")
+            return QuickReply(None if "error" not in result else _FAILED[language], language, kind)
+        return None
+
+    async def _volume(self, command: QuickCommand) -> QuickReply | None:
+        language = command.language
+        device = command.args.get("device")
+        level = command.args.get("level")
+        direction = command.args.get("direction")
+        status = None
+        if device != "tv":
+            status = await self._spotify_status()
+            if device is None:
+                playing = bool(status and status.get("status") == "playing")
+                if not playing:
+                    tv_state = await self._tv_state()
+                    device = "tv" if tv_state is not None and tv_state.is_on else "music"
+                else:
+                    device = "music"
+        if device == "tv":
+            if getattr(self._deps, "tv", None) is None:
+                return None
+            if level is not None:
+                result = await self._tv(self._deps, action="volume", level=level)
+            else:
+                result = await self._tv(self._deps, action="volume", change=direction)
+            return QuickReply(None if result.get("ok") else _FAILED[language], language, command.kind)
+        if status is None:
+            return None
+        if "error" in status:
+            return QuickReply(_FAILED[language], language, command.kind)
+        if level is None:
+            current = status.get("volume_percent")
+            if not isinstance(current, int):
+                return None
+            step = SPOTIFY_VOLUME_STEP if direction == "up" else -SPOTIFY_VOLUME_STEP
+            level = max(0, min(100, current + step))
+        result = await self._spotify(self._deps, action="volume", volume_percent=int(level))
+        return QuickReply(None if "error" not in result else _FAILED[language], language, command.kind)
+
+    async def _play(self, command: QuickCommand) -> QuickReply | None:
+        if not self._spotify_configured():
+            return None
+        language = command.language
+        query = command.args["query"]
+        search_type, query = _music_search_type(query)
+        if search_type == "auto":
+            artists, tracks = await self._search(query, "artist"), await self._search(query, "track")
+            if artists is None or tracks is None:
+                return QuickReply(_FAILED[language], language, command.kind)
+            choice = _choose(query, artists, tracks)
+        else:
+            results = await self._search(query, search_type)
+            if results is None:
+                return QuickReply(_FAILED[language], language, command.kind)
+            choice = results[0] if results else None
+        if choice is None:
+            return QuickReply(_NOT_FOUND[language], language, command.kind)
+        uri = choice["uri"]
+        creators = choice.get("creators") or []
+        if creators:
+            text = _PLAYING_TRACK[language].format(name=choice["name"], artist=creators[0])
+        else:
+            text = _PLAYING[language].format(name=choice["name"])
+
+        async def play() -> str | None:
+            result = await self._spotify(self._deps, action="play", uri=uri)
+            return _FAILED[language] if "error" in result else None
+
+        return QuickReply(text, language, command.kind, after=play)
+
+    async def _search(self, query: str, search_type: str) -> list[dict[str, Any]] | None:
+        """Search results, or None when Spotify could not be searched."""
+        result = await self._spotify(self._deps, action="search", query=query, search_type=search_type)
+        if not isinstance(result, dict) or "error" in result:
+            return None
+        items: Any = result.get("results")
+        return [item for item in items or [] if isinstance(item, dict) and item.get("uri")]
+
+    # Lights and TV -------------------------------------------------------------------------------
+
+    async def _lights_or_tv(self, command: QuickCommand) -> QuickReply | None:
+        language = command.language
+        target = str(command.args["target"])
+        tokens, light_word = target_tokens(target)
+        if target == "tv" or (tokens == {"tv"} and not light_word):
+            if getattr(self._deps, "tv", None) is None:
+                return None
+            if command.kind == "power":
+                return await self._tv_action(command, action="power", on=command.args["on"])
+            if command.kind == "brightness":  # "set the TV to 20" is its volume
+                return await self._tv_action(command, action="volume", level=int(command.args["level"]))
+            return None
+        home = getattr(self._deps, "home_hub", None)
+        if home is None:
+            return None
+        devices = await home.devices()
+        resolved = resolve_light_target(target, devices)
+        if resolved is None:
+            return None
+        change: dict[str, Any] = {}
+        if command.kind == "power":
+            change["on"] = bool(command.args["on"])
+        elif command.kind == "brightness":
+            change["brightness"] = int(command.args["level"])
+        else:
+            change["color"] = command.args["color"]
+        targets = [resolved.name] if resolved.name else list(resolved.devices)
+        results = await asyncio.gather(
+            *(self._lights(self._deps, action="set", target=name, **change) for name in targets)
+        )
+        changed = [name for result in results for name in result.get("changed", [])]
+        problems = [name for result in results for name in (result.get("failed", []) + result.get("unreachable", []))]
+        if not changed and all(str(result.get("error", "")).startswith("Nothing called") for result in results):
+            return None  # the names did not match after all: let the conversation sort it out
+        if not changed:
+            return QuickReply(_FAILED[language], language, command.kind)
+        if problems:
+            return QuickReply(_PARTLY[language].format(names=_names(problems, language)), language, command.kind)
+        return QuickReply(_OK[language], language, command.kind)
+
+    async def _tv_action(self, command: QuickCommand, **kwargs: Any) -> QuickReply | None:
+        if getattr(self._deps, "tv", None) is None:
+            return None
+        result = await self._tv(self._deps, **kwargs)
+        language = command.language
+        return QuickReply(_OK[language] if result.get("ok") else _FAILED[language], language, command.kind)
+
+
+_ARTIST_OF = re.compile(
+    r"^(?:(?:some\s+)?(?:music|songs)\s+(?:by|from)|(?:musica|canciones|temas)\s+de|(?:musica|canzoni)\s+di|"
+    r"(?:musica|musicas|cancoes)\s+(?:de|da|do))\s+(?P<artist>.+)$"
+)
+_TRACK_OF = re.compile(r"^(?:the song|la cancion|el tema|la canzone|a musica|a cancao)\s+(?P<q>.+)$")
+_ALBUM_OF = re.compile(r"^(?:the album|el album|l album|o album|o disco|el disco)\s+(?P<q>.+)$")
+_PLAYLIST_OF = re.compile(
+    r"^(?:the playlist|my playlist|la playlist|a playlist|mi playlist|la lista)\s+(?P<q>.+)$|^(?P<q2>.+?)\s+playlist$"
+)
+_GENRES = frozenset(
+    {"jazz", "rock", "pop", "classical", "classical music", "reggaeton", "salsa", "lofi", "lo fi", "hip hop", "rap",
+     "blues", "country", "metal", "disco", "techno", "house", "ambient", "piano", "relaxing", "chill", "kids",
+     "lullabies", "bachata", "merengue", "flamenco", "fado", "opera", "bossa nova", "samba", "kpop", "k pop",
+     "christmas", "navidad", "natale", "natal", "cumbia", "funk", "soul", "reggae", "indie", "dance", "electronic",
+     "musica clasica", "musica classica", "infantil", "canciones infantiles", "canzoni per bambini", "baby"}
+)  # fmt: skip
+_GENERIC_MUSIC = re.compile(r"\b(?:music|songs|musica|canciones|canzoni|musicas|cancoes|hits)\b")
+
+
+def _music_search_type(query: str) -> tuple[str, str]:
+    """Return (search type or "auto", search text) for a "play ..." request."""
+    query = re.sub(r"^(?:some|a bit of|a little|un poco de|algo de|un po di|um pouco de)\s+", "", query).strip()
+    for pattern, kind in (
+        (_ARTIST_OF, "artist"),
+        (_TRACK_OF, "track"),
+        (_ALBUM_OF, "album"),
+        (_PLAYLIST_OF, "playlist"),
+    ):
+        match = pattern.match(query)
+        if match:
+            groups = match.groupdict()
+            return kind, (groups.get("artist") or groups.get("q") or groups.get("q2") or query).strip()
+    if _GENERIC_MUSIC.search(query) or query in _GENRES:
+        return "playlist", query
+    return "auto", query
+
+
+def _choose(query: str, artists: list[dict[str, Any]], tracks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the artist when the request names one, a track when it names a song."""
+    wanted = normalize(query)
+    track = tracks[0] if tracks else None
+    artist = artists[0] if artists else None
+    if track is not None and normalize(str(track["name"])) and normalize(str(track["name"])) in wanted:
+        return track
+    if artist is not None and normalize(str(artist["name"])) == wanted:
+        return artist
+    if artist is not None and normalize(str(artist["name"])) and normalize(str(artist["name"])) in wanted:
+        return artist
+    return track or artist
+
+
+def _spotify_configured() -> bool:
+    import os
+
+    return bool(os.getenv("SPOTIFY_CREDENTIALS_FILE", "").strip() and os.getenv("SPOTIFY_DEVICE_ID", "").strip())
+
+
+# Replies that never change, worth keeping on disk for instant playback (local_speech cache).
+FIXED_PHRASES: Final[frozenset[str]] = frozenset(
+    {*_OK.values(), *_FAILED.values(), *_GOOD_NIGHT.values(), *_NOT_FOUND.values()}
+)

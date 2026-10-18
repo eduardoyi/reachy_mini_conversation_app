@@ -845,3 +845,10 @@ It transcribes everything, kids talking to Reachy included, but bounds the work 
 Measured on the same machine: 8 s of noise 26 s → 0.3 s; English and Spanish commands unchanged
 (0.3–0.5 s); overlapped speech 1.6 s with the retry. Each clip logs one line
 (`Transcribed audio_s=… language=… tokens=… capped=… took_s=… waited_s=…`, no text).
+
+### Quick commands before the cloud — 2026-10-18
+
+Everyday requests (lights, music, TV, time, date, weather, sleep) are answered in `LOCAL_COMMAND`
+without building the cloud handler; see [quick-commands.md](quick-commands.md). `_try_quick_command`
+runs once the request text is known, plays the reply through `emit()` while no handler exists, and
+stays in `LOCAL_COMMAND` until it has played. Unmatched requests open Gemini as before.

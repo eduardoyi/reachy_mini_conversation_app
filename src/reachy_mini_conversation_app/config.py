@@ -294,6 +294,14 @@ def resolve_gemini_thinking_level(model: str | None = None, value: str | None = 
     return candidate
 
 
+def _optional_float(value: str | None) -> float | None:
+    """Parse an optional number; empty or invalid is None."""
+    try:
+        return float(value) if value and value.strip() else None
+    except ValueError:
+        return None
+
+
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured transcription language; "auto" returns "" (no hint, detect per utterance)."""
     candidate = (value or "").strip()
@@ -683,6 +691,14 @@ class Config:
     TUYA_DEVICES_FILE = os.path.expanduser(os.getenv("TUYA_DEVICES_FILE") or "~/.config/reachy-tuya/devices.json")
     # Rooms for devices whose system has none, and areas within rooms ("Dining"), for home_lights.
     HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
+    # Everyday commands (lights, music, TV, time, weather) answered locally, without the cloud conversation.
+    QUICK_COMMANDS_ENABLED = _env_flag("QUICK_COMMANDS_ENABLED", default=True)
+    # Gemini text-to-speech model for quick replies (in GEMINI_VOICE).
+    LOCAL_SPEECH_MODEL = (os.getenv("LOCAL_SPEECH_MODEL") or "").strip() or "gemini-3.8-flash-lite-tts"
+    # Home place for weather; coordinates skip the lookup.
+    HOME_LOCATION = (os.getenv("HOME_LOCATION") or "").strip() or None
+    HOME_LATITUDE = _optional_float(os.getenv("HOME_LATITUDE"))
+    HOME_LONGITUDE = _optional_float(os.getenv("HOME_LONGITUDE"))
     # Android / Google TV; set by `python -m reachy_mini_conversation_app.android_tv pair`.
     ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
@@ -859,6 +875,11 @@ def refresh_runtime_config_from_env() -> None:
         os.getenv("TUYA_DEVICES_FILE") or "~/.config/reachy-tuya/devices.json"
     )
     config.HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
+    config.QUICK_COMMANDS_ENABLED = _env_flag("QUICK_COMMANDS_ENABLED", default=True)
+    config.LOCAL_SPEECH_MODEL = (os.getenv("LOCAL_SPEECH_MODEL") or "").strip() or "gemini-3.8-flash-lite-tts"
+    config.HOME_LOCATION = (os.getenv("HOME_LOCATION") or "").strip() or None
+    config.HOME_LATITUDE = _optional_float(os.getenv("HOME_LATITUDE"))
+    config.HOME_LONGITUDE = _optional_float(os.getenv("HOME_LONGITUDE"))
     config.ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     config.ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()

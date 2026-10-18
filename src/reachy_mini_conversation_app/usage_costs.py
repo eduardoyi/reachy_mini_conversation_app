@@ -38,6 +38,8 @@ DEFAULT_PRICES: Final[dict[str, dict[str, float]]] = {
         "thinking": 12.00,
     },
     "gpt-5.6-luna": {"input_text": 0.20, "input_cached": 0.02, "output_text": 1.20, "thinking": 1.20},
+    # Quick-command replies (local_speech.py); third-party listings of Google's rate, 2026-10-18.
+    "gemini-3.8-flash-lite-tts": {"input_text": 0.50, "output_audio": 6.00},
 }
 
 

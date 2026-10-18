@@ -14,8 +14,8 @@ default_tools = [
   "forget",
   "head_tracking",
   "spotify_control",
-  "pollen_robotics_reachy_mini_weather_tool__get_weather",
-  "pollen_robotics_reachy_mini_time_tool__get_time",
+  "get_weather",
+  "get_time",
 ]
 +++
 
