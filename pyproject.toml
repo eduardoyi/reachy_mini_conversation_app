@@ -31,6 +31,8 @@ dependencies = [
 
     #Tuya smart lights and plugs over the local network
     "tinytuya>=1.16,<2",
+    #Android / Google TV remote control over the local network
+    "androidtvremote2>=0.3.2,<0.4",
 ]
 
 [dependency-groups]

@@ -53,6 +53,17 @@ def _build_home_devices() -> Any:
     return HomeDevices(providers, HomeLayout.load(Path(config.HOME_LAYOUT_FILE)))
 
 
+def _build_tv() -> Any:
+    """Return the paired TV, or None when there is none."""
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.android_tv import AndroidTV, is_paired
+
+    if not config.ANDROID_TV_HOST or not is_paired(Path(config.ANDROID_TV_CERT_DIR)):
+        return None
+    logging.getLogger(__name__).info("TV available at %s", config.ANDROID_TV_HOST)
+    return AndroidTV(config.ANDROID_TV_HOST, Path(config.ANDROID_TV_CERT_DIR))
+
+
 def _start_inactivity_timeout_thread(
     timeout_minutes: float,
     stream_manager: LocalStream,
@@ -307,6 +318,7 @@ def run(
         current_person_id=current_person_id if face_service is not None else None,
     )
     deps.home_hub = _build_home_devices()
+    deps.tv = _build_tv()
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""

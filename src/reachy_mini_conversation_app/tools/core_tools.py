@@ -52,7 +52,8 @@ class ToolDependencies:
     # Hybrid runtime only: close the conversation after Reachy's goodbye and wait for the wake word.
     end_conversation: Callable[[], dict[str, Any]] | None = None
     face_recognition: Any = None  # FaceRecognitionService from face_identity.py, when enabled
-    home_hub: Any = None  # DirigeraHub from dirigera_hub.py, when an IKEA hub is paired
+    home_hub: Any = None  # HomeDevices from home_devices.py, when lights are set up
+    tv: Any = None  # AndroidTV from android_tv.py, when a TV is paired
     # Recognized person in front of the camera (household person ID), when face recognition is enabled.
     current_person_id: Callable[[], str | None] | None = None
 
@@ -101,7 +102,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -294,7 +295,7 @@ def _build_tool_registry(
 
 def _tool_registry_signature(
     instance_path: str | Path | None,
-) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool]:
+) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -305,6 +306,7 @@ def _tool_registry_signature(
         config.HOUSEHOLD_MEMORY_ENABLED,
         bool(config.HYBRID_RUNTIME_ENABLED),
         _lights_configured(),
+        _tv_configured(),
     )
 
 
@@ -319,6 +321,16 @@ LIGHT_TOOLS = ("home_lights",)
 
 def _lights_configured() -> bool:
     return bool(config.DIRIGERA_HOST and config.DIRIGERA_TOKEN) or Path(config.TUYA_DEVICES_FILE).is_file()
+
+
+# Enabled automatically once a TV is paired, unless the profile's tools were customized.
+TV_TOOLS = ("tv",)
+
+
+def _tv_configured() -> bool:
+    from reachy_mini_conversation_app.android_tv import is_paired
+
+    return bool(config.ANDROID_TV_HOST) and is_paired(Path(config.ANDROID_TV_CERT_DIR))
 
 
 # Registry & specs (dynamic)
@@ -359,6 +371,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in LIGHT_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in LIGHT_TOOLS if name not in tool_names)
+
+    if not _tv_configured():
+        tool_names = [name for name in tool_names if name not in TV_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in TV_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]
