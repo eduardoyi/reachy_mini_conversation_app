@@ -14,6 +14,11 @@ WHISPER_PORT="${WHISPER_PORT:-8766}"
 WHISPER_URL="http://127.0.0.1:${WHISPER_PORT}/v1/models"
 WHISPER_LOG="${WHISPER_LOG:-${TMPDIR:-/tmp}/reachy-whisper.log}"
 WHISPER_READY_TIMEOUT_S="${WHISPER_READY_TIMEOUT_S:-180}"
+# Reachy's own Whisper server (scripts/whisper_server.py) bounds the work per clip so background
+# chatter cannot jam it; it runs with the Python of the `transformers` uv tool. Set
+# WHISPER_SERVER=transformers to use plain `transformers serve` instead.
+WHISPER_SERVER="${WHISPER_SERVER:-reachy}"
+WHISPER_PYTHON="${WHISPER_PYTHON:-$(uv tool dir 2>/dev/null)/transformers/bin/python}"
 # The camera's factory image is dark (brightness 0) and flat. A small brightness lift plus
 # higher gamma brightens mid-tones without washing out shadows; contrast and sharpness get a
 # nudge. Ranges: brightness -64..64, gamma 80..160, contrast 0..95, sharpness 0..7. Set one
@@ -78,7 +83,12 @@ elif ! command -v transformers >/dev/null 2>&1; then
   echo "Install it with: uv tool install --python 3.12 'transformers[serving]' --with librosa --with python-multipart" >&2
 else
   echo "Starting Whisper ($WHISPER_MODEL) on port $WHISPER_PORT; log: $WHISPER_LOG"
-  transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+  if [[ "$WHISPER_SERVER" != "transformers" && -x "$WHISPER_PYTHON" ]]; then
+    "$WHISPER_PYTHON" "$REPO_DIR/scripts/whisper_server.py" --host 127.0.0.1 --port "$WHISPER_PORT" \
+      "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+  else
+    transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+  fi
   whisper_pid=$!
   waited=0
   until curl -fsS -m 2 "$WHISPER_URL" >/dev/null 2>&1; do

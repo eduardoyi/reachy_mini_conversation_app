@@ -334,7 +334,9 @@ transformers serve --host 127.0.0.1 --port 8766 \
 
 To start the STT server and the app together, use the launcher. It reuses a server
 that is already running and stops one it started when the app exits; set
-`WHISPER_MODEL` to change the model (default multilingual `openai/whisper-small`):
+`WHISPER_MODEL` to change the model (default multilingual `openai/whisper-small`). It runs
+`scripts/whisper_server.py`, which keeps background chatter from jamming transcription and picks
+among `WHISPER_LANGUAGES` (default `en,es,it,pt`):
 
 ```bash
 scripts/start-reachy.sh

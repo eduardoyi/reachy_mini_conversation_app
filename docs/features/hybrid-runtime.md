@@ -820,3 +820,28 @@ Tests:
 - the `asleep` wake tests and `test_name_leads_only_when_the_name_opens_a_sentence`
 - `tests/test_addressee_check.py`
 - the standby tool tests in `tests/tools/test_go_to_sleep.py`
+
+### Whisper jammed by background chatter — 2026-10-18
+
+With the kids playing nearby, "Reachy" stopped waking him: the log showed `Continuous local
+STT backlog full; dropped newest segment`, `timed out`, and many `not in Latin script`
+results. `transformers serve` lets Whisper generate up to 448 tokens per clip and works on one
+clip at a time; on noise or overlapping voices Whisper invents long text (8 s of noise took
+26 s), so clips queued behind it and the one with the name was dropped or timed out. The client
+timeout does not stop work the server has already queued.
+
+The launcher now runs `scripts/whisper_server.py` (same endpoint and port, with the
+`transformers` uv tool's Python; `WHISPER_SERVER=transformers` restores `transformers serve`).
+It transcribes everything, kids talking to Reachy included, but bounds the work per clip:
+- a token budget of 16 + 10 per second of audio (fast speech uses about 4–6 a second);
+- a clip that hits the budget, usually Whisper looping on one voice, is decoded once more with
+  `repetition_penalty=1.3`, which recovered a request said over kid chatter ("I want the red one.
+  Can you turn on lights in a dining area, please?") that greedy decoding had turned into one
+  sentence repeated;
+- the language is chosen among `WHISPER_LANGUAGES` (default `en,es,it,pt`; `auto` for any)
+  unless the request gives one;
+- a clip whose client disconnected while queued is skipped.
+
+Measured on the same machine: 8 s of noise 26 s → 0.3 s; English and Spanish commands unchanged
+(0.3–0.5 s); overlapped speech 1.6 s with the retry. Each clip logs one line
+(`Transcribed audio_s=… language=… tokens=… capped=… took_s=… waited_s=…`, no text).
