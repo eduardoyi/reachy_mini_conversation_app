@@ -594,8 +594,6 @@ _NOT_FOUND = {
     "it": "Non l'ho trovato su Spotify.",
     "pt": "Não encontrei isso no Spotify.",
 }
-_SEARCHING_TV = {"en": "Here's {query} on YouTube.", "es": "Aquí tienes {query} en YouTube.",
-                 "it": "Ecco {query} su YouTube.", "pt": "Aqui está {query} no YouTube."}  # fmt: skip
 _WEEKDAYS = {
     "en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
     "es": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"),
@@ -719,8 +717,6 @@ class QuickCommands:
         if kind == "youtube":
             query = command.args["query"]
             reply = await self._tv_action(command, action="youtube", query=query)
-            if reply is not None and reply.text == _OK[language]:
-                return QuickReply(_SEARCHING_TV[language].format(query=query), language, kind)
             return reply
         if kind == "play":
             return await self._play(command)
@@ -919,14 +915,14 @@ class QuickCommands:
             return QuickReply(_FAILED[language], language, command.kind)
         if problems:
             return QuickReply(_PARTLY[language].format(names=_names(problems, language)), language, command.kind)
-        return QuickReply(_OK[language], language, command.kind)
+        return QuickReply(None, language, command.kind)  # the lights changing is the answer
 
     async def _tv_action(self, command: QuickCommand, **kwargs: Any) -> QuickReply | None:
         if getattr(self._deps, "tv", None) is None:
             return None
         result = await self._tv(self._deps, **kwargs)
         language = command.language
-        return QuickReply(_OK[language] if result.get("ok") else _FAILED[language], language, command.kind)
+        return QuickReply(None if result.get("ok") else _FAILED[language], language, command.kind)
 
 
 _ARTIST_OF = re.compile(

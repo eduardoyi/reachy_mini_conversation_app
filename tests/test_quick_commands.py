@@ -218,10 +218,11 @@ def _runner(**kwargs: Any) -> tuple[QuickCommands, dict[str, _Tool], Any]:
 
 @pytest.mark.asyncio
 async def test_lights_off_runs_home_lights_and_says_okay() -> None:
-    """Saying "Apaga las luces" switches everything off and answers in Spanish."""
+    """Saying "Apaga las luces" switches everything off without a word."""
     runner, tools, _ = _runner()
     reply = await runner.handle("apaga las luces")
-    assert reply is not None and reply.text == "Listo."
+    assert reply is not None and reply.text is None  # the lights changing is the answer
+    assert reply.language == "es"
     assert tools["lights"].calls == [{"action": "set", "target": "all", "on": False}]
 
 
@@ -255,7 +256,7 @@ async def test_tv_power_goes_to_the_tv_tool() -> None:
     """Saying "turn off the TV" means the TV, not the TV lights."""
     runner, tools, _ = _runner(tv=_TV(TVState(True, "com.netflix.ninja", 20, False)))
     reply = await runner.handle("turn off the tv")
-    assert reply is not None and reply.text == "Okay."
+    assert reply is not None and reply.text is None
     assert tools["tv"].calls == [{"action": "power", "on": False}]
     assert tools["lights"].calls == []
 

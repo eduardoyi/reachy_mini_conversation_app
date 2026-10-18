@@ -22,11 +22,11 @@ Whisper, then the action and the first reply audio in 0.4–0.6 s).
 
 | Say | Does | Reply |
 | --- | --- | --- |
-| "turn off the lights", "apaga las luces", "spegni le luci", "desliga as luzes" | all lights and plugs | "Okay." / "Listo." / "Fatto." / "Pronto." |
-| "turn on the dining lights", "enciende la luz del comedor" | an area, room, or device | same |
-| "dim the lights", "lights to 30%", "pon las luces al 50 por ciento" | brightness | same |
-| "make the TV lights blue", "pon las luces azules" | color | same |
-| "turn on the TV", "pon la tele", "open Netflix", "put Bluey on YouTube" | TV | "Okay." / "Here's Bluey on YouTube." |
+| "turn off the lights", "apaga las luces", "spegni le luci", "desliga as luzes" | all lights and plugs | silent (speaks only if a light did not respond) |
+| "turn on the dining lights", "enciende la luz del comedor" | an area, room, or device | silent |
+| "dim the lights", "lights to 30%", "pon las luces al 50 por ciento" | brightness | silent |
+| "make the TV lights blue", "pon las luces azules" | color | silent |
+| "turn on the TV", "pon la tele", "open Netflix", "put Bluey on YouTube" | TV | silent (speaks only on failure) |
 | "play Bad Bunny", "pon a Bad Bunny", "play some jazz" | Spotify search, then play | "Playing Bad Bunny." (music starts after) |
 | "pause", "stop the music", "next song", "siguiente", "resume" | Spotify, or the TV when it is what plays | silent |
 | "volume up", "louder", "baja la música", "set the volume to 40" | Spotify while it plays, else the TV when on | silent |
