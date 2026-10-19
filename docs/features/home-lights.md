@@ -71,11 +71,15 @@ integration) is the path that scales.
   and plugs are placed in it.
 - Targets match in this order:
   1. everything: `all`, or plain "the lights" in any of the four languages;
-  2. a room;
-  3. an area, where filler words like "the" and "lights" are ignored, so "the
+  2. a device name, so "Living lamp" is the lamp and not the Living area
+     (until 2026-10-19 areas came first and it switched the whole area);
+  3. a room;
+  4. an area, where filler words like "the" and "lights" are ignored, so "the
      dining lights" matches Dining;
-  4. a device name;
-  5. a partial name.
+  5. a partial name;
+  6. a device whose every name word was said among others, so "living room
+     lamp" and "la lámpara de la sala" find "Living lamp". Quick commands
+     (`quick_commands.resolve_light_target`) use the same order.
 - So "living room" switches both areas, and "the dining" switches one.
 - `tools/home_lights.py`: the actions are `status`, `set` and `scene`. Colors are
   names (red to pink) or `#rrggbb`; "white" means neutral white light. An offline
@@ -127,7 +131,9 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
 - The token grants full control of the hub. It lives only in `.env` and is never
   logged. Tuya local keys stay in `~/.config/reachy-tuya` and are never logged.
 - Tuya scenes live in the cloud, so none are offered. A Tuya device that is
-  switched off at the wall reports as unreachable.
+  switched off at the wall reports as unreachable. A Tuya light switched off with
+  its own remote can keep reporting "on" while dark (the TV strip, 2026-10-19), so
+  a plain "on" for a light that already reports on switches it off and on again.
 - New dependency: `tinytuya` (MIT; pulls in `cryptography`, `requests` and
   `colorama`). Locking it needed pkg-config shims for zlib, bzip2, expat and
   libffi, because uv rebuilds the `pygobject` and `pycairo` source distributions
@@ -141,4 +147,5 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
   brightness, warmth and colors; plugs; offline duplicates; unreachable lights;
   status; scenes; errors; the tool loading only once something is set up.
 - `tests/test_tuya_devices.py`: wizard-file filtering, state reading, bulb and
-  plug commands, `LightChange.for_device`, and merging with one system down.
+  plug commands, relighting a strip that wrongly reports on,
+  `LightChange.for_device`, and merging with one system down.

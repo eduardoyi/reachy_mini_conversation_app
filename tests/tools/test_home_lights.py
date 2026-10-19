@@ -186,6 +186,23 @@ async def test_areas_split_a_room_and_the_room_still_means_both() -> None:
     assert status["areas"] == ["Dining", "Living"] and status["devices"][2]["area"] == "Living"
 
 
+@pytest.mark.asyncio
+async def test_a_device_name_wins_over_the_area_it_shares_a_word_with() -> None:
+    """A target of "Living lamp" switched the whole Living area (2026-10-19); now it is just the lamp."""
+    from reachy_mini_conversation_app.home_devices import HomeLayout
+
+    layout = HomeLayout(areas={"Living": ("sofa light", "living lamp")})
+    sofa = HubDevice("1", "light", "Sofa light", "Living room", False, True, brightness=50)
+    lamp = HubDevice("2", "outlet", "Living lamp", "Living room", False, True, source="tuya")
+    devices = [layout.apply(device) for device in (sofa, lamp)]
+
+    for target in ("Living lamp", "living room lamp"):
+        result = await HomeLights()(_deps(_FakeHome(devices)), action="set", target=target, on=True)
+        assert result.get("changed") == ["Living lamp"], target
+    result = await HomeLights()(_deps(_FakeHome(devices)), action="set", target="living", on=True)
+    assert result.get("changed") == ["Sofa light", "Living lamp"]
+
+
 def test_home_layout_loads_and_tolerates_a_missing_file(tmp_path: Any) -> None:
     """The layout file is optional and matches device names without case or accents."""
     from reachy_mini_conversation_app.home_devices import HomeLayout

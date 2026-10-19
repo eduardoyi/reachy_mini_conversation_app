@@ -567,6 +567,10 @@ def resolve_light_target(phrase: str, devices: list[Any]) -> LightTarget | None:
     def core(name: str) -> frozenset[str]:
         return target_tokens(name)[0] - {"all"}
 
+    # A device's own name wins over a room or area that shares its first word ("Living lamp").
+    exact = tuple(device.name for device in devices if core(device.name) == tokens)
+    if exact:
+        return LightTarget(devices=exact)
     rooms = {device.room for device in devices if device.room}
     for room in rooms:
         if core(room) == tokens:
@@ -575,12 +579,13 @@ def resolve_light_target(phrase: str, devices: list[Any]) -> LightTarget | None:
     for area in areas:
         if core(area) == tokens:
             return LightTarget(name=area)
-    exact = tuple(device.name for device in devices if core(device.name) == tokens)
-    if exact:
-        return LightTarget(devices=exact)
     partial = tuple(device.name for device in devices if tokens <= core(device.name))
     if partial:
         return LightTarget(devices=tuple(dict.fromkeys(partial)))
+    # Every word of a device's name was said, among others: "the living room lamp" -> "Living lamp".
+    named = tuple(device.name for device in devices if core(device.name) and core(device.name) <= tokens)
+    if named:
+        return LightTarget(devices=tuple(dict.fromkeys(named)))
     return None
 
 

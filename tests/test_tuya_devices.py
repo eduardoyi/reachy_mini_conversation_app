@@ -149,6 +149,20 @@ async def test_changes_drive_the_bulb_and_plug(tmp_path: Path) -> None:
         await home.apply(strip, LightChange(brightness=20))
 
 
+@pytest.mark.asyncio
+async def test_a_plain_on_relights_a_strip_that_wrongly_reports_on(tmp_path: Path) -> None:
+    """Switched off with its remote, the TV strip still said "on"; a plain on now goes off then on."""
+    bulb, plug = _FakeBulb(), _FakePlug()
+    home, _ = _home(tmp_path, bulb, plug)
+    strip, plug_device, _offline = await home.devices()
+
+    await home.apply(strip, LightChange(on=True))
+    await home.apply(plug_device, LightChange(on=True))
+
+    assert bulb.calls == [("off",), ("on",)]
+    assert plug.calls == ["on"]
+
+
 def test_light_change_keeps_only_what_a_device_supports() -> None:
     """A plug drops brightness and color; a change with nothing left is None."""
     plug = HubDevice("p", "outlet", "Plug", None, False, True)

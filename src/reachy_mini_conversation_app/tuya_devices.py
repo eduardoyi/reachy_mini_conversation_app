@@ -205,6 +205,11 @@ class TuyaHome:
             results.append(device.turn_off())
         else:
             if change.on:
+                plain_on = change.brightness is None and change.warmth is None and change.color is None
+                if entry.kind == "light" and plain_on and _reports_on(device):
+                    # A strip switched off with its own remote can keep reporting "on" while dark, so a plain
+                    # "on" changes nothing; switching it off first makes "on" light it (2026-10-19, TV Lights).
+                    results.append(device.turn_off())
                 results.append(device.turn_on())
             if entry.kind == "light":
                 in_colour = change.warmth is None and device.get_mode() == "colour"
@@ -258,6 +263,15 @@ class TuyaHome:
         finally:
             for sock in sockets:
                 sock.close()
+
+
+def _reports_on(device: Any) -> bool:
+    """Whether a bulb says it is on; unknown counts as off."""
+    try:
+        state = device.state()
+    except Exception:  # TinyTuya raises a range of socket and decode errors
+        return False
+    return isinstance(state, dict) and "Error" not in state and bool(state.get("is_on"))
 
 
 def _set_colour(device: Any, hue: float, saturation: float, value: float) -> Any:

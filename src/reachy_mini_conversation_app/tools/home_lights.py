@@ -66,21 +66,27 @@ def _match_targets(devices: list[HubDevice], target: str) -> list[HubDevice] | N
     wanted = normalize_name(target)
     if wanted in _EVERYTHING:
         return devices
+    # A device's own name wins: "Living lamp" is the lamp, not the whole "Living" area.
+    exact = [device for device in devices if normalize_name(device.name) == wanted]
+    if exact:
+        return exact
     rooms = [device for device in devices if device.room and normalize_name(device.room) == wanted]
     if rooms:
         return rooms
     areas = [device for device in devices if any(_core(area) == _core(target) for area in device.areas)]
     if areas:
         return areas
-    exact = [device for device in devices if normalize_name(device.name) == wanted]
-    if exact:
-        return exact
     partial = [
         device
         for device in devices
         if wanted in normalize_name(device.name) or (device.room and wanted in normalize_name(device.room))
     ]
-    return partial or None
+    if partial:
+        return partial
+    # Every word of a device's name was said, among others: "living room lamp" -> "Living lamp".
+    said = set(wanted.split())
+    named = [device for device in devices if set(normalize_name(device.name).split()) <= said]
+    return named or None
 
 
 def _layout(home: Any) -> HomeLayout:

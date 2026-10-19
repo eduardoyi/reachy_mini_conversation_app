@@ -145,6 +145,9 @@ HOME = [
         ("the tv lights", None, ("TV Lights",)),
         ("las luces de la tele", None, ("TV Lights",)),
         ("the lamps", None, ("Living lamp", "Dining lamp")),
+        ("the living lamp", None, ("Living lamp",)),
+        ("the living room lamp", None, ("Living lamp",)),
+        ("la lampara de la sala", None, ("Living lamp",)),
     ],
 )
 def test_light_targets_resolve_across_languages(phrase: str, name: str | None, devices: tuple[str, ...]) -> None:
