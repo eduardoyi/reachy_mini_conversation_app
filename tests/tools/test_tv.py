@@ -117,3 +117,18 @@ async def test_an_unreachable_tv_is_reported_without_retry() -> None:
 async def test_no_tv_configured() -> None:
     """Without a paired TV the tool says so."""
     assert await TV()(_deps(None), action="status") == {"error": "No TV is set up."}
+
+
+@pytest.mark.asyncio
+async def test_a_slow_tv_is_reported_as_turning_on_not_as_a_failure() -> None:
+    """The key went out but the TV has not reported yet: it is waking, and pressing power again would undo it."""
+    tv = _FakeTV(is_on=False)
+
+    async def slow_power(on: bool) -> bool:
+        tv.calls.append(("power", on))
+        return False
+
+    tv.power = slow_power  # type: ignore[method-assign]
+    result = await TV()(_deps(tv), action="power", on=True)
+    assert result["ok"] is True and result["confirmed"] is False
+    assert "Do not retry" in result["note"]

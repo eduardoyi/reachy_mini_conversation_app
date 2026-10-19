@@ -347,10 +347,14 @@ class AmbientContextProcessor:
         self._latest_activation_generation = 0
         self._metrics = AmbientContextMetrics()
         self._stt_inflight = 0
+        # Set while Reachy is taking a request: segments go to the STT's accurate model, with one extra slot.
+        self._request_mode = False
+        # The last few segments' audio (in memory only), so a request can be transcribed again accurately.
+        self._recent_segment_audio: deque[tuple[int, AudioFrame]] = deque(maxlen=3)
         self._vad_inflight = 0
         self._local_backend_tasks: set[asyncio.Task[object]] = set()
         self._local_executor = ThreadPoolExecutor(
-            max_workers=self.config.max_pending_stt_tasks + 1,
+            max_workers=self.config.max_pending_stt_tasks + 2,
             thread_name_prefix="reachy-local",
         )
         self._local_executor_shutdown = False
@@ -433,6 +437,20 @@ class AmbientContextProcessor:
     def latest_sequence(self) -> int:
         """Return the highest speech-segment sequence assigned so far, including an open segment."""
         return self._next_sequence - 1
+
+    def segment_audio(self, sequence: int) -> AudioFrame | None:
+        """Return the audio of a recent segment by sequence, or None once it has been dropped."""
+        for kept_sequence, audio in self._recent_segment_audio:
+            if kept_sequence == sequence:
+                return audio
+        return None
+
+    def set_request_mode(self, active: bool) -> None:
+        """Transcribe what follows with the accurate model while Reachy takes a request."""
+        self._request_mode = active
+
+    def _stt_limit(self) -> int:
+        return self.config.max_pending_stt_tasks + (1 if self._request_mode else 0)
 
     def close_open_segment(self) -> None:
         """Finalize the open speech segment now (if any) and schedule its transcription without waiting."""
@@ -600,12 +618,13 @@ class AmbientContextProcessor:
         for completed_task in tuple(self._transcription_tasks):
             if completed_task.done():
                 self._transcription_tasks.discard(completed_task)
-        if len(self._transcription_tasks) >= self.config.max_pending_stt_tasks:
+        limit = self._stt_limit()
+        if len(self._transcription_tasks) >= limit:
             self._increment_metrics(continuous_stt_dropped=self._metrics.continuous_stt_dropped + 1)
             self._discard_continuous_sequence(speech.sequence)
             logger.warning("Continuous local STT backlog full; dropped newest segment")
             return
-        if self._stt_inflight >= self.config.max_pending_stt_tasks:
+        if self._stt_inflight >= limit:
             self._increment_metrics(continuous_stt_dropped=self._metrics.continuous_stt_dropped + 1)
             self._discard_continuous_sequence(speech.sequence)
             logger.warning("Continuous local STT backend busy; dropped newest segment")
@@ -616,7 +635,12 @@ class AmbientContextProcessor:
             return
         audio = np.concatenate(audio_parts).astype(np.int16, copy=True)
         segment = (speech.sample_rate, audio)
-        backend_task = self._start_local_work(self._stt.transcribe, segment, "stt")
+        self._recent_segment_audio.append((speech.sequence, segment))
+        transcribe = self._stt.transcribe
+        request_transcribe = getattr(self._stt, "transcribe_request", None)
+        if self._request_mode and request_transcribe is not None:
+            transcribe = request_transcribe
+        backend_task = self._start_local_work(transcribe, segment, "stt")
         if backend_task is None:
             self._increment_metrics(continuous_stt_dropped=self._metrics.continuous_stt_dropped + 1)
             self._discard_continuous_sequence(speech.sequence)
@@ -699,7 +723,7 @@ class AmbientContextProcessor:
     ) -> asyncio.Task[object] | None:
         """Admit one bounded backend call and retain its frame until it exits."""
         if kind == "stt":
-            if self._stt_inflight >= self.config.max_pending_stt_tasks:
+            if self._stt_inflight >= self._stt_limit():
                 return None
             self._stt_inflight += 1
             self._increment_metrics(stt_inflight_peak=max(self._metrics.stt_inflight_peak, self._stt_inflight))

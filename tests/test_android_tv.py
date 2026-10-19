@@ -126,6 +126,27 @@ async def test_power_reports_a_tv_that_never_changed(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_a_late_power_change_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A TV that wakes after the confirmation window is still watched, so the real wake time is in the log."""
+    import asyncio
+    import logging
+
+    monkeypatch.setattr("reachy_mini_conversation_app.android_tv.POWER_POLL_S", 0.01)
+    monkeypatch.setattr("reachy_mini_conversation_app.android_tv.POWER_CONFIRM_S", 0.02)
+    monkeypatch.setattr("reachy_mini_conversation_app.android_tv.POWER_LATE_S", 1.0)
+    remote = _FakeRemote()
+    remote.is_on = False
+    tv = _tv(remote)
+    caplog.set_level(logging.INFO, logger="reachy_mini_conversation_app.android_tv")
+    assert await tv.power(True) is False
+    remote.is_on = True  # the TV finishes waking
+    await asyncio.gather(*tv._watch_tasks)
+    assert "TV reported on" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_power_falls_back_to_wakeup_when_the_state_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without a reported state POWER could toggle the wrong way, so WAKEUP is sent."""
     monkeypatch.setattr("reachy_mini_conversation_app.android_tv.POWER_POLL_S", 0)

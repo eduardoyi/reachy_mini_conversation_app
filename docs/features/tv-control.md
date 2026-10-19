@@ -48,6 +48,11 @@ after pairing.
 - WAKEUP and SLEEP do nothing on this TV. POWER toggles it in about 3 s, so `power()` sends POWER
   only when the TV reports the other state, and waits up to 6 s for the change. With no reported
   state it falls back to WAKEUP/SLEEP, which cannot toggle the wrong way.
+- 2026-10-18 20:56: after a long standby the TV took more than 6 s to report it was on, so
+  Reachy said turning it on had failed while the TV was coming on. An unconfirmed change is
+  now reported as "turning on/off" (the quick path stays silent, as it does on success), and the
+  tool says not to press power again. The change keeps being watched for up to 30 s; the log
+  says "TV reported on N s after the power key" (or that it never did), to tune the wait.
 - `market://launch?id=<package>` (the library's default for package names) is refused for every
   app, YouTube included. Web links open the apps: `https://www.youtube.com`,
   `https://www.netflix.com/browse`, `https://app.primevideo.com`, and YouTube searches

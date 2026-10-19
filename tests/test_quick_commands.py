@@ -236,11 +236,25 @@ async def test_a_device_list_target_changes_each_device() -> None:
 
 @pytest.mark.asyncio
 async def test_lights_that_did_not_respond_are_named() -> None:
-    """A partial failure says which light did not respond."""
-    lights = _Tool({"set": {"ok": True, "changed": ["Living light 1"], "unreachable": ["Dining lamp"]}})
+    """A light that failed is named; one already offline is not news for "all the lights"."""
+    lights = _Tool(
+        {"set": {"ok": True, "changed": ["Living light 1"], "failed": ["TV Lights"], "unreachable": ["Old lamp"]}}
+    )
     runner, _, _ = _runner(lights=lights)
     reply = await runner.handle("turn off the lights")
-    assert reply is not None and reply.text == "Done, but Dining lamp didn't respond."
+    assert reply is not None and reply.text == "Done, but TV Lights didn't respond."
+    offline_only = _Tool({"set": {"ok": True, "changed": ["Living light 1"], "unreachable": ["Old lamp"]}})
+    runner, _, _ = _runner(lights=offline_only)
+    reply = await runner.handle("turn off the lights")
+    assert reply is not None and reply.text is None
+
+
+@pytest.mark.asyncio
+async def test_turn_the_lights_back_on() -> None:
+    """Saying "back on" is the same as "on"."""
+    runner, tools, _ = _runner()
+    await runner.handle("turn the lights back on")
+    assert tools["lights"].calls == [{"action": "set", "target": "all", "on": True}]
 
 
 @pytest.mark.asyncio
@@ -291,7 +305,7 @@ async def test_play_a_genre_searches_playlists() -> None:
     runner, _, _ = _runner(spotify=spotify)
     reply = await runner.handle("play some jazz")
     assert reply is not None and reply.text == "Playing Jazz Classics."
-    assert spotify.calls == [{"action": "search", "query": "jazz", "search_type": "playlist"}]
+    assert spotify.calls[1:] == [{"action": "search", "query": "jazz", "search_type": "playlist"}]
 
 
 @pytest.mark.asyncio
@@ -305,11 +319,32 @@ async def test_volume_goes_to_the_tv_when_nothing_plays_on_spotify() -> None:
 
 @pytest.mark.asyncio
 async def test_volume_steps_spotify_from_its_current_level() -> None:
-    """While music plays, "louder" raises Spotify by 15."""
+    """While music plays, "louder" raises Spotify by 5 and "lower" drops it by 5."""
     spotify = _Tool({"status": {"status": "playing", "volume_percent": 40}})
     runner, _, _ = _runner(spotify=spotify)
     await runner.handle("louder")
-    assert spotify.calls[-1] == {"action": "volume", "volume_percent": 55}
+    assert spotify.calls[-1] == {"action": "volume", "volume_percent": 45}
+    await runner.handle("Lower.")
+    assert spotify.calls[-1] == {"action": "volume", "volume_percent": 35}
+
+
+@pytest.mark.asyncio
+async def test_volume_steps_from_the_level_before_reachy_lowered_the_music(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Music at 30 is lowered to 20 while Reachy listens; "lower" means 25, not 15."""
+    from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+    monkeypatch.setattr(SPOTIFY_DUCKER, "_restore_to", 30)
+    spotify = _Tool({"status": {"status": "playing", "volume_percent": 20}})
+    runner, _, _ = _runner(spotify=spotify)
+    await runner.handle("lower")
+    assert spotify.calls[-1] == {"action": "volume", "volume_percent": 25}
+
+
+@pytest.mark.parametrize("text", ["set volume to 25", "said volume to 25%.", "put the volume at 25"])
+def test_set_volume_phrasings(text: str) -> None:
+    """Whisper often hears "set" as "said"; both set the level."""
+    command = parse(text)
+    assert command is not None and command.kind == "volume" and command.args["level"] == 25
 
 
 @pytest.mark.asyncio
@@ -399,3 +434,71 @@ async def test_weather_without_a_home_goes_to_the_conversation() -> None:
     """No HOME_LOCATION: Gemini answers weather as before."""
     runner, _, _ = _runner()
     assert await runner.handle("what's the weather") is None
+
+
+@pytest.mark.asyncio
+async def test_play_says_when_the_spotify_speaker_is_unreachable() -> None:
+    """An idle Cast speaker missing from Spotify's devices is reported before any song is announced."""
+    spotify = _Tool({"status": {"error": "Open Spotify on the configured device; it is unavailable or restricted."}})
+    runner, _, _ = _runner(spotify=spotify)
+    reply = await runner.handle("play Bad Bunny")
+    assert reply is not None and "can't reach the Spotify speaker" in (reply.text or "")
+    assert [call["action"] for call in spotify.calls] == ["status"]
+
+
+@pytest.mark.asyncio
+async def test_household_routines_run_locally_and_good_night_also_sleeps() -> None:
+    """Movie mode and good night from the home layout run without the conversation."""
+    from types import SimpleNamespace
+
+    from reachy_mini_conversation_app.home_devices import Routine, HomeLayout
+
+    calls: list[dict[str, Any]] = []
+
+    async def lights(_deps: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"ok": True, "changed": ["TV Lights"]}
+
+    layout = HomeLayout(
+        routines=(
+            Routine(say=("movie mode", "modo película"), on=("TV Lights",), off=("all",)),
+            Routine(say=("good night", "buenas noches"), off=("all",), sleep=True),
+        )
+    )
+    slept: list[bool] = []
+    deps = SimpleNamespace(
+        home_hub=SimpleNamespace(layout=layout),
+        movement_manager=SimpleNamespace(go_to_sleep=lambda: slept.append(True)),
+    )
+    quick = QuickCommands(deps, lights=lights)
+
+    reply = await quick.handle("Movie mode, please.")
+    assert reply is not None and reply.text is None and calls == [{"action": "scene", "scene": "movie mode"}]
+    reply = await quick.handle("¿Modo película?")
+    assert reply is not None and reply.language == "es"
+    reply = await quick.handle("Buenas noches")
+    assert reply is not None and reply.text == "¡Buenas noches!" and reply.sleep and reply.after is not None
+    await reply.after()
+    assert slept == [True]
+    assert await quick.handle("movie mode is fun") is None  # only the whole phrase runs a routine
+
+
+@pytest.mark.asyncio
+async def test_good_night_also_turns_the_tv_off_and_pauses_the_music() -> None:
+    """The good night routine: lights off, music paused, TV off, then Reachy sleeps."""
+    import asyncio
+
+    from reachy_mini_conversation_app.home_devices import Routine, HomeLayout
+
+    spotify = _Tool({"status": {"status": "playing", "volume_percent": 40}})
+    lights = _Tool({"scene": {"ok": True, "changed": ["Living light 1"]}})
+    runner, tools, deps = _runner(spotify=spotify, lights=lights, tv=_TV(TVState(True, None, 20, False)))
+    deps.home_hub.layout = HomeLayout(  # type: ignore[attr-defined]
+        routines=(Routine(say=("good night",), off=("all",), sleep=True, tv_off=True, pause_music=True),)
+    )
+    reply = await runner.handle("Good night")
+    await asyncio.gather(*runner._background)
+    assert reply is not None and reply.text == "Good night!" and reply.sleep
+    assert lights.calls == [{"action": "scene", "scene": "good night"}]
+    assert {"action": "pause"} in spotify.calls
+    assert tools["tv"].calls == [{"action": "power", "on": False}]

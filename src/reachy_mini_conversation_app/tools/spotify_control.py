@@ -189,6 +189,11 @@ class SpotifyDucker:
     async def _duck_quietly(self) -> None:
         await self._duck(require_playing=False)
 
+    @property
+    def level_before_ducking(self) -> int | None:
+        """The volume the music had before Reachy lowered it to listen, or None when it is not lowered."""
+        return self._restore_to
+
     def forget_restore_level(self) -> None:
         """Keep an explicitly requested volume instead of restoring the pre-conversation level."""
         self._restore_to = None
@@ -416,6 +421,11 @@ class SpotifyControl(Tool):
         device_id = os.getenv("SPOTIFY_DEVICE_ID", "").strip()
         if not credentials_path or not device_id:
             return {"error": "Spotify is not configured."}
+        if action in {"play", "resume"}:
+            from reachy_mini_conversation_app.music_speaker import prepare_for_playback
+
+            # The Mac's Spotify app plays through a Bluetooth speaker, when one is set up: open, connect, route.
+            await asyncio.to_thread(prepare_for_playback)
         async with self._lock:
             try:
                 self._search_results = {

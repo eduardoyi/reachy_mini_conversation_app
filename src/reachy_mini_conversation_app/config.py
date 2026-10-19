@@ -294,6 +294,20 @@ def resolve_gemini_thinking_level(model: str | None = None, value: str | None = 
     return candidate
 
 
+def _follow_up_by_person(value: str | None) -> dict[str, float]:
+    """Parse "enzo=45, mara=45" into person IDs and follow-up seconds; bad entries are skipped."""
+    windows: dict[str, float] = {}
+    for item in (value or "").split(","):
+        name, _, seconds = item.partition("=")
+        try:
+            parsed = float(seconds)
+        except ValueError:
+            continue
+        if name.strip() and 0 < parsed <= 300:
+            windows[name.strip().casefold()] = parsed
+    return windows
+
+
 def _optional_float(value: str | None) -> float | None:
     """Parse an optional number; empty or invalid is None."""
     try:
@@ -652,6 +666,8 @@ class Config:
     LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
     LOCAL_STT_BASE_URL = resolve_local_stt_base_url()
     LOCAL_STT_MODEL = resolve_local_stt_model()
+    # Optional more accurate model for requests made to Reachy (e.g. openai/whisper-large-v3-turbo).
+    LOCAL_STT_REQUEST_MODEL = (os.getenv("LOCAL_STT_REQUEST_MODEL") or "").strip() or None
     LOCAL_STT_TIMEOUT_SECONDS = resolve_local_processing_seconds(
         LOCAL_STT_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_STT_TIMEOUT_SECONDS
     )
@@ -693,6 +709,10 @@ class Config:
     HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
     # Everyday commands (lights, music, TV, time, weather) answered locally, without the cloud conversation.
     QUICK_COMMANDS_ENABLED = _env_flag("QUICK_COMMANDS_ENABLED", default=True)
+    # Longer follow-up windows for people who need more time to answer (face-recognized), e.g. "enzo=45".
+    HYBRID_FOLLOW_UP_BY_PERSON = _follow_up_by_person(os.getenv("HYBRID_FOLLOW_UP_BY_PERSON"))
+    # Debugging only: print the words of requests quick commands passed to the conversation (off by default).
+    QUICK_COMMANDS_LOG_TEXT = _env_flag("QUICK_COMMANDS_LOG_TEXT", default=False)
     # Gemini text-to-speech model for quick replies (in GEMINI_VOICE).
     LOCAL_SPEECH_MODEL = (os.getenv("LOCAL_SPEECH_MODEL") or "").strip() or "gemini-3.8-flash-lite-tts"
     # Home place for weather; coordinates skip the lookup.
@@ -837,6 +857,7 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_CONTEXT_STRATEGY = resolve_local_context_strategy()
     config.LOCAL_STT_BASE_URL = resolve_local_stt_base_url()
     config.LOCAL_STT_MODEL = resolve_local_stt_model()
+    config.LOCAL_STT_REQUEST_MODEL = (os.getenv("LOCAL_STT_REQUEST_MODEL") or "").strip() or None
     config.LOCAL_STT_TIMEOUT_SECONDS = resolve_local_processing_seconds(
         LOCAL_STT_TIMEOUT_SECONDS_ENV, DEFAULT_LOCAL_STT_TIMEOUT_SECONDS
     )
@@ -876,6 +897,8 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.HOME_LAYOUT_FILE = os.path.expanduser(os.getenv("HOME_LAYOUT_FILE") or "~/.config/reachy-home/layout.json")
     config.QUICK_COMMANDS_ENABLED = _env_flag("QUICK_COMMANDS_ENABLED", default=True)
+    config.HYBRID_FOLLOW_UP_BY_PERSON = _follow_up_by_person(os.getenv("HYBRID_FOLLOW_UP_BY_PERSON"))
+    config.QUICK_COMMANDS_LOG_TEXT = _env_flag("QUICK_COMMANDS_LOG_TEXT", default=False)
     config.LOCAL_SPEECH_MODEL = (os.getenv("LOCAL_SPEECH_MODEL") or "").strip() or "gemini-3.8-flash-lite-tts"
     config.HOME_LOCATION = (os.getenv("HOME_LOCATION") or "").strip() or None
     config.HOME_LATITUDE = _optional_float(os.getenv("HOME_LATITUDE"))

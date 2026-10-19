@@ -75,6 +75,7 @@ class OpenAICompatibleLocalSTT:
         base_url: str,
         *,
         model: str = "whisper-1",
+        request_model: str | None = None,
         language: str | None = None,
         timeout_seconds: float = 15.0,
         target_sample_rate: int = _TARGET_SAMPLE_RATE,
@@ -88,6 +89,8 @@ class OpenAICompatibleLocalSTT:
         self.model = model.strip()
         if not self.model:
             raise ValueError("model must not be empty")
+        # A more accurate (slower) model for what is said to Reachy right after his name.
+        self.request_model = (request_model or "").strip() or None
         self.language = _normalize_language(language)
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be finite and positive")
@@ -106,14 +109,18 @@ class OpenAICompatibleLocalSTT:
         self.max_audio_seconds = max_audio_seconds
         self._transport = transport
 
-    async def transcribe(self, audio: AudioFrame) -> str:
+    async def transcribe_request(self, audio: AudioFrame) -> str:
+        """Transcribe a request addressed to Reachy with the accurate model, when one is set."""
+        return await self.transcribe(audio, model=self.request_model)
+
+    async def transcribe(self, audio: AudioFrame, *, model: str | None = None) -> str:
         """Send a bounded in-memory WAV request and return derived text only."""
         wav_payload = _encode_wav(
             audio,
             target_sample_rate=self.target_sample_rate,
             max_audio_seconds=self.max_audio_seconds,
         )
-        request_data = {"model": self.model}
+        request_data = {"model": model or self.model}
         if self.language is not None:
             request_data["language"] = self.language
         request_files = {"file": ("audio.wav", wav_payload, "audio/wav")}

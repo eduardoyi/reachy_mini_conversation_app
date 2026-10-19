@@ -215,3 +215,52 @@ async def test_a_failing_light_is_reported_once_and_not_retried(caplog: pytest.L
     assert result["failed"] == ["TV Lights"] and result["changed"] == ["Techo"]
     assert "Do not retry" in result["instruction"]
     assert any("TV Lights failed: TypeError" in record.message for record in caplog.records)
+
+
+def _household(tmp_path: Any) -> Any:
+    from reachy_mini_conversation_app.home_devices import HomeLayout
+
+    path = tmp_path / "layout.json"
+    path.write_text(
+        '{"left_out_of_all_on": ["TV Lights"], "routines": ['
+        '{"say": ["movie mode", "modo cine"], "on": ["TV Lights"], "off": ["all"]},'
+        '{"say": ["lights"], "on": ["all"]},'
+        '{"say": ["good night"], "off": ["all"], "sleep": true},'
+        '{"say": ["broken"]}]}'
+    )
+    return HomeLayout.load(path)
+
+
+@pytest.mark.asyncio
+async def test_turning_on_all_the_lights_leaves_out_the_tv_backlight(tmp_path: Any) -> None:
+    """Turning on the lights skips TV Lights unless they are named; turning everything off includes them."""
+    home = _FakeHome([LAMP, CEILING, STRIP])
+    home.layout = _household(tmp_path)  # type: ignore[attr-defined]
+    assert (await HomeLights()(_deps(home), action="set", target="the lights", on=True))["changed"] == [
+        "Lámpara de pie",
+        "Techo",
+    ]
+    assert (await HomeLights()(_deps(home), action="set", target="all", on=False))["changed"] == [
+        "Lámpara de pie",
+        "Techo",
+        "TV Lights",
+    ]
+    assert (await HomeLights()(_deps(home), action="set", target="tv lights", on=True))["changed"] == ["TV Lights"]
+
+
+@pytest.mark.asyncio
+async def test_a_routine_runs_as_a_scene_and_is_listed(tmp_path: Any) -> None:
+    """Movie mode turns the TV backlight on and every other light off; it shows among the scenes."""
+    layout = _household(tmp_path)
+    assert [routine.name for routine in layout.routines] == ["movie mode", "lights", "good night"]  # "broken" dropped
+    home = _FakeHome([LAMP, CEILING, STRIP, OFFLINE])
+    home.layout = layout  # type: ignore[attr-defined]
+    result = await HomeLights()(_deps(home), action="scene", scene="Modo Cine")
+    assert result["routine"] == "movie mode" and result["ok"] is True
+    assert home.changes == [
+        ("5", LightChange(on=True)),
+        ("1", LightChange(on=False)),
+        ("2", LightChange(on=False)),
+    ]  # the offline lamp is skipped
+    status = await HomeLights()(_deps(home), action="status")
+    assert status["scenes"] == ["movie mode", "lights", "good night"]

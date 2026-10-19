@@ -372,3 +372,19 @@ def test_public_symbols_do_not_require_runtime_model_dependencies() -> None:
     """The baseline backends construct with only existing application dependencies."""
     assert RmsEnergyVAD().threshold == 500.0
     assert OpenAICompatibleLocalSTT("http://localhost").model == "whisper-1"
+
+
+@pytest.mark.asyncio
+async def test_request_transcription_names_the_accurate_model() -> None:
+    """Requests to Reachy ask the server for the request model; others for the default one."""
+    transport = RecordingTransport()
+    client = OpenAICompatibleLocalSTT(
+        "http://127.0.0.1:8765", model="openai/whisper-small", request_model="openai/whisper-large-v3-turbo",
+        transport=transport,
+    )  # fmt: skip
+    await client.transcribe_request(_frame(np.ones(160, dtype=np.int16)))
+    assert transport.request is not None
+    assert b"whisper-large-v3-turbo" in await transport.request.aread()
+    await client.transcribe(_frame(np.ones(160, dtype=np.int16)))
+    body = await transport.request.aread()
+    assert b"whisper-small" in body and b"turbo" not in body

@@ -10,6 +10,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Multilingual by default; use an ".en" model for an English-only household.
 WHISPER_MODEL="${WHISPER_MODEL:-openai/whisper-small}"
+# More accurate model for what is said to Reachy right after his name (Reachy's own server only); set
+# LOCAL_STT_REQUEST_MODEL to the same name in .env. Empty disables it.
+WHISPER_REQUEST_MODEL="${WHISPER_REQUEST_MODEL-openai/whisper-large-v3-turbo}"
 WHISPER_PORT="${WHISPER_PORT:-8766}"
 WHISPER_URL="http://127.0.0.1:${WHISPER_PORT}/v1/models"
 WHISPER_LOG="${WHISPER_LOG:-${TMPDIR:-/tmp}/reachy-whisper.log}"
@@ -84,8 +87,10 @@ elif ! command -v transformers >/dev/null 2>&1; then
 else
   echo "Starting Whisper ($WHISPER_MODEL) on port $WHISPER_PORT; log: $WHISPER_LOG"
   if [[ "$WHISPER_SERVER" != "transformers" && -x "$WHISPER_PYTHON" ]]; then
+    request_args=()
+    [[ -n "$WHISPER_REQUEST_MODEL" ]] && request_args=(--request-model "$WHISPER_REQUEST_MODEL")
     "$WHISPER_PYTHON" "$REPO_DIR/scripts/whisper_server.py" --host 127.0.0.1 --port "$WHISPER_PORT" \
-      "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+      "${request_args[@]}" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
   else
     transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
   fi

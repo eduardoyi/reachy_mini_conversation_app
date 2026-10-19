@@ -251,7 +251,8 @@ ACTIVATION_CONTEXT_HEADER = "Conversation near you before you were called (local
 ACTIVATION_CONTEXT_FOOTER = (
     "The user has just called you by name and is talking to you now. Their request follows and is addressed "
     'to you; if it refers to the conversation above ("can you check?", "what do you think?"), use it to '
-    "understand what they mean and answer or act on the live request."
+    "understand what they mean and answer or act on the live request. Requests in the conversation above were "
+    "already handled; do not repeat them (do not play that music again, for example) unless asked now."
 )
 ACTIVATION_CUE = (
     "The user has just called you by name and is talking to you now. Their request follows and is addressed "
@@ -259,9 +260,13 @@ ACTIVATION_CUE = (
 )
 # Whisper spellings of the wake word; the acoustic wake keeps the word itself local.
 _WAKE_WORD_VARIANTS = (
-    r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi"
+    r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi|"
+    r"rishi|ricchi|ritzy|richey|reechi"
 )
 _WAKE_WORD_TRANSCRIPT_PATTERN = re.compile(rf"\b(?:{_WAKE_WORD_VARIANTS})\b", re.IGNORECASE)
+# How close (difflib ratio) a first word must be to "reachy" to count as a misspelled name: "reach",
+# "rich", "ready" pass, "we", "mom", "turn" do not.
+_MISHEARD_WAKE_SIMILARITY = 0.6
 # While asleep, the name must lead the utterance ("Reachy, ...", "hey Reachy"), not appear mid-sentence.
 _NAME_FIRST_WORDS = 2
 
@@ -290,6 +295,23 @@ def frame_activation_context(transcript: str, max_chars: int) -> str:
     if len(text) > budget:
         text = text[-budget:]  # keep the newest lines, which the request most likely refers to
     return f"{ACTIVATION_CONTEXT_HEADER}\n{text}\n\n{ACTIVATION_CONTEXT_FOOTER}"
+
+
+def request_after_misheard_wake(text: str) -> str:
+    """Return the request when the first word sounds like "Reachy" but STT spelled it oddly ("Reach, lights on").
+
+    Used only after an acoustic wake, which already heard the name: an overheard sentence that does not
+    open with something like it still goes to the conversation.
+    """
+    import difflib
+
+    words = text.split()
+    if len(words) < 2:
+        return ""
+    first = re.sub(r"[^a-z]", "", words[0].casefold())
+    if difflib.SequenceMatcher(None, first, "reachy").ratio() < _MISHEARD_WAKE_SIMILARITY:
+        return ""
+    return " ".join(words[1:]).lstrip(" ,.;:!?¡¿-").strip()
 
 
 def request_after_wake(text: str) -> str:
@@ -329,6 +351,15 @@ class HybridRuntime:
     _QUICK_REPLY_PER_CHAR_S = 0.12
     # A wake segment this short is taken as the wake word alone; the request is the next segment.
     _WAKE_ONLY_MAX_WORDS = 2
+    # The request clip after an acoustic wake: wait this long for speech to start, end it after this much
+    # silence, and never let it run longer than the cap.
+    _REQUEST_CLIP_START_S = 3.0
+    _REQUEST_CLIP_SILENCE_S = 0.8
+    _REQUEST_CLIP_MAX_S = 8.0
+    _REQUEST_CLIP_STT_TIMEOUT_S = 6.0
+    # A segment cut at an acoustic wake, with no name in it, this short is the misheard name plus the start
+    # of the request.
+    _UNNAMED_WAKE_MAX_WORDS = 4
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
@@ -397,11 +428,15 @@ class HybridRuntime:
         state_observer: StateObserver | None = None,
         inactivity_timeout_s: float = 0.0,
         follow_up_window_s: float = 0.0,
+        follow_up_window_for: Callable[[], float] | None = None,
         addressee_check: AddresseeChecker | None = None,
         quick_commands: QuickCommandHandler | None = None,
         reply_speaker: ReplySpeaker | None = None,
         speaking_callback: Callable[[bool], None] | None = None,
+        request_transcriber: Callable[[AudioFrame], Awaitable[str]] | None = None,
+        listening_observer: Callable[[bool], Awaitable[None]] | None = None,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+        start_asleep: bool = False,
         clock: Clock = time.monotonic,
         monitor_interval_s: float = 0.1,
     ) -> None:
@@ -437,6 +472,24 @@ class HybridRuntime:
         self._quick_commands = quick_commands
         self._reply_speaker = reply_speaker
         self._speaking_callback = speaking_callback
+        # Transcribes the whole request after an acoustic wake as one clip (the accurate local model).
+        self._request_transcriber = request_transcriber
+        self._request_clip: list[AudioFrame] | None = None
+        # Audio after the wake that was still waiting for local processing when the clip began: on a busy Mac
+        # the wake is detected late, so the start of the request ("Prende" in "prende la luz") is already
+        # past the activation barrier. queued = in the local worker at detection, late = captured but routed
+        # locally after activation. The clip is queued + late + post-activation frames.
+        self._request_clip_queued: list[AudioFrame] | None = None
+        self._request_clip_queued_epoch = -1
+        self._request_clip_late: list[AudioFrame] | None = None
+        # The segment holding a transcript wake's request: if whisper-small's text is not a quick command, its
+        # audio is transcribed again with the accurate model before the conversation opens.
+        self._transcript_wake_segment_sequence: int | None = None
+        self._request_clip_vad = RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD)
+        # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
+        # without a conversation; a conversation reports through cloud_session_observer instead.
+        self._listening_observer = listening_observer
+        self._observer_tasks: set[asyncio.Task[None]] = set()
         # Spoken replies to quick commands, played while no cloud handler exists.
         self._local_output: deque[AudioFrame | AdditionalOutputs] = deque()
         self._local_processing_close_callback = local_processing_close_callback
@@ -451,11 +504,13 @@ class HybridRuntime:
         self._last_user_speech_start_at = -math.inf
         self._last_reply_was_question = False
         self._follow_up_window_s = float(follow_up_window_s)
+        # Optional per-conversation window (e.g. longer while a young child is talking); falls back to the fixed one.
+        self._follow_up_window_for = follow_up_window_for
         # (reason, requested_at) for a close Reachy asked for; it happens once his goodbye has played.
         self._close_requested: tuple[str, float] | None = None
         # Told to go to sleep: until a wake is confirmed by local STT hearing the name first, acoustic
         # detections and mid-sentence mentions do not wake him (they fire on ordinary conversation).
-        self._asleep = False
+        self._asleep = bool(start_asleep)
         self._addressee_check = addressee_check
         self._addressee_task: asyncio.Task[None] | None = None
         self._reply_parts: list[str] = []
@@ -972,6 +1027,7 @@ class HybridRuntime:
                 self._wake_followup_after_sequence = segment.sequence
         addressed_text = detection.remaining_text
         context_fence = segment.sequence
+        self._transcript_wake_segment_sequence = segment.sequence
         if not detection.wake_word_is_first_word:
             if addressed_text:
                 # Mid-sentence wake ("…this weekend, Reachy, can you check?"): the whole sentence is the request,
@@ -1048,6 +1104,8 @@ class HybridRuntime:
     ) -> bool:
         handler: ConversationHandler | None = None
         generation = 0
+        clip_task: asyncio.Task[str] | None = None
+        listening_notified = False
         try:
             async with self._state_lock:
                 with self._lifecycle_lock:
@@ -1064,6 +1122,16 @@ class HybridRuntime:
                         generation if reason == "acoustic_wake" and not addressed_text else None
                     )
                     processor = self._context_processor
+                    clip_request = (
+                        reason == "acoustic_wake" and not addressed_text and self._request_transcriber is not None
+                    )
+                    self._request_clip = [] if clip_request else None
+                    self._request_clip_late = [] if clip_request else None
+                    if not clip_request:
+                        self._request_clip_queued = None
+                    set_request_mode = getattr(processor, "set_request_mode", None)
+                    if set_request_mode is not None and not clip_request:
+                        set_request_mode(True)  # the request is transcribed with the accurate model
                     transcribe_request = (
                         reason == "acoustic_wake"
                         and not addressed_text
@@ -1088,6 +1156,16 @@ class HybridRuntime:
                     if asleep and not confirm_wake:
                         self._asleep = False
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
+            if not confirm_wake:  # a wake while asleep counts once the name is confirmed
+                self._notify_listening(True)
+                listening_notified = True
+            clip_task = (
+                asyncio.create_task(
+                    self._transcribe_request_clip(generation), name=f"hybrid-request-clip-{generation}"
+                )
+                if clip_request
+                else None
+            )
 
             if not confirm_wake:
                 await self._invoke_acknowledgement(reason)
@@ -1096,12 +1174,21 @@ class HybridRuntime:
             if closed:
                 raise asyncio.CancelledError
 
+            request_sequence: int | None = None  # the transcript-wake segment that holds the request
+            request_is_followup = False
+            if reason == "wake_word":
+                with self._lifecycle_lock:
+                    request_sequence = self._transcript_wake_segment_sequence
+                    self._transcript_wake_segment_sequence = None
             if reason == "wake_word" and not addressed_text:
                 followup_segment, waited_wake_sequence = await self._wait_for_wake_followup()
                 if waited_wake_sequence is not None:
                     wake_sequence = max(wake_sequence or 0, waited_wake_sequence)
+                request_sequence = None
                 if followup_segment is not None:
                     addressed_text = followup_segment.text[: self._MAX_ADDRESSED_TEXT_CHARS]
+                    request_sequence = followup_segment.sequence
+                    request_is_followup = True
                 else:
                     self._record_local_command_outcome(LocalCommandOutcome.FOLLOWUP_TIMEOUT)
 
@@ -1119,6 +1206,7 @@ class HybridRuntime:
 
             # What quick commands may act on: only words addressed to Reachy, never an overheard sentence.
             quick_text = (request_after_wake(addressed_text) or addressed_text) if addressed_text else ""
+            segment_quick_text = ""
             if reason == "acoustic_wake" and self._context_processor is not None:
                 quick_text = ""
                 await self._settle_local_transcript()
@@ -1128,6 +1216,18 @@ class HybridRuntime:
                 # A segment of a word or two at the wake is the wake word itself (or a fragment of it): the
                 # request follows, so wait for it rather than sending the fragment as the request.
                 wake_text_is_request = len(wake_text.split()) > self._WAKE_ONLY_MAX_WORDS
+                # A short segment without a recognizable name, cut at the wake while the person kept talking,
+                # is the name misheard ("Reachy, can..." as "which you can't"): the request is still coming.
+                processor = self._context_processor
+                cut_mid_request = (
+                    not wake_word_found
+                    and wake_text_is_request
+                    and len(wake_text.split()) <= self._UNNAMED_WAKE_MAX_WORDS
+                    and processor is not None
+                    and (processor.has_open_segment or processor.latest_sequence > (wake_segment_sequence or -1))
+                )
+                if cut_mid_request:
+                    wake_text_is_request = False
                 if not wake_text_is_request or (wake_word_found and not request_after_wake(wake_text)):
                     followup_segment, _ = await self._wait_for_wake_followup()
                     followup_text = followup_segment.text if followup_segment is not None else ""
@@ -1135,12 +1235,18 @@ class HybridRuntime:
                     self._clear_wake_followup_waiter()
                 # Send the whole utterance around the wake as the user's turn: it carries the request (and
                 # what it refers to) without depending on how local STT spelled the wake word.
-                parts = (wake_text, followup_text) if followup_text else ((wake_text,) if wake_text_is_request else ())
+                parts = (
+                    (wake_text, followup_text)
+                    if followup_text
+                    else ((wake_text,) if wake_text_is_request or cut_mid_request else ())
+                )
                 request_text = " ".join(part for part in parts if part).strip()
                 if wake_word_found:
                     quick_text = " ".join(part for part in (request_after_wake(wake_text), followup_text) if part)
                 elif followup_text and not wake_text_is_request:
                     quick_text = followup_text  # the next sentence after "Reachy" alone
+                elif wake_text_is_request:
+                    quick_text = request_after_misheard_wake(wake_text)
                 if request_text:
                     addressed_text = request_text[: self._MAX_ADDRESSED_TEXT_CHARS]
                     with self._lifecycle_lock:
@@ -1156,15 +1262,54 @@ class HybridRuntime:
                     wake_word_found,
                     len(followup_text),
                 )
+                clip_text = await self._await_request_clip(clip_task)
+                clip_task = None
+                if clip_text and quick_text and quick_text.casefold() != clip_text.casefold():
+                    segment_quick_text = quick_text
+                if clip_text:
+                    # One clip of everything said after the name, transcribed accurately, beats the fragments.
+                    quick_text = clip_text
+                    addressed_text = clip_text[: self._MAX_ADDRESSED_TEXT_CHARS]
+                    with self._lifecycle_lock:
+                        self._pending_acoustic_ack_generation = None
+                    self._clear_postactivation_queue()
+                    if wake_segment_sequence is not None:
+                        wake_sequence = wake_segment_sequence
                 if confirm_wake:
                     leading_text = wake_text if wake_word_found else followup_text
                     if not _name_leads(leading_text):
                         return await self._stay_asleep(generation)
                     with self._lifecycle_lock:
                         self._asleep = False
+                    self._notify_listening(True)
+                    listening_notified = True
                     await self._invoke_acknowledgement(reason)
             if quick_text and await self._try_quick_command(quick_text, generation):
                 return True
+            # The clip can still miss words the fast transcript caught; try that before the conversation.
+            if segment_quick_text and await self._try_quick_command(segment_quick_text, generation):
+                return True
+            # A transcript wake heard by whisper-small ("prendela los" for "prende las luces"): listen again
+            # with the accurate model before handing a misheard request to the conversation.
+            if quick_text and request_sequence is not None:
+                accurate = await self._transcribe_segment_accurately(request_sequence)
+                accurate_quick = (
+                    accurate
+                    if request_is_followup
+                    else (request_after_wake(accurate) or request_after_misheard_wake(accurate))
+                )
+                if accurate_quick and accurate_quick.casefold() != quick_text.casefold():
+                    if await self._try_quick_command(accurate_quick, generation):
+                        return True
+                if accurate:
+                    addressed_text = accurate[: self._MAX_ADDRESSED_TEXT_CHARS]
+            if (
+                not quick_text
+                and addressed_text
+                and self._quick_commands is not None
+                and config.QUICK_COMMANDS_LOG_TEXT
+            ):
+                logger.info("Quick commands skipped (no name heard before the request): %r", addressed_text)
 
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             initial_context = frame_activation_context(ambient_text, config.LOCAL_CONTEXT_MAX_CHARS)
@@ -1255,6 +1400,18 @@ class HybridRuntime:
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "provider_setup_failed")
             return False
         finally:
+            set_request_mode = getattr(self._context_processor, "set_request_mode", None)
+            if set_request_mode is not None:
+                set_request_mode(False)
+            self._request_clip = None
+            self._request_clip_queued = None
+            self._request_clip_late = None
+            if clip_task is not None and not clip_task.done():
+                clip_task.cancel()
+            with self._lifecycle_lock:
+                conversation_open = self._mode is RuntimeMode.CLOUD_CONVERSATION and self._generation == generation
+            if listening_notified and not conversation_open:
+                self._notify_listening(False)
             with self._lifecycle_lock:
                 activation_is_current = self._activation_task is asyncio.current_task()
             if activation_is_current:
@@ -1262,6 +1419,114 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._activation_task is asyncio.current_task():
                     self._activation_task = None
+
+    def _notify_listening(self, listening: bool) -> None:
+        observer = self._listening_observer
+        if observer is None:
+            return
+
+        async def notify() -> None:
+            try:
+                await observer(listening)
+            except Exception as error:
+                logger.warning("Listening observer failed: %s", type(error).__name__)
+
+        task = asyncio.create_task(notify(), name=f"hybrid-listening-{listening}")
+        self._observer_tasks.add(task)
+        task.add_done_callback(self._observer_tasks.discard)
+
+    async def _await_request_clip(self, clip_task: asyncio.Task[str] | None) -> str:
+        if clip_task is None:
+            return ""
+        try:
+            return (await clip_task).strip()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Request clip failed: %s", type(error).__name__)
+            return ""
+
+    async def _transcribe_request_clip(self, generation: int) -> str:
+        """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip."""
+        transcriber = self._request_transcriber
+        if transcriber is None:
+            return ""
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        speech_started_at: float | None = None
+        silence_s = 0.0
+        index = 0
+        vad = self._request_clip_vad
+        while True:
+            await asyncio.sleep(0.05)
+            if self._request_clip is None or not self._quick_generation_current(generation):
+                return ""
+            clip = self._request_clip_frames()
+            for frame in clip[index:]:
+                try:
+                    speech = vad.is_speech(frame)
+                except (TypeError, ValueError):
+                    speech = False
+                duration = self._frame_duration(frame)
+                if speech:
+                    silence_s = 0.0
+                    if speech_started_at is None:
+                        speech_started_at = loop.time()
+                elif speech_started_at is not None:
+                    silence_s += duration
+            index = len(clip)
+            now = loop.time()
+            if speech_started_at is None:
+                if now - started_at > self._REQUEST_CLIP_START_S:
+                    return ""
+                continue
+            if silence_s >= self._REQUEST_CLIP_SILENCE_S or now - speech_started_at > self._REQUEST_CLIP_MAX_S:
+                break
+        frames = self._request_clip_frames()
+        if not frames:
+            return ""
+        sample_rate = frames[0][0]
+        audio = np.concatenate([audio_to_mono_int16(frame[1]) for frame in frames if frame[0] == sample_rate])
+        text = await asyncio.wait_for(transcriber((sample_rate, audio)), self._REQUEST_CLIP_STT_TIMEOUT_S)
+        logger.info("Request clip transcribed audio_s=%.1f chars=%d", audio.size / sample_rate, len(text.strip()))
+        if config.QUICK_COMMANDS_LOG_TEXT:
+            logger.info("Request clip text: %r", text)
+        return text if isinstance(text, str) else ""
+
+    async def _transcribe_segment_accurately(self, sequence: int) -> str:
+        """Transcribe one local segment's audio again with the request model ("" when unavailable)."""
+        transcriber = self._request_transcriber
+        segment_audio = getattr(self._context_processor, "segment_audio", None)
+        if transcriber is None or self._quick_commands is None or segment_audio is None:
+            return ""
+        audio = segment_audio(sequence)
+        if audio is None:
+            return ""
+        try:
+            text = await asyncio.wait_for(transcriber(audio), self._REQUEST_CLIP_STT_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Accurate request transcription failed: %s", type(error).__name__)
+            return ""
+        text = text.strip() if isinstance(text, str) else ""
+        if config.QUICK_COMMANDS_LOG_TEXT:
+            logger.info("Request heard again accurately: %r", text)
+        return text
+
+    def _request_clip_frames(self) -> list[AudioFrame]:
+        with self._lifecycle_lock:
+            return [
+                *(self._request_clip_queued or ()),
+                *(self._request_clip_late or ()),
+                *(self._request_clip or ()),
+            ]
+
+    def _keep_for_request_clip(self, frames: list[AudioFrame], frame: AudioFrame) -> None:
+        """Append ``frame`` unless ``frames`` already holds the longest request a clip records."""
+        held = sum(self._frame_duration(kept) for kept in frames)
+        if held < self._REQUEST_CLIP_START_S + self._REQUEST_CLIP_MAX_S:
+            frames.append(frame)
 
     async def _stay_asleep(self, generation: int) -> bool:
         """Drop an acoustic wake that local STT did not confirm, without moving or opening the cloud."""
@@ -1347,6 +1612,8 @@ class HybridRuntime:
             logger.warning("Quick command failed: %s", type(error).__name__)
             return False
         if reply is None:
+            if config.QUICK_COMMANDS_LOG_TEXT:
+                logger.info("Quick command not recognized; to the conversation: %r", request)
             return False
         if not self._quick_generation_current(generation):
             return True  # it ran; the activation was superseded meanwhile
@@ -1776,6 +2043,8 @@ class HybridRuntime:
         if duration <= 0:
             return
         with self._lifecycle_lock:
+            if self._request_clip is not None:
+                self._request_clip.append(frame)
             self._postactivation_frames.append((capture_sequence, frame))
             self._postactivation_seconds += duration
             self._session_queued_frames += 1
@@ -1874,6 +2143,9 @@ class HybridRuntime:
                     postactivation_frame = True
                 else:
                     local_frame = True
+                    with self._lifecycle_lock:
+                        if self._request_clip_late is not None:
+                            self._keep_for_request_clip(self._request_clip_late, copied_frame)
                     try:
                         self._ambient_buffer.append(copied_frame)
                     except (TypeError, ValueError) as error:
@@ -1979,6 +2251,10 @@ class HybridRuntime:
                 items.append(queue.get_nowait())
             try:
                 for frame, acoustic_epoch, completions in _merge_local_items(items):
+                    with self._lifecycle_lock:
+                        queued = self._request_clip_queued
+                        if queued is not None and acoustic_epoch == self._request_clip_queued_epoch:
+                            self._keep_for_request_clip(queued, frame)
                     try:
                         await self._observe_acoustic_frame(frame, acoustic_epoch)
                         result = self._local_processor.observe_frame(frame)
@@ -2027,6 +2303,10 @@ class HybridRuntime:
             and self._mode is RuntimeMode.LOCAL_AMBIENT
             and epoch == self._acoustic_epoch
         ):
+            if self._request_transcriber is not None:
+                with self._lifecycle_lock:
+                    self._request_clip_queued = []
+                    self._request_clip_queued_epoch = epoch
             # Activate in its own task: awaiting it here would stall this worker, so frames after the wake
             # (the spoken request) would not reach local STT until activation finished.
             task = asyncio.create_task(self.activate("acoustic_wake"), name="hybrid-acoustic-activation")
@@ -2161,6 +2441,11 @@ class HybridRuntime:
         window = self._follow_up_window_s
         if window <= 0 or not self._connection_ready or self._active_handler is None:
             return False
+        if self._follow_up_window_for is not None:
+            try:
+                window = max(window, float(self._follow_up_window_for()))
+            except Exception as error:  # a broken hint must not stop conversations from closing
+                logger.debug("Follow-up window hint failed: %s", type(error).__name__)
         if self._playback_is_active_locked(now) or not self._active_handler.output_queue.empty():
             return False
         replied_at = self._replied_at_locked()

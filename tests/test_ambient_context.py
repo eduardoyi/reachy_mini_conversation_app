@@ -854,3 +854,34 @@ async def test_latin_only_drops_non_latin_stt_hallucinations() -> None:
 
     assert processor.transcript.text() == "can you check?"
     await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_request_mode_transcribes_with_the_accurate_model() -> None:
+    """While Reachy takes a request, segments use the STT's request transcription."""
+
+    class TwoModelSTT:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def transcribe(self, audio: AudioFrame) -> str:
+            self.calls.append("fast")
+            return "background"
+
+        def transcribe_request(self, audio: AudioFrame) -> str:
+            self.calls.append("accurate")
+            return "what time is it"
+
+    stt = TwoModelSTT()
+    processor = AmbientContextProcessor(vad=SequenceVAD([True, False, False] * 2), stt=stt, config=processor_config())
+    for value in range(3):
+        await processor.observe_frame(frame(value, sample_rate=100))
+    await processor.drain()
+    processor.set_request_mode(True)
+    for value in range(3):
+        await processor.observe_frame(frame(value, sample_rate=100))
+    await processor.drain()
+    processor.set_request_mode(False)
+
+    assert stt.calls == ["fast", "accurate"]
+    await processor.close()

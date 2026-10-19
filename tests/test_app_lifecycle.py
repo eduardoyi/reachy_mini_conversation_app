@@ -48,6 +48,16 @@ def test_wake_up_if_sleeping_enables_motors_before_wake_up() -> None:
     ]
 
 
+def test_wake_up_if_sleeping_can_leave_him_asleep() -> None:
+    """With stay_asleep the motors are enabled but the wake-up movement is not played."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = SLEEP_HEAD_POSE.copy()
+
+    assert app_lifecycle.wake_up_if_sleeping(robot, MagicMock(), stay_asleep=True)
+
+    assert robot.method_calls == [call.get_current_head_pose(), call.enable_motors()]
+
+
 def test_wake_up_if_sleeping_skips_non_sleep_head_pose() -> None:
     """Startup should leave an already-awake robot alone."""
     robot = MagicMock()

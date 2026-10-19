@@ -802,6 +802,11 @@ sets `_asleep`. While it is set:
 - A transcript wake needs the name first in the same way.
 - Any confirmed wake, or a keyboard activation, clears `_asleep`. After that chat
   he stays awake in the idle pose.
+- Restarting the app while he is in the sleep pose keeps him asleep (2026-10-19):
+  startup enables the motors without the wake-up movement, holds the pose and starts
+  the runtime with `start_asleep=True`. Before, a restart woke him, and the next
+  acoustic hit on the kids talking (0.99, no name in the transcript) opened a
+  conversation. Without the hybrid runtime, startup still wakes him.
 
 The new `turn_off` tool keeps the old sleep-and-stop behavior, and the shutdown path
 (`run_go_to_sleep_tool`) now uses it. With the hybrid runtime, `end_conversation`
@@ -852,3 +857,12 @@ Everyday requests (lights, music, TV, time, date, weather, sleep) are answered i
 without building the cloud handler; see [quick-commands.md](quick-commands.md). `_try_quick_command`
 runs once the request text is known, plays the reply through `emit()` while no handler exists, and
 stays in `LOCAL_COMMAND` until it has played. Unmatched requests open Gemini as before.
+
+### Longer follow-up for Enzo — 2026-10-18
+
+Enzo (4) often needs more than 15 s to answer. `HYBRID_FOLLOW_UP_BY_PERSON` (e.g. `enzo=45`) gives
+people recognized by face during a conversation a longer follow-up window; the longest among
+everyone seen in that conversation applies, and the list resets when the conversation ends.
+`main.follow_up_window_for` feeds it to `HybridRuntime(follow_up_window_for=...)`. Tests:
+`test_follow_up_window_is_longer_while_a_child_who_needs_time_is_talking`,
+`test_follow_up_by_person_parses_names_and_seconds`.

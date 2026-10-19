@@ -299,7 +299,10 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    app_lifecycle.wake_up_if_sleeping(robot, logger)
+    # Restarted while asleep (e.g. after "good night"): stay asleep, so only his name wakes him and
+    # the acoustic detector firing on ordinary speech does not open a conversation.
+    started_asleep = app_lifecycle.wake_up_if_sleeping(robot, logger, stay_asleep=config.HYBRID_RUNTIME_ENABLED)
+    started_asleep = started_asleep and config.HYBRID_RUNTIME_ENABLED
 
     speaker_direction = None
     if config.SPEAKER_FOLLOWING_ENABLED:
@@ -316,6 +319,8 @@ def run(
         current_robot=robot,
         speaker_direction=speaker_direction.recent_speech_yaw if speaker_direction is not None else None,
     )
+    if started_asleep:
+        movement_manager.go_to_sleep()
 
     face_service = None
     if config.FACE_RECOGNITION_ENABLED and not args.no_camera:
@@ -390,9 +395,24 @@ def run(
                 # Start recognizing now so the name is known when the provider's startup context is sent.
                 face_service.set_active(True)
 
+        # People recognized during the current conversation, for per-person follow-up windows.
+        conversation_people: set[str] = set()
+
+        def follow_up_window_for() -> float:
+            """Wait longer for an answer while someone who needs more time (e.g. Enzo) is in the conversation."""
+            windows = config.HYBRID_FOLLOW_UP_BY_PERSON
+            if not windows:
+                return 0.0
+            person = current_person_id() if face_service is not None else None
+            if person:
+                conversation_people.add(person)
+            return max((windows.get(person_id, 0.0) for person_id in conversation_people), default=0.0)
+
         async def on_cloud_session(active: bool) -> None:
             """Follow faces and lower Spotify while a wake-word conversation is open; undo both afterwards."""
             from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+            conversation_people.clear()
 
             if config.SPEAKER_FOLLOWING_ENABLED:
                 movement_manager.set_conversation_active(active)
@@ -414,6 +434,7 @@ def run(
         intent_router: LocalIntentRouter | None = None
         action_executor: LocalActionExecutor | None = None
         local_processor: AmbientContextProcessor | None = None
+        request_transcriber: Callable[[Any], Awaitable[str]] | None = None
         if config.LOCAL_STT_BASE_URL is not None:
             context_strategy = (
                 AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
@@ -423,10 +444,13 @@ def run(
             local_stt = OpenAICompatibleLocalSTT(
                 config.LOCAL_STT_BASE_URL,
                 model=config.LOCAL_STT_MODEL,
+                request_model=config.LOCAL_STT_REQUEST_MODEL,
                 language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
                 timeout_seconds=config.LOCAL_STT_TIMEOUT_SECONDS,
                 max_text_chars=config.LOCAL_CONTEXT_MAX_CHARS,
             )
+            if config.LOCAL_STT_REQUEST_MODEL:
+                request_transcriber = local_stt.transcribe_request
             context_processor = AmbientContextProcessor(
                 vad=RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD),
                 stt=local_stt,
@@ -475,6 +499,15 @@ def run(
 
         quick_commands, reply_speaker = _build_quick_commands(deps)
 
+        async def on_listening(listening: bool) -> None:
+            """Lower Spotify the moment Reachy hears his name, like a smart speaker; restore it afterwards."""
+            from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+            if listening:
+                await SPOTIFY_DUCKER.session_started()
+            else:
+                await SPOTIFY_DUCKER.session_ended()
+
         hybrid_runtime = HybridRuntime(
             build_hybrid_handler,
             ambient_buffer=AmbientAudioBuffer(max_seconds=config.HYBRID_AMBIENT_BUFFER_SECONDS),
@@ -489,11 +522,15 @@ def run(
             cloud_session_observer=on_cloud_session,
             inactivity_timeout_s=config.HYBRID_CLOUD_INACTIVITY_SECONDS or 0.0,
             follow_up_window_s=config.HYBRID_FOLLOW_UP_SECONDS,
+            follow_up_window_for=follow_up_window_for,
             addressee_check=addressee_check,
             quick_commands=quick_commands,
             reply_speaker=reply_speaker,
             speaking_callback=getattr(movement_manager, "set_speaking", None),
+            request_transcriber=request_transcriber,
+            listening_observer=on_listening,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
+            start_asleep=started_asleep,
         )
         runtime_for_tools = hybrid_runtime
 

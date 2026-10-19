@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 LANGUAGES: Final[tuple[str, ...]] = ("en", "es", "it", "pt")
 # A request longer than this is a conversation, not a command.
 MAX_COMMAND_WORDS: Final[int] = 14
-SPOTIFY_VOLUME_STEP: Final[int] = 15
+SPOTIFY_VOLUME_STEP: Final[int] = 5
 
 
 @dataclass(frozen=True)
@@ -119,6 +119,7 @@ _WEATHER = {
         rf"que tiempo (?:hace|hara|va a hacer){_WHEN}(?:\s+en\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
         r"(?:que temperatura hace|cuantos grados hace|hace frio|hace calor)(?: fuera)?(?: hoy)?",
         r"(?:el tiempo|el pronostico)(?: de)? (?:hoy|manana)|el pronostico",
+        rf"(?:(?:como esta|que tal) el |el )?clima{_WHEN}|el tiempo",
     ],
     "it": [
         rf"che tempo (?:fa|fara){_WHEN}(?:\s+a\s+(?P<place>[a-z ]+?))?{_WHEN.replace('when', 'when2')}",
@@ -178,24 +179,25 @@ _NEXT = {
 }
 _VOLUME_TARGET = r"(?:\s+(?:of\s+)?(?:the\s+|el\s+|la\s+|il\s+|o\s+|a\s+|da\s+|de\s+la\s+|della\s+)?(?P<device>tv|tele|television|televisione|televisao|music|musica|spotify))?"
 _VOLUME_UP = {
-    "en": rf"(?:volume up|louder|turn it up|turn the volume up|turn up the volume|raise the volume|"
+    "en": rf"(?:volume up|louder|a bit louder|little louder|turn it up|turn the volume up|turn up the volume|raise the volume|"
     rf"turn up the (?:music|tv)|turn the (?:music|tv) up|increase the volume){_VOLUME_TARGET}(?: a bit| a little)?",
-    "es": rf"(?:sube(?:le)?(?: el)? volumen|mas alto|mas fuerte|sube la musica|sube la tele|subele el volumen)"
+    "es": rf"(?:sube(?:le)?(?: el)? volumen|mas alto|mas fuerte|sube la musica|sube la tele|subele el volumen|subele)"
     rf"{_VOLUME_TARGET}(?: un poco)?",
     "it": rf"(?:alza(?: il)? volume|piu forte|piu alto|aumenta(?: il)? volume|alza la musica){_VOLUME_TARGET}"
     rf"(?: un po)?",
     "pt": rf"(?:aumenta(?: o)? volume|sobe(?: o)? volume|mais alto|aumenta a musica){_VOLUME_TARGET}(?: um pouco)?",
 }
 _VOLUME_DOWN = {
-    "en": rf"(?:volume down|quieter|softer|turn it down|turn the volume down|turn down the volume|lower the volume|"
+    "en": rf"(?:volume down|lower|lower it|a bit lower|little lower|quieter|softer|turn it down|turn the volume down|turn down the volume|lower the volume|"
     rf"turn down the (?:music|tv)|turn the (?:music|tv) down|decrease the volume){_VOLUME_TARGET}(?: a bit| a little)?",
-    "es": rf"(?:baja(?:le)?(?: el)? volumen|mas bajo|mas despacio|baja la musica|baja la tele|bajale el volumen)"
+    "es": rf"(?:baja(?:le)?(?: el)? volumen|mas bajo|mas despacio|baja la musica|baja la tele|bajale el volumen|bajale)"
     rf"{_VOLUME_TARGET}(?: un poco)?",
     "it": rf"(?:abbassa(?: il)? volume|piu piano|piu basso|abbassa la musica){_VOLUME_TARGET}(?: un po)?",
     "pt": rf"(?:baixa(?: o)? volume|diminui(?: o)? volume|mais baixo|baixa a musica){_VOLUME_TARGET}(?: um pouco)?",
 }
 _VOLUME_SET = {
-    "en": rf"(?:set (?:the )?)?volume{_VOLUME_TARGET} (?:to |at )?(?P<level>\d{{1,3}})(?: percent)?",
+    "en": rf"(?:(?:set|said|sets|put|turn|make|change) (?:the )?)?volume{_VOLUME_TARGET} (?:to |at )?"
+    rf"(?P<level>\d{{1,3}})(?: percent)?",
     "es": rf"(?:pon )?(?:el )?volumen{_VOLUME_TARGET} (?:al|a|en) (?P<level>\d{{1,3}})(?: por ciento| percent)?",
     "it": rf"(?:metti )?(?:il )?volume{_VOLUME_TARGET} (?:al|a) (?P<level>\d{{1,3}})(?: per cento| percent)?",
     "pt": rf"(?:poe )?(?:o )?volume{_VOLUME_TARGET} (?:a|em|no|nos) (?P<level>\d{{1,3}})(?: por cento| percent)?",
@@ -353,6 +355,19 @@ def _language(language: str, text: str) -> str:
     return best if counts[best] > counts.get(language, 0) else language
 
 
+def _log_routine_failure(task: asyncio.Task[None]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("Routine step failed: %s", type(task.exception()).__name__)
+
+
+_SPANISH_ROUTINE_WORDS = _SPANISH_MARKERS | {"modo", "cine", "pelicula", "oscuridad", "buenas", "noches", "luz"}
+
+
+def _routine_language(phrase: str) -> str:
+    """Guess the language of a routine phrase ("modo cine" is Spanish); English otherwise."""
+    return "es" if any(word in _SPANISH_ROUTINE_WORDS for word in phrase.split()) else "en"
+
+
 def _volume_device(match: re.Match[str]) -> str | None:
     device = match.groupdict().get("device")
     if device in _TV_WORDS:
@@ -501,7 +516,8 @@ _LIGHT_WORDS = frozenset(
 _FILLERS = frozenset(
     {"the", "a", "an", "of", "in", "on", "my", "el", "la", "los", "las", "de", "del", "en", "mi", "mis", "il", "lo",
      "le", "gli", "i", "di", "della", "delle", "dello", "nel", "nella", "o", "os", "as", "da", "do", "das", "dos",
-     "no", "na", "em", "meu", "minha", "area", "zone", "zona", "parte", "part", "side"}
+     "no", "na", "em", "meu", "minha", "area", "zone", "zona", "parte", "part", "side", "back", "again",
+     "otra", "vez", "di", "nuovo", "novo", "outra"}
 )  # fmt: skip
 _PHRASES = (
     ("sala de estar", "living room"),
@@ -587,6 +603,12 @@ _PARTLY = {
 _GOOD_NIGHT = {"en": "Good night!", "es": "¡Buenas noches!", "it": "Buonanotte!", "pt": "Boa noite!"}
 _PLAYING_TRACK = {"en": "Playing {name} by {artist}.", "es": "Pongo {name}, de {artist}.",
                   "it": "Metto {name}, di {artist}.", "pt": "A tocar {name}, de {artist}."}  # fmt: skip
+_SPEAKER_UNAVAILABLE = {
+    "en": "I can't reach the Spotify speaker right now. Start Spotify on it from your phone once, then ask me again.",
+    "es": "Ahora no llego al altavoz de Spotify. Ponlo una vez desde el móvil y vuelve a pedírmelo.",
+    "it": "Ora non raggiungo la cassa di Spotify. Avviala una volta dal telefono e chiedimelo di nuovo.",
+    "pt": "Agora não chego à coluna do Spotify. Põe-na a tocar uma vez pelo telemóvel e pede-me outra vez.",
+}
 _PLAYING = {"en": "Playing {name}.", "es": "Pongo {name}.", "it": "Metto {name}.", "pt": "A tocar {name}."}
 _NOT_FOUND = {
     "en": "I couldn't find that on Spotify.",
@@ -675,9 +697,17 @@ class QuickCommands:
         self._spotify = spotify or SpotifyControl()
         self._tv = tv or TV()
         self._spotify_configured = spotify_configured or _spotify_configured
+        self._background: set[asyncio.Task[None]] = set()
 
     async def handle(self, text: str) -> QuickReply | None:
         """Run ``text`` if it is an everyday command; return None to leave it to the conversation."""
+        routine = self._routine_for(text)
+        if routine is not None:
+            try:
+                return await self._run_routine(routine, text)
+            except Exception as error:
+                logger.warning("Quick routine failed: %s", type(error).__name__)
+                return None
         command = parse(text)
         if command is None:
             return None
@@ -686,6 +716,68 @@ class QuickCommands:
         except Exception as error:  # a tool bug must not break the wake; the conversation can try
             logger.warning("Quick command %s failed: %s", command.kind, type(error).__name__)
             return None
+
+    def _routine_for(self, text: str) -> Any:
+        """Return the household routine (from the home layout) whose phrase is the whole request."""
+        layout = getattr(getattr(self._deps, "home_hub", None), "layout", None)
+        phrase = strip_politeness(normalize(text))
+        if not phrase:
+            return None
+        for routine in getattr(layout, "routines", ()):
+            if any(strip_politeness(normalize(said)) == phrase for said in routine.say):
+                return routine
+        return None
+
+    async def _run_routine(self, routine: Any, text: str) -> QuickReply:
+        """Run a lights routine ("movie mode"); silent when it works, like any light change."""
+        phrase = strip_politeness(normalize(text))
+        parsed = parse(text)
+        language = parsed.language if parsed is not None else _routine_language(phrase)
+
+        async def lights() -> dict[str, Any]:
+            if not routine.on and not routine.off:
+                return {"ok": True, "changed": ["nothing"]}
+            return dict(await self._lights(self._deps, action="scene", scene=routine.name))
+
+        async def tv_off() -> None:
+            if routine.tv_off and getattr(self._deps, "tv", None) is not None:
+                result = await self._tv(self._deps, action="power", on=False)  # no key if it is already off
+                if "error" in result:
+                    logger.info("Routine %r: TV not turned off (%s)", routine.name, result["error"])
+
+        async def pause_music() -> None:
+            if routine.pause_music and self._spotify_configured():
+                status = await self._spotify_status()
+                if status and status.get("status") == "playing":
+                    await self._spotify(self._deps, action="pause")
+
+        if routine.tv_off:
+            # The TV can take seconds to confirm it is off; the reply should not wait for it.
+            task = asyncio.create_task(tv_off(), name="routine-tv-off")
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+            task.add_done_callback(_log_routine_failure)
+        result, *others = await asyncio.gather(lights(), pause_music(), return_exceptions=True)
+        for other in others:
+            if isinstance(other, Exception):
+                logger.warning("Routine %r step failed: %s", routine.name, type(other).__name__)
+        if isinstance(result, BaseException):
+            raise result
+        problems = list(result.get("failed", []))
+        if "error" in result or not result.get("changed") and not routine.sleep:
+            text_out: str | None = _FAILED[language] if "error" in result or problems else None
+        elif problems:
+            text_out = _PARTLY[language].format(names=_names(problems, language))
+        else:
+            text_out = None
+        if routine.sleep:
+
+            async def fall_asleep() -> str | None:
+                self._deps.movement_manager.go_to_sleep()
+                return None
+
+            return QuickReply(text_out or _GOOD_NIGHT[language], language, "routine", sleep=True, after=fall_asleep)
+        return QuickReply(text_out, language, "routine")
 
     async def run(self, command: QuickCommand) -> QuickReply | None:
         """Execute one command; None when it needs the conversation after all."""
@@ -749,6 +841,13 @@ class QuickCommands:
 
     # Media ---------------------------------------------------------------------------------------
 
+    async def _prepare_music(self) -> None:
+        """Open Spotify and connect the music speaker before checking whether music can play."""
+        if self._spotify_configured():
+            from reachy_mini_conversation_app.music_speaker import prepare_for_playback
+
+            await asyncio.to_thread(prepare_for_playback)
+
     async def _spotify_status(self) -> dict[str, Any] | None:
         """Spotify's status, ``{"error": ...}`` when it could not be read, or None when Spotify is not set up."""
         if not self._spotify_configured():
@@ -792,7 +891,7 @@ class QuickCommands:
         if spotify_failed:
             return QuickReply(_FAILED[language], language, kind)
         if kind == "resume":
-            result = await self._spotify(self._deps, action="resume")
+            result = await self._spotify(self._deps, action="resume")  # the tool readies the speaker
             # Nothing to resume (no recent playback): the conversation can pick something to play.
             return None if "error" in result else QuickReply(None, language, kind)
         if kind == "next":
@@ -831,8 +930,12 @@ class QuickCommands:
             current = status.get("volume_percent")
             if not isinstance(current, int):
                 return None
+            # While Reachy listens the music is lowered; step from the level the person was hearing.
+            from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
+
+            base = SPOTIFY_DUCKER.level_before_ducking
             step = SPOTIFY_VOLUME_STEP if direction == "up" else -SPOTIFY_VOLUME_STEP
-            level = max(0, min(100, current + step))
+            level = max(0, min(100, (base if base is not None else current) + step))
         result = await self._spotify(self._deps, action="volume", volume_percent=int(level))
         return QuickReply(None if "error" not in result else _FAILED[language], language, command.kind)
 
@@ -840,6 +943,11 @@ class QuickCommands:
         if not self._spotify_configured():
             return None
         language = command.language
+        await self._prepare_music()
+        status = await self._spotify_status()
+        if status is not None and "unavailable" in str(status.get("error", "")):
+            # Cast speakers drop off Spotify's device list when idle; say so before announcing a song.
+            return QuickReply(_SPEAKER_UNAVAILABLE[language], language, command.kind)
         query = command.args["query"]
         search_type, query = _music_search_type(query)
         if search_type == "auto":
@@ -908,7 +1016,10 @@ class QuickCommands:
             *(self._lights(self._deps, action="set", target=name, **change) for name in targets)
         )
         changed = [name for result in results for name in result.get("changed", [])]
-        problems = [name for result in results for name in (result.get("failed", []) + result.get("unreachable", []))]
+        # Lights already offline are not news when the target is a group ("all", a room); a named light is.
+        problems = [name for result in results for name in result.get("failed", [])]
+        if resolved.devices:
+            problems += [name for result in results for name in result.get("unreachable", [])]
         if not changed and all(str(result.get("error", "")).startswith("Nothing called") for result in results):
             return None  # the names did not match after all: let the conversation sort it out
         if not changed:

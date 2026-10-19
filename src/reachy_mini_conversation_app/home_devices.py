@@ -111,16 +111,69 @@ def normalize_name(text: str) -> str:
 
 
 @dataclass(frozen=True)
+class Routine:
+    """A named set of lights to turn on and off at once ("movie mode").
+
+    ``on`` and ``off`` hold targets as the ``home_lights`` tool takes them (a device, room or area name,
+    or "all"); "all" in ``off`` means every light not in ``on``. ``sleep`` also puts Reachy to sleep,
+    ``tv_off`` turns the TV off and ``pause_music`` pauses Spotify (JSON: ``"tv": "off"``, ``"music": "pause"``).
+    """
+
+    say: tuple[str, ...]
+    on: tuple[str, ...] = ()
+    off: tuple[str, ...] = ()
+    sleep: bool = False
+    tv_off: bool = False
+    pause_music: bool = False
+
+    @property
+    def name(self) -> str:
+        """The first phrase, which names the routine."""
+        return self.say[0]
+
+
+def _routines(raw: object) -> tuple[Routine, ...]:
+    routines: list[Routine] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        say = tuple(str(phrase) for phrase in item.get("say") or () if str(phrase).strip())
+        on = tuple(str(name) for name in item.get("on") or ())
+        off = tuple(str(name) for name in item.get("off") or ())
+        tv_off = str(item.get("tv") or "").casefold() == "off"
+        pause_music = str(item.get("music") or "").casefold() in ("pause", "stop")
+        if say and (on or off or tv_off or pause_music):
+            routines.append(
+                Routine(
+                    say=say,
+                    on=on,
+                    off=off,
+                    sleep=bool(item.get("sleep")),
+                    tv_off=tv_off,
+                    pause_music=pause_music,
+                )
+            )
+        else:
+            logger.warning('Home layout routine ignored: it needs "say" and something to do')
+    return tuple(routines)
+
+
+@dataclass(frozen=True)
 class HomeLayout:
     """Household-specific grouping the systems do not store: rooms for devices without one, and areas.
 
     Read from a JSON file such as
     ``{"rooms": {"TV Lights": "Living room"}, "areas": {"Dining": ["Dining light 1", "Dining lamp"]}}``;
-    device names match without case or accents.
+    device names match without case or accents. Optional: ``"left_out_of_all_on": ["TV Lights"]``
+    (lights that "turn on the lights" skips; turning everything off still includes them) and
+    ``"routines"`` (see ``Routine``), e.g.
+    ``[{"say": ["movie mode", "modo cine"], "on": ["TV Lights"], "off": ["all"]}]``.
     """
 
     rooms: dict[str, str] = field(default_factory=dict)
     areas: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    left_out_of_all_on: frozenset[str] = frozenset()
+    routines: tuple[Routine, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> HomeLayout:
@@ -132,11 +185,15 @@ class HomeLayout:
         except (OSError, ValueError) as error:
             logger.warning("Home layout unreadable: %s", type(error).__name__)
             return cls()
-        rooms = raw.get("rooms") if isinstance(raw, dict) else None
-        areas = raw.get("areas") if isinstance(raw, dict) else None
+        if not isinstance(raw, dict):
+            return cls()
+        rooms = raw.get("rooms")
+        areas = raw.get("areas")
         return cls(
             rooms={normalize_name(str(k)): str(v) for k, v in (rooms or {}).items()},
             areas={str(area): tuple(normalize_name(str(n)) for n in names) for area, names in (areas or {}).items()},
+            left_out_of_all_on=frozenset(normalize_name(str(n)) for n in raw.get("left_out_of_all_on") or ()),
+            routines=_routines(raw.get("routines")),
         )
 
     def apply(self, device: HubDevice) -> HubDevice:
@@ -156,6 +213,11 @@ class HomeDevices:
         """Use ``providers`` keyed by the ``source`` their devices carry, grouped by ``layout``."""
         self._providers = providers
         self._layout = layout or HomeLayout()
+
+    @property
+    def layout(self) -> HomeLayout:
+        """The household layout (areas, routines, lights left out of "all on")."""
+        return self._layout
 
     async def devices(self) -> list[HubDevice]:
         """List every system's devices; a system that fails is skipped unless all fail."""

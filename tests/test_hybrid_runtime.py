@@ -3291,6 +3291,27 @@ async def test_asleep_an_acoustic_wake_mid_sentence_stays_asleep_without_moving(
 
 
 @pytest.mark.asyncio
+async def test_started_asleep_an_acoustic_wake_without_the_name_stays_asleep() -> None:
+    """Restarted in the sleep pose: an acoustic hit on ordinary talk does not open a conversation."""
+    processor = _processor_with_open_wake_segment("people are over there")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_followup_timeout_s=0.1,
+        start_asleep=True,
+    )
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert not handler.started.is_set()
+        assert runtime._asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_asleep_the_name_first_wakes_him_and_he_stays_awake() -> None:
     """A wake that starts with his name acknowledges (raising the head) and ends sleep mode."""
     processor = _processor_with_open_wake_segment("Reachy")
@@ -3517,3 +3538,248 @@ async def test_acoustic_wake_quick_commands_only_get_words_after_the_name() -> N
             assert handler.started.is_set() == (not expected)
         finally:
             await runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Reach, lights on.", "lights on."),
+        ("Rich turn off the lights", "turn off the lights"),
+        ("We should turn off the lights", ""),
+        ("Mom said turn off the TV", ""),
+        ("Turn off the lights", ""),
+    ],
+)
+def test_request_after_misheard_wake_needs_a_name_like_first_word(text: str, expected: str) -> None:
+    """Only a first word that sounds like "Reachy" counts as the name."""
+    from reachy_mini_conversation_app.hybrid_runtime import request_after_misheard_wake
+
+    assert request_after_misheard_wake(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_misheard_name_cut_mid_request_waits_for_the_rest() -> None:
+    """Whisper turned "Reachy, can..." into "which you can't"; the person kept talking, so the rest is the request."""
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply("It's 2:08 PM.")
+
+    async def speak(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    processor = _processor_with_open_wake_segment("which you can't")
+    close_wake = processor.close_open_segment
+
+    def close_and_keep_talking() -> None:
+        close_wake()
+        # The person keeps talking: the next segment opens right after the wake.
+        asyncio.get_running_loop().call_soon(setattr, processor, "_speech", object())
+        asyncio.get_running_loop().call_soon(setattr, processor, "_next_sequence", 4)
+
+    processor.close_open_segment = close_and_keep_talking  # type: ignore[method-assign]
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        reply_speaker=speak,
+        wake_followup_timeout_s=2.0,
+    )
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime._wake_followup_future is not None, attempts=2000)
+        await asyncio.sleep(0.05)
+        runtime.observe_local_transcript(TranscriptSegment("tell me the time", 2, 3, 3))
+        assert await asyncio.wait_for(activation, timeout=3.0)
+        assert seen == ["tell me the time"]
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_acoustic_wake_transcribes_the_whole_request_as_one_clip() -> None:
+    """Everything said after the name, until a pause, is one accurately transcribed clip; music is lowered meanwhile."""
+    seen: list[str] = []
+    clips: list[float] = []
+    listening: list[bool] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def transcribe_request(frame: AudioFrame) -> str:
+        clips.append(frame[1].size / frame[0])
+        return "what time is it"
+
+    async def on_listening(active: bool) -> None:
+        listening.append(active)
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+        listening_observer=on_listening,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 10 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        await asyncio.sleep(0)
+        assert seen == ["what time is it"]
+        assert clips == [pytest.approx(2.0)]
+        assert not handler.started.is_set()
+        assert listening == [True, False]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_request_clip_keeps_audio_captured_before_activation_caught_up() -> None:
+    """On a busy Mac the wake is detected late; audio up to the barrier still belongs to the request ("Prende ...")."""
+    clips: list[float] = []
+
+    async def quick(_text: str) -> _QuickReply | None:
+        return _QuickReply(None)
+
+    async def transcribe_request(frame: AudioFrame) -> str:
+        clips.append(frame[1].size / frame[0])
+        return "prende la luz"
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    runtime = HybridRuntime(
+        FakeHandler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 5)  # frames 2-5 were captured before activation
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 10 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        assert clips == [pytest.approx(2.0)]  # all ten speech frames, not only the six after the barrier
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_clip_that_lost_the_verb_falls_back_to_the_fast_transcript() -> None:
+    """The clip heard only "la luz"; the fast transcript had "Reachy, prende la luz", which runs locally."""
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None) if text.startswith("prende") else None
+
+    async def transcribe_request(_frame: AudioFrame) -> str:
+        return "la luz"
+
+    processor = _processor_with_open_wake_segment("Reachy, prende la luz")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        assert seen == ["la luz", "prende la luz"]
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_misheard_transcript_wake_request_is_heard_again_accurately() -> None:
+    """whisper-small wrote "prendela los"; the accurate model hears the same audio as "prende las luces"."""
+    seen: list[str] = []
+    heard_again: list[int] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None) if text == "prende las luces." else None
+
+    async def transcribe_request(frame: AudioFrame) -> str:
+        heard_again.append(frame[1].size)
+        return "Reachy, prende las luces."
+
+    processor = _processor_with_open_wake_segment("unused")
+    processor.segment_audio = lambda sequence: (16_000, np.ones(160, dtype=np.int16)) if sequence == 5 else None  # type: ignore[method-assign]
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+    )
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, prendela los.", 1, 2, 5))
+        await wait_until(lambda: len(seen) == 2 and runtime.mode is RuntimeMode.LOCAL_AMBIENT, attempts=2000)
+        assert seen == ["prendela los.", "prende las luces."]
+        assert heard_again == [160]
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_follow_up_window_is_longer_while_a_child_who_needs_time_is_talking() -> None:
+    """With Enzo in the conversation, Reachy waits 45 s instead of 15 s before standby."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        inactivity_timeout_s=60,
+        follow_up_window_s=15,
+        follow_up_window_for=lambda: 45.0,
+        clock=clock,
+    )
+    assert await runtime.activate()
+    handler.set_connected(True)
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    clock.advance(30)  # t=31: past 15 s, Enzo is still thinking
+    assert not await runtime.check_inactivity()
+    clock.advance(16)  # t=47: 46 s after the reply
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+def test_follow_up_by_person_parses_names_and_seconds() -> None:
+    """Bad entries are skipped; names match without case."""
+    from reachy_mini_conversation_app.config import _follow_up_by_person
+
+    assert _follow_up_by_person("Enzo=45, mara=40, bad, x=0, y=999") == {"enzo": 45.0, "mara": 40.0}
+    assert _follow_up_by_person(None) == {}

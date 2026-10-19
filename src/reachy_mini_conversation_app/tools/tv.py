@@ -91,10 +91,13 @@ class TV(Tool):
                 return {"error": "power needs on=true or on=false."}
             if await tv.power(bool(on)):
                 return {"ok": True, "on": bool(on)}
+            # The key was sent; this TV can take over 6 s to wake from a long standby before it reports.
             return {
-                "ok": False,
-                "error": "The TV did not confirm the change.",
-                "instruction": "Tell the person it may not have worked. Do not retry.",
+                "ok": True,
+                "on": bool(on),
+                "confirmed": False,
+                "note": "The power key was sent but the TV has not reported the change yet; it can take a few "
+                "seconds. Say it is turning on (or off). Do not retry: pressing power again would undo it.",
             }
         if action == "volume":
             level, change = kwargs.get("level"), kwargs.get("change")

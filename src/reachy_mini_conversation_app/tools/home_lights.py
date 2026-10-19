@@ -2,7 +2,14 @@ import asyncio
 import logging
 from typing import Any
 
-from reachy_mini_conversation_app.home_devices import HubDevice, LightChange, HomeDeviceError, normalize_name
+from reachy_mini_conversation_app.home_devices import (
+    Routine,
+    HubDevice,
+    HomeLayout,
+    LightChange,
+    HomeDeviceError,
+    normalize_name,
+)
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -76,6 +83,25 @@ def _match_targets(devices: list[HubDevice], target: str) -> list[HubDevice] | N
     return partial or None
 
 
+def _layout(home: Any) -> HomeLayout:
+    layout = getattr(home, "layout", None)
+    return layout if isinstance(layout, HomeLayout) else HomeLayout()
+
+
+def _left_out(devices: list[HubDevice], layout: HomeLayout) -> list[HubDevice]:
+    """Drop the lights "turn on the lights" skips (the TV backlight)."""
+    return [device for device in devices if normalize_name(device.name) not in layout.left_out_of_all_on]
+
+
+def find_routine(layout: HomeLayout, name: str) -> Routine | None:
+    """Return the routine one of whose phrases is ``name`` (without case or accents)."""
+    wanted = normalize_name(name)
+    for routine in layout.routines:
+        if any(normalize_name(phrase) == wanted for phrase in routine.say):
+            return routine
+    return None
+
+
 def _describe(device: HubDevice) -> dict[str, Any]:
     state: dict[str, Any] = {"name": device.name, "on": device.is_on}
     if device.room:
@@ -132,8 +158,9 @@ class HomeLights(Tool):
         "or 'all' (also for plain \"the lights\"). Give on=true/false, "
         "brightness 1-100, warmth (warm, neutral, cool) for white light, and/or color (red, orange, yellow, "
         "green, cyan, blue, purple, pink, white, or #rrggbb) for lights that show colors. Brightness, warmth "
-        "or color alone also turns the light on. action=scene runs a saved scene by name. Use the names as "
-        "status returns them, and say briefly what you changed."
+        "or color alone also turns the light on. 'all' with on=true leaves out accent lights such as the TV "
+        'backlight unless they are named. action=scene runs a saved scene or a household routine ("movie mode") '
+        "by name. Use the names as status returns them, and say briefly what you changed."
     )
     parameters_schema = {
         "type": "object",
@@ -176,10 +203,13 @@ class HomeLights(Tool):
             "rooms": rooms,
             "areas": areas,
             "devices": [_describe(device) for device in _without_offline_duplicates(devices)],
-            "scenes": [scene.name for scene in scenes],
+            "scenes": [scene.name for scene in scenes] + [routine.name for routine in _layout(home).routines],
         }
 
     async def _scene(self, home: Any, name: str) -> dict[str, Any]:
+        routine = find_routine(_layout(home), name)
+        if routine is not None:
+            return await self._routine(home, routine)
         scenes = await home.scenes()
         wanted = normalize_name(name)
         matches = [scene for scene in scenes if normalize_name(scene.name) == wanted] or [
@@ -225,11 +255,72 @@ class HomeLights(Tool):
                 "rooms": sorted({device.room for device in devices if device.room}),
                 "names": [device.name for device in devices],
             }
+        if normalize_name(target) in _EVERYTHING and change.on is not False:
+            targets = _left_out(targets, _layout(home))  # "turn on the lights" skips the TV backlight
         changes = [
             (device, device_change)
             for device in targets
             if device.reachable and (device_change := change.for_device(device)) is not None
         ]
+        response = await self._apply(home, changes, targets)
+        notes = []
+        if brightness is not None and any(not device.dims for device in targets):
+            notes.append("Plugs only switch on and off.")
+        if color is not None and any(device.dims and not device.colors for device in targets):
+            notes.append("Some of these lights cannot show colors.")
+        if warmth is not None and any(device.dims and not device.warmth for device in targets):
+            notes.append("Some of these lights have fixed white.")
+        if notes:
+            response["note"] = " ".join(notes)
+        return response
+
+    async def _routine(self, home: Any, routine: Routine) -> dict[str, Any]:
+        """Turn the routine's lights on and the rest of its lights off, in one step."""
+        devices = await home.devices()
+        layout = _layout(home)
+
+        def resolve(names: tuple[str, ...]) -> list[HubDevice]:
+            found: dict[str, HubDevice] = {}
+            for name in names:
+                matched = _match_targets(devices, name)
+                if matched is None:
+                    logger.warning("Routine %r names nothing called %r", routine.name, name)
+                    continue
+                found.update((device.id, device) for device in matched)
+            return list(found.values())
+
+        on_names = tuple(name for name in routine.on if normalize_name(name) not in _EVERYTHING)
+        turn_on = resolve(on_names)
+        if len(on_names) < len(routine.on):  # "all" on leaves out the accent lights
+            named = {device.id for device in turn_on}
+            turn_on += [device for device in _left_out(resolve(("all",)), layout) if device.id not in named]
+        on_ids = {device.id for device in turn_on}
+        turn_off = [device for device in resolve(routine.off) if device.id not in on_ids]
+        targets = turn_on + turn_off
+        changes = [(device, LightChange(on=True)) for device in turn_on if device.reachable] + [
+            (device, LightChange(on=False)) for device in turn_off if device.reachable
+        ]
+        response = await self._apply(home, changes, targets)
+        response["routine"] = routine.name
+        also = [
+            text
+            for wanted, text in ((routine.tv_off, "turn the TV off"), (routine.pause_music, "pause the music"))
+            if wanted
+        ]
+        if also:
+            response["also"] = f"This routine should also {' and '.join(also)}; use the tv and spotify_control tools."
+        logger.info(
+            "Routine %r: on=%d off=%d failed=%d",
+            routine.name,
+            sum(1 for _, change in changes if change.on),
+            sum(1 for _, change in changes if change.on is False),
+            len(response.get("failed", [])),
+        )
+        return response
+
+    async def _apply(
+        self, home: Any, changes: list[tuple[HubDevice, LightChange]], targets: list[HubDevice]
+    ) -> dict[str, Any]:
         results = await asyncio.gather(
             *(home.apply(device, device_change) for device, device_change in changes), return_exceptions=True
         )
@@ -247,13 +338,4 @@ class HomeLights(Tool):
         if failed or (unreachable and not changed):
             # A device that failed once fails again; retrying only loops (seen live with a color bug).
             response["instruction"] = "Tell the person which lights did not respond. Do not retry this change."
-        notes = []
-        if brightness is not None and any(not device.dims for device in targets):
-            notes.append("Plugs only switch on and off.")
-        if color is not None and any(device.dims and not device.colors for device in targets):
-            notes.append("Some of these lights cannot show colors.")
-        if warmth is not None and any(device.dims and not device.warmth for device in targets):
-            notes.append("Some of these lights have fixed white.")
-        if notes:
-            response["note"] = " ".join(notes)
         return response

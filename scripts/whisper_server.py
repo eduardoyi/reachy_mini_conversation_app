@@ -13,7 +13,11 @@ bounds the work per clip:
   the red one..." became "I want the red one. Can you turn on lights in a dining area, please?");
 - the language is picked from the household's languages (``WHISPER_LANGUAGES``, default en,es,it,pt),
   so chatter is not decoded as Chinese or Japanese;
-- a clip whose client already gave up is skipped instead of transcribed.
+- a clip whose client already gave up is skipped instead of transcribed;
+- with ``--request-model``, a second, more accurate model transcribes what is said to Reachy right after
+  his name (the app names it per request), while background speech keeps the fast model. Measured
+  2026-10-18: whisper-small heard "Reachy, ¿qué hora es?" as "¿Real si que hora es?" in 0.34 s;
+  whisper-large-v3-turbo got it right in 1.24 s.
 
 Run it with the Python of the ``transformers`` uv tool (it has torch, librosa and FastAPI):
 
@@ -139,8 +143,8 @@ class Transcriber:
         }
 
 
-def build_app(transcriber: Transcriber) -> Any:
-    """Return the FastAPI app."""
+def build_app(transcriber: Transcriber, request_transcriber: Transcriber | None = None) -> Any:
+    """Return the FastAPI app; a request naming ``request_transcriber``'s model is transcribed with it."""
     from fastapi import FastAPI, Request, HTTPException
     from fastapi.responses import JSONResponse
 
@@ -149,7 +153,8 @@ def build_app(transcriber: Transcriber) -> Any:
 
     @app.get("/v1/models")
     async def models() -> JSONResponse:
-        return JSONResponse({"object": "list", "data": [{"id": transcriber.model_id, "object": "model"}]})
+        loaded = [transcriber, *([request_transcriber] if request_transcriber else [])]
+        return JSONResponse({"object": "list", "data": [{"id": t.model_id, "object": "model"} for t in loaded]})
 
     @app.post("/v1/audio/transcriptions")
     async def transcriptions(request: Request) -> JSONResponse:
@@ -159,16 +164,23 @@ def build_app(transcriber: Transcriber) -> Any:
                 raise HTTPException(status_code=422, detail="Expected an audio file upload")
             audio_bytes = await upload.read()
             language = str(form.get("language") or "").strip().lower() or None
+            requested_model = str(form.get("model") or "").strip()
+        chosen = (
+            request_transcriber
+            if request_transcriber is not None and requested_model == request_transcriber.model_id
+            else transcriber
+        )
         queued_at = time.perf_counter()
         async with lock:
             if await request.is_disconnected():
                 logger.info("Skipped a clip: the client stopped waiting after %.1fs", time.perf_counter() - queued_at)
                 return JSONResponse({"text": ""}, status_code=499)
             try:
-                text, details = await asyncio.to_thread(transcriber.transcribe, audio_bytes, language)
+                text, details = await asyncio.to_thread(chosen.transcribe, audio_bytes, language)
             except Exception as error:
                 logger.warning("Transcription failed: %s", type(error).__name__)
                 raise HTTPException(status_code=400, detail="Could not transcribe the audio") from error
+        details["model"] = chosen.model_id.rsplit("/", 1)[-1]
         details["waited_s"] = round(max(0.0, time.perf_counter() - queued_at - details["took_s"]), 2)
         logger.info("Transcribed %s", " ".join(f"{key}={value}" for key, value in details.items()))
         return JSONResponse({"text": text})
@@ -182,14 +194,23 @@ def main() -> None:
     parser.add_argument("model", nargs="?", default="openai/whisper-small")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument(
+        "--request-model",
+        default=None,
+        help="also load this more accurate model, used when a request names it (Reachy's requests)",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     languages = parse_languages(os.getenv("WHISPER_LANGUAGES"))
     transcriber = Transcriber(args.model, languages)
     logger.info("Whisper %s on %s; languages: %s", args.model, transcriber.device, ", ".join(languages) or "any")
+    request_transcriber = None
+    if args.request_model and args.request_model != args.model:
+        request_transcriber = Transcriber(args.request_model, languages)
+        logger.info("Requests to Reachy use %s", args.request_model)
     import uvicorn
 
-    uvicorn.run(build_app(transcriber), host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(build_app(transcriber, request_transcriber), host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

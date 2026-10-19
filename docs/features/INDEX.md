@@ -24,6 +24,7 @@ the implementation.
 | AI usage and cost tracking | [usage-costs.md](usage-costs.md) | in-progress |
 | TV control (Android TV) | [tv-control.md](tv-control.md) | in-progress |
 | Quick commands (no cloud) | [quick-commands.md](quick-commands.md) | in-progress |
+| Music on a Bluetooth speaker | [music-speaker.md](music-speaker.md) | in-progress |
 
 Do not describe planned architecture as shipped behavior. The living
 implementation plan in [`../plans/reachy-hybrid-household-companion.md`](../plans/reachy-hybrid-household-companion.md)

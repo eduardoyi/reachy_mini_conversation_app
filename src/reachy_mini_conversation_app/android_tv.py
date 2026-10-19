@@ -26,8 +26,10 @@ CONNECT_TIMEOUT_S: Final[float] = 5.0
 # Volume keys are sent one step at a time; a short gap lets the TV register each one.
 VOLUME_KEY_GAP_S: Final[float] = 0.05
 MAX_VOLUME_STEPS: Final[int] = 60
-# The Mi TV P1 reports a power change about 3 s after the key.
+# The Mi TV P1 reports a power change about 3 s after the key, but waking after a long standby took
+# longer than 6 s (2026-10-18): past POWER_CONFIRM_S the change is watched until POWER_LATE_S and logged.
 POWER_CONFIRM_S: Final[float] = 6.0
+POWER_LATE_S: Final[float] = 30.0
 POWER_POLL_S: Final[float] = 0.25
 # The TV reports its state (on, app, volume) shortly after connecting.
 FIRST_STATE_WAIT_S: Final[float] = 1.5
@@ -153,6 +155,7 @@ class AndroidTV:
         self._remote: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock: asyncio.Lock | None = None
+        self._watch_tasks: set[asyncio.Task[None]] = set()
 
     async def _connected(self) -> Any:
         loop = asyncio.get_running_loop()
@@ -244,7 +247,27 @@ class AndroidTV:
             return True
         key = "POWER" if remote.is_on is not None else ("WAKEUP" if on else "SLEEP")
         await self._send(lambda remote: remote.send_key_command(key))
-        return await self._wait_for(lambda: self._remote is not None and self._remote.is_on is on, POWER_CONFIRM_S)
+        loop = asyncio.get_running_loop()
+        sent_at = loop.time()
+        confirmed = await self._wait_for(
+            lambda: self._remote is not None and self._remote.is_on is on, POWER_CONFIRM_S
+        )
+        if not confirmed:
+            task = asyncio.create_task(self._watch_late_power(on, sent_at), name="tv-late-power")
+            self._watch_tasks.add(task)
+            task.add_done_callback(self._watch_tasks.discard)
+        return confirmed
+
+    async def _watch_late_power(self, on: bool, sent_at: float) -> None:
+        """Log whether a power change the TV did not confirm in time happened later, and when."""
+        changed = await self._wait_for(
+            lambda: self._remote is not None and self._remote.is_on is on, POWER_LATE_S - POWER_CONFIRM_S
+        )
+        elapsed = asyncio.get_running_loop().time() - sent_at
+        if changed:
+            logger.info("TV reported %s %.1f s after the power key", "on" if on else "off", elapsed)
+        else:
+            logger.warning("TV still not %s %.0f s after the power key", "on" if on else "off", elapsed)
 
     async def key(self, key_code: str, repeat: int = 1) -> None:
         """Press one remote key ``repeat`` times."""

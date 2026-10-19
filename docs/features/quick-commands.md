@@ -52,6 +52,34 @@ Rooms, areas and device names match across languages ("comedor" → Dining, "sal
 - A command that times out is not handed to Gemini (it may have half run); a reply that stalls is
   abandoned after a cap so Reachy listens for his name again.
 
+## Hearing the request — 2026-10-18
+
+The first live tries failed in Whisper, not in the grammar: the continuous segmenter splits speech at
+every short pause, so the request after the name reached STT as 0.6–1.4 s fragments, and
+whisper-small turned them into "which you can't", "Good day.", "Thanks.". Now, after an acoustic
+wake:
+- Spotify is lowered at once (as a smart speaker does), not only when Gemini connects, and restored
+  after a quick command.
+- Everything said after the name is recorded as one clip from the post-wake audio until 0.8 s of
+  silence (up to 8 s) and transcribed by `LOCAL_STT_REQUEST_MODEL` (whisper-large-v3-turbo, loaded
+  by the launcher next to whisper-small). That text drives quick commands and is what Gemini gets.
+  Measured: turbo heard "Reachy, ¿qué hora es?" correctly where small gave "¿Real si que hora es?",
+  at about 1.3 s instead of 0.4 s per clip. Background speech stays on whisper-small.
+- `QUICK_COMMANDS_LOG_TEXT=1` prints the request text when it goes to Gemini (debugging only).
+- First live try of the clip (19:53): "Reachy, prende la luz" was clipped to "la luz" and went to
+  Gemini. Right after startup the local worker was behind, so the wake was detected late and the
+  start of the request was already before the activation barrier, outside the clip. The clip now
+  also keeps audio after the wake that was still queued for local processing, or captured before
+  the barrier but routed after activation. If the clip text still isn't a quick command, the fast
+  transcript's request is tried before opening the conversation.
+- Second live run (20:44): when the name is caught in the transcript instead of acoustically,
+  only whisper-small hears the request, and "prende las luces" became "prendela los". Gemini got
+  that plus the earlier "Reproduce Bad Bunny" from the background transcript, turned on the lights
+  and played Bad Bunny again. Now, when whisper-small's request isn't a quick command, that
+  segment's audio (the last three are kept in memory) is transcribed again with the accurate model
+  and tried once more; Gemini gets the accurate text if it still goes there. The activation context
+  also tells Gemini that requests in the background transcript were already handled.
+
 ## Implementation
 
 - `quick_commands.py`: `parse()` (pure; normalized text, politeness stripped, at most 14 words, whole
@@ -93,3 +121,38 @@ Rooms, areas and device names match across languages ("comedor" → Dining, "sal
 `tests/test_quick_commands.py` (grammar in four languages, conversation requests left alone, light
 targets, execution with fake tools), `tests/test_weather.py`, `tests/test_local_speech.py`, and the
 quick-command tests at the end of `tests/test_hybrid_runtime.py`.
+
+## Household routines — 2026-10-18
+
+Phrases that set several lights at once live in the home layout file (`HOME_LAYOUT_FILE`, default
+`~/.config/reachy-home/layout.json`), not in code, so each household names its own:
+
+```json
+"left_out_of_all_on": ["TV Lights"],
+"routines": [
+  {"say": ["movie mode", "modo cine", "modo película"], "on": ["TV Lights"], "off": ["all"]},
+  {"say": ["lights", "luces"], "on": ["all"]},
+  {"say": ["lights off", "darkness", "oscuridad"], "off": ["all"]},
+  {"say": ["good night", "goodnight", "buenas noches"], "off": ["all"], "sleep": true, "tv": "off", "music": "pause"}
+]
+```
+
+- A routine runs when its phrase is the whole request (after the name, politeness stripped), before
+  the grammar, so "good night" now also turns everything off before Reachy sleeps. Silent on success.
+- `on`/`off` take what `home_lights` takes (device, room, area or "all"); "all" in `off` means
+  every light not in `on`. Offline devices are skipped.
+- `left_out_of_all_on`: "turn on the lights" (any language, quick or Gemini) skips these unless
+  named; turning everything off still includes them.
+- `"tv": "off"` turns the TV off (in the background; the reply doesn't wait for the TV to confirm,
+  and a TV that is already off gets no key). `"music": "pause"` pauses Spotify if it is playing.
+- Gemini sees routines as scenes (`home_lights` action=scene), so "put movie mode on" works there too.
+- Weather in one word: "weather", "clima", "el clima", "el tiempo".
+
+## Volume words — 2026-10-18
+
+- "lower" / "louder" (also "bájale" / "súbele") change Spotify by 5 (`SPOTIFY_VOLUME_STEP`, was 15).
+  The step counts from the level before Reachy lowered the music to listen
+  (`SpotifyDucker.level_before_ducking`), so at 30 "lower" gives 25, not 15. If music isn't
+  playing and the TV is on, they change the TV volume.
+- "set volume to 25" also accepts "said volume to 25%" (how Whisper often hears "set"), "put the
+  volume at 25" and "volume 25".
