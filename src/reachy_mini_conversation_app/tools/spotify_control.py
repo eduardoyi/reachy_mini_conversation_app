@@ -98,7 +98,7 @@ class SpotifyDucker:
     """Lower Spotify on the configured device during a wake-word conversation and restore it afterwards.
 
     Like a smart speaker: music playing when the user wakes Reachy (or started during the conversation)
-    drops to a low level so the user can be heard, then returns to its previous level when the
+    drops to a third of its level (at most ``duck_percent``) so the user can be heard, then returns to its previous level when the
     conversation ends, unless the user changed the volume meanwhile. A podcast or audiobook episode is
     paused instead (its voices would be heard as the user) and resumed afterwards.
     """
@@ -107,6 +107,8 @@ class SpotifyDucker:
     _RESTORE_ATTEMPTS = 2
     _RESTORE_RETRY_DELAY_S = 1.0
     _EXIT_RESTORE_TIMEOUT_S = 5.0
+    # While the user talks to Reachy, music drops to this fraction of its level (at most duck_percent).
+    _DUCK_FRACTION = 1 / 3
 
     def __init__(self, duck_percent: int = 20) -> None:
         """Create an idle ducker that lowers music to ``duck_percent``."""
@@ -212,6 +214,14 @@ class SpotifyDucker:
                 return volume
         return None
 
+    def _duck_target(self, volume: int) -> int:
+        """Return the level to lower ``volume`` to: a third of it, and never above ``duck_percent``.
+
+        A fixed level barely helped at low volumes: on 2026-10-19 music at 29 went to 20 and Whisper heard
+        "stop the music" as "start the music".
+        """
+        return max(1, min(self._duck_percent, round(volume * self._DUCK_FRACTION)))
+
     async def _duck(self, *, require_playing: bool) -> bool:
         """Lower the configured device; return whether music is playing there (always True when not checked)."""
         configuration = self._configuration()
@@ -238,18 +248,21 @@ class SpotifyDucker:
                             await self._pause_episode(client, headers, device_id, playback)
                             return True
                     volume = await self._device_volume(client, headers, device_id)
-                    if volume is None or volume <= self._duck_percent:
+                    if volume is None or (self._restore_to is not None and volume == self._ducked_to):
+                        return True  # still lowered from a conversation whose restore failed: not lower again
+                    target = self._duck_target(volume)
+                    if volume <= target:
                         return True
                     response = await client.put(
                         "https://api.spotify.com/v1/me/player/volume",
-                        params={"device_id": device_id, "volume_percent": self._duck_percent},
+                        params={"device_id": device_id, "volume_percent": target},
                         headers=headers,
                     )
                     response.raise_for_status()
                     if self._restore_to is None:
                         self._restore_to = volume
-                    self._ducked_to = self._duck_percent
-                    logger.info("Spotify lowered for conversation from=%d to=%d", volume, self._duck_percent)
+                    self._ducked_to = target
+                    logger.info("Spotify lowered for conversation from=%d to=%d", volume, target)
                     return True
             except (httpx.HTTPError, OSError, ValueError, TypeError) as error:
                 logger.warning("Spotify lowering failed: %s", type(error).__name__)

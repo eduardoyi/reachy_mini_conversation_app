@@ -297,6 +297,15 @@ def frame_activation_context(transcript: str, max_chars: int) -> str:
     return f"{ACTIVATION_CONTEXT_HEADER}\n{text}\n\n{ACTIVATION_CONTEXT_FOOTER}"
 
 
+def request_audio_hint(text: str) -> str:
+    """Tell Gemini what local speech recognition heard, as a hint to check against the request's audio."""
+    heard = " ".join(text.split())
+    return (
+        f'Local speech recognition heard the request as: "{heard}". It can be wrong, especially over music or '
+        "other noise. The recording of the request follows; go by what you hear."
+    )
+
+
 def request_after_misheard_wake(text: str) -> str:
     """Return the request when the first word sounds like "Reachy" but STT spelled it oddly ("Reach, lights on").
 
@@ -1106,6 +1115,8 @@ class HybridRuntime:
         generation = 0
         clip_task: asyncio.Task[str] | None = None
         listening_notified = False
+        # Gemini hears the request itself (the clip's audio) with the local text only as a hint.
+        request_in_audio = False
         try:
             async with self._state_lock:
                 with self._lifecycle_lock:
@@ -1251,9 +1262,9 @@ class HybridRuntime:
                     addressed_text = request_text[: self._MAX_ADDRESSED_TEXT_CHARS]
                     with self._lifecycle_lock:
                         self._pending_acoustic_ack_generation = None
-                        if wake_word_found or followup_text:
-                            # The request is in the text; drop its queued audio so it is not heard twice.
-                            self._clear_postactivation_queue()
+                    if (wake_word_found or followup_text) and clip_task is None:
+                        # The request is in the text; drop its queued audio so it is not heard twice.
+                        self._clear_postactivation_queue()
                     if wake_segment_sequence is not None:
                         wake_sequence = wake_segment_sequence  # context = what came before this utterance
                 logger.info(
@@ -1272,7 +1283,11 @@ class HybridRuntime:
                     addressed_text = clip_text[: self._MAX_ADDRESSED_TEXT_CHARS]
                     with self._lifecycle_lock:
                         self._pending_acoustic_ack_generation = None
-                    self._clear_postactivation_queue()
+                    # If it goes to the conversation, Gemini hears the clip's audio rather than this text:
+                    # on 2026-10-19 it played music on "Start the music." when the user had said "stop".
+                    request_in_audio = self._queue_request_clip_audio()
+                elif addressed_text and (wake_word_found or followup_text):
+                    self._clear_postactivation_queue()  # the fast transcript's text carries the request
                     if wake_segment_sequence is not None:
                         wake_sequence = wake_segment_sequence
                 if confirm_wake:
@@ -1312,7 +1327,13 @@ class HybridRuntime:
                 logger.info("Quick commands skipped (no name heard before the request): %r", addressed_text)
 
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
-            initial_context = frame_activation_context(ambient_text, config.LOCAL_CONTEXT_MAX_CHARS)
+            hint = request_audio_hint(addressed_text) if request_in_audio and addressed_text else ""
+            # Gemini cuts the context at LOCAL_CONTEXT_MAX_CHARS; keep room for the hint at its end.
+            initial_context = frame_activation_context(
+                ambient_text, config.LOCAL_CONTEXT_MAX_CHARS - (len(hint) + 2 if hint else 0)
+            )
+            if hint:
+                initial_context = f"{initial_context}\n\n{hint}".strip()
 
             produced_handler = self._handler_factory()
             handler = await produced_handler if inspect.isawaitable(produced_handler) else produced_handler
@@ -1352,7 +1373,9 @@ class HybridRuntime:
                     self._user_speaking = False
                     self._interaction_busy = False
                     self._playback_until = 0.0
-                    self._pending_activation_text = (generation, addressed_text) if addressed_text else None
+                    self._pending_activation_text = (
+                        (generation, addressed_text) if addressed_text and not request_in_audio else None
+                    )
                 self._transition(RuntimeMode.CLOUD_CONVERSATION, "activation_ready")
                 self._notify_cloud_session(True)
                 provider_task = asyncio.create_task(
@@ -1513,6 +1536,19 @@ class HybridRuntime:
         if config.QUICK_COMMANDS_LOG_TEXT:
             logger.info("Request heard again accurately: %r", text)
         return text
+
+    def _queue_request_clip_audio(self) -> bool:
+        """Put the clip's audio from before the activation barrier ahead of the queued post-wake audio.
+
+        The post-wake queue already holds the rest of the clip and what followed it, so Gemini hears the
+        whole request. Returns whether any request audio is queued for Gemini.
+        """
+        with self._lifecycle_lock:
+            early = [*(self._request_clip_queued or ()), *(self._request_clip_late or ())]
+            for frame in reversed(early):
+                self._postactivation_frames.appendleft((None, frame))
+                self._postactivation_seconds += self._frame_duration(frame)
+            return bool(self._postactivation_frames)
 
     def _request_clip_frames(self) -> list[AudioFrame]:
         with self._lifecycle_lock:
@@ -2199,6 +2235,12 @@ class HybridRuntime:
             await self._flush_postactivation_locked(handler, generation)
             if not self._is_current_handler(handler, generation):
                 return
+            with self._lifecycle_lock:
+                closing = self._close_requested is not None
+            if closing:
+                # He has said goodbye: the room answering "bye!" would start another goodbye (2026-10-19 he
+                # said goodbye over and over). Gemini hears silence until the conversation closes.
+                copied_frame = (copied_frame[0], np.zeros_like(copied_frame[1]))
             try:
                 await handler.receive(copied_frame)
             except asyncio.CancelledError:

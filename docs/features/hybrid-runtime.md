@@ -761,7 +761,10 @@ A conversation now ends in one of these ways, checked in this order by
 1. **Reachy asks to close it.** The `end_conversation` tool (a goodbye, or people
    clearly talking among themselves) and `go_to_sleep` call `request_close`. The close
    waits at least 1 s and until his reply has played and the provider is no longer
-   busy, at most 12 s.
+   busy, at most 12 s. From the request on, Gemini gets silence instead of the
+   microphone: on 2026-10-19 people answering his goodbye kept starting another goodbye.
+   Something said after his goodbye needs his name again. The tool result asks for one
+   goodbye only.
 2. **The addressee check says it was not for him.** After a reply, user transcript
    pieces since that reply are joined. Once there are at least 4 words and a 1.5 s
    pause, `AddresseeCheck` sends Reachy's last reply and that text to
@@ -819,6 +822,7 @@ Tests:
 - `test_side_conversation_closes_the_follow_up_window_at_a_pause`
 - `test_follow_up_window_waits_while_reachy_is_working_and_restarts_after_his_answer`
 - `test_a_requested_close_waits_for_the_goodbye_to_play`
+- `test_after_his_goodbye_gemini_hears_silence`
 - `test_addressee_check_closes_early_when_people_talk_among_themselves`
 - `test_addressee_verdicts_that_keep_him_or_come_too_late_do_not_close`
 - `test_sleep_holds_the_pose_until_an_activation_wakes_him`

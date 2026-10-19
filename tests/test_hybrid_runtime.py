@@ -3181,6 +3181,25 @@ async def test_a_requested_close_waits_for_the_goodbye_to_play() -> None:
 
 
 @pytest.mark.asyncio
+async def test_after_his_goodbye_gemini_hears_silence() -> None:
+    """Once Reachy ends the conversation, the room saying "bye!" back cannot start another goodbye."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    await runtime.handle_frame(frame(7))
+    await wait_until(lambda: len(handler.receive_frames) == 1)
+
+    assert runtime.request_close("assistant_ended")
+    await runtime.handle_frame(frame(9))
+    await wait_until(lambda: len(handler.receive_frames) == 2)
+
+    assert handler.receive_frames[0][1].tolist() == [7]
+    assert handler.receive_frames[1][1].tolist() == [0]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_addressee_check_closes_early_when_people_talk_among_themselves() -> None:
     """Unanswered speech judged not for Reachy closes the conversation before the window ends."""
     clock = FakeClock()
@@ -3643,6 +3662,46 @@ async def test_acoustic_wake_transcribes_the_whole_request_as_one_clip() -> None
         assert clips == [pytest.approx(2.0)]
         assert not handler.started.is_set()
         assert listening == [True, False]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_request_for_the_conversation_reaches_gemini_as_audio_with_the_text_as_a_hint() -> None:
+    """Gemini hears the request itself; a misheard local text ("Start" for "stop") is only a hint."""
+
+    async def quick(_text: str) -> _QuickReply | None:
+        return None  # not a quick command: it goes to the conversation
+
+    async def transcribe_request(_frame: AudioFrame) -> str:
+        return "Start the music."
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 3)  # frames 2-3 were captured before activation
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 10 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        await handler.started.wait()
+        handler.set_connected(True)
+        await wait_until(lambda: len(handler.receive_frames) == 20)
+
+        assert handler.say_texts == []
+        assert 'heard the request as: "Start the music."' in handler.get_initial_context()
+        assert sum(int(frame[1][0] != 0) for frame in handler.receive_frames) == 10  # all of the request
     finally:
         await runtime.close()
 

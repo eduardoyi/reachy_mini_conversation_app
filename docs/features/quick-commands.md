@@ -62,7 +62,8 @@ wake:
   after a quick command.
 - Everything said after the name is recorded as one clip from the post-wake audio until 0.8 s of
   silence (up to 8 s) and transcribed by `LOCAL_STT_REQUEST_MODEL` (whisper-large-v3-turbo, loaded
-  by the launcher next to whisper-small). That text drives quick commands and is what Gemini gets.
+  by the launcher next to whisper-small). That text drives quick commands. If the request goes to
+  Gemini, Gemini hears the clip's audio and gets the text only as a hint (see 2026-10-19 below).
   Measured: turbo heard "Reachy, ¿qué hora es?" correctly where small gave "¿Real si que hora es?",
   at about 1.3 s instead of 0.4 s per clip. Background speech stays on whisper-small.
 - `QUICK_COMMANDS_LOG_TEXT=1` prints the request text when it goes to Gemini (debugging only).
@@ -79,6 +80,20 @@ wake:
   segment's audio (the last three are kept in memory) is transcribed again with the accurate model
   and tried once more; Gemini gets the accurate text if it still goes there. The activation context
   also tells Gemini that requests in the background transcript were already handled.
+
+- 2026-10-19 09:06: with music at 29, "Reachy, stop the music" was heard as "Start the music." (turbo)
+  and "Sato music" (small). Lowering only took it from 29 to 20. Music now drops to a third of its
+  level, at most `SPOTIFY_DUCK_VOLUME_PERCENT` (20), so 29 goes to 10. A level still lowered because a
+  restore failed is not lowered again.
+- The same request then went to Gemini as the text "Start the music." sent as the user's turn. The
+  clip's audio had been dropped "so it is not heard twice", so Gemini resumed the music and only paused
+  it when the user corrected it. Now, when a clip's request goes to the conversation, the clip's audio
+  (including what was captured before activation) is what Gemini hears. The local text goes in the
+  starting context as a hint that may be wrong. Checked against Gemini Live with a wrong hint ("Start
+  the music.") and recorded "stop the music": the old way resumed, the new way paused, also with music
+  and singing mixed in. First audio comes about 0.7 s later than with text (1.3–1.9 s after the
+  request audio instead of 0.7–0.9 s); the tool call came at the same time or earlier. A transcript
+  wake still sends text, since its request was spoken before activation and has no queued audio.
 
 ## Implementation
 

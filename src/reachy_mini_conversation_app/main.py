@@ -538,12 +538,21 @@ def run(
             """Sleep pose, then close the conversation after the good night; the wake word still works."""
             movement_manager.go_to_sleep()
             runtime_for_tools.request_close("go_to_sleep")
-            return {"status": "sleeping", "wakes_on_name": True}
+            return {
+                "status": "sleeping",
+                "wakes_on_name": True,
+                "note": "Say one short good night now, once. You no longer hear the room.",
+            }
 
         def end_conversation() -> dict[str, Any]:
             """Close the conversation after Reachy's goodbye; the wake word starts a new one."""
             closing = runtime_for_tools.request_close("assistant_ended")
-            return {"status": "ending" if closing else "no_conversation"}
+            if not closing:
+                return {"status": "no_conversation"}
+            return {
+                "status": "ending",
+                "note": "Say one short goodbye now, once. You no longer hear the room; do not say goodbye again.",
+            }
 
         deps.standby = go_to_standby
         deps.end_conversation = end_conversation

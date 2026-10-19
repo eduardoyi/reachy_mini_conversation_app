@@ -429,9 +429,24 @@ async def test_play_during_a_conversation_asks_for_a_short_reply_and_winds_down(
 
 
 @pytest.mark.asyncio
+async def test_ducker_lowers_quiet_music_to_a_third(configured, monkeypatch):
+    """Music below the duck level still drops, to a third of its level, so the user can be heard over it."""
+    state = {"volume": 29, "playing": True}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    assert ducker.level_before_ducking == 29
+    await ducker.session_ended()
+
+    assert puts == [10, 29]
+
+
+@pytest.mark.asyncio
 async def test_ducker_reports_music_playing_at_the_wake(configured, monkeypatch):
     """Music already playing when a conversation opens switches that conversation to quick closing."""
-    state = {"volume": 15, "playing": True}
+    state = {"volume": 1, "playing": True}
     puts: list[int] = []
     install_transport(monkeypatch, _player_handler(state, puts))
     ducker = spotify_control.SpotifyDucker(duck_percent=20)
@@ -440,7 +455,7 @@ async def test_ducker_reports_music_playing_at_the_wake(configured, monkeypatch)
 
     await ducker.session_started()
 
-    assert notified == [True]  # already quiet, so not lowered, but still playing
+    assert notified == [True]  # already as quiet as it goes, so not lowered, but still playing
     assert puts == []
     state["playing"] = False
     ducker2 = spotify_control.SpotifyDucker(duck_percent=20)
