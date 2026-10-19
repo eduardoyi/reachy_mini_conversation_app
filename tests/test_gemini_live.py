@@ -386,28 +386,6 @@ def test_plain_38_live_session_config_has_blocking_tools_and_capped_compression(
     assert session_config.context_window_compression.sliding_window.target_tokens == 16_000
 
 
-@pytest.mark.parametrize(
-    ("model", "thinking_level", "expected"),
-    [
-        ("gemini-3.8-live", None, True),
-        ("gemini-3.8-live-extended-thinking", "low", False),
-        ("fake-live-model", None, False),
-    ],
-)
-def test_only_plain_38_live_is_told_to_acknowledge_before_tools(
-    gemini_config, deps, monkeypatch, model, thinking_level, expected
-) -> None:
-    """Plain 3.8 Live is asked to say a short acknowledgement before a tool; others already do or keep their setup."""
-    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", model)
-    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", thinking_level)
-    handler = build_handler(deps)
-
-    instructions = handler._build_session_config([]).system_instruction
-
-    assert instructions is not None
-    assert (gemini_live._TOOL_ACKNOWLEDGEMENT_GUIDANCE in str(instructions.parts[0].text)) is expected
-
-
 @pytest.mark.asyncio
 async def test_plain_38_live_client_uses_v1alpha(gemini_config, deps, monkeypatch) -> None:
     """Both Gemini 3.8 Live models are served over the v1alpha transport."""

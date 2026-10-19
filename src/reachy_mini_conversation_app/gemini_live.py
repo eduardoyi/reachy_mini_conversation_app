@@ -102,13 +102,6 @@ _VIDEO_GUIDANCE: Final[str] = (
     "directly from the most recent frames without calling the camera tool; use the camera tool "
     "only if you have no recent frame."
 )
-# Plain Gemini 3.8 Live calls tools silently and speaks only after the result, so the user cannot
-# tell they were heard; Extended Thinking already says a short "let me check" on its own.
-_TOOL_ACKNOWLEDGEMENT_GUIDANCE: Final[str] = (
-    "When the user asks you to do something that needs a tool, first say a very short "
-    'acknowledgement out loud (two to four words, like "Sure, one sec" or "Turning them on"), '
-    "then call the tool. After the result, confirm briefly without repeating the acknowledgement."
-)
 _LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
 _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
 # If Reachy stays silent this long after the user stops talking (thinking or running a tool),
@@ -935,8 +928,6 @@ class GeminiLiveHandler(ConversationHandler):
         session_instructions = get_session_instructions(self.instance_path)
         if self._video_enabled and self.deps.camera_enabled:
             session_instructions = f"{session_instructions}\n\n{_VIDEO_GUIDANCE}"
-        if self._live_38 and not self._extended_thinking:
-            session_instructions = f"{session_instructions}\n\n{_TOOL_ACKNOWLEDGEMENT_GUIDANCE}"
         has_initial_context = self._build_initial_context_content() is not None
         if has_initial_context:
             session_instructions = f"{session_instructions}\n\n{_INITIAL_CONTEXT_SECURITY_GUIDANCE}"
