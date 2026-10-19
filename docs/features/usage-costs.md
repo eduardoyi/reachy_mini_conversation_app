@@ -1,7 +1,7 @@
 # Feature: AI usage and cost tracking
 
 - Status: `in-progress` (built and unit-tested; first live sessions pending)
-- Last updated: 2026-10-18
+- Last updated: 2026-10-19
 
 ## Overview
 
@@ -29,6 +29,18 @@ then 3,030 tokens, and each reply was split into audio and thinking tokens.
 cannot attribute as text. `GeminiLiveHandler._record_usage` writes one record per
 connection when it ends. A rotated long conversation therefore writes one record
 per connection. The log line is `Gemini session usage est_cost=$… turns=… <tokens>`.
+
+## What drove cost (ledger, 2026-10-18 to 2026-10-19)
+
+50 Extended Thinking conversations (332 turns, 46 minutes) were estimated at $11.32,
+about 3.4 cents a turn. Shares: re-billed text context 44% (about 20k text tokens a
+turn), thinking 35% (about 1,000 tokens a turn at `low`), live-video frames 11%, input
+audio 7%, spoken output 2%. OpenAI memory calls and quick-reply speech were under $0.10.
+The context was never trimmed because Google's default compression trigger is about
+105k tokens; `GEMINI_CONTEXT_TRIGGER_TOKENS` now caps it (see the
+[Gemini feature](gemini-live-provider.md#plain-gemini-38-live-and-the-context-cap)).
+A short probe turn reported a prompt about 2.5k tokens larger on Extended Thinking than
+on plain `gemini-3.8-live` with the same setup.
 
 ## Prices
 

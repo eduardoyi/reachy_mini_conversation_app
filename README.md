@@ -114,11 +114,12 @@ values. This keeps one-off commands such as
 |----------|-------------|
 | `REALTIME_PROVIDER` | Realtime provider: `huggingface` (default), `gemini`, or `openai_live`. Leading/trailing whitespace and case are normalized; another value fails closed with a configuration error. |
 | `GEMINI_API_KEY` | Required only when `REALTIME_PROVIDER=gemini`. Configure it in the local app environment; it is not accepted by settings RPC and is never logged. |
-| `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. |
+| `GEMINI_LIVE_MODEL` | Optional Gemini Live model. Defaults to `gemini-3.1-flash-live-preview`. `gemini-3.8-live` (no thinking level, quicker short answers) and `gemini-3.8-live-extended-thinking` both get context trimming, session resumption and live video. |
+| `GEMINI_CONTEXT_TRIGGER_TOKENS` | Gemini 3.8 Live only: once the conversation context reaches this many tokens, the oldest turns are dropped down to half of it. Default `32000`, minimum `16000`. Google bills the whole context on every turn, so this caps the cost per turn. |
 | `GEMINI_THINKING_LEVEL` | `low`, `medium`, or `high` for `gemini-3.8-live-extended-thinking` only; defaults to `medium` for that model. Leave unset for other models. |
 | `GEMINI_VOICE` | Optional Gemini voice. Defaults to `Puck`; it must be a voice supported by the selected Gemini Live model. |
 | `GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED` | Experimental local microphone onset playback clear for Gemini; default `0`. Set `1` for a supervised interruption trial. Noise can trigger it; cloud generation still controls the response. |
-| `GEMINI_LIVE_VIDEO_ENABLED` | Stream the camera to Gemini at 1 frame per second while the user is talking and for 30 seconds after, so visual questions need no camera tool call; default `0`. Requires `gemini-3.8-live-extended-thinking`. Camera frames go to Google during conversations; video costs about $0.90 per streamed hour. |
+| `GEMINI_LIVE_VIDEO_ENABLED` | Stream the camera to Gemini at 1 frame per second while the user is talking and for 30 seconds after, so visual questions need no camera tool call; default `0`. Requires a Gemini 3.8 Live model. Camera frames go to Google during conversations; video costs about $0.90 per streamed hour. |
 | `SPEAKER_FOLLOWING_ENABLED` | Turn head and body toward whoever starts talking (microphone-array direction) and follow their face during conversations; default `1`. See [speaker following](docs/features/speaker-following.md). |
 | `FACE_RECOGNITION_ENABLED` | Recognize enrolled household members on camera, entirely locally; default `0`. Enroll by voice ("remember my face, I'm Ana"), from the live camera in Settings, or by uploading photos there. Only the recognized name is shared with the conversation provider. See [face recognition](docs/features/face-recognition.md). |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |

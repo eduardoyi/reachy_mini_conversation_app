@@ -182,6 +182,45 @@ def test_gemini_model_check_accepts_sdk_models_prefix() -> None:
     assert config.is_gemini_extended_thinking_model(f"models/{config.GEMINI_EXTENDED_THINKING_MODEL}")
 
 
+def test_gemini_38_live_model_check_covers_both_38_models() -> None:
+    """Plain 3.8 Live and Extended Thinking share session features; the legacy model does not."""
+    assert config.is_gemini_38_live_model(config.GEMINI_38_LIVE_MODEL)
+    assert config.is_gemini_38_live_model(f"models/{config.GEMINI_EXTENDED_THINKING_MODEL}")
+    assert not config.is_gemini_38_live_model(config.DEFAULT_GEMINI_LIVE_MODEL)
+    assert not config.is_gemini_extended_thinking_model(config.GEMINI_38_LIVE_MODEL)
+
+
+def test_gemini_thinking_level_is_rejected_for_plain_38_live(monkeypatch) -> None:
+    """Plain 3.8 Live does not support thinking_level, so an explicit one fails clearly."""
+    monkeypatch.setenv(config.GEMINI_LIVE_MODEL_ENV, config.GEMINI_38_LIVE_MODEL)
+    monkeypatch.setenv(config.GEMINI_THINKING_LEVEL_ENV, "low")
+
+    with pytest.raises(ValueError, match="only for"):
+        config.refresh_runtime_config_from_env()
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (None, config.DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS),
+        ("48000", 48_000),
+        ("1000", config.DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS),
+        ("lots", config.DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS),
+    ],
+)
+def test_gemini_context_trigger_tokens_default_and_override(monkeypatch, raw_value, expected) -> None:
+    """The context cap defaults to 32k and ignores values too small to keep the instructions."""
+    monkeypatch.setattr(config.config, "GEMINI_CONTEXT_TRIGGER_TOKENS", config.config.GEMINI_CONTEXT_TRIGGER_TOKENS)
+    if raw_value is None:
+        monkeypatch.delenv(config.GEMINI_CONTEXT_TRIGGER_TOKENS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(config.GEMINI_CONTEXT_TRIGGER_TOKENS_ENV, raw_value)
+
+    config.refresh_runtime_config_from_env()
+
+    assert config.config.GEMINI_CONTEXT_TRIGGER_TOKENS == expected
+
+
 def test_openai_live_defaults_and_runtime_overrides_are_loaded(monkeypatch) -> None:
     """OpenAI Live model and voice use documented defaults and trim explicit overrides."""
     monkeypatch.setattr(config.config, "OPENAI_LIVE_MODEL", config.config.OPENAI_LIVE_MODEL)

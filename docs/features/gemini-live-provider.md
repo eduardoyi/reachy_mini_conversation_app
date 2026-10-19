@@ -1,7 +1,7 @@
 # Feature: Gemini Live provider
 
 - Status: `in-progress`
-- Last updated: 2026-10-17
+- Last updated: 2026-10-19
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -130,6 +130,32 @@ startup, exact mutation receipts and cleanup; keep provider transport/status han
 in `gemini_live.py`. Do not send unverified transcript chunks to capture or add
 automatic provider fallback when extending this path.
 
+## Plain Gemini 3.8 Live and the context cap
+
+`GEMINI_LIVE_MODEL=gemini-3.8-live` selects Gemini 3.8 Live without Extended Thinking.
+It shares the 3.8 session features: v1alpha transport, sliding-window compression,
+session resumption with connection rotation, live video, and camera images inside the
+function response. It differs in three ways:
+
+- **No thinking level.** Google rejects `thinking_level` for this model, and so does the
+  config (`GEMINI_THINKING_LEVEL` must be unset). The model still thinks briefly between
+  turns (36-88 thought tokens per short turn in a 2026-10-19 probe).
+- **Blocking tools.** Its default is `NON_BLOCKING`, but it sends no interaction status,
+  so tools are declared `BLOCKING` and use the synchronous response path of the legacy
+  model. A probe on 2026-10-19 confirmed a blocking tool call is answered in one turn,
+  and a red test image in the function response was described correctly.
+- **Quiet rotation without status.** The handler cannot see a reply in progress, so
+  rotation waits five seconds after the user's speech and two after the model's last
+  audio.
+
+Both 3.8 models trim the context at `GEMINI_CONTEXT_TRIGGER_TOKENS` (default 32,000)
+down to half of it. Google's default trigger is 80% of the 131k window, which a normal
+conversation never reached, so every turn re-billed the whole growing history. A probe
+with a 16k trigger kept the prompt between about 6k and 14k tokens on both models
+across seven 5k-token turns. Instructions and tool declarations (about 8k tokens) are
+not trimmed. A single realtime text input of about 26k tokens was rejected
+(`1007 invalid argument`) with a 16k trigger.
+
 ## User-facing behavior
 
 ### Default Hugging Face behavior
@@ -251,7 +277,7 @@ appears on slow turns.
 The `camera` tool is on-demand. By default a camera frame is sent to Gemini only
 as the result of an explicit camera-tool call, not merely because a camera exists.
 
-Optional live video (`GEMINI_LIVE_VIDEO_ENABLED=1`, Extended Thinking only, since it
+Optional live video (`GEMINI_LIVE_VIDEO_ENABLED=1`, Gemini 3.8 Live models only, since it
 relies on context compression to avoid Gemini's two-minute audio+video session
 limit) streams the camera at about one frame per second while the user is engaged:
 from the first user voice activity or transcript until 30 seconds after the last
@@ -679,6 +705,7 @@ explicit native-audio skip, lock consistency, JavaScript syntax checks, and
 | 2026-10-13 | A Reachy Mini Lite run confirmed accurate camera answers and a resumed session at the nine-minute close, but the app's part of each look took ~35 ms while Gemini took 4-12 s to call the camera and 2.7-7.3 s more to answer. Added opt-in live video (`GEMINI_LIVE_VIDEO_ENABLED`) streaming one frame per second while the user is engaged, so the model can answer from the feed without a tool call. Resumable closes now reconnect immediately instead of after the 5 s retry delay, and are logged as a resume rather than a start failure. Regression tests: `test_live_video_is_opt_in_and_requires_compression`, `test_camera_stream_sends_frames_only_while_the_user_is_engaged`, `test_resumable_session_close_reconnects_without_the_retry_delay`. |
 | 2026-10-13 | Live acceptance on the Reachy Mini Lite with `GEMINI_LIVE_VIDEO_ENABLED=1`: the user reported visual answers as much faster than the camera-tool path. The architecture source (`docs/scheme.mmd`) now shows the opt-in live video edge; the generated SVG still needs regenerating with the Mermaid CLI, which is not installed here. |
 | 2026-10-13 | A hybrid session on the Reachy Mini Lite ended with `interaction_deadline` (APIError, provider_failed) about two minutes into a lively exchange: Spotify music played near the robot, the user barged in repeatedly, and the model never reported IDLE, so the cap started by the first request kept running across many later user turns. A new user turn now restarts the cap. Regression test: `test_extended_thinking_new_user_turn_restarts_the_interaction_deadline`. |
+| 2026-10-19 | Added `gemini-3.8-live` (blocking tools, no thinking level) with the 3.8 session features, and capped context at `GEMINI_CONTEXT_TRIGGER_TOKENS` (default 32k) after the usage ledger showed re-billed context was 44% of conversation cost. Live probes confirmed both models accept the cap, trim at it, and resume; the plain model answered a blocking tool call and read an image from a function response. Regression tests: `test_plain_38_live_session_config_has_blocking_tools_and_capped_compression`, `test_plain_38_live_client_uses_v1alpha`, `test_plain_38_live_is_not_quiet_right_after_speech_or_reply_audio`, `test_gemini_38_camera_image_is_attached_to_the_function_response`, `test_gemini_context_trigger_tokens_default_and_override`. Not yet tried in a real conversation on the robot. |
 | 2026-10-14 | A hybrid conversation on the Reachy Mini Lite ended after exactly nine minutes with `provider_failed` (APIError): the handler's own nine-minute connection limit closed the session as final, and hybrid mode has no resume step, so Reachy went quiet mid-conversation. With compression the handler now rotates the connection itself (at a quiet moment after eight minutes, at nine minutes, or on GoAway) and resumes from the handle without re-sending context. Every fenced close now logs `Gemini Live session closed reason=…`. Regression tests: `test_go_away_with_compression_resumes_on_a_new_connection`, `test_aging_connection_rotates_at_a_quiet_moment`, `test_aging_connection_waits_for_the_turn_then_rotates_at_the_limit`, `test_aging_connection_without_a_handle_ends_at_the_limit`. |
 
 ## Shared migration validation — 2026-09-16

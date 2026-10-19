@@ -336,6 +336,7 @@ def test_extended_thinking_session_config_enables_resumption_and_compression(gem
     """Extended Thinking sessions use sliding-window compression and resume from the stored handle."""
     monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking")
     monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low")
+    monkeypatch.setattr(config, "GEMINI_CONTEXT_TRIGGER_TOKENS", 40_000, raising=False)
     handler = build_handler(deps)
 
     fresh_config = handler._build_session_config([])
@@ -345,9 +346,60 @@ def test_extended_thinking_session_config_enables_resumption_and_compression(gem
     assert fresh_config.session_resumption is not None
     assert fresh_config.session_resumption.handle is None
     assert fresh_config.context_window_compression is not None
+    assert fresh_config.context_window_compression.trigger_tokens == 40_000
     assert fresh_config.context_window_compression.sliding_window is not None
+    assert fresh_config.context_window_compression.sliding_window.target_tokens == 20_000
     assert resumed_config.session_resumption is not None
     assert resumed_config.session_resumption.handle == "resume-handle"
+
+
+def test_plain_38_live_session_config_has_blocking_tools_and_capped_compression(
+    gemini_config, deps, monkeypatch
+) -> None:
+    """Plain Gemini 3.8 Live gets compression and resumption, synchronous tools and no thinking level."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live")
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", None)
+    monkeypatch.setattr(config, "GEMINI_CONTEXT_TRIGGER_TOKENS", 32_000, raising=False)
+    handler = build_handler(deps)
+
+    session_config = handler._build_session_config(
+        [
+            {
+                "type": "function",
+                "name": "move_head",
+                "description": "Move the head.",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    assert handler._extended_thinking is False
+    assert session_config.thinking_config is None
+    assert session_config.tools is not None
+    declarations = session_config.tools[1].function_declarations
+    assert declarations is not None
+    assert declarations[0].behavior == types.Behavior.BLOCKING
+    assert session_config.session_resumption is not None
+    assert session_config.context_window_compression is not None
+    assert session_config.context_window_compression.trigger_tokens == 32_000
+    assert session_config.context_window_compression.sliding_window is not None
+    assert session_config.context_window_compression.sliding_window.target_tokens == 16_000
+
+
+@pytest.mark.asyncio
+async def test_plain_38_live_client_uses_v1alpha(gemini_config, deps, monkeypatch) -> None:
+    """Both Gemini 3.8 Live models are served over the v1alpha transport."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live")
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", None)
+    created: list[dict[str, object]] = []
+    monkeypatch.setattr(gemini_live.genai, "Client", lambda **kwargs: created.append(kwargs) or MagicMock())
+    handler = build_handler(deps)
+
+    await handler._ensure_client()
+
+    http_options = created[0]["http_options"]
+    assert isinstance(http_options, types.HttpOptions)
+    assert http_options.api_version == "v1alpha"
 
 
 def test_auto_transcription_language_sends_no_language_codes(gemini_config, deps, monkeypatch) -> None:
@@ -507,6 +559,13 @@ def resumable_handle_event(handle: str = "resume-handle") -> types.LiveServerMes
     )
 
 
+def use_plain_38_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Select plain Gemini 3.8 Live, which enables compression and resumption without interaction status."""
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", None, raising=False)
+    monkeypatch.setattr(config, "GEMINI_LIVE_VIDEO_ENABLED", False, raising=False)
+
+
 def use_extended_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
     """Select the Extended Thinking model, which enables compression and resumption, without live video."""
     monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
@@ -550,9 +609,12 @@ async def test_go_away_with_compression_resumes_on_a_new_connection(gemini_confi
 
 
 @pytest.mark.asyncio
-async def test_aging_connection_rotates_at_a_quiet_moment(gemini_config, deps, monkeypatch, caplog) -> None:
+@pytest.mark.parametrize("select_model", [use_extended_thinking, use_plain_38_live])
+async def test_aging_connection_rotates_at_a_quiet_moment(
+    gemini_config, deps, monkeypatch, caplog, select_model
+) -> None:
     """Past the rotation age, an idle connection is replaced and the conversation resumes."""
-    use_extended_thinking(monkeypatch)
+    select_model(monkeypatch)
     monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_AFTER_S", 0.0)
     monkeypatch.setattr(gemini_live, "_CONNECTION_ROTATION_POLL_S", 0.01)
     first_session, second_session = FakeSession(), FakeSession()
@@ -601,6 +663,23 @@ async def test_aging_connection_waits_for_the_turn_then_rotates_at_the_limit(gem
     assert reasons == ["age_limit"]
     assert time.perf_counter() - started >= 0.1
     await handler.shutdown()
+
+
+def test_plain_38_live_is_not_quiet_right_after_speech_or_reply_audio(gemini_config, deps, monkeypatch) -> None:
+    """Without interaction status, recent user speech or reply audio means a turn may be in progress."""
+    use_plain_38_live(monkeypatch)
+    handler = build_handler(deps)
+    now = time.perf_counter()
+
+    assert handler._connection_quiet() is True
+    handler._last_user_speech_at = now - 3.0
+    assert handler._connection_quiet() is False
+    handler._last_user_speech_at = now - 6.0
+    assert handler._connection_quiet() is True
+    handler._last_model_audio_at = now - 1.0
+    assert handler._connection_quiet() is False
+    handler._last_model_audio_at = now - 3.0
+    assert handler._connection_quiet() is True
 
 
 @pytest.mark.asyncio
@@ -2629,8 +2708,11 @@ async def test_compressed_session_has_no_camera_session_limit(gemini_config, dep
 
 
 @pytest.mark.asyncio
-async def test_extended_thinking_camera_image_is_attached_to_the_function_response(
-    gemini_config, deps, monkeypatch
+@pytest.mark.parametrize(
+    ("model", "thinking_level"), [("gemini-3.8-live-extended-thinking", "low"), ("gemini-3.8-live", None)]
+)
+async def test_gemini_38_camera_image_is_attached_to_the_function_response(
+    gemini_config, deps, monkeypatch, model, thinking_level
 ) -> None:
     """The image travels inside the function response and survives the SDK's JSON encoding without warnings."""
     import json
@@ -2639,8 +2721,8 @@ async def test_extended_thinking_camera_image_is_attached_to_the_function_respon
     from google.genai import _common
     from google.genai import _transformers as genai_transformers
 
-    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
-    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low", raising=False)
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", model, raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", thinking_level, raising=False)
     session = FakeSession()
     handler = build_handler(deps)
     activate_session(handler, session)
@@ -2687,7 +2769,7 @@ async def test_extended_thinking_camera_image_is_attached_to_the_function_respon
 
 
 def test_live_video_is_opt_in_and_requires_compression(gemini_config, monkeypatch) -> None:
-    """Video streaming needs the flag, the Extended Thinking model, and a camera; it adds model guidance."""
+    """Video streaming needs the flag, a Gemini 3.8 Live model, and a camera; it adds model guidance."""
     camera_deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_enabled=True)
     monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live-extended-thinking", raising=False)
     monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "low", raising=False)
@@ -2696,11 +2778,15 @@ def test_live_video_is_opt_in_and_requires_compression(gemini_config, monkeypatc
     off = build_handler(camera_deps)
     monkeypatch.setattr(config, "GEMINI_LIVE_VIDEO_ENABLED", True, raising=False)
     on = build_handler(camera_deps)
+    monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "gemini-3.8-live", raising=False)
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", None, raising=False)
+    plain_38 = build_handler(camera_deps)
     monkeypatch.setattr(config, "GEMINI_LIVE_MODEL", "fake-live-model", raising=False)
     legacy = build_handler(camera_deps)
 
     assert off._video_enabled is False
     assert on._video_enabled is True
+    assert plain_38._video_enabled is True
     assert legacy._video_enabled is False
     off_instructions = off._build_session_config([]).system_instruction
     on_instructions = on._build_session_config([]).system_instruction

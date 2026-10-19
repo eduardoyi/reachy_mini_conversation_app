@@ -22,6 +22,7 @@ from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import (
     config,
     set_custom_profile,
+    is_gemini_38_live_model,
     resolve_gemini_thinking_level,
     is_gemini_extended_thinking_model,
 )
@@ -89,6 +90,10 @@ _SESSION_DEADLINE_HEADROOM_S: Final[float] = 2.0
 _CONNECTION_ROTATION_AFTER_S: Final[float] = 8 * 60.0
 _CONNECTION_ROTATION_POLL_S: Final[float] = 0.5
 _CONNECTION_QUIET_AFTER_SPEECH_S: Final[float] = 1.0
+# Plain Gemini 3.8 Live reports no interaction status, so a reply in progress is inferred from recent
+# speech and audio: rotation waits this long after the user's speech and the model's last audio.
+_CONNECTION_QUIET_AFTER_SPEECH_NO_STATUS_S: Final[float] = 5.0
+_CONNECTION_QUIET_AFTER_MODEL_AUDIO_S: Final[float] = 2.0
 _VIDEO_FRAME_INTERVAL_S: Final[float] = 1.0
 _VIDEO_ENGAGED_S: Final[float] = 30.0
 _VIDEO_GUIDANCE: Final[str] = (
@@ -213,13 +218,17 @@ class GeminiLiveHandler(ConversationHandler):
         self._voice_override = self._normalize_voice(startup_voice, source="persisted startup voice")
         self._model = config.GEMINI_LIVE_MODEL
         self._extended_thinking = is_gemini_extended_thinking_model(self._model)
+        # Both Gemini 3.8 Live models use v1alpha, take camera images inside function responses and
+        # support compression and resumption.
+        self._live_38 = is_gemini_38_live_model(self._model)
         # Sliding-window compression lifts the Live session-length limits, including the
         # shorter limit after an image; resumption carries the session across connections.
-        self._context_compression = self._extended_thinking
+        self._context_compression = self._live_38
         self._resumption_handle: str | None = None
         # Live video needs compression: without it Gemini ends audio+video sessions after two minutes.
         self._video_enabled = config.GEMINI_LIVE_VIDEO_ENABLED and self._context_compression
         self._last_user_speech_at: float | None = None
+        self._last_model_audio_at: float | None = None
         self._thinking_level = (
             resolve_gemini_thinking_level(self._model, config.GEMINI_THINKING_LEVEL)
             if self._extended_thinking
@@ -538,7 +547,7 @@ class GeminiLiveHandler(ConversationHandler):
 
     def _start_session_deadline(self, session: AsyncSession, generation: int) -> None:
         """Install the conservative session-age deadline after readiness."""
-        if not self._extended_thinking:
+        if not self._live_38:
             return
         self._session_ready_at = time.perf_counter()
         self._session_deadline_at = self._session_ready_at + _SESSION_AUDIO_LIMIT_S
@@ -562,10 +571,15 @@ class GeminiLiveHandler(ConversationHandler):
 
     def _connection_quiet(self) -> bool:
         """Return whether no user turn, model turn, tool call or queued output is in progress."""
+        now = time.perf_counter()
         last_speech = self._last_user_speech_at
-        recent_speech = (
-            last_speech is not None and time.perf_counter() - last_speech < _CONNECTION_QUIET_AFTER_SPEECH_S
+        quiet_after_speech_s = (
+            _CONNECTION_QUIET_AFTER_SPEECH_S if self._extended_thinking else _CONNECTION_QUIET_AFTER_SPEECH_NO_STATUS_S
         )
+        recent_speech = last_speech is not None and now - last_speech < quiet_after_speech_s
+        last_audio = self._last_model_audio_at
+        if not self._extended_thinking and last_audio is not None:
+            recent_speech = recent_speech or now - last_audio < _CONNECTION_QUIET_AFTER_MODEL_AUDIO_S
         return (
             self._accepted_input_at is None
             and self._interaction_deadline_at is None
@@ -887,6 +901,10 @@ class GeminiLiveHandler(ConversationHandler):
                 }
                 if self._extended_thinking:
                     declaration["behavior"] = types.Behavior.NON_BLOCKING
+                elif self._live_38:
+                    # Plain 3.8 Live defaults to NON_BLOCKING; blocking keeps the synchronous tool contract
+                    # this handler uses for models without interaction status.
+                    declaration["behavior"] = types.Behavior.BLOCKING
                 declarations.append(declaration)
             tools.append({"function_declarations": declarations})
         return tools
@@ -936,10 +954,12 @@ class GeminiLiveHandler(ConversationHandler):
                 session_options["thinking_config"] = types.ThinkingConfig(
                     thinking_level=types.ThinkingLevel(thinking_level)
                 )
-            session_options["session_resumption"] = types.SessionResumptionConfig(handle=self._resumption_handle)
         if self._context_compression:
+            session_options["session_resumption"] = types.SessionResumptionConfig(handle=self._resumption_handle)
+            trigger_tokens = config.GEMINI_CONTEXT_TRIGGER_TOKENS
             session_options["context_window_compression"] = types.ContextWindowCompressionConfig(
-                sliding_window=types.SlidingWindow()
+                trigger_tokens=trigger_tokens,
+                sliding_window=types.SlidingWindow(target_tokens=trigger_tokens // 2),
             )
         return types.LiveConnectConfig.model_validate(session_options)
 
@@ -1178,7 +1198,7 @@ class GeminiLiveHandler(ConversationHandler):
         api_key = (config.GEMINI_API_KEY or "").strip()
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is required when REALTIME_PROVIDER=gemini")
-        if self._extended_thinking:
+        if self._live_38:
             self.client = genai.Client(
                 api_key=api_key,
                 http_options=types.HttpOptions(api_version="v1alpha"),
@@ -1384,7 +1404,7 @@ class GeminiLiveHandler(ConversationHandler):
                 self._connection_observer_connected = True
                 self._emit_connection_state(True)
                 session_ready = True
-                if self._extended_thinking:
+                if self._live_38:
                     self._start_session_deadline(session, generation)
                 self._append_latency_sample(
                     self._connection_ready_samples,
@@ -1682,6 +1702,7 @@ class GeminiLiveHandler(ConversationHandler):
                     self._mark_activity("assistant_audio_delta")
                     self._cancel_thinking_cue()
                     self.deps.movement_manager.set_speaking(True)
+                    self._last_model_audio_at = time.perf_counter()
                     playable = self._audio_chunks.push(audio_data)
                     if playable is not None:
                         await self.output_queue.put((self.SAMPLE_RATE, playable))
@@ -2068,13 +2089,13 @@ class GeminiLiveHandler(ConversationHandler):
         model_result: dict[str, Any],
         image_bytes: bytes | None,
     ) -> types.FunctionResponse:
-        """Build one function response, attaching the camera image for Extended Thinking."""
+        """Build one function response, attaching the camera image for Gemini 3.8 Live."""
         response = types.FunctionResponse(
             id=completed_tool.id,
             name=completed_tool.tool_name,
             response={"output": model_result},
         )
-        if image_bytes is not None and self._extended_thinking:
+        if image_bytes is not None and self._live_38:
             # google-genai 2.19 does not base64-encode bytes in tool responses (json.dumps fails),
             # so the image is attached already encoded.
             blob = types.FunctionResponseBlob.model_construct(
@@ -2104,7 +2125,7 @@ class GeminiLiveHandler(ConversationHandler):
                 for completed_tool in completed_tools:
                     model_result, image_bytes = self._prepare_tool_result(completed_tool)
                     if image_bytes is not None:
-                        if self._extended_thinking:
+                        if self._live_38:
                             # A late first frame is dropped instead of shortening (and ending) the session.
                             camera_window_closed = self._camera_window_closed()
                             if not camera_window_closed:
@@ -2116,8 +2137,8 @@ class GeminiLiveHandler(ConversationHandler):
                                 model_result = dict(model_result)
                                 model_result["image_attached"] = False
                                 image_bytes = None
-                        if image_bytes is None or self._extended_thinking:
-                            # Extended Thinking gets the image inside its function response (ordered with the
+                        if image_bytes is None or self._live_38:
+                            # Gemini 3.8 Live gets the image inside its function response (ordered with the
                             # result); a realtime frame sent just before the response is often not yet seen.
                             prepared.append((completed_tool, model_result, image_bytes))
                             continue
@@ -2158,7 +2179,7 @@ class GeminiLiveHandler(ConversationHandler):
                     for completed_tool, model_result, image_bytes in prepared
                 ]
                 await session.send_tool_response(function_responses=function_responses)
-                if self._extended_thinking:
+                if self._live_38:
                     for completed_tool, _, image_bytes in prepared:
                         if image_bytes is None:
                             continue

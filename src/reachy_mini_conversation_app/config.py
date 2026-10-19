@@ -79,6 +79,15 @@ GEMINI_LIVE_LOCAL_BARGE_IN_ENV = "GEMINI_LIVE_LOCAL_BARGE_IN_ENABLED"
 GEMINI_LIVE_VIDEO_ENV = "GEMINI_LIVE_VIDEO_ENABLED"
 DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview"
 GEMINI_EXTENDED_THINKING_MODEL = "gemini-3.8-live-extended-thinking"
+# Gemini 3.8 Live without Extended Thinking: same session features (compression, resumption, live video),
+# no thinking level and no interaction status.
+GEMINI_38_LIVE_MODEL = "gemini-3.8-live"
+GEMINI_CONTEXT_TRIGGER_TOKENS_ENV = "GEMINI_CONTEXT_TRIGGER_TOKENS"
+# Google bills the whole context on every turn and by default trims it only at 80% of the 131k window
+# (about 105k), so a long conversation got dearer each turn. From this size the oldest turns are dropped
+# down to half of it; instructions and tool declarations (about 8k) are always kept.
+DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS = 32_000
+MIN_GEMINI_CONTEXT_TRIGGER_TOKENS = 16_000
 DEFAULT_GEMINI_VOICE = "Puck"
 DEFAULT_GEMINI_THINKING_LEVEL = "medium"
 GEMINI_THINKING_LEVELS: tuple[str, ...] = ("low", "medium", "high")
@@ -275,6 +284,29 @@ def is_gemini_extended_thinking_model(model: str | None = None) -> bool:
     if configured_model is None:
         configured_model = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
     return configured_model.strip().removeprefix("models/") == GEMINI_EXTENDED_THINKING_MODEL
+
+
+def is_gemini_38_live_model(model: str | None = None) -> bool:
+    """Return whether a model ID is a Gemini 3.8 Live model, with or without Extended Thinking."""
+    configured_model = model
+    if configured_model is None:
+        configured_model = (os.getenv(GEMINI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_GEMINI_LIVE_MODEL
+    return configured_model.strip().removeprefix("models/") in (GEMINI_38_LIVE_MODEL, GEMINI_EXTENDED_THINKING_MODEL)
+
+
+def resolve_gemini_context_trigger_tokens() -> int:
+    """Return the context size at which Gemini 3.8 Live drops the oldest turns."""
+    raw_value = os.getenv(GEMINI_CONTEXT_TRIGGER_TOKENS_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS
+    try:
+        value = int(raw_value)
+    except ValueError:
+        value = 0
+    if value < MIN_GEMINI_CONTEXT_TRIGGER_TOKENS:
+        logger.warning("Ignoring invalid %s=%r; using default.", GEMINI_CONTEXT_TRIGGER_TOKENS_ENV, raw_value)
+        return DEFAULT_GEMINI_CONTEXT_TRIGGER_TOKENS
+    return value
 
 
 def resolve_gemini_thinking_level(model: str | None = None, value: str | None = None) -> str | None:
@@ -652,6 +684,7 @@ class Config:
         GEMINI_LIVE_MODEL,
         os.getenv(GEMINI_THINKING_LEVEL_ENV),
     )
+    GEMINI_CONTEXT_TRIGGER_TOKENS = resolve_gemini_context_trigger_tokens()
     OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
     OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
     OPENAI_LIVE_BACKEND_MODEL = (
@@ -843,6 +876,7 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_LIVE_MODEL = gemini_model
     config.GEMINI_VOICE = (os.getenv(GEMINI_VOICE_ENV) or "").strip() or DEFAULT_GEMINI_VOICE
     config.GEMINI_THINKING_LEVEL = gemini_thinking_level
+    config.GEMINI_CONTEXT_TRIGGER_TOKENS = resolve_gemini_context_trigger_tokens()
     config.OPENAI_API_KEY = os.getenv(OPENAI_API_KEY_ENV)
     config.OPENAI_LIVE_MODEL = (os.getenv(OPENAI_LIVE_MODEL_ENV) or "").strip() or DEFAULT_OPENAI_LIVE_MODEL
     config.OPENAI_LIVE_BACKEND_MODEL = (
