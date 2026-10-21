@@ -65,7 +65,7 @@ def gemini_memory_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_CAPTURE_ENABLED", False, raising=False)
     monkeypatch.setattr(config, "HOUSEHOLD_MEMORY_REVIEW_ENABLED", False, raising=False)
     monkeypatch.setattr(gemini_live, "get_session_greeting_prompt", lambda: "", raising=False)
-    monkeypatch.setattr(gemini_live, "get_tool_specs", lambda: [], raising=False)
+    monkeypatch.setattr(gemini_live, "get_tool_specs", lambda exclusion_list=None: [], raising=False)
 
 
 def _deps() -> ToolDependencies:

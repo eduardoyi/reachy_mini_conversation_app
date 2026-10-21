@@ -102,6 +102,9 @@ _VIDEO_GUIDANCE: Final[str] = (
     "directly from the most recent frames without calling the camera tool; use the camera tool "
     "only if you have no recent frame."
 )
+# Idle moves are chosen locally (idle_policy) and Gemini never gets an idle turn, so this tool only gave the
+# model a way to skip answering: on plain Gemini 3.8 Live it called it six times while children talked to it.
+_LOCAL_ONLY_TOOLS: Final[tuple[str, ...]] = ("idle_do_nothing",)
 _LOCAL_BARGE_IN_OUTPUT_WINDOW_S: Final[float] = 1.0
 _LOCAL_BARGE_IN_OUTPUT_RMS_THRESHOLD: Final[float] = 104.0
 # If Reachy stays silent this long after the user stops talking (thinking or running a tool),
@@ -229,6 +232,9 @@ class GeminiLiveHandler(ConversationHandler):
         self._video_enabled = config.GEMINI_LIVE_VIDEO_ENABLED and self._context_compression
         self._last_user_speech_at: float | None = None
         self._last_model_audio_at: float | None = None
+        # Per model turn, to log turns that end without speech (the model chose to stay silent).
+        self._turn_spoke = False
+        self._turn_tool_names: list[str] = []
         self._thinking_level = (
             resolve_gemini_thinking_level(self._model, config.GEMINI_THINKING_LEVEL)
             if self._extended_thinking
@@ -1354,7 +1360,7 @@ class GeminiLiveHandler(ConversationHandler):
             if not self._memory_session.context_is_current():
                 self._memory_invalidated = True
                 raise RuntimeError("Gemini Live memory context is unavailable")
-            tool_specs = get_tool_specs()
+            tool_specs = get_tool_specs(exclusion_list=list(_LOCAL_ONLY_TOOLS))
             session_config = self._build_session_config(tool_specs)
             if not self._memory_context_is_current():
                 self._memory_invalidated = True
@@ -1703,6 +1709,7 @@ class GeminiLiveHandler(ConversationHandler):
                     self._cancel_thinking_cue()
                     self.deps.movement_manager.set_speaking(True)
                     self._last_model_audio_at = time.perf_counter()
+                    self._turn_spoke = True
                     playable = self._audio_chunks.push(audio_data)
                     if playable is not None:
                         await self.output_queue.put((self.SAMPLE_RATE, playable))
@@ -1712,6 +1719,12 @@ class GeminiLiveHandler(ConversationHandler):
                 if tail is not None:
                     await self.output_queue.put((self.SAMPLE_RATE, tail))
                 self.deps.movement_manager.set_speaking(False)
+            if server_content.turn_complete:
+                if not self._turn_spoke:
+                    tools = ",".join(self._turn_tool_names) or "none"
+                    logger.info("Gemini turn ended without speech tools=%s", tools)
+                self._turn_spoke = False
+                self._turn_tool_names = []
 
         if event.tool_call is not None:
             await self._handle_tool_call(event.tool_call, session, generation)
@@ -1805,6 +1818,8 @@ class GeminiLiveHandler(ConversationHandler):
         for function_call in tool_call.function_calls or []:
             call_id = function_call.id
             tool_name = function_call.name
+            if isinstance(tool_name, str) and tool_name:
+                self._turn_tool_names.append(tool_name)
             if not isinstance(call_id, str) or not call_id:
                 logger.error("Ignoring Gemini tool call without a valid call id")
                 continue

@@ -3350,3 +3350,57 @@ async def test_turn_usage_is_summed_into_one_cost_record_per_connection(gemini_c
     assert entry["feature"] == "conversation" and entry["turns"] == 2
     assert entry["tokens"] == {"input_audio": 400, "input_text": 5581, "output_audio": 100}
     await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_session_does_not_offer_the_local_only_idle_tool(gemini_config, deps, monkeypatch) -> None:
+    """Idle moves are chosen locally, so Gemini is never offered idle_do_nothing as a way to stay silent."""
+    specs = [
+        {"type": "function", "name": name, "description": name, "parameters": {"type": "object", "properties": {}}}
+        for name in ("move_head", "idle_do_nothing")
+    ]
+    monkeypatch.setattr(
+        gemini_live,
+        "get_tool_specs",
+        lambda exclusion_list=None: [spec for spec in specs if spec["name"] not in (exclusion_list or [])],
+    )
+    session = FakeSession()
+    session.events.put_nowait(types.LiveServerMessage(go_away=types.LiveServerGoAway(time_left="0s")))
+    client = FakeClient(session)
+    handler = build_handler(deps, client)
+
+    await handler.start_up()
+
+    declared = client.aio.live.config.tools[1].function_declarations
+    assert [declaration.name for declaration in declared] == ["move_head"]
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_turn_without_speech_is_logged_with_its_tools(gemini_config, deps, monkeypatch, caplog) -> None:
+    """A model turn that ends without audio is logged with the tools it called; a spoken turn is not."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    monkeypatch.setattr(
+        type(handler.tool_manager), "start_tool", AsyncMock(return_value=SimpleNamespace(tool_id="emotion-1"))
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "cancel_tool_and_wait", AsyncMock(return_value=True))
+    turn_complete = types.LiveServerMessage(server_content=types.LiveServerContent(turn_complete=True))
+    call = types.FunctionCall(id="call-1", name="play_emotion", args={"emotion": "happy"})
+
+    with caplog.at_level(logging.INFO, logger="reachy_mini_conversation_app.gemini_live"):
+        await handler._handle_server_message(
+            types.LiveServerMessage(tool_call=types.LiveServerToolCall(function_calls=[call])), session, 1
+        )
+        await handler._handle_server_message(turn_complete, session, 1)
+        await handler._handle_server_message(audio_event(), session, 1)
+        await handler._handle_server_message(turn_complete, session, 1)
+        await handler._handle_server_message(turn_complete, session, 1)
+
+    silent = [record.getMessage() for record in caplog.records if "without speech" in record.getMessage()]
+    assert silent == [
+        "Gemini turn ended without speech tools=play_emotion",
+        "Gemini turn ended without speech tools=none",
+    ]
+    await handler.shutdown()
