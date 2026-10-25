@@ -94,11 +94,11 @@ _CONNECTION_QUIET_AFTER_SPEECH_S: Final[float] = 1.0
 # speech and audio: rotation waits this long after the user's speech and the model's last audio.
 _CONNECTION_QUIET_AFTER_SPEECH_NO_STATUS_S: Final[float] = 5.0
 _CONNECTION_QUIET_AFTER_MODEL_AUDIO_S: Final[float] = 2.0
-_VIDEO_FRAME_INTERVAL_S: Final[float] = 1.0
+_VIDEO_FRAME_INTERVAL_S: Final[float] = 1.5  # 1 s cost a third more for little gain in a living room
 _VIDEO_ENGAGED_S: Final[float] = 30.0
 _VIDEO_GUIDANCE: Final[str] = (
     "While the user is talking, and for a short while after, you also receive a live camera feed "
-    "from your own eyes at about one frame per second. Answer questions about what you can see "
+    "from your own eyes, a frame every second or two. Answer questions about what you can see "
     "directly from the most recent frames without calling the camera tool; use the camera tool "
     "only if you have no recent frame."
 )
@@ -1127,7 +1127,7 @@ class GeminiLiveHandler(ConversationHandler):
         return last is not None and time.perf_counter() - last <= _VIDEO_ENGAGED_S
 
     async def _stream_camera(self, session: AsyncSession, generation: int) -> None:
-        """Send about one camera frame per second while the user is engaged in conversation."""
+        """Send a camera frame every _VIDEO_FRAME_INTERVAL_S while the user is engaged in conversation."""
         media = self.deps.reachy_mini.media
         streaming = False
         failure_logged = False
