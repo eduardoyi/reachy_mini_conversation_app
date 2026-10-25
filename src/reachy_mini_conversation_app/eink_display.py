@@ -8,7 +8,9 @@ display returns to a resting "¡Hola! Soy Reachy" card.
 """
 
 import io
+import os
 import re
+import sys
 import json
 import time
 import zlib
@@ -18,12 +20,12 @@ import hashlib
 import logging
 import functools
 import threading
+import subprocess
 import unicodedata
 from typing import Callable
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 import numpy as np
 from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageFilter
@@ -31,6 +33,16 @@ from google import genai
 from google.genai import types
 from PIL.PngImagePlugin import PngInfo
 
+from reachy_mini_conversation_app.eink_server import (
+    SERVER,
+    CURRENT,
+    is_awake,
+    read_json,
+    write_json,
+    fingerprint,
+    running_pid,
+    current_filename,
+)
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.web_pictures import WebPicture, WebPictures, PictureError
 
@@ -39,12 +51,10 @@ logger = logging.getLogger(__name__)
 
 WIDTH, HEIGHT = 800, 480
 MAX_PNG_BYTES = 90_000  # the TRMNL OG does not draw larger images
-IDLE_AFTER_S = 30 * 60
-# A check-in waits this long for a new screen before answering; the firmware gives up after 15 s.
-CHECK_IN_HOLD_S = 10.0
 DRAWING_TIMEOUT_S = 20.0
 # Leaves time to draw the subject instead within the conversation's 30 s tool deadline.
 PICTURE_TIMEOUT_S = 12.0
+SERVER_START_TIMEOUT_S = 5.0
 MAX_TEXT_LINES = 6
 DRAWING_PROMPT = (
     "A friendly, simple cartoon of {subject} for young children. Bold clean black outlines on a plain white "
@@ -266,7 +276,7 @@ class Screen:
 
 
 class EInkDisplay:
-    """The current screen, the device server, drawings and web pictures."""
+    """Screens for the TRMNL, drawings and web pictures; the device server runs in its own process."""
 
     def __init__(
         self,
@@ -281,9 +291,10 @@ class EInkDisplay:
         pictures_per_day: int = 30,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        """Prepare the resting screen; the device server starts with ``start()``."""
+        """Write the resting screen to the spool folder the device server reads; ``start()`` starts the server."""
         self.port = port
         self.refresh_s = refresh_s
+        self.spool = cache_dir / "screen"
         self._cache_dir = cache_dir
         self._drawings_per_day = drawings_per_day
         self._image_model = image_model
@@ -292,58 +303,58 @@ class EInkDisplay:
         self._pictures_per_day = pictures_per_day
         self._clock = clock
         self._lock = threading.Lock()
-        self._changed = threading.Condition(self._lock)
+        self.spool.mkdir(parents=True, exist_ok=True)
         # The TRMNL keeps images by file name, <name>-<id>-<unix time>, and deletes a saved image when a
         # newer one shares its <name>-<id>. Shown screens therefore share one id and differ by time, so
-        # each replaces the last in the device's small flash instead of piling up for a day.
-        self._home = Screen(f"reachy-000000-{int(clock())}", render_home())
-        self._screen: Screen | None = None
-        self._shown_at = 0.0
-        self._stamp = 0
-        self._last_sent: str | None = None
-        self._server: ThreadingHTTPServer | None = None
+        # each replaces the last in the device's small flash instead of piling up for a day. The resting
+        # card keeps its name while it is unchanged, so a restart does not redraw it.
+        home_png = render_home()
+        home = read_json(self.spool / CURRENT).get("home")
+        if not isinstance(home, str) or self._read(home) != home_png:
+            home = f"reachy-000000-{int(clock())}"
+            (self.spool / f"{home}.png").write_bytes(home_png)
+            self._update(home=home)
 
     def show(self, png: bytes) -> None:
         """Make ``png`` the screen the TRMNL fetches at its next check-in."""
         if len(png) > MAX_PNG_BYTES:
             raise ValueError(f"Screen is {len(png)} bytes; the TRMNL draws at most {MAX_PNG_BYTES}.")
-        with self._changed:
-            self._stamp = max(int(self._clock()), self._stamp + 1)  # unique even for two screens in a second
-            self._screen = Screen(f"reachy-000001-{self._stamp}", png)
-            self._shown_at = self._clock()
-            self._changed.notify_all()
+        with self._lock:
+            last = read_json(self.spool / CURRENT).get("screen")
+            last_stamp = int(last.rsplit("-", 1)[1]) if isinstance(last, str) and last[-1:].isdigit() else 0
+            stamp = max(int(self._clock()), last_stamp + 1)  # unique even for two screens in a second
+            filename = f"reachy-000001-{stamp}"
+            (self.spool / f"{filename}.png").write_bytes(png)
+            self._update(screen=filename, shown_at=self._clock())
 
     def show_home(self) -> None:
         """Go back to the resting card."""
-        with self._changed:
-            self._screen = None
-            self._changed.notify_all()
+        with self._lock:
+            self._update(screen=None)
 
     def current(self) -> Screen:
         """Return the screen to show now: the last one shown, or the resting card once it is old."""
-        with self._lock:
-            return self._current()
+        filename = current_filename(self.spool, self._clock()) or ""
+        return Screen(filename, self._read(filename) or b"")
 
-    def screen_for_check_in(self, hold_s: float) -> Screen:
-        """Return the screen for a TRMNL check-in, holding up to ``hold_s`` for one it has not been sent yet."""
-        with self._changed:
-            self._changed.wait_for(lambda: self._current().filename != self._last_sent, timeout=hold_s)
-            screen = self._current()
-            self._last_sent = screen.filename
-            return screen
+    def awake(self) -> bool:
+        """Whether the TRMNL is checking in, so a new screen reaches it within seconds."""
+        return is_awake(self.spool, self._clock(), self.refresh_s)
 
-    def _current(self) -> Screen:
-        if self._screen is None or self._clock() - self._shown_at >= IDLE_AFTER_S:
-            return self._home
-        return self._screen
+    def _read(self, filename: str) -> bytes | None:
+        try:
+            return (self.spool / f"{filename}.png").read_bytes()
+        except OSError:
+            return None
 
-    def screen_png(self, filename: str) -> bytes | None:
-        """Return the PNG of the current or resting screen with this file name, else None."""
-        with self._lock:
-            for screen in (self._screen, self._home):
-                if screen is not None and screen.filename == filename:
-                    return screen.png
-        return None
+    def _update(self, **changes: object) -> None:
+        """Change ``current.json`` and delete screens it no longer names."""
+        current = {**read_json(self.spool / CURRENT), **changes}
+        write_json(self.spool / CURRENT, current)
+        keep = {f"{current.get('screen')}.png", f"{current.get('home')}.png"}
+        for old in self.spool.glob("reachy-*.png"):
+            if old.name not in keep:
+                old.unlink(missing_ok=True)
 
     async def drawing(self, subject: str) -> Image.Image:
         """Return a drawing of ``subject``: from the cache, else a new one counted against today's limit."""
@@ -399,7 +410,7 @@ class EInkDisplay:
             with Image.open(path) as cached:
                 return WebPicture(cached.convert("L"), str(cached.info.get("source", "")))
         if self._pictures is None:
-            raise PictureError("web pictures need BRAVE_API_KEY and TYPESAFE_API_KEY")
+            raise PictureError("picture search is not set up (it needs BRAVE_API_KEY and TYPESAFE_API_KEY)")
         if not self._take_allowance("pictures", self._pictures_per_day):
             raise PictureError("today's picture searches are used up")
         try:
@@ -433,106 +444,45 @@ class EInkDisplay:
         return True
 
     def start(self) -> None:
-        """Start the device server on all interfaces; the TRMNL reaches it over the LAN."""
-        if self._server is not None:
+        """Start the device server unless one with this code and settings is already running.
+
+        The server keeps running after Reachy stops: the TRMNL sleeps 5 minutes after a check-in fails,
+        so it must find the server there across restarts.
+        """
+        expected = fingerprint(self.port, self.refresh_s)
+        pid = running_pid(self.spool)
+        if pid is not None and read_json(self.spool / SERVER).get("fingerprint") == expected:
+            logger.info("E-ink display server already running on port %d (pid %d)", self.port, pid)
             return
-        try:
-            self._server = _DeviceServer(("0.0.0.0", self.port), self)
-        except OSError as error:
-            logger.error("E-ink display server could not start on port %d: %s", self.port, error)
-            return
-        threading.Thread(target=self._server.serve_forever, name="trmnl-server", daemon=True).start()
-        logger.info("E-ink display server listening on port %d", self.port)
+        log_path = self.spool / "server.log"
+        with log_path.open("a") as log:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "reachy_mini_conversation_app.eink_server",
+                    "--spool",
+                    str(self.spool),
+                    "--port",
+                    str(self.port),
+                    "--refresh",
+                    str(self.refresh_s),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=log,
+                start_new_session=True,  # not stopped with the app, nor by its Ctrl-C
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+        deadline = time.monotonic() + SERVER_START_TIMEOUT_S
+        while time.monotonic() < deadline and process.poll() is None:
+            if read_json(self.spool / SERVER).get("pid") == process.pid:
+                logger.info(
+                    "E-ink display server started on port %d (pid %d); log: %s", self.port, process.pid, log_path
+                )
+                return
+            time.sleep(0.05)
+        logger.error("E-ink display server did not start on port %d; see %s", self.port, log_path)
 
     def stop(self) -> None:
-        """Stop the device server."""
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-
-
-class _DeviceServer(ThreadingHTTPServer):
-    daemon_threads = True
-    block_on_close = False  # a held check-in must not delay shutdown
-
-    def __init__(self, address: tuple[str, int], display: EInkDisplay) -> None:
-        self.display = display
-        super().__init__(address, _DeviceRequestHandler)
-
-
-class _DeviceRequestHandler(BaseHTTPRequestHandler):
-    """The three endpoints the TRMNL firmware calls, plus the current screen's image."""
-
-    server: _DeviceServer
-
-    def do_GET(self) -> None:
-        display = self.server.display
-        path = self.path.split("?", 1)[0]
-        base = f"http://{self.headers.get('Host') or f'127.0.0.1:{display.port}'}"
-        if path == "/api/setup":
-            logger.info(
-                "TRMNL connected (model %s, firmware %s)", self.headers.get("Model"), self.headers.get("FW-Version")
-            )
-            home = display.current()
-            self._send_json(
-                {
-                    "status": 200,
-                    "api_key": "reachy",
-                    "friendly_id": "REACHY",
-                    "image_url": f"{base}/screens/{home.filename}.png",
-                    "message": "Connected to Reachy",
-                }
-            )
-        elif path == "/api/display":
-            logger.debug(
-                "TRMNL check-in: battery %s V, signal %s dBm",
-                self.headers.get("Battery-Voltage"),
-                self.headers.get("RSSI"),
-            )
-            # Answering as soon as a screen changes saves the device a sleep, a reboot and a Wi-Fi reconnect.
-            screen = display.screen_for_check_in(CHECK_IN_HOLD_S)
-            self._send_json(
-                {
-                    "status": 0,
-                    "image_url": f"{base}/screens/{screen.filename}.png",
-                    "filename": screen.filename,
-                    "refresh_rate": display.refresh_s,  # an int: the firmware reads a string as 0
-                    "reset_firmware": False,
-                    "update_firmware": False,
-                    "firmware_url": None,
-                    "special_function": "none",
-                }
-            )
-        elif path.startswith("/screens/") and path.endswith(".png"):
-            png = display.screen_png(path[len("/screens/") : -len(".png")])
-            if png is None:
-                self.send_error(404)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(png)))
-            self.end_headers()
-            self.wfile.write(png)
-        else:
-            self.send_error(404)
-
-    def do_POST(self) -> None:
-        if self.path.split("?", 1)[0] != "/api/log":
-            self.send_error(404)
-            return
-        length = min(int(self.headers.get("Content-Length") or 0), 64_000)
-        logger.info("TRMNL reported: %s", self.rfile.read(length).decode(errors="replace")[:500])
-        self.send_response(204)
-        self.end_headers()
-
-    def _send_json(self, body: dict[str, object]) -> None:
-        payload = json.dumps(body).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, format: str, *args: object) -> None:
-        logger.debug(format, *args)
+        """Leave the device server running, so the TRMNL keeps checking in while Reachy restarts."""

@@ -10,6 +10,10 @@ import pytest
 from PIL import Image
 
 from reachy_mini_conversation_app.web_pictures import (
+    UNSAFE,
+    UNCLEAR,
+    NO_MATCH,
+    NO_ANSWER,
     TYPESAFE_URL,
     BRAVE_IMAGES_URL,
     WebPictures,
@@ -145,43 +149,59 @@ async def test_only_brave_thumbnails_are_ever_downloaded() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "verdict",
+    ("verdict", "reason"),
     [
-        pytest.param({**SAFE, "shows_subject": 0.6}, id="weak-match"),
-        pytest.param({**SAFE, "sexual": 0.3}, id="sexual"),
-        pytest.param({**SAFE, "violent": 0.35}, id="violent"),
-        pytest.param({**SAFE, "mature": 0.6}, id="mature"),
-        pytest.param({**SAFE, "cluttered": 0.9}, id="logo-or-collage"),
-        pytest.param({**SAFE, "nudity": 0.9}, id="nudity-outside-fine-art"),
-        pytest.param({**SAFE, "clear_on_screen": 0.3}, id="too-dark-or-small-on-screen"),
+        pytest.param({**SAFE, "shows_subject": 0.6}, NO_MATCH, id="weak-match"),
+        pytest.param({**SAFE, "sexual": 0.3}, UNSAFE, id="sexual"),
+        pytest.param({**SAFE, "violent": 0.35}, UNSAFE, id="violent"),
+        pytest.param({**SAFE, "mature": 0.6}, UNSAFE, id="mature"),
+        pytest.param({**SAFE, "cluttered": 0.9}, NO_MATCH, id="logo-or-collage"),
+        pytest.param({**SAFE, "nudity": 0.9}, UNSAFE, id="nudity-outside-fine-art"),
+        pytest.param({**SAFE, "clear_on_screen": 0.3}, UNCLEAR, id="too-dark-or-small-on-screen"),
         # Measured on Goya's The Third of May 1808: fine art, but realistic blood.
-        pytest.param({**SAFE, "fine_art": 0.97, "violent": 0.97, "graphic": 0.85}, id="graphic-even-as-art"),
-        pytest.param({**SAFE, "fine_art": 0.5, "violent": 0.94}, id="violent-and-unsure-it-is-art"),
-        pytest.param({**CLASSICAL_NUDE, "sexual": 0.5}, id="suggestive-even-as-art"),
-        pytest.param({**CLASSICAL_NUDE, "fine_art": 0.6}, id="unsure-it-is-art"),
-        pytest.param({name: value for name, value in SAFE.items() if name != "mature"}, id="missing-answer"),
+        pytest.param({**SAFE, "fine_art": 0.97, "violent": 0.97, "graphic": 0.85}, UNSAFE, id="graphic-even-as-art"),
+        pytest.param({**SAFE, "fine_art": 0.5, "violent": 0.94}, UNSAFE, id="violent-and-unsure-it-is-art"),
+        pytest.param({**CLASSICAL_NUDE, "sexual": 0.5}, UNSAFE, id="suggestive-even-as-art"),
+        pytest.param({**CLASSICAL_NUDE, "fine_art": 0.6}, UNSAFE, id="unsure-it-is-art"),
+        pytest.param({name: value for name, value in SAFE.items() if name != "mature"}, UNSAFE, id="missing-answer"),
     ],
 )
-async def test_any_doubt_rejects_the_picture(verdict: dict[str, float]) -> None:
+async def test_any_doubt_rejects_the_picture_and_says_why(verdict: dict[str, float], reason: str) -> None:
     """A weak match, any likely risk, nudity outside fine art, or a missing answer means the picture is not shown."""
-    with pytest.raises(PictureError, match="passed the check"):
+    with pytest.raises(PictureError) as raised:
         await _FakeWeb([_result(1)], [verdict]).pictures().find("cat")
+    assert str(raised.value) == reason
+
+
+@pytest.mark.asyncio
+async def test_the_most_important_reason_is_given_when_every_picture_fails() -> None:
+    """Safety outranks clarity, which outranks a poor match, so Reachy never hides why it held a picture back."""
+    unclear, no_match, unsafe = (
+        {**SAFE, "clear_on_screen": 0.1},
+        {**SAFE, "shows_subject": 0.1},
+        {**SAFE, "violent": 0.9},
+    )
+    three = [_result(1), _result(2), _result(3)]
+    with pytest.raises(PictureError, match=UNSAFE):
+        await _FakeWeb(three, [unclear, no_match, unsafe]).pictures().find("cat")
+    with pytest.raises(PictureError, match=UNCLEAR):
+        await _FakeWeb(three, [no_match, unclear, no_match]).pictures().find("cat")
 
 
 @pytest.mark.asyncio
 async def test_failures_raise_picture_errors() -> None:
     """A failed search, no results, a failed check or unusable thumbnails all end in a PictureError."""
-    with pytest.raises(PictureError, match="search failed"):
+    with pytest.raises(PictureError, match="search did not work"):
         await _FakeWeb([], [], search_status=500).pictures().find("cat")
     with pytest.raises(PictureError, match="no pictures"):
         await _FakeWeb([], []).pictures().find("cat")
-    with pytest.raises(PictureError, match="passed the check"):
+    with pytest.raises(PictureError, match=NO_ANSWER):
         await _FakeWeb([_result(1)], [SAFE], check_status=429).pictures().find("cat")
     tiny = _FakeWeb([_result(1)], [SAFE], images={"1.jpg": _jpeg((120, 90))})
-    with pytest.raises(PictureError, match="downloaded"):
+    with pytest.raises(PictureError, match="could not be loaded"):
         await tiny.pictures().find("cat")
     broken = _FakeWeb([_result(1)], [SAFE], images={"1.jpg": b"not an image"})
-    with pytest.raises(PictureError, match="downloaded"):
+    with pytest.raises(PictureError, match="could not be loaded"):
         await broken.pictures().find("cat")
 
 

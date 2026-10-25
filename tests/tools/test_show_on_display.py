@@ -1,6 +1,7 @@
 """Tests for the show_on_display tool."""
 
 import io
+import time
 import asyncio
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ from PIL import Image
 
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.eink_server import DEVICE, write_json
 from reachy_mini_conversation_app.eink_display import EInkDisplay
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -43,15 +45,15 @@ class _FakePictures:
 
     async def find(self, subject: str) -> WebPicture:
         if not self.found:
-            raise PictureError("no picture passed the check")
+            raise PictureError("the pictures found were not right for children")
         return WebPicture(Image.new("RGB", (500, 375), (90, 90, 90)), "wikipedia.org")
 
 
 def _display(
-    tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: int = 20, pictures: Any = None
+    tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: int = 20, pictures: Any = None, awake: bool = True
 ) -> EInkDisplay:
     client: Any = SimpleNamespace(aio=SimpleNamespace(models=_FakeModels())) if with_drawings else None
-    return EInkDisplay(
+    display = EInkDisplay(
         port=8090,
         refresh_s=60,
         cache_dir=tmp_path,
@@ -60,6 +62,9 @@ def _display(
         client=client,
         pictures=pictures,
     )
+    if awake:
+        write_json(display.spool / DEVICE, {"ended": time.time()})  # the TRMNL just checked in
+    return display
 
 
 def _deps(display: EInkDisplay | None) -> ToolDependencies:
@@ -144,13 +149,13 @@ async def test_the_daily_limit_offers_cards_instead(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_a_word_card_still_shows_when_its_picture_fails(tmp_path: Path) -> None:
-    """The word matters more than its picture: the card shows without it and the note says so."""
+    """The word matters more than its picture: the card shows without it and Reachy is told so."""
     display = _display(tmp_path, with_drawings=False)
     home = display.current()
 
     result = await ShowOnDisplay()(_deps(display), kind="word", word="cane", meaning="perro", picture="dog")
 
-    assert result["ok"] is True and "no picture" in result["note"]
+    assert result["ok"] is True and "no picture" in result["instruction"]
     assert display.current() != home
 
 
@@ -181,12 +186,28 @@ async def test_a_web_picture_is_shown_when_one_passes_the_check(tmp_path: Path) 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pictures", [_FakePictures(found=False), None])
 async def test_without_a_suitable_picture_it_is_drawn_instead(tmp_path: Path, pictures: Any) -> None:
-    """No safe picture, or no picture search set up, still shows something: a drawing, and the note says so."""
+    """No safe picture, or no picture search set up, still shows a drawing, and Reachy is told to say why."""
     display = _display(tmp_path, pictures=pictures)
     home = display.current()
 
     result = await ShowOnDisplay()(_deps(display), kind="picture", subject="a tiger")
 
-    assert result["ok"] is True and "drawing" in result["note"]
+    assert result["ok"] is True and result["shown"] == "a drawing, not a real picture"
+    reason = "not right for children" if pictures else "picture search is not set up"
+    assert result["instruction"].startswith("Tell them you could not show a real picture because")
+    assert reason in result["instruction"] and result["instruction"].endswith("so you drew it instead.")
     assert display.current() != home
     assert (tmp_path / "drawings" / "a-tiger.png").is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_sleeping_screen_is_reported_instead_of_claimed_shown(tmp_path: Path) -> None:
+    """When the TRMNL has stopped checking in, the screen is still set, but Reachy says it is napping."""
+    display = _display(tmp_path, pictures=_FakePictures(found=False), awake=False)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_deps(display), kind="picture", subject="a tiger")
+
+    assert "asleep" in result["note"]
+    assert "drew it instead" in result["instruction"] and "button on its back" in result["instruction"]
+    assert display.current() != home

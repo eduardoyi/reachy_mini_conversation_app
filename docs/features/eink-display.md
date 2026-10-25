@@ -23,8 +23,10 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
   finds candidates and Jev checks each shows the subject and has no violence, mature content or
   nudity; classical and fine-art nudity is allowed, and fierce animals (open-jawed sharks, roaring
   dinosaurs) are fine, by the household's choice. If none passes, the keys are missing, today's 30 searches are used or
-  it takes over 12 s, the subject is drawn instead and Reachy is told so. A subject shown before
-  comes from the cache.
+  it takes over 12 s, the subject is drawn instead and Reachy is told to say why, in plain words:
+  the pictures found were not right for children, would be too hard to see, did not clearly show it,
+  or the search or check did not work (when candidates fail for different reasons the most important
+  one is given, safety first). A subject shown before comes from the cache.
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
   large type, its pronunciation written for a Spanish speaker ("la MÉ-la"), the Spanish meaning, an
   optional header and an optional small drawing. If the drawing fails the card shows without it.
@@ -35,6 +37,12 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
   says its pencil needs a rest; cards and cached drawings still work.
 - A drawing that fails (no API key, blocked by Google's filter, over 20 s) leaves the screen as it
   was, and Reachy is told to say so and not retry.
+- If the TRMNL has not checked in for over 30 s (plus the refresh rate), the screen is still set,
+  but Reachy is told to say the screen is napping and will show it within a few minutes, or at once
+  if someone presses the button on its back. The firmware sleeps a fixed 5 minutes after any failed
+  check-in (a Wi-Fi drop, the Mac asleep, the server being replaced or the server's first start).
+- Restarting Reachy does not disturb the screen: the device server runs in its own process and keeps
+  answering the TRMNL, and the screen shown before the restart stays until it is replaced or idles out.
 
 ## Setup
 
@@ -91,21 +99,32 @@ flowchart LR
   Draw -->|cache miss| Gemini[gemini-3.1-flash-lite-image]
   Tool --> Render[render_drawing / render_word / render_text]
   Render -->|2-bit PNG| State[EInkDisplay.show]
-  TRMNL -->|GET /api/display, held up to 10 s| Server[device server thread]
-  Server --> State
+  State -->|PNG + current.json| Spool[(display/screen/)]
+  TRMNL -->|GET /api/display, held up to 10 s| Server[eink_server process]
+  Server -->|reads screens, writes device.json| Spool
   TRMNL -->|GET /screens/name.png| Server
 ```
 
-- `EInkDisplay` holds the current screen and the resting card behind a lock. The device server is
-  a standard-library `ThreadingHTTPServer` on `0.0.0.0:TRMNL_PORT` in a daemon thread, started and
-  stopped by `main.run()`, independent of `--ui`.
+- The device server (`eink_server.py`, standard library only) is its own process: a
+  `ThreadingHTTPServer` on `0.0.0.0:TRMNL_PORT`. It outlives the app because the TRMNL sleeps
+  5 minutes after a failed check-in and a restarting app is down for about 20 s.
+  `EInkDisplay.start()` (from `main.run()`, independent of `--ui`) reuses a running server whose
+  fingerprint (hash of `eink_server.py` plus port and refresh rate) matches, and otherwise launches
+  `python -m reachy_mini_conversation_app.eink_server` in a new session. A new server SIGTERMs the
+  old one, which answers its held check-ins at once and frees the port; the new one binds within
+  milliseconds, so a takeover is not a failed check-in. `stop()` leaves the server running. To stop it:
+  `.venv/bin/python -m reachy_mini_conversation_app.eink_server --stop`.
+- They share the spool folder `~/.cache/reachy-mini-conversation-app/display/screen/`: one PNG per
+  screen (only the current screen and the resting card are kept), `current.json` (screen, resting
+  card, time shown; replaced atomically), `device.json` (check-in start and end times, which
+  `EInkDisplay.awake()` reads), `server.json` (pid, fingerprint) and `server.log`.
 - The tool runs on the conversation loop and awaits the drawing (about 3 s; the Live tool deadline
   is 30 s). Rendering and the screen swap are synchronous.
 - Speed: the TRMNL deep-sleeps between check-ins and reboots and reconnects to Wi-Fi on every wake,
   so a plain poll is slow (measured: a 60 s rate averaged ~35 s to pick up a screen; a 5 s rate gave
   a 16 s cycle and ~6 s). Instead each `/api/display` request is held for up to `CHECK_IN_HOLD_S`
-  (10 s, under the firmware's 15 s read timeout) and answered the moment `show()` or `show_home()`
-  changes the screen (`screen_for_check_in`, a condition variable). With a 1 s sleep the device is
+  (10 s, under the firmware's 15 s read timeout) and answered as soon as `show()` or `show_home()`
+  changes the screen (`DeviceServer.screen_for_check_in` polls `current.json` every 0.2 s). With a 1 s sleep the device is
   listening most of the time: measured 0–2 s to fetch a screen shown after a quiet spell, ~5.5 s
   when screens come seconds apart (the device is still drawing the last one).
 - The firmware does not redraw an image whose file name it has just shown, so frequent check-ins
@@ -121,7 +140,8 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens and server | `eink_display.py` | `render_home/drawing/word/text() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/screen_png/drawing/start/stop` |
+| Screens | `eink_display.py` | `render_home/drawing/word/text() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/awake/drawing/picture/start/stop` |
+| Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
 | Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
@@ -165,13 +185,20 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 - The server listens on all interfaces without authentication (the TRMNL firmware sends no
   credential when fetching images). Anything on the LAN can read the current screen: drawings and
   short text, never audio, camera frames or memory. The setup `api_key` is a fixed placeholder.
+- The current screen and resting card are kept on disk in the spool folder until replaced, so short
+  text shown on the screen (a list, a name) stays in `~/.cache` until the next screen.
 - Web pictures send the subject words (chosen by the model, never raw speech) to Brave, and web
   thumbnails (never household images) to TypeSafe. Picture checks rely on TypeSafe's experimental
   image input; if Jev rejects or cannot read images, every picture falls back to a drawing.
 - Logs carry the screen kind, firmware/model at setup, and battery/signal at debug level, never the
   words or subjects shown.
-- A port already in use logs an error; the app runs without the display.
+- A port already in use (or a server that does not start within 5 s) logs an error pointing to
+  `server.log`; the app runs without the display. The server log has setup, device reports and
+  "TRMNL checking in again after N s"; Reachy's own log no longer shows them.
 - Drawing failures leave the screen unchanged; the word card degrades to no picture.
+- The TRMNL sleeps 5 minutes after one failed check-in (`SHORT_TERM_SLOW_RETRY_INTERVAL`; API retries
+  are fixed at that value in current firmware). `EInkDisplay.awake()` reports it from check-in times,
+  and the log says "TRMNL checking in again after N s" when it returns.
 - Pillow's built-in font lacks accents and ¡¿ñ, hence the bundled font.
 
 ## Dependencies
@@ -184,9 +211,9 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
-| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure and daily limit messages; word card without its picture; the `TRMNL_ENABLED` gate |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
+| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure and daily limit messages; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
 | `tests/test_config.py` | `TRMNL_*` and `DISPLAY_DRAWINGS_PER_DAY` parsing and fallbacks |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
@@ -207,6 +234,10 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: The device server runs as its own lasting process, so restarting Reachy no longer
+  sends the TRMNL into its 5-minute sleep.
+- 2026-10-25: Reachy no longer claims a screen it could not show: a drawing fallback comes with the
+  reason to say, and a sleeping TRMNL (5 minutes after a failed check-in) is reported as napping.
 - 2026-10-25: Clarity no longer rejects fine art (Guardi's Venice was drawn instead); it still ranks copies.
 - 2026-10-25: Fine art may depict violence unless it is graphic (new `graphic` question): Guernica shows,
   Goya's Third of May and The Death of Marat do not.

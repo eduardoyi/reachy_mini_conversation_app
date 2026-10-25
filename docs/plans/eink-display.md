@@ -166,3 +166,20 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   (the wheel test builds from tracked files, so it passed before the font was committed): the font
   path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.
   Full gate after v2: ruff, format, mypy (100 files) clean; 1,836 passed, 4 skipped.
+- 2026-10-25: Reachy said it showed pictures that never appeared. Two causes: (1) a drawing
+  fallback only added a note, so Reachy announced "the painting"; `PictureError` now says why in
+  plain words (unsafe > unclear > no match > no answer) and the tool returns
+  `shown: "a drawing, not a real picture"` with an `instruction` to say it. (2) A Guardi Rialto
+  painting passed Jev and was set as the screen (a 42 KB render that looked right), but the TRMNL
+  made no check-in for 20 s of watching: the app had been restarted at 09:04 (about 19 s down), and
+  firmware `applyApiRetry` sleeps a fixed 300 s after any failed check-in. The display now tracks
+  check-ins (`awake()`, gap 30 s + refresh rate), and the tool tells Reachy to say the screen is
+  napping and that the back button wakes it.
+  The TRMNL resumed check-ins around 09:11, about 5 minutes after the restart, and fetched the
+  waiting Rialto screen. Full gate: ruff, format, mypy (100 files) clean; 1,854 passed, 4 skipped.
+- 2026-10-25: Restarts no longer put the TRMNL to sleep. The firmware cannot be told to retry
+  sooner (`applyApiRetry` is fixed at 300 s and only custom firmware could change it), so the server
+  must never be missing: `eink_server.py` now runs as its own process that outlives the app, reads
+  screens from a spool folder and records check-ins there. A new app reuses it; changed server code
+  or settings replace it with a hand-off that answers held check-ins first and rebinds within
+  milliseconds. Startup of the server module: 0.05 s (standard library only).

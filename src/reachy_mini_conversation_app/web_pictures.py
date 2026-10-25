@@ -125,8 +125,16 @@ _QUESTIONS: dict[str, dict[str, object]] = {
 }
 
 
+# Why no picture was shown, in words Reachy can pass on; the most important reason across candidates wins.
+UNSAFE = "the pictures found were not right for children"
+UNCLEAR = "the pictures found would be too hard to see on the screen"
+NO_MATCH = "no picture clearly showed it"
+NO_ANSWER = "the picture check did not answer"
+_REASONS_BY_PRIORITY = (UNSAFE, UNCLEAR, NO_MATCH, NO_ANSWER)
+
+
 class PictureError(RuntimeError):
-    """No suitable picture could be found."""
+    """No suitable picture could be found; the message says why in plain words."""
 
 
 @dataclass(frozen=True)
@@ -163,15 +171,16 @@ class WebPictures:
             pictures = await asyncio.gather(*(self._download(client, url) for url, _ in candidates))
             downloaded = [(picture, source) for picture, (_, source) in zip(pictures, candidates) if picture]
             if not downloaded:
-                raise PictureError("no picture could be downloaded")
-            clarity = await asyncio.gather(*(self._clarity(client, subject, picture) for picture, _ in downloaded))
+                raise PictureError("the pictures could not be loaded")
+            verdicts = await asyncio.gather(*(self._check(client, subject, picture) for picture, _ in downloaded))
         approved = [
             (score, -rank, picture, source)
-            for rank, ((picture, source), score) in enumerate(zip(downloaded, clarity))
+            for rank, ((picture, source), (score, _)) in enumerate(zip(downloaded, verdicts))
             if score is not None
         ]
         if not approved:
-            raise PictureError("no picture passed the check")
+            problems = {problem for _, problem in verdicts}
+            raise PictureError(next(reason for reason in _REASONS_BY_PRIORITY if reason in problems))
         _, _, picture, source = max(approved, key=lambda candidate: candidate[:2])
         return WebPicture(picture, source)
 
@@ -186,7 +195,8 @@ class WebPictures:
             response.raise_for_status()
             results = response.json().get("results", [])
         except (httpx.HTTPError, ValueError) as error:
-            raise PictureError(f"image search failed ({type(error).__name__})") from error
+            logger.warning("Image search failed: %s", type(error).__name__)
+            raise PictureError("the picture search did not work") from error
         candidates: list[tuple[str, str]] = []
         for result in results if isinstance(results, list) else []:
             thumbnail = (result.get("thumbnail") or {}).get("src") if isinstance(result, dict) else None
@@ -213,8 +223,8 @@ class WebPictures:
             return None
         return picture if min(picture.size) >= MIN_SHORT_SIDE else None
 
-    async def _clarity(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> float | None:
-        """Ask Jev about ``picture``; its clarity on screen if it passes every check, else None."""
+    async def _check(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> tuple[float | None, str]:
+        """Ask Jev about ``picture``: (its clarity on screen, "") if it passes every check, else (None, why not)."""
         short_side, long_side = CHECK_SIDES
         scale = max(short_side / min(picture.size), 1.0)
         scale = min(scale, long_side / max(picture.size))
@@ -259,16 +269,20 @@ class WebPictures:
             answers = {name: float(answer["noul"]) for name, answer in response.json()["answers"].items()}
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
             logger.warning("Picture check failed: %s", type(error).__name__)
-            return None
+            return None, NO_ANSWER
         fine_art = answers.get("fine_art", 0.0) >= MIN_FINE_ART
         limits = {**MAX_RISKS, "sexual": FINE_ART_MAX_SEXUAL, "violent": 1.0} if fine_art else MAX_RISKS
-        approved = (
-            answers.get("shows_subject", 0.0) >= MIN_SHOWS_SUBJECT
-            and all(answers.get(name, 1.0) <= limit for name, limit in limits.items())
-            and (answers.get("nudity", 1.0) <= MAX_NUDITY or fine_art)
-            and answers.get("graphic", 1.0) <= MAX_GRAPHIC
-            and (fine_art or answers.get("clear_on_screen", 0.0) >= MIN_CLEAR_ON_SCREEN)
+        unsafe = (
+            any(answers.get(name, 1.0) > limits[name] for name in ("sexual", "violent", "mature"))
+            or (answers.get("nudity", 1.0) > MAX_NUDITY and not fine_art)
+            or answers.get("graphic", 1.0) > MAX_GRAPHIC
         )
+        no_match = (
+            answers.get("shows_subject", 0.0) < MIN_SHOWS_SUBJECT
+            or answers.get("cluttered", 1.0) > limits["cluttered"]
+        )
+        unclear = not fine_art and answers.get("clear_on_screen", 0.0) < MIN_CLEAR_ON_SCREEN
+        problem = UNSAFE if unsafe else NO_MATCH if no_match else UNCLEAR if unclear else ""
         scores = ", ".join(f"{name}={value:.2f}" for name, value in sorted(answers.items()))
-        logger.info("Picture check: %s (%s)", "approved" if approved else "rejected", scores)
-        return answers["clear_on_screen"] if approved else None
+        logger.info("Picture check: %s (%s)", problem or "approved", scores)
+        return (None, problem) if problem else (answers.get("clear_on_screen", 0.0), "")

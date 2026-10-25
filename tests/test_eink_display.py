@@ -1,8 +1,10 @@
 """Tests for the TRMNL e-ink screens, device server and drawings."""
 
 import io
+import os
 import json
 import time
+import signal
 import socket
 import asyncio
 import threading
@@ -15,12 +17,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from reachy_mini_conversation_app import eink_display
+from reachy_mini_conversation_app import eink_server, eink_display
+from reachy_mini_conversation_app.eink_server import SERVER, AWAKE_GAP_S, IDLE_AFTER_S, DeviceServer, read_json
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.eink_display import (
     WIDTH,
     HEIGHT,
-    IDLE_AFTER_S,
     MAX_PNG_BYTES,
     EInkDisplay,
     DrawingError,
@@ -160,8 +162,10 @@ def test_each_screen_gets_a_new_firmware_friendly_filename(tmp_path: Path) -> No
     for name in names:
         prefix, serial, stamp = name.split("-")
         assert len(name) <= 31 and len(f"{prefix}-{serial}") == 13 and len(stamp) == 10
-    assert display.screen_png(display.current().filename) == display.current().png
-    assert display.screen_png("reachy-999999-1792878594") is None
+    server = _server(display)
+    assert server.screen_png(display.current().filename) == display.current().png
+    assert server.screen_png("reachy-999999-1792878594") is None
+    server.server_close()
 
 
 def test_shown_screens_share_one_id_so_the_device_keeps_only_the_latest(tmp_path: Path) -> None:
@@ -176,22 +180,29 @@ def test_shown_screens_share_one_id_so_the_device_keeps_only_the_latest(tmp_path
     assert len(shown_ids) == 1 and home_id not in shown_ids
 
 
+def _server(display: EInkDisplay, clock: Any = time.time) -> DeviceServer:
+    """Return a device server on a free local port, reading ``display``'s spool folder."""
+    return DeviceServer(display.spool, 0, display.refresh_s, host="127.0.0.1", clock=clock)
+
+
 def test_a_held_check_in_answers_as_soon_as_a_screen_is_shown(tmp_path: Path) -> None:
     """A check-in with nothing new waits; showing a screen answers it at once instead of after the hold."""
     display = _display(tmp_path)
-    assert display.screen_for_check_in(5.0) == display.current()  # first check-in: nothing sent yet
+    server = _server(display)
+    assert server.screen_for_check_in(5.0) == display.current().filename  # first check-in: nothing sent yet
 
-    answered: list[tuple[str, float]] = []
+    answered: list[tuple[str | None, float]] = []
 
     def check_in() -> None:
         started = time.monotonic()
-        answered.append((display.screen_for_check_in(5.0).filename, time.monotonic() - started))
+        answered.append((server.screen_for_check_in(5.0), time.monotonic() - started))
 
     waiting = threading.Thread(target=check_in)
     waiting.start()
     time.sleep(0.2)
     display.show(render_text(["hola"]))
     waiting.join(timeout=5)
+    server.server_close()
 
     assert answered and answered[0][0] == display.current().filename
     assert 0.1 < answered[0][1] < 2.0
@@ -199,12 +210,54 @@ def test_a_held_check_in_answers_as_soon_as_a_screen_is_shown(tmp_path: Path) ->
 
 def test_a_check_in_with_nothing_new_returns_the_same_screen_after_the_hold(tmp_path: Path) -> None:
     """With no change the held check-in gives up after the hold and repeats the screen the device already has."""
-    display = _display(tmp_path)
-    sent = display.screen_for_check_in(1.0)
+    server = _server(_display(tmp_path))
+    sent = server.screen_for_check_in(1.0)
 
     started = time.monotonic()
-    assert display.screen_for_check_in(0.3) == sent
+    assert server.screen_for_check_in(0.3) == sent
     assert time.monotonic() - started >= 0.3
+    server.server_close()
+
+
+def test_the_screen_counts_as_awake_only_while_it_keeps_checking_in(tmp_path: Path) -> None:
+    """Never checked in, or silent for longer than a normal gap, means a new screen will not arrive soon."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock, refresh_s=1)
+    assert not display.awake()
+
+    server = _server(display, clock)
+    server.screen_for_check_in(0.0)
+    server.server_close()
+    clock.now += AWAKE_GAP_S
+    assert display.awake()
+    clock.now += 2
+    assert not display.awake()
+
+
+def test_a_held_check_in_counts_as_awake(tmp_path: Path) -> None:
+    """While the device waits on a held check-in it is awake, however long ago the last one ended."""
+    display = _display(tmp_path)
+    server = _server(display)
+    holding = threading.Thread(target=server.screen_for_check_in, args=(1.0,))
+    holding.start()
+    time.sleep(0.2)
+    assert display.awake()
+    holding.join()
+    server.server_close()
+
+
+def test_a_restarted_app_keeps_the_screen_and_the_resting_card_name(tmp_path: Path) -> None:
+    """The screen lives in the spool folder, so restarting Reachy neither blanks it nor makes the TRMNL redraw."""
+    first = _display(tmp_path)
+    home = first.current().filename
+    first.show(render_text(["hola"]))
+    shown = first.current()
+
+    again = _display(tmp_path)
+    assert again.current() == shown
+    again.show_home()
+    assert again.current().filename == home
+    assert sorted(path.name for path in again.spool.glob("reachy-*.png")) == [f"{home}.png"]
 
 
 def test_oversized_screens_are_refused(tmp_path: Path) -> None:
@@ -265,14 +318,14 @@ async def test_failed_drawings_raise_drawing_errors(tmp_path: Path, monkeypatch:
 @pytest.fixture
 def served_display(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[EInkDisplay]:
     """Run the device server on a free local port for the test."""
-    monkeypatch.setattr(eink_display, "CHECK_IN_HOLD_S", 0.2)
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    display = _display(tmp_path, port=port)
-    display.start()
+    monkeypatch.setattr(eink_server, "CHECK_IN_HOLD_S", 0.2)
+    display = _display(tmp_path)
+    server = _server(display)
+    display.port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     yield display
-    display.stop()
+    server.shutdown()
+    server.server_close()
 
 
 def _get(display: EInkDisplay, path: str) -> tuple[int, bytes, str]:
@@ -382,3 +435,59 @@ async def test_picture_failures_raise_picture_errors(tmp_path: Path, monkeypatch
     with pytest.raises(PictureError, match="too long"):
         await _display(tmp_path, pictures=_FakePictures(delay_s=1.0)).picture("cat")
     assert not list(tmp_path.rglob("cat.png"))
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _wait_for_server(display: EInkDisplay, not_pid: int | None = None) -> int:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        pid = read_json(display.spool / SERVER).get("pid")
+        if isinstance(pid, int) and pid != not_pid:
+            return pid
+        time.sleep(0.05)
+    raise AssertionError("the device server did not start")
+
+
+def test_the_device_server_outlives_the_app_and_is_replaced_only_when_it_changes(tmp_path: Path) -> None:
+    """start() launches a separate server, a restarted app reuses it, and new settings replace it in place."""
+    display = _display(tmp_path, port=_free_port())
+    pids: list[int] = []
+    try:
+        display.start()
+        pids.append(_wait_for_server(display))
+        display.stop()
+        assert _get(display, "/api/setup")[0] == 200  # still answering with the app stopped
+
+        _display(tmp_path, port=display.port).start()
+        assert read_json(display.spool / SERVER)["pid"] == pids[0]
+
+        replacement = _display(tmp_path, port=display.port, refresh_s=5)
+        replacement.start()
+        pids.append(_wait_for_server(replacement, not_pid=pids[0]))
+        assert json.loads(_get(replacement, "/api/display")[1])["refresh_rate"] == 5
+        assert _exited(pids[0]), "the replaced server is still running"
+    finally:
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            _exited(pid)
+
+
+def _exited(pid: int, timeout_s: float = 5.0) -> bool:
+    """Wait for a server this test started to exit, reaping it."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return True
+        except ChildProcessError:
+            return True
+        time.sleep(0.05)
+    return False

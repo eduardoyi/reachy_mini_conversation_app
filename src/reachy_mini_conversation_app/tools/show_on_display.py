@@ -86,7 +86,10 @@ class ShowOnDisplay(Tool):
                         png = render_photo(found.image, caption, found.source)
                     except PictureError as error:
                         logger.info("No web picture, drawing instead: %s", error)
-                        result["note"] += " No suitable picture was found, so it is a drawing."
+                        result["shown"] = "a drawing, not a real picture"
+                        result["instruction"] = (
+                            f"Tell them you could not show a real picture because {error}, so you drew it instead."
+                        )
                 if png is None:
                     png = render_drawing(await display.drawing(subject), caption)
             elif kind == "word":
@@ -99,7 +102,7 @@ class ShowOnDisplay(Tool):
                         picture = await display.drawing(subject)
                     except DrawingError as error:
                         logger.info("Word card shown without its picture: %s", error)
-                        result["note"] += " It has no picture this time."
+                        result["instruction"] = "The card has no picture this time; mention it if they expected one."
                 png = render_word(
                     word,
                     _text(kwargs, "pronunciation"),
@@ -124,4 +127,11 @@ class ShowOnDisplay(Tool):
             logger.warning("show_on_display drawing failed: %s", error)
             return {"error": f"Could not draw that: {error}.", "instruction": "Tell them kindly. Do not retry."}
         display.show(png)
+        if not display.awake():
+            result["note"] = "The screen is asleep; it wakes and shows this within about five minutes."
+            napping = (
+                "Say the screen is napping, so it will show up in a few minutes, "
+                "or right away if they press the button on its back."
+            )
+            result["instruction"] = f"{result['instruction']} {napping}" if "instruction" in result else napping
         return result
