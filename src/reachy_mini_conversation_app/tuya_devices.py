@@ -130,7 +130,7 @@ class TuyaHome:
     async def apply(self, device: HubDevice, change: LightChange) -> None:
         """Change one device."""
         entry = self._entries[device.id]
-        await asyncio.to_thread(self._apply, entry, change)
+        await asyncio.to_thread(self._apply, entry, change, device.color_only)
 
     def _address(self, device_id: str) -> tuple[str, str] | None:
         with self._lock:
@@ -196,7 +196,7 @@ class TuyaHome:
             logger.debug("Tuya read failed for %s: %s", entry.name, type(error).__name__)
             return unreachable
 
-    def _apply(self, entry: TuyaEntry, change: LightChange) -> None:
+    def _apply(self, entry: TuyaEntry, change: LightChange, color_only: bool = False) -> None:
         device = self._connect(entry)
         if device is None:
             raise HomeDeviceError(f"{entry.name} is not on the network")
@@ -213,6 +213,11 @@ class TuyaHome:
                 results.append(device.turn_on())
             if entry.kind == "light":
                 in_colour = change.warmth is None and device.get_mode() == "colour"
+                if color_only and not in_colour and change.color is None:
+                    # An RGB strip left in white mode (by a warmth or its remote) reports on but stays dark
+                    # (2026-10-25, TV Lights); its color mode brings back the last color.
+                    results.append(device.set_mode("colour"))
+                    in_colour = True
                 if change.color is not None or (change.brightness is not None and in_colour):
                     current_hue, current_saturation, current_value = (
                         device.colour_hsv() if in_colour else (0.0, 0.0, 1.0)

@@ -1,6 +1,7 @@
 import json
 from typing import Any
 from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
@@ -64,6 +65,11 @@ class _FakeBulb:
     def set_brightness_percentage(self, brightness: int) -> dict[str, Any]:
         self.calls.append(("brightness", brightness))
         return {"Error": "Device Unreachable"} if self.fail else {}
+
+    def set_mode(self, mode: str) -> dict[str, Any]:
+        self.calls.append(("mode", mode))
+        self.mode = mode
+        return {}
 
 
 class _FakePlug:
@@ -161,6 +167,25 @@ async def test_a_plain_on_relights_a_strip_that_wrongly_reports_on(tmp_path: Pat
 
     assert bulb.calls == [("off",), ("on",)]
     assert plug.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_a_color_only_strip_leaves_white_mode_when_switched_on(tmp_path: Path) -> None:
+    """In white mode the RGB TV strip said "on" but stayed dark; switching it on now brings back its color."""
+    bulb, plug = _FakeBulb(mode="white"), _FakePlug()
+    home, _ = _home(tmp_path, bulb, plug)
+    strip, _plug, _offline = await home.devices()
+    strip = replace(strip, color_only=True, kelvin_range=None)
+
+    await home.apply(strip, LightChange(on=True))
+    assert bulb.calls[-2:] == [("on",), ("mode", "colour")]
+
+    bulb.calls.clear()
+    await home.apply(strip, LightChange(on=True))  # already in color: nothing more
+    assert ("mode", "colour") not in bulb.calls
+    bulb.mode = "white"
+    await home.apply(strip, LightChange(on=False))
+    assert bulb.calls[-1] == ("off",) and bulb.mode == "white"
 
 
 def test_light_change_keeps_only_what_a_device_supports() -> None:

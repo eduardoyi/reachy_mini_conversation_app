@@ -69,6 +69,13 @@ integration) is the path that scales.
   (Tuya keeps rooms in its cloud) and defines areas within a room. The household
   has one IKEA "Living room" with two areas, Living and Dining, and the Tuya strip
   and plugs are placed in it.
+- `"color_only"` in the layout lists RGB lights whose white mode leaves them dark.
+  The household's TV strip (Tuya `dj`) reports a color temperature, so it was
+  offered warmth. A warmth or "white" switched it to white mode, where it said
+  "on" but showed nothing (2026-10-25, after "movie mode"). A color-only light has
+  no warmth: white and warmth become a near-white color (`white_as_color`, a pale
+  amber for warm through plain white for cool). Switching it on also puts it back
+  in color mode if something left it in white mode, such as its own remote.
 - Targets match in this order:
   1. everything: `all`, or plain "the lights" in any of the four languages;
   2. a device name, so "Living lamp" is the lamp and not the Living area

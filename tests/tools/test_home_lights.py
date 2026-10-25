@@ -1,4 +1,5 @@
 from typing import Any
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -33,6 +34,7 @@ CEILING = HubDevice("2", "light", "Techo", "Salón", True, True, brightness=80)
 PLUG = HubDevice("3", "outlet", "Floor lamp plug", "Bedroom", False, True, source="tuya")
 OFFLINE = HubDevice("4", "light", "Kids lamp", "Kids room", False, False, brightness=10)
 STRIP = HubDevice("5", "light", "TV Lights", None, True, True, brightness=40, colors=True, source="tuya")
+CEILING_WARM = HubDevice("2", "light", "Techo", "Salón", True, True, brightness=80, kelvin_range=(2200, 4000))
 
 
 def _deps(home: Any) -> ToolDependencies:
@@ -214,6 +216,37 @@ def test_home_layout_loads_and_tolerates_a_missing_file(tmp_path: Any) -> None:
     lamp = layout.apply(HubDevice("1", "outlet", "lampara", None, False, True))
     assert lamp.room == "Salón"
     assert layout.apply(HubDevice("2", "outlet", "dining lamp", "Kitchen", False, True)).areas == ("Dining",)
+
+
+def test_home_layout_marks_color_only_lights_and_drops_their_white_mode(tmp_path: Any) -> None:
+    """A color-only light loses the white range its system claims; a light without colors is left alone."""
+    from reachy_mini_conversation_app.home_devices import HomeLayout
+
+    path = tmp_path / "layout.json"
+    path.write_text('{"color_only": ["tv lights", "Floor lamp plug"]}')
+    layout = HomeLayout.load(path)
+    strip = layout.apply(replace(STRIP, kelvin_range=(2700, 6500)))
+    assert strip.color_only and not strip.warmth and strip.colors
+    assert layout.apply(PLUG) == PLUG
+
+
+@pytest.mark.asyncio
+async def test_white_and_warmth_on_a_color_only_light_become_a_color() -> None:
+    """The RGB strip went dark in white mode, so white is sent to it as a color instead."""
+    from reachy_mini_conversation_app.home_devices import white_as_color
+
+    strip = replace(STRIP, color_only=True)
+    home = _FakeHome([strip, CEILING_WARM])
+    result = await HomeLights()(_deps(home), action="set", target="all", color="white")
+    changes = dict(home.changes)
+    assert changes["5"] == LightChange(on=True, color=white_as_color(0.5))
+    assert changes["2"] == LightChange(on=True, warmth=0.5)
+    assert "note" not in result
+
+    home.changes.clear()
+    await HomeLights()(_deps(home), action="set", target="TV Lights", warmth="warm")
+    assert home.changes == [("5", LightChange(on=True, color=(30.0, 0.5)))]
+    assert white_as_color(1.0) == (30.0, 0.0)
 
 
 @pytest.mark.asyncio

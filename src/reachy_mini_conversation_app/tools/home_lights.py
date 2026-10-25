@@ -274,7 +274,7 @@ class HomeLights(Tool):
             notes.append("Plugs only switch on and off.")
         if color is not None and any(device.dims and not device.colors for device in targets):
             notes.append("Some of these lights cannot show colors.")
-        if warmth is not None and any(device.dims and not device.warmth for device in targets):
+        if warmth is not None and any(device.dims and not device.warmth and not device.colors for device in targets):
             notes.append("Some of these lights have fixed white.")
         if notes:
             response["note"] = " ".join(notes)

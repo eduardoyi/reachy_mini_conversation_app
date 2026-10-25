@@ -37,6 +37,8 @@ class HubDevice:
     colors: bool = False  # can show any color
     source: str = "dirigera"
     areas: tuple[str, ...] = ()  # parts of a room ("Dining"), from the home layout
+    # Only shows colors (an RGB strip): its system's white mode leaves it dark, so white is made as a color.
+    color_only: bool = False
 
     @property
     def dims(self) -> bool:
@@ -68,10 +70,15 @@ class LightChange:
     color: tuple[float, float] | None = None  # (hue 0-360, saturation 0-1)
 
     def for_device(self, device: HubDevice) -> LightChange | None:
-        """Keep only what ``device`` supports; a brightness, warmth or color alone also turns it on."""
+        """Keep only what ``device`` supports; a brightness, warmth or color alone also turns it on.
+
+        A light that shows colors but has no white control gets warmth as a near-white color.
+        """
         brightness = self.brightness if device.dims else None
         warmth = self.warmth if device.warmth else None
         color = self.color if device.colors else None
+        if color is None and warmth is None and self.warmth is not None and device.colors:
+            color = white_as_color(self.warmth)
         on = self.on
         if on is None and (brightness is not None or warmth is not None or color is not None):
             on = True
@@ -102,6 +109,11 @@ class HomeProvider(Protocol):
     async def close(self) -> None:
         """Release connections."""
         ...
+
+
+def white_as_color(warmth: float) -> tuple[float, float]:
+    """Return (hue, saturation) for white on an RGB-only light: warm is a pale amber, cool is plain white."""
+    return (30.0, round(0.5 * (1 - max(0.0, min(1.0, warmth))), 3))
 
 
 def normalize_name(text: str) -> str:
@@ -165,7 +177,8 @@ class HomeLayout:
     Read from a JSON file such as
     ``{"rooms": {"TV Lights": "Living room"}, "areas": {"Dining": ["Dining light 1", "Dining lamp"]}}``;
     device names match without case or accents. Optional: ``"left_out_of_all_on": ["TV Lights"]``
-    (lights that "turn on the lights" skips; turning everything off still includes them) and
+    (lights that "turn on the lights" skips; turning everything off still includes them),
+    ``"color_only": ["TV Lights"]`` (RGB lights whose white mode is dark; see ``HubDevice.color_only``) and
     ``"routines"`` (see ``Routine``), e.g.
     ``[{"say": ["movie mode", "modo cine"], "on": ["TV Lights"], "off": ["all"]}]``.
     """
@@ -173,6 +186,7 @@ class HomeLayout:
     rooms: dict[str, str] = field(default_factory=dict)
     areas: dict[str, tuple[str, ...]] = field(default_factory=dict)
     left_out_of_all_on: frozenset[str] = frozenset()
+    color_only: frozenset[str] = frozenset()
     routines: tuple[Routine, ...] = ()
 
     @classmethod
@@ -193,16 +207,21 @@ class HomeLayout:
             rooms={normalize_name(str(k)): str(v) for k, v in (rooms or {}).items()},
             areas={str(area): tuple(normalize_name(str(n)) for n in names) for area, names in (areas or {}).items()},
             left_out_of_all_on=frozenset(normalize_name(str(n)) for n in raw.get("left_out_of_all_on") or ()),
+            color_only=frozenset(normalize_name(str(n)) for n in raw.get("color_only") or ()),
             routines=_routines(raw.get("routines")),
         )
 
     def apply(self, device: HubDevice) -> HubDevice:
-        """Give ``device`` its layout room (if its system has none) and its areas."""
+        """Give ``device`` its layout room (if its system has none), its areas, and mark it color-only."""
         key = normalize_name(device.name)
         room = device.room or self.rooms.get(key)
         areas = tuple(area for area, names in self.areas.items() if key in names)
-        if room == device.room and areas == device.areas:
+        color_only = device.color_only or (key in self.color_only and device.colors)
+        if room == device.room and areas == device.areas and color_only == device.color_only:
             return device
+        if color_only:
+            # Its system may claim a white mode (the TV strip reports a color temperature); offering it would go dark.
+            return replace(device, room=room, areas=areas, color_only=True, kelvin_range=None)
         return replace(device, room=room, areas=areas)
 
 
