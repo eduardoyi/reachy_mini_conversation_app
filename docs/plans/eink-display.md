@@ -25,7 +25,7 @@ image generation uses the existing `GEMINI_API_KEY`.
 | HTTP stack | Standard-library `ThreadingHTTPServer`, standard library only so a replacement starts in 0.05 s; a new server stops the old one and rebinds within milliseconds | Three tiny endpoints; no new dependency; runs with or without `--ui` |
 | Image format | 800x480 2-bit grayscale PNG (four levels 0/85/170/255), < 90 KB | What the OG draws (TRMNL ImageMagick guide); encoded with zlib + numpy |
 | Drawing model | `gemini-3.1-flash-lite-image` (Nano Banana 2 Lite) | Listed for this key; 2.9 s for a 1200x896 drawing in a live test (2026-10-24); same API key; Google's safety filters |
-| Drawing style | Fixed prompt: an accurate encyclopedia-style illustration, real proportions and details, black ink outlines, flat light/mid grey, white background, no text or labels, no cartoon faces, nothing gory (since 2026-10-25; v1 used friendly children's cartoons) | Looks right in four grays and does not talk down to anyone; also the content guardrail; nobody chooses the style |
+| Drawing style | Fixed prompt: a clean, simple flat illustration, accurate shapes with only the main details, bold thick outlines, large flat light/mid grey areas, white background, no text or labels, no cartoon faces, nothing gory (since 2026-10-25; v1 used friendly children's cartoons, then briefly a too-detailed encyclopedia style) | Looks right in four grays and does not talk down to anyone; also the content guardrail; nobody chooses the style |
 | Text | Typed by our renderer, never drawn by the model | Image models misspell; Spanish/Italian need accents |
 | Font | Atkinson Hyperlegible (OFL, bundled, ~55 KB per weight) | Pillow's built-in font has no accents or ¡¿ñ; designed for legibility |
 | New dependency | Pillow (HPND license, no network access, wheels for Linux/macOS/Windows) | Decoding the model's JPEG, scaling, drawing text |
@@ -202,3 +202,10 @@ port answers setup/display/image like the device expects. Tool: no display, each
   - Lite redrawing a Brave + Jev reference photo: 4–8 s, faithful, but it traces the photo (clouds,
     a crane) and cannot show a step no photo shows; Brave refused 4 of 5 simultaneous searches
     (rate limit). Not adopted.
+- 2026-10-25: On the TRMNL the encyclopedia style looked wrong (photos from the household): thin
+  outlines broke into dashes and Parque das Nações was a noisy dark mass. Median smoothing at screen
+  size made it worse (it erased the lines). Compared two simpler prompts on five subjects: "simple"
+  (bold thick outlines, large flat areas, only the main details) kept the RAV4, Starship and its tower,
+  T. rex and Eiffel Tower accurate and readable, and turned Parque das Nações into the Oriente station
+  and the Vasco da Gama tower; "bold pictogram" lost too much (no launch tower). Adopted "simple";
+  cache `drawings-v3/`; 3.0–3.6 s.

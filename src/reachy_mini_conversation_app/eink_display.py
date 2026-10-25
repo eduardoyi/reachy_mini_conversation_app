@@ -55,15 +55,18 @@ PICTURE_TIMEOUT_S = 12.0
 SERVER_START_TIMEOUT_S = 5.0
 MAX_TEXT_LINES = 6
 MAX_STEPS = 4
+# Accurate shapes but bold lines and big flat areas: thin lines break into dashes in four grays, and busy
+# scenes turn into dark noisy blobs on the TRMNL (seen 2026-10-25 with a detailed encyclopedia style).
 DRAWING_PROMPT = (
-    "A clear, accurate illustration of {subject}, like a drawing in a good illustrated encyclopedia: true "
-    "proportions and real details, clean confident black ink outlines, flat fills in light grey and medium grey "
-    "on a plain white background. No gradients, photographic shading or texture. No text, letters, numbers or "
-    "labels. No cartoon faces or eyes on objects. One subject, centered, filling most of the frame. Calm and "
-    "suitable for a family home, nothing gory."
+    "A clean, simple illustration of {subject}, like a modern flat illustration in a children's science book: "
+    "accurate shapes and proportions with only the main details, bold thick black outlines, large flat areas of "
+    "light grey and medium grey on a plain white background. No small details, thin lines, hatching, texture, "
+    "gradients or shading. No text, letters, numbers or labels. No cartoon faces or eyes on objects. One subject, "
+    "centered, filling most of the frame. Calm and suitable for a family home, nothing gory."
 )
-# Drawings are cached per style; the 2026-10-24 cartoon style lives on in drawings/ and is no longer used.
-DRAWINGS_DIR = "drawings-v2"
+# Drawings are cached per style, so a new style never shows old drawings: drawings/ holds the 2026-10-24
+# cartoons and drawings-v2/ the too-detailed encyclopedia style; neither is used any more.
+DRAWINGS_DIR = "drawings-v3"
 _ASSETS = Path(__file__).parent / "static" / "eink"
 _GREY, _LIGHT_GREY = 85, 170
 _LEVEL_EDGES = (64, 128, 230)

@@ -292,7 +292,7 @@ async def test_drawings_are_made_once_and_then_cached(tmp_path: Path) -> None:
     assert first.size == again.size == (643, 480)
     assert len(models.prompts) == 1
     assert "A Cat" in models.prompts[0] and "No text" in models.prompts[0]
-    assert "No cartoon faces" in models.prompts[0] and "encyclopedia" in models.prompts[0]
+    assert "No cartoon faces" in models.prompts[0] and "bold thick black outlines" in models.prompts[0]
     assert (tmp_path / DRAWINGS_DIR / "a-cat.png").is_file()  # a new style never reuses old drawings
     record = get_ledger().entries()[-1]
     assert record["feature"] == "display_drawing"

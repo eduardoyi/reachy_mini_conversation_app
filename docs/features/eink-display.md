@@ -15,8 +15,8 @@ Out of scope so far: stories, scheduled pages such as a morning page or calendar
 
 ## User-visible behavior
 
-- "Draw me a dinosaur": Reachy says to look at the screen; an encyclopedia-style illustration (real
-  proportions, ink outlines, flat greys, no cartoon faces) with a caption
+- "Draw me a dinosaur": Reachy says to look at the screen; a clean, simple illustration (accurate
+  shapes with only the main details, bold outlines, large flat greys, no cartoon faces) with a caption
   appears a few seconds later (about 3 s to draw, usually 0–2 s for the TRMNL to fetch it, then the
   e-ink redraw). Asking for the same subject again reuses the saved drawing.
 - "Show me the Mona Lisa", "what does a Falcon 9 look like?": a real picture from the web, dithered
@@ -135,7 +135,7 @@ flowchart LR
 - The firmware does not redraw an image whose file name it has just shown, so frequent check-ins
   never flash the panel (`display_session.cpp`: "The image hasn't changed since the last wakeup").
 - Drawings and pictures are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/display/`
-  (`drawings-v2/` for the current style, `pictures/` with the source site in a PNG text chunk), named by the subject folded
+  (`drawings-v3/` for the current style, `pictures/` with the source site in a PNG text chunk), named by the subject folded
   to ASCII ("A Cat" and "a cat" share one).
 - Each drawing's tokens go to the usage ledger as feature `display_drawing`, each Brave search as
   `display_picture_search` (`{"request": 1}`, $0.005) and each Jev check as `display_picture_check`
@@ -241,6 +241,10 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: The encyclopedia style was too detailed for the TRMNL: thin lines broke into dashes (a
+  RAV4) and a busy scene (Parque das Nações) became dark noisy blobs. Smoothing at screen size erased
+  the lines instead. Drawings now ask for bold thick outlines, large flat greys and only the main
+  details (`drawings-v3/`); still accurate, still about 3 s.
 - 2026-10-25: Drawings switched from children's cartoons to an encyclopedia-style illustration (same
   model and speed, new `drawings-v2/` cache). Grounded Nano Banana 2.1 was more accurate but took 13–30 s,
   so it is not used; see the plan's execution log.
