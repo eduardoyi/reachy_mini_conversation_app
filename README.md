@@ -494,7 +494,7 @@ HYBRID_CLOUD_INACTIVITY_SECONDS=30 \
 .venv/bin/reachy-mini-conversation-app --media-backend local --ui
 ```
 
-Use headphones. Say **Reachy**, wait for the acknowledgment nod, then speak your
+Use headphones. Say **Reachy**, wait for the antennas to perk up, then speak your
 request. The wake frame and earlier audio stay local; follow-on live speech uses
 the normal cloud conversation. This trial does not recover a command spoken
 inside the same microphone frame as the wake. The cloud closes after 30 seconds

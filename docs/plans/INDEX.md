@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Wake antenna cue](wake-antenna-cue.md) | `in-progress` | 2026-10-25 | Antennas perk out and hold while Reachy listens, release when he answers; head lift replaces the nod; built and tested, robot check pending |
 | [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | Drawings, web pictures (Jev check), word cards, text and v3 visual explanations live on the TRMNL; device server is its own process; no daily caps; stories, morning page and calendar deferred |
 | [Skill tools](skill-tools.md) | `in-progress` | 2026-10-25 | Rare tools behind use_skill/skill_help; fixed block −25% measured live; household test pending |
 | [Now playing on the e-ink screen](now-playing-display.md) | `in-progress` | 2026-10-25 | Spotify song card on the TRMNL; built, tested and checked live with music (card per song with cover) |

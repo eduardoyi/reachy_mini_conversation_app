@@ -18,7 +18,8 @@ Units and frames
 - Antennas and `body_yaw` are in radians.
 
 Safety
-- Listening freezes antennas, then blends them back on unfreeze.
+- A wake or listening springs the antennas to an alert pose and holds it until he answers,
+  then blends them back.
 - Interpolations and blends are used to avoid jumps at all times.
 - `set_target` errors are rate-limited in logs.
 """
@@ -51,6 +52,16 @@ CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement contr
 SPEAKER_TURN_MIN_RAD = np.deg2rad(25.0)
 SPEAKER_TURN_MIN_DURATION_S = 0.5
 SPEAKER_TURN_MAX_DURATION_S = 1.4
+# Wake cue: on a wake the antennas spring out to an alert V (the pose of the "attentive" emotion) and hold
+# it while he listens, so you can see he heard his name. They drop back once he starts answering.
+ATTENTIVE_ANTENNAS = (-float(np.deg2rad(35.0)), float(np.deg2rad(35.0)))
+# Without an answer, stop holding this long after the wake or the user's last words.
+ATTENTIVE_HOLD_S = 8.0
+# Damped spring toward the alert pose: ~20% overshoot, settled in about 0.4 s.
+PERK_DECAY_S = 0.1
+PERK_FREQUENCY_HZ = 3.0
+# Caps the perk's swing, e.g. out of the folded sleep pose; recorded emotions peak near 8 rad/s.
+PERK_MAX_SPEED_RAD_S = 6.0
 
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
@@ -133,16 +144,16 @@ class BreathingMove(Move):  # type: ignore
 
 
 class ActivationAcknowledgementMove(Move):  # type: ignore
-    """Short relative nod that returns to the captured full-body pose."""
+    """Short relative head lift that returns to the captured full-body pose."""
 
-    duration = 0.18
+    duration = 0.35
 
     def __init__(self, start_pose: FullBodyPose) -> None:
         """Capture the worker's last commanded pose as the gesture baseline."""
         self._start_pose = clone_full_body_pose(start_pose)
 
     def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
-        """Return a relative nod and the exact captured pose at both endpoints."""
+        """Return a relative chin-up lift and the exact captured pose at both endpoints."""
         if t <= 0.0 or t >= self.duration:
             start_head, start_antennas, body_yaw = clone_full_body_pose(self._start_pose)
             return (
@@ -152,7 +163,7 @@ class ActivationAcknowledgementMove(Move):  # type: ignore
             )
 
         progress = max(0.0, min(1.0, t / self.duration))
-        pitch = 4.0 * np.sin(np.pi * progress)
+        pitch = -8.0 * np.sin(np.pi * progress)  # negative pitch looks up
         offset = create_head_pose(0, 0, 0, 0, pitch, 0, degrees=True)
         head_pose = compose_world_offset(self._start_pose[0], offset, reorthonormalize=True)
         antennas_array = np.asarray(self._start_pose[1], dtype=np.float64)
@@ -383,6 +394,10 @@ class MovementManager:
         self._antenna_unfreeze_blend = 1.0
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
         self._last_listening_blend_time = self._now()
+        # Wake cue: the alert antennas hold while listening or until this deadline; None when released.
+        self._attentive_until: float | None = None
+        self._perk_started_at: float | None = None  # when the antennas began springing to the alert pose
+        self._perk_from: Tuple[float, float] = self._last_commanded_pose[1]
         self._breathing_active = False  # true when breathing move is running or queued
         self._listening_debounce_s = 0.15
         self._last_listening_toggle_time = self._now()
@@ -454,8 +469,8 @@ class MovementManager:
         """Enable or disable listening mode without touching shared state directly.
 
         While listening:
-        - Antenna positions are frozen at the last commanded values.
-        - Blending is reset so that upon unfreezing the antennas return smoothly.
+        - The antennas hold the alert pose, then keep holding it while he works out an answer.
+        - Blending is reset so that once released the antennas return smoothly.
         - Idle breathing is suppressed.
 
         Thread-safe: the change is posted to the worker command queue.
@@ -525,6 +540,7 @@ class MovementManager:
             with self._status_lock:
                 start_pose = clone_full_body_pose(self._last_commanded_pose)
             self.move_queue.append(ActivationAcknowledgementMove(start_pose))
+            self._attentive_until = self._now() + ATTENTIVE_HOLD_S
             self.state.update_activity()
             logger.debug("Queued activation acknowledgment move")
         elif command == "clear_queue":
@@ -557,15 +573,10 @@ class MovementManager:
             self._last_listening_blend_time = now
             if desired_state:
                 self._request_speaker_turn()
-                # Freeze: snapshot current commanded antennas and reset blend
-                self._listening_antennas = (
-                    float(self._last_commanded_pose[1][0]),
-                    float(self._last_commanded_pose[1][1]),
-                )
-                self._antenna_unfreeze_blend = 0.0
             else:
-                # Unfreeze: restart blending from frozen pose
-                self._antenna_unfreeze_blend = 0.0
+                # Keep the alert pose while he works out an answer; speaking releases it.
+                self._attentive_until = now + ATTENTIVE_HOLD_S
+            self._antenna_unfreeze_blend = 0.0
             self.state.update_activity()
         elif command == "set_head_tracking":
             self._tracking_auto = False
@@ -578,6 +589,7 @@ class MovementManager:
                     self._set_head_tracking(True)
                     self._tracking_auto = True
             else:
+                self._attentive_until = None
                 if self._tracking_auto:
                     self._tracking_auto = False
                     self._set_head_tracking(False)
@@ -588,6 +600,8 @@ class MovementManager:
         elif command == "wake_up":
             pass  # already awake
         elif command == "set_speaking":
+            if payload:
+                self._attentive_until = None  # answering: drop the alert antennas
             if not self._head_tracking:
                 return
             speaking = bool(payload)
@@ -636,6 +650,7 @@ class MovementManager:
         self.state.move_start_time = None
         self._breathing_active = False
         self._is_listening = False
+        self._attentive_until = None
         self._gaze_yaw = 0.0
         self._sleeping = True
         self._sleep_hold = sleep_move()
@@ -876,9 +891,11 @@ class MovementManager:
         self._manage_breathing(current_time)
 
     def _calculate_blended_antennas(self, target_antennas: Tuple[float, float]) -> Tuple[float, float]:
-        """Blend target antennas with listening freeze state and update blending."""
+        """Hold the alert antennas while attentive, else blend back to the target antennas."""
         now = self._now()
-        listening = self._is_listening
+        if self._attentive_until is not None and now >= self._attentive_until:
+            self._attentive_until = None
+        listening = self._is_listening or self._attentive_until is not None
         listening_antennas = self._listening_antennas
         blend = self._antenna_unfreeze_blend
         blend_duration = self._antenna_blend_duration
@@ -886,9 +903,11 @@ class MovementManager:
         self._last_listening_blend_time = now
 
         if listening:
-            antennas_cmd = listening_antennas
+            antennas_cmd = self._perk_antennas(now, max(0.0, now - last_update))
+            self._listening_antennas = antennas_cmd  # releasing blends back from wherever the perk is
             new_blend = 0.0
         else:
+            self._perk_started_at = None
             dt = max(0.0, now - last_update)
             if blend_duration <= 0:
                 new_blend = 1.0
@@ -910,6 +929,22 @@ class MovementManager:
                 )
 
         return antennas_cmd
+
+    def _perk_antennas(self, now: float, dt: float) -> Tuple[float, float]:
+        """Spring from where the antennas were toward the alert pose, speed-capped (worker thread only)."""
+        with self._status_lock:
+            previous = self._last_commanded_pose[1]
+        if self._perk_started_at is None:
+            self._perk_started_at = now
+            self._perk_from = (float(previous[0]), float(previous[1]))
+        t = now - self._perk_started_at
+        reach = 1.0 - np.exp(-t / PERK_DECAY_S) * np.cos(2 * np.pi * PERK_FREQUENCY_HZ * t)
+        max_step = PERK_MAX_SPEED_RAD_S * dt
+        left, right = (
+            float(np.clip(start + (alert - start) * reach, last - max_step, last + max_step))
+            for start, alert, last in zip(self._perk_from, ATTENTIVE_ANTENNAS, previous)
+        )
+        return left, right
 
     def _issue_control_command(
         self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float

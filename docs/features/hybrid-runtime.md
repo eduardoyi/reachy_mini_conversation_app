@@ -232,7 +232,9 @@ provider. `ConversationHandler` supplies typed traffic, connection, and
 startup-greeting controls. `MovementManager.acknowledge_activation()` is the
 only path used for the physical activation acknowledgment; the runtime never calls robot
 motor APIs. The manager's worker captures its last commanded full-body pose,
-applies a relative nod, and returns to that exact pose.
+applies a relative head lift, and returns to that exact pose. The same call springs
+the antennas to an alert pose and holds it until Reachy answers; see
+[wake cue](wake-cue.md).
 
 Before transitioning out of `CLOUD_CONVERSATION`, the runtime synchronously calls
 `ConversationHandler.stop_background_work()`. Providers with background cloud work
@@ -528,7 +530,7 @@ A bare acoustic wake now requests a brief spoken acknowledgment after the provid
 is ready. Local post-barrier speech energy suppresses this request when the user
 has already continued speaking; this does not require local STT. Addressed text
 retains its existing single-submission path. Silence in the setup FIFO does not
-suppress the acknowledgment. The physical nod remains immediate, and startup
+suppress the acknowledgment. The physical acknowledgment (head lift and antenna perk, formerly a nod) remains immediate, and startup
 greetings remain disabled for other hybrid activation paths.
 
 The acknowledgment uses the existing provider `say()` boundary with a short

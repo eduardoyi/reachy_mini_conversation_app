@@ -9,6 +9,9 @@ import pytest
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
+    ATTENTIVE_HOLD_S,
+    ATTENTIVE_ANTENNAS,
+    PERK_MAX_SPEED_RAD_S,
     GazeTurnMove,
     BreathingMove,
     MovementManager,
@@ -146,6 +149,105 @@ def test_activation_acknowledgement_is_worker_owned_relative_and_returns_to_star
     np.testing.assert_array_equal(antennas_peak, start_pose[1])
     np.testing.assert_array_equal(antennas_end, start_pose[1])
     assert (yaw_start, yaw_peak, yaw_end) == (start_pose[2],) * 3
+
+
+class _AntennaClock:
+    """Drive the antenna layer tick by tick on a fake clock, as the worker loop would."""
+
+    def __init__(self, manager: MovementManager, antennas: tuple[float, float] = (-0.1745, 0.1745)) -> None:
+        self.manager = manager
+        self.now = 1000.0
+        manager._now = lambda: self.now
+        manager._last_listening_blend_time = self.now
+        manager._last_listening_toggle_time = self.now - 1.0  # past the listening debounce
+        manager._last_commanded_pose = (np.eye(4), antennas, 0.0)
+        manager._listening_antennas = antennas
+
+    def tick(self, target: tuple[float, float] = (-0.1745, 0.1745), dt: float = 1 / 60) -> tuple[float, float]:
+        self.now += dt
+        self.manager._poll_signals(self.now)
+        antennas = self.manager._calculate_blended_antennas(target)
+        self.manager._issue_control_command(np.eye(4), antennas, 0.0)
+        return antennas
+
+    def run(self, seconds: float, target: tuple[float, float] = (-0.1745, 0.1745)) -> list[tuple[float, float]]:
+        return [self.tick(target) for _ in range(round(seconds * 60))]
+
+
+def test_wake_springs_the_antennas_to_the_alert_pose_and_holds_it() -> None:
+    """A wake flicks the antennas past the alert pose, then they settle there and stay while he listens."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+
+    manager.acknowledge_activation()
+    path = clock.run(1.0)
+
+    # The right antenna's alert angle is positive: it overshoots, then settles on the pose.
+    assert max(right for _, right in path) > ATTENTIVE_ANTENNAS[1] + np.deg2rad(3)
+    np.testing.assert_allclose(path[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
+
+    # Listening, then the pause while he works out an answer, keep the pose.
+    manager.set_listening(True)
+    clock.run(3.0)
+    manager.set_listening(False)
+    np.testing.assert_allclose(clock.run(ATTENTIVE_HOLD_S - 1.0)[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
+
+
+def test_answering_releases_the_alert_antennas_smoothly() -> None:
+    """Speaking drops the hold; the antennas ease back to the move's antennas instead of snapping."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+    manager.acknowledge_activation()
+    clock.run(1.0)
+
+    manager.set_speaking(True)
+    first = clock.tick()
+    assert abs(first[1] - ATTENTIVE_ANTENNAS[1]) < np.deg2rad(5)
+    np.testing.assert_allclose(clock.run(0.5)[-1], (-0.1745, 0.1745), atol=1e-6)
+
+
+@pytest.mark.parametrize("release", ["timeout", "conversation_closed", "sleep"])
+def test_alert_antennas_release_without_an_answer(release: str) -> None:
+    """A wake nobody follows up on, a closed conversation, or sleep all let the antennas relax."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+    manager.acknowledge_activation()
+    clock.run(1.0)
+
+    if release == "timeout":
+        clock.run(ATTENTIVE_HOLD_S)
+    elif release == "conversation_closed":
+        manager.set_conversation_active(False)
+    else:
+        manager.go_to_sleep()
+    clock.run(1.0)
+
+    assert manager._attentive_until is None
+    assert manager._perk_started_at is None
+
+
+def test_following_turns_perk_again_when_the_user_speaks() -> None:
+    """Without a wake word, the user starting to talk raises the antennas again."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+
+    manager.set_listening(True)
+    np.testing.assert_allclose(clock.run(1.0)[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
+
+
+def test_perk_out_of_the_sleep_pose_is_speed_capped() -> None:
+    """Waking from the folded sleep pose swings the antennas up no faster than the cap."""
+    from reachy_mini.reachy_mini import SLEEP_ANTENNAS_JOINT_POSITIONS
+
+    manager = MovementManager(MagicMock())
+    sleep_antennas = (float(SLEEP_ANTENNAS_JOINT_POSITIONS[0]), float(SLEEP_ANTENNAS_JOINT_POSITIONS[1]))
+    clock = _AntennaClock(manager, sleep_antennas)
+    manager.acknowledge_activation()
+
+    path = [sleep_antennas, *clock.run(1.5, target=sleep_antennas)]
+    steps = np.abs(np.diff(np.asarray(path), axis=0))
+    assert steps.max() <= PERK_MAX_SPEED_RAD_S / 60 + 1e-9
+    np.testing.assert_allclose(path[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
 
 
 def _robot_facing(yaw_deg: float = 0.0, body_yaw: float = 0.0) -> MagicMock:

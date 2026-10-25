@@ -1148,7 +1148,7 @@ claim or measured acoustic latency.
 
 Acoustic wake and transcript wake are mutually exclusive in this trial. Acoustic
 wake opens the existing cloud path directly; it does not wait for or classify a
-local STT follow-up. Say Reachy, wait for the nod, then speak. Prebarrier capture
+local STT follow-up. Say Reachy, wait for the antennas to perk up, then speak. Prebarrier capture
 never enters the provider; postbarrier frames retain the existing bounded
 handshake FIFO. No guarantee is made for a command inside the wake's captured
 frame. Keyboard/browser activation is unchanged. Inactivity or manual deactivation

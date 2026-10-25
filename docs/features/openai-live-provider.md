@@ -216,8 +216,9 @@ regressions passed; its validation log separates these from pending Gemini live 
 Session readiness clears listening mode rather than holding it for the entire
 connection. This leaves local antenna motion, idle breathing, and idle-policy
 eligibility available; their existing activity guards still apply. GPT Live does
-not currently provide mapped user speech boundaries, so listening-specific
-antenna freezing is unavailable. Output speaking state still controls the existing
+not currently provide mapped user speech boundaries, so follow-up turns do not
+perk the antennas; the [wake cue](wake-cue.md) still perks on the wake and holds
+until the first speaking state. Output speaking state still controls the existing
 face-tracking handoff; it does not generate animation.
 
 Speech-reactive head wobble remains the SDK's local playback behavior. Normal
