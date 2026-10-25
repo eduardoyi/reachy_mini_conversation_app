@@ -1,17 +1,17 @@
 # Feature: E-ink display (TRMNL)
 
-- Status: `in-progress` (v1 and v2 checked live on the household TRMNL, including real web pictures; voice use not yet tried)
+- Status: `in-progress` (drawings, web pictures, word cards, text and visual explanations checked live on the household TRMNL; pictures used by voice; explanations not yet asked for by voice)
 - Last updated: 2026-10-25
 - Plan: [docs/plans/eink-display.md](../plans/eink-display.md)
 
 ## Overview
 
-Reachy shows drawings, checked pictures from the web, word cards and short text on a TRMNL OG e-ink display (7.5", 800x480,
-four grays). It is a deliberately slow, low-stimulation screen: no video, no feed, no apps. The
+Reachy shows drawings, checked pictures from the web, word cards, short text and step-by-step visual
+explanations on a TRMNL OG e-ink display (7.5", 800x480, four grays). It is a deliberately slow, low-stimulation screen: no video, no feed, no apps. The
 screen changes only when someone asks; otherwise it shows a resting card with a cartoon Reachy and
 "¡Hola! Soy Reachy / Hi, I'm Reachy".
 
-Out of scope so far: multi-panel visual explanations, stories, scheduled pages (see the plan).
+Out of scope so far: stories, scheduled pages such as a morning page or calendar (see the plan).
 
 ## User-visible behavior
 
@@ -27,6 +27,10 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
   the pictures found were not right for children, would be too hard to see, did not clearly show it,
   or the search or check did not work (when candidates fail for different reasons the most important
   one is given, safety first). A subject shown before comes from the cache.
+- "How does a seed grow?", "why does it rain?": a visual explanation, a title over 2–4 numbered
+  panels, each with its own drawing and a short caption in the child's language (one row for two or
+  three steps, two rows of two for four). The drawings are made at the same time (measured: four in
+  3.0 s, a 9 KB screen). A panel whose drawing fails shows only its words, and Reachy is told.
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
   large type, its pronunciation written for a Spanish speaker ("la MÉ-la"), the Spanish meaning, an
   optional header and an optional small drawing. If the drawing fails the card shows without it.
@@ -132,22 +136,24 @@ flowchart LR
 - Drawings and pictures are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/display/`
   (`drawings/`, `pictures/` with the source site in a PNG text chunk), named by the subject folded
   to ASCII ("A Cat" and "a cat" share one).
-- Each drawing's tokens go to the usage ledger as feature `display_drawing`. Brave searches and Jev
-  checks are not in the ledger yet (Brave bills per search; Jev reports input tokens).
+- Each drawing's tokens go to the usage ledger as feature `display_drawing`, each Brave search as
+  `display_picture_search` (`{"request": 1}`, $0.005) and each Jev check as `display_picture_check`
+  (Jev's reported input and output tokens; $0.042 per 1M input, output free). Failed searches and
+  checks are not recorded.
 
 ## Canonical files and contracts
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens | `eink_display.py` | `render_home/drawing/word/text() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/awake/drawing/picture/start/stop` |
+| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/awake/drawing/picture/start/stop` |
 | Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
 | Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt` |
-| Guidance | `profiles/household_companion/profile.md` | When to use the screen; Spanish-style pronunciation and Spanish meanings for Italian words |
+| Guidance | `profiles/household_companion/profile.md` | When to use the screen (explanations for how and why questions); Spanish-style pronunciation and Spanish meanings for Italian words |
 
 TRMNL device API, as served (firmware 1.8.17 checked):
 
@@ -210,9 +216,9 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
-| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
+| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
@@ -222,7 +228,7 @@ Commands run on 2026-10-25 (macOS, Python 3.12):
 ruff check . --fix && ruff format . && mypy --pretty --show-error-codes && pytest tests/ -v
 ```
 
-Results: full gate clean; 1,817 passed, 4 skipped.
+Results: full gate clean; 1,817 passed, 4 skipped (v1). Latest (2026-10-25, explanations and picture costs): 1,883 passed, 4 skipped.
 
 Live check 2026-10-25 (household TRMNL OG, firmware 1.8.17, MacBook on the same Wi-Fi): the real
 `EInkDisplay` and `show_on_display` served the resting card, a fox drawing made in 2.7 s, a word card
@@ -233,6 +239,8 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Visual explanations (`kind=steps`): a title over 2–4 numbered panels, drawings made in
+  parallel. Brave searches and Jev checks now go to the usage ledger with their costs.
 - 2026-10-25: Daily caps on new drawings (20) and picture searches (30) removed at the household's
   request; `DISPLAY_DRAWINGS_PER_DAY` and `DISPLAY_PICTURES_PER_DAY` are gone.
 - 2026-10-25: The device server runs as its own lasting process, so restarting Reachy no longer
