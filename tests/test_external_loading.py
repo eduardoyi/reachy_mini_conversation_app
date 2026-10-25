@@ -171,6 +171,7 @@ def test_tool_registry_reloads_when_profile_changes(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    monkeypatch.setattr(config_mod.config, "SKILL_TOOLS_ENABLED", False)  # specs list every tool
 
     core_tools_mod = _reload_core_tools()
 
@@ -211,6 +212,7 @@ def test_tool_registry_reads_wait_for_forced_reload(
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    monkeypatch.setattr(config_mod.config, "SKILL_TOOLS_ENABLED", False)  # specs list every tool
     core_tools_mod = _reload_core_tools()
 
     reload_entered = threading.Event()

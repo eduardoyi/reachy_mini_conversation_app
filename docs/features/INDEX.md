@@ -26,6 +26,7 @@ the implementation.
 | Quick commands (no cloud) | [quick-commands.md](quick-commands.md) | in-progress |
 | Music on a Bluetooth speaker | [music-speaker.md](music-speaker.md) | in-progress |
 | E-ink display (TRMNL) | [eink-display.md](eink-display.md) | in-progress |
+| Skill tools (progressive tool disclosure) | [skill-tools.md](skill-tools.md) | in-progress |
 
 Do not describe planned architecture as shipped behavior. The living
 implementation plan in [`../plans/reachy-hybrid-household-companion.md`](../plans/reachy-hybrid-household-companion.md)

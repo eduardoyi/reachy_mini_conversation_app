@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_tool_specs
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_tools
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
@@ -211,7 +211,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             logger.debug("No active session; cannot run idle tool")
             return
 
-        available_tool_names = {spec["name"] for spec in get_tool_specs()}
+        available_tool_names = set(get_tools())  # idle tools run locally, so skills count too
         await start_idle_tool_call(
             deps=self.deps,
             tool_manager=self.tool_manager,

@@ -773,6 +773,8 @@ class Config:
     ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
     # TRMNL e-ink display: the app serves the screens it polls (point the TRMNL at http://<this-mac>:<port>).
     TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
+    SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
@@ -967,6 +969,7 @@ def refresh_runtime_config_from_env() -> None:
     config.ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     config.ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
     config.TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"

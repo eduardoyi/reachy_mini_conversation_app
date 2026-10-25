@@ -13,6 +13,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
+from reachy_mini_conversation_app.tools import skills
 from reachy_mini_conversation_app.config import config, list_tool_module_names
 from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
@@ -519,11 +520,15 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
 
 
 def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
-    """Get tool specs, optionally excluding some tools."""
+    """Get the tool specs to offer the model, optionally excluding some tools.
+
+    With SKILL_TOOLS_ENABLED, rarely used tools are folded into ``use_skill`` and ``skill_help``.
+    """
     initialize_tools()
     exclusion_list = exclusion_list or []
     with _TOOLS_LOCK:
-        return [tool.spec() for tool in ALL_TOOLS.values() if tool.name not in exclusion_list]
+        specs = [tool.spec() for tool in ALL_TOOLS.values() if tool.name not in exclusion_list]
+    return skills.fold_into_skills(specs) if config.SKILL_TOOLS_ENABLED else specs
 
 
 def get_tools() -> dict[str, Tool]:
@@ -544,6 +549,14 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
 
 
 async def _dispatch_tool_call(tool_name: str, args: Dict[str, Any], deps: ToolDependencies) -> Dict[str, Any]:
+    if tool_name == skills.SKILL_HELP:
+        return skills.skill_help(get_tools(), args)
+    if tool_name == skills.USE_SKILL:
+        skill_tool, arguments = skills.check_arguments(get_tools(), args)
+        if skill_tool is None:
+            return arguments
+        logger.info("Using skill: %s", skill_tool.name)
+        tool_name, args = skill_tool.name, arguments
     tool = get_tools().get(tool_name)
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}

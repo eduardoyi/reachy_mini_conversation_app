@@ -19,21 +19,6 @@ except ImportError as e:
     DANCE_AVAILABLE = False
 
 
-def get_available_dances_and_descriptions() -> str:
-    """Get formatted list of available dances with descriptions."""
-    if not DANCE_AVAILABLE:
-        return "Moves not available."
-
-    if not AVAILABLE_MOVES:
-        return "Moves not available."
-
-    output = ""
-    for move_name, (func, params, metadata) in AVAILABLE_MOVES.items():
-        description = metadata.get("description", "No description available.")
-        output += f"{move_name}: {description}\n"
-    return output
-
-
 class Dance(Tool):
     """Play a named or random dance move once (or repeat). Non-blocking."""
 
@@ -46,10 +31,7 @@ class Dance(Tool):
             "move": {
                 "type": "string",
                 "enum": list(AVAILABLE_MOVES.keys() if DANCE_AVAILABLE else []),
-                "description": f"""Name of the moves and their descriptions; omit for random.
-                                Here is a list of the available moves, you MUST only choose from these: \n
-                                {get_available_dances_and_descriptions()}
-                                """,
+                "description": "The move; omit for a random one.",
             },
             "repeat": {
                 "type": "integer",
