@@ -3,8 +3,10 @@
 Brave Image Search (strict SafeSearch) finds candidates. Only Brave's own thumbnails are downloaded,
 never the source sites, so a search result cannot point this computer at the local network. Jev
 (TypeSafe) then answers narrow yes/no questions about each thumbnail: does it show what was asked,
-is there nudity outside fine art, anything sexual, violent or meant for adults, and is it a logo or
-clutter rather than a picture. Fierce animals with open jaws are fine. The best-ranked candidate that clears every question is used.
+is there nudity outside fine art, anything sexual, violent or meant for adults, is it a logo or
+clutter rather than a picture, and, looking at it as the four-gray screen will show it, is the
+subject still easy to recognise. Fierce animals with open jaws are fine. Of the candidates that
+clear every question, the clearest on screen is used.
 """
 
 import io
@@ -12,6 +14,7 @@ import uuid
 import base64
 import asyncio
 import logging
+from typing import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -38,6 +41,8 @@ MAX_RISKS = {"sexual": 0.2, "violent": 0.3, "mature": 0.4, "cluttered": 0.3}
 # Nudity is allowed only in classical and fine-art paintings and sculptures, whose nudes still score
 # sexual 0.24-0.29 when Jev is sure they are fine art.
 MAX_NUDITY, MIN_FINE_ART, FINE_ART_MAX_SEXUAL = 0.2, 0.8, 0.4
+# Judged on the four-gray screen version: too dark or tiny subjects fall below this.
+MIN_CLEAR_ON_SCREEN = 0.5
 
 _AUDIENCE = "children aged 2 to 5, at home, on a small black-and-white screen"
 _QUESTIONS: dict[str, dict[str, object]] = {
@@ -47,7 +52,11 @@ _QUESTIONS: dict[str, dict[str, object]] = {
     },
     "nudity": {
         "type": "noul",
-        "instructions": "Does the `image` show a nude or partly nude person, or nude body parts?",
+        "instructions": "Does the `image` show a naked or partly naked person?",
+        "criteria": {
+            "true": "Bare breasts, buttocks or genitals, or a person shown in underwear",
+            "false": "Clothed people, or only bare faces, hands, arms or legs",
+        },
     },
     "fine_art": {
         "type": "noul",
@@ -90,6 +99,17 @@ _QUESTIONS: dict[str, dict[str, object]] = {
             "labels, rather than one clear photo, painting or illustration?"
         ),
     },
+    "clear_on_screen": {
+        "type": "noul",
+        "instructions": (
+            "The `screen` image is how the picture will look on a small black-and-white e-ink screen. On it, "
+            "can a young child easily recognise the `subject`?"
+        ),
+        "criteria": {
+            "true": "The subject is large, well lit and stands out clearly from the background",
+            "false": "Too dark, washed out, tiny, blurry or lost in a busy background",
+        },
+    },
 }
 
 
@@ -114,27 +134,34 @@ class WebPictures:
         brave_api_key: str,
         typesafe_api_key: str,
         check_model: str,
+        screen_preview: Callable[[Image.Image], bytes],
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        """Keep the API keys; each find() opens its own HTTP client."""
+        """Keep the API keys; ``screen_preview`` renders a picture as the e-ink screen will show it."""
         self._brave_api_key = brave_api_key
         self._typesafe_api_key = typesafe_api_key
         self._check_model = check_model
+        self._screen_preview = screen_preview
         self._transport = transport
 
     async def find(self, subject: str) -> WebPicture:
-        """Return the best-ranked picture of ``subject`` that passes every check."""
+        """Return the picture of ``subject`` that passes every check and is clearest on screen."""
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, transport=self._transport) as client:
             candidates = await self._search(client, subject)
             pictures = await asyncio.gather(*(self._download(client, url) for url, _ in candidates))
             downloaded = [(picture, source) for picture, (_, source) in zip(pictures, candidates) if picture]
             if not downloaded:
                 raise PictureError("no picture could be downloaded")
-            verdicts = await asyncio.gather(*(self._approved(client, subject, picture) for picture, _ in downloaded))
-        for (picture, source), approved in zip(downloaded, verdicts):
-            if approved:
-                return WebPicture(picture, source)
-        raise PictureError("no picture passed the check")
+            clarity = await asyncio.gather(*(self._clarity(client, subject, picture) for picture, _ in downloaded))
+        approved = [
+            (score, -rank, picture, source)
+            for rank, ((picture, source), score) in enumerate(zip(downloaded, clarity))
+            if score is not None
+        ]
+        if not approved:
+            raise PictureError("no picture passed the check")
+        _, _, picture, source = max(approved, key=lambda candidate: candidate[:2])
+        return WebPicture(picture, source)
 
     async def _search(self, client: httpx.AsyncClient, subject: str) -> list[tuple[str, str]]:
         """Return (thumbnail URL, source site) for the top results."""
@@ -174,15 +201,18 @@ class WebPictures:
             return None
         return picture if min(picture.size) >= MIN_SHORT_SIDE else None
 
-    async def _approved(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> bool:
-        """Ask Jev about ``picture``; True only if it shows the subject and every risk is unlikely."""
+    async def _clarity(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> float | None:
+        """Ask Jev about ``picture``; its clarity on screen if it passes every check, else None."""
         short_side, long_side = CHECK_SIDES
         scale = max(short_side / min(picture.size), 1.0)
         scale = min(scale, long_side / max(picture.size))
         sized = picture.resize((round(picture.width * scale), round(picture.height * scale)))
         jpeg = io.BytesIO()
         sized.save(jpeg, format="JPEG", quality=85)
-        placeholder = str(uuid.uuid4())
+        with Image.open(io.BytesIO(self._screen_preview(picture))) as rendered:
+            screen = io.BytesIO()
+            rendered.convert("L").save(screen, format="JPEG", quality=90)
+        placeholder, screen_placeholder = str(uuid.uuid4()), str(uuid.uuid4())
         try:
             response = await client.post(
                 TYPESAFE_URL,
@@ -192,14 +222,24 @@ class WebPictures:
                 },
                 json={
                     "model": self._check_model,
-                    "state": {"subject": subject, "audience": _AUDIENCE, "image": placeholder},
+                    "state": {
+                        "subject": subject,
+                        "audience": _AUDIENCE,
+                        "image": placeholder,
+                        "screen": screen_placeholder,
+                    },
                     "questions": _QUESTIONS,
                     "assets": {
                         placeholder: {
                             "type": "image",
                             "format": "jpg",
                             "data_base64": base64.b64encode(jpeg.getvalue()).decode(),
-                        }
+                        },
+                        screen_placeholder: {
+                            "type": "image",
+                            "format": "jpg",
+                            "data_base64": base64.b64encode(screen.getvalue()).decode(),
+                        },
                     },
                 },
             )
@@ -207,14 +247,15 @@ class WebPictures:
             answers = {name: float(answer["noul"]) for name, answer in response.json()["answers"].items()}
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
             logger.warning("Picture check failed: %s", type(error).__name__)
-            return False
+            return None
         fine_art = answers.get("fine_art", 0.0) >= MIN_FINE_ART
         limits = {**MAX_RISKS, "sexual": FINE_ART_MAX_SEXUAL} if fine_art else MAX_RISKS
         approved = (
             answers.get("shows_subject", 0.0) >= MIN_SHOWS_SUBJECT
             and all(answers.get(name, 1.0) <= limit for name, limit in limits.items())
             and (answers.get("nudity", 1.0) <= MAX_NUDITY or fine_art)
+            and answers.get("clear_on_screen", 0.0) >= MIN_CLEAR_ON_SCREEN
         )
         scores = ", ".join(f"{name}={value:.2f}" for name, value in sorted(answers.items()))
         logger.info("Picture check: %s (%s)", "approved" if approved else "rejected", scores)
-        return approved
+        return answers["clear_on_screen"] if approved else None

@@ -142,6 +142,15 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   battle paintings 0 passed (mature 0.84–0.98 or violent 0.45–0.98); "lion hunting a zebra" passed
   only a distant watching lion (violent 0.30) and a calm pair (0.12), all kills and chases rejected
   (0.59–0.98). Limits: violent ≤ 0.3, mature ≤ 0.4.
+- 2026-10-25: First real use: a "cocodrilo de verdad" picture was too dark to make out on the TRMNL.
+  Jev now gets a second image per candidate, the `render_photo` screen version, and a
+  `clear_on_screen` question (≥ 0.5); the clearest approved candidate wins instead of the top-ranked.
+  Real searches: the dark pexels crocodile 0.26–0.27 rejected and a clear one chosen; a tiny cat in
+  a dark corner 0.27 rejected; the Mona Lisa on a Louvre wall 0.19 rejected and a close-up (0.71)
+  chosen; ducks 0.73–0.87; most night-sky shots 0.30–0.46 rejected. Review also found the nudity
+  question counted bare skin (a hand near a crocodile 0.51, the Mona Lisa 0.15–0.31); narrowed to
+  bare breasts, buttocks, genitals or underwear: hand 0.05, Mona Lisa 0.03–0.13, David still
+  0.76–0.98 (allowed as fine art), swimwear beach shots 0.10–0.34.
 - 2026-10-25: The v1 commit fails `tests/test_profile_paths.py::test_wheel_file_paths_stay_within_windows_budget`
   (the wheel test builds from tracked files, so it passed before the font was committed): the font
   path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.

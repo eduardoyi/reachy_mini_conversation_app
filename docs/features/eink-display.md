@@ -67,14 +67,15 @@ policy applied in code (`WebPictures._approved`, calibrated on real searches 202
 | Question | Rule |
 |----------|------|
 | `shows_subject` | ≥ 0.7 |
-| `nudity`, `fine_art` | nudity ≤ 0.2, or fine_art ≥ 0.8 (classical and fine-art nudes allowed) |
+| `nudity`, `fine_art` | nudity ≤ 0.2, or fine_art ≥ 0.8 (classical and fine-art nudes allowed). Nudity means bare breasts, buttocks or genitals or underwear, not bare hands or faces (a hand in a crocodile photo scored 0.51 under broader wording, 0.05 now) |
 | `sexual` | ≤ 0.2; ≤ 0.4 when fine_art ≥ 0.8 (Venus and David score 0.19–0.29 while judged fine art) |
 | `violent` | ≤ 0.3: fighting, attacks, prey being caught, blood, injury; fierce animals with open jaws and roaring dinosaurs are not violence (boxing, battles, zombies, kills, a bloody T. rex 0.45–0.98; roaring T. rex and open-jawed sharks 0.05–0.18) |
 | `mature` | ≤ 0.4: horror, gore, drugs, alcohol, smoking, gambling, crude gestures (smoking, beer, horror, zombies 0.84–0.98; Botticelli's Venus 0.17–0.27) |
 | `cluttered` | ≤ 0.3: logos, icons, clip art, text, screenshots, memes, collages (tiger logos 0.80–0.95) |
+| `clear_on_screen` | ≥ 0.5, judged on a second image, the candidate rendered by `render_photo` exactly as the TRMNL will show it: a dark crocodile 0.26–0.27, a tiny cat in a dark corner 0.27, a Louvre wall with the Mona Lisa small 0.19 are rejected; clear ducks, tigers and close-ups score 0.7–0.87. Among approved candidates the clearest wins (ties go to search rank) |
 
 A missing answer counts against the picture. Six candidates are checked in parallel; the
-best-ranked approved one wins. Every verdict is logged as scores only (no subject). Requests send
+approved one clearest on screen wins. Every verdict is logged as scores only (no subject). Requests send
 the image as a base64 `jpg` asset with `TypeSafe-Danger-Zone-Images: true`. Jev answers HTTP 400
 "Invalid image dimensions" for a short side under ~280 px or a long side over ~1000 px, so each
 candidate is resized to a 300 px short side within a 1000 px long side first. Brave's plan allows
@@ -120,7 +121,7 @@ flowchart LR
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
 | Screens and server | `eink_display.py` | `render_home/drawing/word/text() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/screen_png/drawing/start/stop` |
-| Web pictures | `web_pictures.py` | `WebPictures.find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
+| Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
 | Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
@@ -205,6 +206,8 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Jev also judges each candidate as the screen will show it and the clearest approved one
+  wins; nudity narrowed to bare breasts, buttocks, genitals or underwear.
 - 2026-10-25: Household policy: block violence, mature content and nudity (fine art excepted), not
   scary-looking animals; "frightening" replaced by "mature", violence reworded and recalibrated.
 - 2026-10-25: Live calibration of Jev's questions and limits, resizing for Jev, six candidates; shown

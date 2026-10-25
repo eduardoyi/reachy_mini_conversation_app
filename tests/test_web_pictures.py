@@ -24,6 +24,7 @@ SAFE = {
     "sexual": 0.02,
     "violent": 0.01,
     "mature": 0.03,
+    "clear_on_screen": 0.8,
     "cluttered": 0.05,
 }
 # Measured on Botticelli's Venus (2026-10-25): sure it is fine art, yet "sexual" around a quarter.
@@ -33,6 +34,13 @@ CLASSICAL_NUDE = {**SAFE, "nudity": 0.98, "fine_art": 0.98, "sexual": 0.25}
 def _jpeg(size: tuple[int, int] = (500, 375), shade: int = 120) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", size, (shade, shade, shade)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def _screen(picture: Image.Image) -> bytes:
+    """Stand in for the e-ink renderer: a small PNG Jev sees as the screen version."""
+    buffer = io.BytesIO()
+    Image.new("L", (800, 480), 200).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -79,6 +87,7 @@ class _FakeWeb:
             brave_api_key="brave-key",
             typesafe_api_key="ts-key",
             check_model="jev-latest",
+            screen_preview=_screen,
             transport=httpx.MockTransport(self.handle),
         )
 
@@ -109,9 +118,12 @@ async def test_jev_gets_the_image_and_one_narrow_question_per_risk() -> None:
     assert body["model"] == "jev-latest"
     assert set(body["questions"]) == set(SAFE)
     assert all(question["type"] == "noul" for question in body["questions"].values())
-    placeholder, asset = next(iter(body["assets"].items()))
+    (placeholder, asset), (screen_placeholder, screen) = body["assets"].items()
     assert body["state"]["image"] == placeholder and body["state"]["subject"] == "Falcon 9 rocket"
-    assert asset["type"] == "image" and asset["format"] == "jpg"
+    assert body["state"]["screen"] == screen_placeholder
+    assert asset["type"] == screen["type"] == "image" and asset["format"] == screen["format"] == "jpg"
+    assert Image.open(io.BytesIO(base64.b64decode(screen["data_base64"]))).size == (800, 480)
+    assert "`screen`" in body["questions"]["clear_on_screen"]["instructions"]
     assert "classical paintings and sculptures" in body["questions"]["sexual"]["criteria"]["false"]
     assert "open jaws" in body["questions"]["violent"]["criteria"]["false"]
     assert "open jaws" in body["questions"]["mature"]["criteria"]["false"]
@@ -139,6 +151,7 @@ async def test_only_brave_thumbnails_are_ever_downloaded() -> None:
         pytest.param({**SAFE, "mature": 0.6}, id="mature"),
         pytest.param({**SAFE, "cluttered": 0.9}, id="logo-or-collage"),
         pytest.param({**SAFE, "nudity": 0.9}, id="nudity-outside-fine-art"),
+        pytest.param({**SAFE, "clear_on_screen": 0.3}, id="too-dark-or-small-on-screen"),
         pytest.param({**CLASSICAL_NUDE, "sexual": 0.5}, id="suggestive-even-as-art"),
         pytest.param({**CLASSICAL_NUDE, "fine_art": 0.6}, id="unsure-it-is-art"),
         pytest.param({name: value for name, value in SAFE.items() if name != "mature"}, id="missing-answer"),
@@ -196,3 +209,13 @@ async def test_pictures_are_resized_to_sizes_jev_accepts() -> None:
             asset = next(iter(json.loads(request.content)["assets"].values()))
             size = Image.open(io.BytesIO(base64.b64decode(asset["data_base64"]))).size
             assert min(size) >= 300 and max(size) <= 1000
+
+
+@pytest.mark.asyncio
+async def test_the_clearest_approved_picture_wins_over_a_higher_ranked_one() -> None:
+    """Among pictures that pass, the one clearest on the e-ink screen is shown, ties going to search rank."""
+    web = _FakeWeb(
+        [_result(1), _result(2), _result(3)],
+        [{**SAFE, "clear_on_screen": 0.55}, {**SAFE, "clear_on_screen": 0.9}, {**SAFE, "clear_on_screen": 0.9}],
+    )
+    assert (await web.pictures().find("crocodile")).source == "site2.org"

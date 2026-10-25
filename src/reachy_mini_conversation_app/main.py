@@ -72,7 +72,7 @@ def _build_display() -> Any:
         return None
     from google import genai
 
-    from reachy_mini_conversation_app.eink_display import EInkDisplay
+    from reachy_mini_conversation_app.eink_display import EInkDisplay, render_photo
     from reachy_mini_conversation_app.web_pictures import WebPictures
 
     api_key = (config.GEMINI_API_KEY or "").strip()
@@ -82,6 +82,7 @@ def _build_display() -> Any:
             brave_api_key=config.BRAVE_API_KEY,
             typesafe_api_key=config.TYPESAFE_API_KEY,
             check_model=config.DISPLAY_CHECK_MODEL,
+            screen_preview=render_photo,
         )
     return EInkDisplay(
         port=config.TRMNL_PORT,
