@@ -22,7 +22,7 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
   to the four grays, with its source site in small type. Brave Image Search (strict SafeSearch)
   finds candidates and Jev checks each shows the subject and has no violence, mature content or
   nudity; classical and fine-art nudity is allowed, and fierce animals (open-jawed sharks, roaring
-  dinosaurs) are fine, by the household's choice. If none passes, the keys are missing, today's 30 searches are used or
+  dinosaurs) are fine, by the household's choice. If none passes, the keys are missing or
   it takes over 12 s, the subject is drawn instead and Reachy is told to say why, in plain words:
   the pictures found were not right for children, would be too hard to see, did not clearly show it,
   or the search or check did not work (when candidates fail for different reasons the most important
@@ -33,8 +33,8 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
 - "Write MARA big", "put up the shopping list", "show 3 + 4": one big line, or a title over up to
   six lines; longer text is cut with "…".
 - "Go back to the start screen": the resting card. It also returns 30 minutes after the last screen.
-- After 20 new drawings in a day (`DISPLAY_DRAWINGS_PER_DAY`), new drawings are refused and Reachy
-  says its pencil needs a rest; cards and cached drawings still work.
+- There is no daily cap on new drawings or picture searches (removed 2026-10-25 at the household's
+  request); a subject drawn or found before still comes from the cache.
 - A drawing that fails (no API key, blocked by Google's filter, over 20 s) leaves the screen as it
   was, and Reachy is told to say so and not retry.
 - If the TRMNL has not checked in for over 30 s (plus the refresh rate), the screen is still set,
@@ -131,8 +131,7 @@ flowchart LR
   never flash the panel (`display_session.cpp`: "The image hasn't changed since the last wakeup").
 - Drawings and pictures are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/display/`
   (`drawings/`, `pictures/` with the source site in a PNG text chunk), named by the subject folded
-  to ASCII ("A Cat" and "a cat" share one). The day's counts are in `per-day.json` there; an attempt
-  counts even if it fails, which bounds cost.
+  to ASCII ("A Cat" and "a cat" share one).
 - Each drawing's tokens go to the usage ledger as feature `display_drawing`. Brave searches and Jev
   checks are not in the ledger yet (Brave bills per search; Jev reports input tokens).
 
@@ -146,7 +145,7 @@ flowchart LR
 | Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
-| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `DISPLAY_DRAWINGS_PER_DAY` (20, 0–500), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`), `DISPLAY_PICTURES_PER_DAY` (30, 0–500) |
+| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
 | Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt` |
 | Guidance | `profiles/household_companion/profile.md` | When to use the screen; Spanish-style pronunciation and Spanish meanings for Italian words |
 
@@ -211,10 +210,10 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure and daily limit messages; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
-| `tests/test_config.py` | `TRMNL_*` and `DISPLAY_DRAWINGS_PER_DAY` parsing and fallbacks |
+| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
 
@@ -234,6 +233,8 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Daily caps on new drawings (20) and picture searches (30) removed at the household's
+  request; `DISPLAY_DRAWINGS_PER_DAY` and `DISPLAY_PICTURES_PER_DAY` are gone.
 - 2026-10-25: The device server runs as its own lasting process, so restarting Reachy no longer
   sends the TRMNL into its 5-minute sleep.
 - 2026-10-25: Reachy no longer claims a screen it could not show: a drawing fallback comes with the

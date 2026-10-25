@@ -599,19 +599,19 @@ def test_transcription_language_auto_means_no_hint(
 
 
 @pytest.mark.parametrize(
-    ("port", "refresh", "per_day", "expected"),
+    ("port", "refresh", "expected"),
     [
-        (None, None, None, (8090, 1, 20)),
-        ("9000", "900", "0", (9000, 900, 0)),
-        ("http", "0", "-1", (8090, 1, 20)),
-        ("80", "99999", "lots", (8090, 1, 20)),
+        (None, None, (8090, 1)),
+        ("9000", "900", (9000, 900)),
+        ("http", "0", (8090, 1)),
+        ("80", "99999", (8090, 1)),
     ],
 )
 def test_trmnl_display_settings_fall_back_to_defaults(
-    monkeypatch: pytest.MonkeyPatch, port: str | None, refresh: str | None, per_day: str | None, expected: tuple
+    monkeypatch: pytest.MonkeyPatch, port: str | None, refresh: str | None, expected: tuple
 ) -> None:
-    """The display's port, refresh and daily drawings accept sane numbers and ignore anything else."""
-    for name, raw in (("TRMNL_PORT", port), ("TRMNL_REFRESH_SECONDS", refresh), ("DISPLAY_DRAWINGS_PER_DAY", per_day)):
+    """The display's port and refresh accept sane numbers and ignore anything else."""
+    for name, raw in (("TRMNL_PORT", port), ("TRMNL_REFRESH_SECONDS", refresh)):
         if raw is None:
             monkeypatch.delenv(name, raising=False)
         else:
@@ -622,6 +622,6 @@ def test_trmnl_display_settings_fall_back_to_defaults(
 
     settings = config.config
     assert settings.TRMNL_ENABLED is True
-    assert (settings.TRMNL_PORT, settings.TRMNL_REFRESH_SECONDS, settings.DISPLAY_DRAWINGS_PER_DAY) == expected
+    assert (settings.TRMNL_PORT, settings.TRMNL_REFRESH_SECONDS) == expected
     monkeypatch.delenv("TRMNL_ENABLED")
     config.refresh_runtime_config_from_env()

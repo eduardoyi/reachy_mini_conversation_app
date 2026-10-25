@@ -49,15 +49,12 @@ class _FakePictures:
         return WebPicture(Image.new("RGB", (500, 375), (90, 90, 90)), "wikipedia.org")
 
 
-def _display(
-    tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: int = 20, pictures: Any = None, awake: bool = True
-) -> EInkDisplay:
+def _display(tmp_path: Path, *, with_drawings: bool = True, pictures: Any = None, awake: bool = True) -> EInkDisplay:
     client: Any = SimpleNamespace(aio=SimpleNamespace(models=_FakeModels())) if with_drawings else None
     display = EInkDisplay(
         port=8090,
         refresh_s=60,
         cache_dir=tmp_path,
-        drawings_per_day=drawings_per_day,
         image_model="gemini-3.1-flash-lite-image",
         client=client,
         pictures=pictures,
@@ -134,17 +131,6 @@ async def test_drawing_failures_tell_the_model_not_to_retry(tmp_path: Path) -> N
 
     assert "Could not draw" in result["error"] and "Do not retry" in result["instruction"]
     assert display.current() == home
-
-
-@pytest.mark.asyncio
-async def test_the_daily_limit_offers_cards_instead(tmp_path: Path) -> None:
-    """After today's drawings are used, Reachy is told to offer a word or text card."""
-    display = _display(tmp_path, drawings_per_day=0)
-
-    result = await ShowOnDisplay()(_deps(display), kind="drawing", subject="a cat")
-
-    assert result["error"] == "No more new drawings today."
-    assert "word or text card" in result["instruction"]
 
 
 @pytest.mark.asyncio

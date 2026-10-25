@@ -11,7 +11,6 @@ import io
 import os
 import re
 import sys
-import json
 import time
 import zlib
 import struct
@@ -24,7 +23,6 @@ import subprocess
 import unicodedata
 from typing import Callable
 from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass
 
 import numpy as np
@@ -68,10 +66,6 @@ _LEVEL_EDGES = (64, 128, 230)
 
 class DrawingError(RuntimeError):
     """A drawing could not be made."""
-
-
-class DrawingLimitError(DrawingError):
-    """Today's drawings are used up."""
 
 
 @functools.lru_cache(maxsize=64)
@@ -284,11 +278,9 @@ class EInkDisplay:
         port: int,
         refresh_s: int,
         cache_dir: Path,
-        drawings_per_day: int,
         image_model: str,
         client: genai.Client | None = None,
         pictures: WebPictures | None = None,
-        pictures_per_day: int = 30,
         clock: Callable[[], float] = time.time,
     ) -> None:
         """Write the resting screen to the spool folder the device server reads; ``start()`` starts the server."""
@@ -296,11 +288,9 @@ class EInkDisplay:
         self.refresh_s = refresh_s
         self.spool = cache_dir / "screen"
         self._cache_dir = cache_dir
-        self._drawings_per_day = drawings_per_day
         self._image_model = image_model
         self._client = client
         self._pictures = pictures
-        self._pictures_per_day = pictures_per_day
         self._clock = clock
         self._lock = threading.Lock()
         self.spool.mkdir(parents=True, exist_ok=True)
@@ -364,8 +354,6 @@ class EInkDisplay:
                 return cached.convert("L")
         if self._client is None:
             raise DrawingError("drawings need GEMINI_API_KEY")
-        if not self._take_allowance("drawings", self._drawings_per_day):
-            raise DrawingLimitError("today's drawings are used up")
         try:
             response = await asyncio.wait_for(
                 self._client.aio.models.generate_content(
@@ -411,8 +399,6 @@ class EInkDisplay:
                 return WebPicture(cached.convert("L"), str(cached.info.get("source", "")))
         if self._pictures is None:
             raise PictureError("picture search is not set up (it needs BRAVE_API_KEY and TYPESAFE_API_KEY)")
-        if not self._take_allowance("pictures", self._pictures_per_day):
-            raise PictureError("today's picture searches are used up")
         try:
             found = await asyncio.wait_for(self._pictures.find(subject), PICTURE_TIMEOUT_S)
         except asyncio.TimeoutError as error:
@@ -424,24 +410,6 @@ class EInkDisplay:
         info.add_text("source", found.source)
         picture.save(path, pnginfo=info)
         return WebPicture(picture, found.source)
-
-    def _take_allowance(self, kind: str, per_day: int) -> bool:
-        """Count one more new ``kind`` today; False when today's are used up."""
-        today = datetime.fromtimestamp(self._clock()).date().isoformat()
-        counts_path = self._cache_dir / "per-day.json"
-        try:
-            counts = json.loads(counts_path.read_text())
-        except (OSError, ValueError):
-            counts = {}
-        if not isinstance(counts, dict) or counts.get("date") != today:
-            counts = {"date": today}
-        used = int(counts.get(kind, 0))
-        if used >= per_day:
-            return False
-        counts[kind] = used + 1
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
-        counts_path.write_text(json.dumps(counts))
-        return True
 
     def start(self) -> None:
         """Start the device server unless one with this code and settings is already running.

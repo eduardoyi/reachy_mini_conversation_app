@@ -126,8 +126,8 @@ values. This keeps one-off commands such as
 | `SKILL_TOOLS_ENABLED` | Offer rarely used tools (lights, TV, Spotify, memory and face tools, head tracking, look around) as skills: one menu line each in `use_skill`, full instructions from `skill_help` when needed, so they are not resent on every turn; default `1`. Set `0` for the full tool list. See [docs/features/skill-tools.md](docs/features/skill-tools.md). |
 | `TRMNL_PORT` / `TRMNL_REFRESH_SECONDS` | Display server port (default `8090`) and seconds the TRMNL sleeps between check-ins (default `1` for USB power, 1–3600; raise it on battery). Each check-in is held up to 10 s and answered as soon as a screen changes. |
 | `BRAVE_API_KEY` / `TYPESAFE_API_KEY` | Web pictures for `show_on_display`: Brave Image Search (strict SafeSearch) finds them, Jev checks each is fine for young children. Without both, pictures are drawn instead. |
-| `DISPLAY_CHECK_MODEL` / `DISPLAY_PICTURES_PER_DAY` | Jev model for the picture check (default `jev-latest`) and new picture searches allowed per day (default `30`; cached subjects do not count). |
-| `DISPLAY_IMAGE_MODEL` / `DISPLAY_DRAWINGS_PER_DAY` | Gemini image model for drawings (default `gemini-3.1-flash-lite-image`) and new drawings allowed per day (default `20`; cached subjects do not count). |
+| `DISPLAY_CHECK_MODEL` | Jev model for the picture check (default `jev-latest`). |
+| `DISPLAY_IMAGE_MODEL` | Gemini image model for drawings (default `gemini-3.1-flash-lite-image`). |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |

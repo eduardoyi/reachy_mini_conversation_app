@@ -183,3 +183,5 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   screens from a spool folder and records check-ins there. A new app reuses it; changed server code
   or settings replace it with a hand-off that answers held check-ins first and rebinds within
   milliseconds. Startup of the server module: 0.05 s (standard library only).
+- 2026-10-25: Removed the daily caps on new drawings and picture searches at the household's request
+  (the cost-guard and fallback decisions above are superseded on this point). Full gate: 1,865 passed.

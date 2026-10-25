@@ -3,7 +3,6 @@ from typing import Any
 
 from reachy_mini_conversation_app.eink_display import (
     DrawingError,
-    DrawingLimitError,
     render_text,
     render_word,
     render_photo,
@@ -118,11 +117,6 @@ class ShowOnDisplay(Tool):
                 png = render_text(lines, _text(kwargs, "title"))
             else:
                 return {"error": "kind must be drawing, word, text or home."}
-        except DrawingLimitError:
-            return {
-                "error": "No more new drawings today.",
-                "instruction": "Say your pencil needs a rest until tomorrow; offer a word or text card instead.",
-            }
         except DrawingError as error:
             logger.warning("show_on_display drawing failed: %s", error)
             return {"error": f"Could not draw that: {error}.", "instruction": "Tell them kindly. Do not retry."}

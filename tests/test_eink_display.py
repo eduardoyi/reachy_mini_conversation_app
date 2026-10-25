@@ -26,7 +26,6 @@ from reachy_mini_conversation_app.eink_display import (
     MAX_PNG_BYTES,
     EInkDisplay,
     DrawingError,
-    DrawingLimitError,
     encode_png,
     render_home,
     render_text,
@@ -73,7 +72,6 @@ def _display(tmp_path: Path, models: _FakeModels | None = None, **kwargs: Any) -
         "port": 8090,
         "refresh_s": 60,
         "cache_dir": tmp_path,
-        "drawings_per_day": 20,
         "image_model": "gemini-3.1-flash-lite-image",
         "client": client,
     }
@@ -285,21 +283,6 @@ async def test_drawings_are_made_once_and_then_cached(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_new_drawings_stop_at_the_daily_limit_but_cached_ones_still_show(tmp_path: Path) -> None:
-    """After today's drawings are used, new subjects are refused while drawn ones still come from the cache."""
-    clock = _Clock()
-    display = _display(tmp_path, _FakeModels(_jpeg()), drawings_per_day=1, clock=clock)
-
-    await display.drawing("cat")
-    with pytest.raises(DrawingLimitError):
-        await display.drawing("dog")
-    assert (await display.drawing("cat")).size == (643, 480)
-
-    clock.now += 24 * 3600
-    assert (await display.drawing("dog")).size == (643, 480)
-
-
-@pytest.mark.asyncio
 async def test_failed_drawings_raise_drawing_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No API key, a blocked picture and a slow model each fail with a DrawingError, and nothing is cached."""
     with pytest.raises(DrawingError):
@@ -410,18 +393,6 @@ async def test_web_pictures_are_cached_with_their_source(tmp_path: Path) -> None
     assert finder.subjects == ["Mona Lisa"]
     assert first.source == again.source == "wikipedia.org"
     assert again.image.size == (500, 375)
-
-
-@pytest.mark.asyncio
-async def test_picture_searches_have_their_own_daily_limit(tmp_path: Path) -> None:
-    """New searches stop at the daily limit while cached pictures and drawings still work."""
-    display = _display(tmp_path, _FakeModels(_jpeg()), pictures=_FakePictures(), pictures_per_day=1)
-
-    await display.picture("Eiffel Tower")
-    with pytest.raises(PictureError, match="used up"):
-        await display.picture("Big Ben")
-    assert (await display.picture("Eiffel Tower")).source == "wikipedia.org"
-    assert (await display.drawing("cat")).size == (643, 480)
 
 
 @pytest.mark.asyncio

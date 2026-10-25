@@ -88,11 +88,9 @@ def _build_display() -> Any:
         port=config.TRMNL_PORT,
         refresh_s=config.TRMNL_REFRESH_SECONDS,
         cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "display",
-        drawings_per_day=config.DISPLAY_DRAWINGS_PER_DAY,
         image_model=config.DISPLAY_IMAGE_MODEL,
         client=genai.Client(api_key=api_key) if api_key else None,
         pictures=pictures,
-        pictures_per_day=config.DISPLAY_PICTURES_PER_DAY,
     )
 
 
