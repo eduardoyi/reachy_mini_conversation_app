@@ -40,6 +40,9 @@ DEFAULT_PRICES: Final[dict[str, dict[str, float]]] = {
     "gpt-5.6-luna": {"input_text": 0.20, "input_cached": 0.02, "output_text": 1.20, "thinking": 1.20},
     # Quick-command replies (local_speech.py); third-party listings of Google's rate, 2026-10-18.
     "gemini-3.8-flash-lite-tts": {"input_text": 0.50, "output_audio": 6.00},
+    # E-ink drawings (eink_display.py): Google's $0.0336 per 1K image over the 1,120 image tokens one
+    # drawing used (2026-10-24); the input rate is an assumption.
+    "gemini-3.1-flash-lite-image": {"input_text": 0.25, "output_image": 30.00},
 }
 
 

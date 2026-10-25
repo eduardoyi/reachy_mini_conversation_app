@@ -64,6 +64,27 @@ def _build_tv() -> Any:
     return AndroidTV(config.ANDROID_TV_HOST, Path(config.ANDROID_TV_CERT_DIR))
 
 
+def _build_display() -> Any:
+    """Return the TRMNL e-ink display, or None when TRMNL_ENABLED is off."""
+    from reachy_mini_conversation_app.config import config
+
+    if not config.TRMNL_ENABLED:
+        return None
+    from google import genai
+
+    from reachy_mini_conversation_app.eink_display import EInkDisplay
+
+    api_key = (config.GEMINI_API_KEY or "").strip()
+    return EInkDisplay(
+        port=config.TRMNL_PORT,
+        refresh_s=config.TRMNL_REFRESH_SECONDS,
+        cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "drawings",
+        drawings_per_day=config.DISPLAY_DRAWINGS_PER_DAY,
+        image_model=config.DISPLAY_IMAGE_MODEL,
+        client=genai.Client(api_key=api_key) if api_key else None,
+    )
+
+
 def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     """Return the quick-command handler and its reply voice, or (None, None) when disabled."""
     from reachy_mini_conversation_app.config import config
@@ -350,6 +371,7 @@ def run(
     )
     deps.home_hub = _build_home_devices()
     deps.tv = _build_tv()
+    deps.display = _build_display()
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""
@@ -680,6 +702,8 @@ def run(
         face_service.start()
         if hybrid_runtime is None:
             face_service.set_active(True)
+    if deps.display is not None:
+        deps.display.start()
     # Audio-reactive head motion follows SDK playback. The explicit simulator
     # output bypass does not feed assistant PCM into this wobbler.
     if config.SPEECH_WOBBLE_ENABLED:
@@ -731,6 +755,8 @@ def run(
             speaker_direction.stop()
         if face_service is not None:
             face_service.stop()
+        if deps.display is not None:
+            deps.display.stop()
         try:
             robot.disable_wobbling()
         except Exception as e:

@@ -348,6 +348,22 @@ def _optional_float(value: str | None) -> float | None:
         return None
 
 
+def _bounded_int(env_name: str, default: int, low: int, high: int) -> int:
+    """Parse an integer setting within [low, high]; empty or invalid is the default."""
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using default.", env_name, raw_value)
+        return default
+    if not low <= value <= high:
+        logger.warning("Ignoring out-of-range %s=%r; using default.", env_name, raw_value)
+        return default
+    return value
+
+
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured transcription language; "auto" returns "" (no hint, detect per utterance)."""
     candidate = (value or "").strip()
@@ -755,6 +771,12 @@ class Config:
     # Android / Google TV; set by `python -m reachy_mini_conversation_app.android_tv pair`.
     ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
+    # TRMNL e-ink display: the app serves the screens it polls (point the TRMNL at http://<this-mac>:<port>).
+    TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
+    TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
+    DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
+    DISPLAY_DRAWINGS_PER_DAY = _bounded_int("DISPLAY_DRAWINGS_PER_DAY", 20, 0, 500)
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -939,6 +961,11 @@ def refresh_runtime_config_from_env() -> None:
     config.HOME_LONGITUDE = _optional_float(os.getenv("HOME_LONGITUDE"))
     config.ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     config.ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
+    config.TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
+    config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
+    config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
+    config.DISPLAY_DRAWINGS_PER_DAY = _bounded_int("DISPLAY_DRAWINGS_PER_DAY", 20, 0, 500)
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

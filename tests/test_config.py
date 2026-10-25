@@ -596,3 +596,32 @@ def test_transcription_language_auto_means_no_hint(
     from reachy_mini_conversation_app.config import _normalize_transcription_language
 
     assert _normalize_transcription_language(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("port", "refresh", "per_day", "expected"),
+    [
+        (None, None, None, (8090, 1, 20)),
+        ("9000", "900", "0", (9000, 900, 0)),
+        ("http", "0", "-1", (8090, 1, 20)),
+        ("80", "99999", "lots", (8090, 1, 20)),
+    ],
+)
+def test_trmnl_display_settings_fall_back_to_defaults(
+    monkeypatch: pytest.MonkeyPatch, port: str | None, refresh: str | None, per_day: str | None, expected: tuple
+) -> None:
+    """The display's port, refresh and daily drawings accept sane numbers and ignore anything else."""
+    for name, raw in (("TRMNL_PORT", port), ("TRMNL_REFRESH_SECONDS", refresh), ("DISPLAY_DRAWINGS_PER_DAY", per_day)):
+        if raw is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, raw)
+    monkeypatch.setenv("TRMNL_ENABLED", "1")
+
+    config.refresh_runtime_config_from_env()
+
+    settings = config.config
+    assert settings.TRMNL_ENABLED is True
+    assert (settings.TRMNL_PORT, settings.TRMNL_REFRESH_SECONDS, settings.DISPLAY_DRAWINGS_PER_DAY) == expected
+    monkeypatch.delenv("TRMNL_ENABLED")
+    config.refresh_runtime_config_from_env()
