@@ -21,7 +21,7 @@ import functools
 import threading
 import subprocess
 import unicodedata
-from typing import Callable
+from typing import Any, Callable
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -63,6 +63,19 @@ DRAWING_PROMPT = (
     "light grey and medium grey on a plain white background. No small details, thin lines, hatching, texture, "
     "gradients or shading. No text, letters, numbers or labels. No cartoon faces or eyes on objects. One subject, "
     "centered, filling most of the frame. Calm and suitable for a family home, nothing gory."
+)
+# Camera photo edits ("make me a pirate"): clearly them (their real features, a costume for creatures), on white,
+# with bold outlines and flat greys. Naming features like glasses made the model add them, so it keeps them "as in
+# the photo, adding nothing" (checked 2026-10-25 on synthetic photos).
+PHOTO_EDIT_PROMPT = (
+    "Make a new picture from this camera photo: {edit}. Make that change clear and obvious, but keep each person's "
+    "likeness so the family recognises them at once: their real face shape, eyes, eyebrows, nose, mouth, hairstyle, "
+    "facial hair, age and expression exactly as in the photo, adding nothing they do not have. When the change turns "
+    "them into an animal, creature or character, show it as a full costume with their own face showing, so it is "
+    "clearly them. Draw faces with a little more detail than the rest. Leave out the room and clutter: a plain white "
+    "background. Draw it as a clean illustration with bold black outlines and flat areas of light grey and medium "
+    "grey; no hatching, texture, gradients or shading. No text, letters, numbers or labels. Calm and suitable for a "
+    "family home, nothing gory."
 )
 # Drawings are cached per style, so a new style never shows old drawings: drawings/ holds the 2026-10-24
 # cartoons and drawings-v2/ the too-detailed encyclopedia style; neither is used any more.
@@ -411,10 +424,11 @@ class EInkDisplay:
             (self.spool / f"{home}.png").write_bytes(home_png)
             self._update(home=home)
 
-    def show(self, png: bytes, owner: str = "requested") -> None:
+    def show(self, png: bytes, owner: str = "requested", *, expires_after_s: float | None = None) -> None:
         """Make ``png`` the screen the TRMNL fetches at its next check-in.
 
         ``owner`` says who put it up: "requested" (someone asked) or "music" (the now-playing card).
+        With ``expires_after_s`` (camera photos) the screen leaves after that long and its file is deleted.
         """
         if len(png) > MAX_PNG_BYTES:
             raise ValueError(f"Screen is {len(png)} bytes; the TRMNL draws at most {MAX_PNG_BYTES}.")
@@ -424,7 +438,11 @@ class EInkDisplay:
             stamp = max(int(self._clock()), last_stamp + 1)  # unique even for two screens in a second
             filename = f"reachy-000001-{stamp}"
             (self.spool / f"{filename}.png").write_bytes(png)
-            self._update(screen=filename, shown_at=self._clock(), owner=owner)
+            now = self._clock()
+            expires_at = None if expires_after_s is None else now + expires_after_s
+            self._update(
+                screen=filename, shown_at=now, owner=owner, expires_at=expires_at, private=expires_after_s is not None
+            )
 
     def show_home(self) -> None:
         """Go back to the resting card."""
@@ -470,18 +488,30 @@ class EInkDisplay:
                 old.unlink(missing_ok=True)
 
     async def drawing(self, subject: str) -> Image.Image:
-        """Return a drawing of ``subject``: from the cache, else a new one counted against today's limit."""
+        """Return a drawing of ``subject``: from the cache, else a new one."""
         path = self._cache_dir / DRAWINGS_DIR / f"{_cache_key(subject)}.png"
         if path.is_file():
             with Image.open(path) as cached:
                 return cached.convert("L")
+        picture = await self._generate(DRAWING_PROMPT.format(subject=subject), "display_drawing", "the drawing")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        picture.save(path)
+        return picture
+
+    async def edit_photo(self, jpeg: bytes, edit: str) -> Image.Image:
+        """Redraw a camera photo with ``edit`` in the drawing style; nothing is cached."""
+        photo = types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")
+        return await self._generate([PHOTO_EDIT_PROMPT.format(edit=edit), photo], "display_photo_edit", "the edit")
+
+    async def _generate(self, contents: Any, feature: str, what: str) -> Image.Image:
+        """Ask the image model for one picture, record its cost, and return it cleaned for four grays."""
         if self._client is None:
             raise DrawingError("drawings need GEMINI_API_KEY")
         try:
             response = await asyncio.wait_for(
                 self._client.aio.models.generate_content(
                     model=self._image_model,
-                    contents=DRAWING_PROMPT.format(subject=subject),
+                    contents=contents,
                     config=types.GenerateContentConfig(
                         response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="4:3")
                     ),
@@ -489,11 +519,11 @@ class EInkDisplay:
                 DRAWING_TIMEOUT_S,
             )
         except asyncio.TimeoutError as error:
-            raise DrawingError("the drawing took too long") from error
+            raise DrawingError(f"{what} took too long") from error
         usage = response.usage_metadata
         if usage is not None:
             get_ledger().record(
-                "display_drawing",
+                feature,
                 self._image_model,
                 {
                     "input_text": int(usage.prompt_token_count or 0),
@@ -509,10 +539,7 @@ class EInkDisplay:
         with Image.open(io.BytesIO(data)) as made:
             picture = made.convert("L")
         picture.thumbnail((WIDTH, HEIGHT))
-        picture = picture.filter(ImageFilter.MedianFilter(3))  # JPEG noise would speckle flat fills
-        path.parent.mkdir(parents=True, exist_ok=True)
-        picture.save(path)
-        return picture
+        return picture.filter(ImageFilter.MedianFilter(3))  # JPEG noise would speckle flat fills
 
     async def picture(self, subject: str) -> WebPicture:
         """Return a checked web picture of ``subject``: from the cache, else a new search counted against today's."""

@@ -121,6 +121,27 @@ in bold, the artist, and the album in grey. Music on any other device is ignored
   `SPOTIFY_DEVICE_ID`).
 - Logs say "Now playing card updated" and whether it had art, never titles, artists or albums.
 
+## Camera photos
+
+"Take my picture" or "make me a pirate": `show_on_display kind=camera` takes a photo with Reachy's
+camera 3 s after the call (Reachy counts down "3, 2, 1") and shows it dithered like a web picture.
+With `edit` ("make him a pirate", "show her as an astronaut") the photo goes to the image model
+with the change (`PHOTO_EDIT_PROMPT`: the change as the main thing, on white, in the drawing style)
+and is shown like a drawing, in about 4–6 s. The prompt keeps each person's real features as in the
+photo and turns creatures into a costume with their face showing, so the result looks like them.
+"Draw me as…", "how would I look as…" and "dress me as…" always use the photo, never a plain drawing. Plan: [camera-photos-display.md](../plans/camera-photos-display.md).
+
+- **Anyone may use it**, kids included, but only on request (household choice).
+- **Never saved:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the usage
+  ledger records only an edit's tokens (`display_photo_edit`).
+- **Ten minutes on screen:** the spool marks the screen `private` with `expires_at`; after that the
+  device server shows the resting card, refuses to serve the photo (404) and deletes its file at the
+  next check-in.
+- **Edits leave the house:** the photo goes to Google's image model; a plain photo does not.
+- **Failures:** a refused, slow or failed edit leaves the screen as it was and Reachy offers the
+  plain photo. Turning a child's drawing into a "real scene" does not work with this model (it
+  redraws the drawing).
+
 ## Architecture
 
 ```mermaid
@@ -172,11 +193,11 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner)/show_home/current/owner/keep_alive/awake/drawing/picture/start/stop` |
+| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/edit_photo/picture/start/stop` |
 | Now playing | `now_playing.py` | `parse_playback(body, device_id) -> Playback`; `NowPlaying(display, fetch, in_conversation, art_dir).run/check/show_now/refresh_soon`; `spotify_fetcher(credentials, device)` |
-| Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
+| Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` (incl. `owner`, `expires_at`, `private`) / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
@@ -245,9 +266,9 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
 | `tests/test_now_playing.py` | Track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
 | `tests/tools/test_spotify_control.py` | Pause, next and resume refresh the screen; rejected commands do not |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
@@ -270,6 +291,7 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Camera photos and photo edits (`kind=camera`), never saved, 10 minutes on screen.
 - 2026-10-25: Now playing: the Spotify song on Reachy's speaker shows as a music card (album art,
   title, artist, album), following the household's rules for requested screens; "what song is this".
 - 2026-10-25: The encyclopedia style was too detailed for the TRMNL: thin lines broke into dashes (a

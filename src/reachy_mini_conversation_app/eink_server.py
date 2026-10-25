@@ -66,7 +66,9 @@ def current_filename(spool: Path, now: float) -> str | None:
     current = read_json(spool / CURRENT)
     screen, shown_at = current.get("screen"), current.get("shown_at", 0.0)
     if isinstance(screen, str) and isinstance(shown_at, (int, float)) and now - shown_at < IDLE_AFTER_S:
-        return screen
+        expires_at = current.get("expires_at")
+        if not isinstance(expires_at, (int, float)) or now < expires_at:  # camera photos leave sooner
+            return screen
     home = current.get("home")
     return home if isinstance(home, str) else None
 
@@ -120,6 +122,7 @@ class DeviceServer(ThreadingHTTPServer):
         if isinstance(last, (int, float)) and now - last > AWAKE_GAP_S + self.refresh_s:
             logger.info("TRMNL checking in again after %.0f s", now - last)
         self._record_check_in(opening=True)
+        self._forget_expired_private_screen()
         try:
             deadline = time.monotonic() + hold_s
             while True:
@@ -134,12 +137,20 @@ class DeviceServer(ThreadingHTTPServer):
     def screen_png(self, filename: str) -> bytes | None:
         """Return the PNG of the current or resting screen with this file name, else None."""
         current = read_json(self.spool / CURRENT)
-        if filename not in (current.get("screen"), current.get("home")):
+        if filename not in (current_filename(self.spool, self._clock()), current.get("home")):
             return None
         try:
             return (self.spool / f"{filename}.png").read_bytes()
         except OSError:
             return None
+
+    def _forget_expired_private_screen(self) -> None:
+        """Delete the file of a camera photo whose time on screen is over, so it does not linger on disk."""
+        current = read_json(self.spool / CURRENT)
+        screen, expires_at = current.get("screen"), current.get("expires_at")
+        if current.get("private") and isinstance(screen, str) and isinstance(expires_at, (int, float)):
+            if self._clock() >= expires_at:
+                (self.spool / f"{screen}.png").unlink(missing_ok=True)
 
     def _record_check_in(self, *, opening: bool) -> None:
         with self._lock:

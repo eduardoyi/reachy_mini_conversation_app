@@ -12,6 +12,7 @@ acceptance criteria are met.
 | [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | Drawings, web pictures (Jev check), word cards, text and v3 visual explanations live on the TRMNL; device server is its own process; no daily caps; stories, morning page and calendar deferred |
 | [Skill tools](skill-tools.md) | `in-progress` | 2026-10-25 | Rare tools behind use_skill/skill_help; fixed block −25% measured live; household test pending |
 | [Now playing on the e-ink screen](now-playing-display.md) | `in-progress` | 2026-10-25 | Spotify song card on the TRMNL; built, tested and checked live with music (card per song with cover) |
+| [Camera photos on the e-ink screen](camera-photos-display.md) | `in-progress` | 2026-10-25 | Photos and photo edits from Reachy's camera; built and tested; live voice check pending |
 | [Local music controls and a local command model](local-music-controls.md) | `in-progress` | 2026-10-14 | V1 music lowering, volume and wind-down accepted on hardware; V2 local music commands and V3 local command model planned |
 | [Reachy Mini Lite hardware bring-up](reachy-mini-lite-bringup.md) | `in-progress` | 2026-10-13 | Stepwise first power-on, robot audio, interruption, hybrid/wake re-tuning; SDK target 1.11 |
 | [TypeSafe judgment exploration](typesafe-judgment-exploration.md) | `draft` | 2026-09-17 | Synthetic evaluation complete; background memory verification proposed, no runtime integration |

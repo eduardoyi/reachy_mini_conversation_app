@@ -180,7 +180,8 @@ def test_the_resting_card_returns_after_the_idle_time(tmp_path: Path) -> None:
 
 def test_each_screen_gets_a_new_firmware_friendly_filename(tmp_path: Path) -> None:
     """Names are <name>-<id>-<unix time>, at most 31 chars, new for every screen, even several in one second."""
-    display = _display(tmp_path, clock=_Clock())
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
     names = {display.current().filename}
     for _ in range(3):
         display.show(render_text(["hola"]))
@@ -190,7 +191,7 @@ def test_each_screen_gets_a_new_firmware_friendly_filename(tmp_path: Path) -> No
     for name in names:
         prefix, serial, stamp = name.split("-")
         assert len(name) <= 31 and len(f"{prefix}-{serial}") == 13 and len(stamp) == 10
-    server = _server(display)
+    server = _server(display, clock)
     assert server.screen_png(display.current().filename) == display.current().png
     assert server.screen_png("reachy-999999-1792878594") is None
     server.server_close()
@@ -536,3 +537,49 @@ def test_keep_alive_holds_only_the_music_card(tmp_path: Path) -> None:
     display.keep_alive()
     clock.now += 1
     assert display.owner() == "home"
+
+
+def test_a_camera_photo_leaves_the_screen_and_the_disk_after_its_time(tmp_path: Path) -> None:
+    """After 10 minutes the photo is no longer shown or served, and the next check-in deletes its file."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    home = display.current()
+    display.show(render_text(["foto"]), expires_after_s=600)
+    photo = display.current()
+    server = _server(display, clock)
+    assert server.screen_png(photo.filename) == photo.png
+
+    clock.now += 600
+    assert display.current() == home
+    assert server.screen_png(photo.filename) is None
+    server.screen_for_check_in(0.0)
+    assert not (display.spool / f"{photo.filename}.png").exists()
+    server.server_close()
+
+
+def test_only_private_screens_are_deleted(tmp_path: Path) -> None:
+    """A normal screen past its idle time keeps its file until the next screen replaces it."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    display.show(render_text(["hola"]))
+    shown = display.current()
+    server = _server(display, clock)
+
+    clock.now += IDLE_AFTER_S
+    server.screen_for_check_in(0.0)
+    assert (display.spool / f"{shown.filename}.png").exists()
+    server.server_close()
+
+
+@pytest.mark.asyncio
+async def test_photo_edits_record_their_cost_and_are_never_cached(tmp_path: Path) -> None:
+    """An edit sends the photo with the change, records its tokens, and leaves no file behind."""
+    models = _FakeModels(_jpeg())
+    display = _display(tmp_path, models)
+
+    edited = await display.edit_photo(_jpeg(90), "make him a pirate")
+
+    assert edited.size == (643, 480)
+    assert "make him a pirate" in models.prompts[0][0]
+    assert get_ledger().entries()[-1]["feature"] == "display_photo_edit"
+    assert not (tmp_path / DRAWINGS_DIR).exists()

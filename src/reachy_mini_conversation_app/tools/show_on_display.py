@@ -1,3 +1,4 @@
+import io
 import asyncio
 import logging
 from typing import Any
@@ -14,10 +15,17 @@ from reachy_mini_conversation_app.eink_display import (
     render_drawing,
 )
 from reachy_mini_conversation_app.web_pictures import PictureError
+from reachy_mini_conversation_app.camera_frames import capture_jpeg
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
 logger = logging.getLogger(__name__)
+
+
+# The photo is taken this long after the call, while Reachy counts down, so people can pose.
+CAMERA_COUNTDOWN_S = 3.0
+# Camera photos leave the screen (and its file is deleted) after this long; they are never saved.
+PHOTO_ON_SCREEN_S = 10 * 60
 
 
 def _text(kwargs: dict[str, Any], key: str) -> str:
@@ -47,8 +55,12 @@ class ShowOnDisplay(Tool):
         "updates in a few seconds. Use it when seeing helps, never for long text. Every time you translate or "
         "teach a word or short phrase, also show it with kind=word; do not only say it. Every time someone asks "
         "how something works or why something happens, show it with kind=steps, also for real machines like a "
-        "rocket or a plane; kind=picture only shows what something looks like. "
-        "kind=drawing: a picture of `subject` (in English) with a short `caption`. "
+        "rocket or a plane; kind=picture only shows what something looks like. Every time someone wants to see "
+        "themselves (or someone here) drawn, dressed up or turned into something ('draw me as a dinosaur', 'how "
+        "would I look as a pirate', 'disfrázame de astronauta'), use kind=camera with `edit` so it looks like "
+        "them; kind=drawing never knows what anyone here looks like. "
+        "kind=drawing: a picture of `subject` (in English) with a short `caption`; for things and characters, "
+        "not for the people in front of you. "
         "kind=picture: a real photo or artwork from the web, to see what a real thing looks like (a painting, a "
         "monument, an animal, a rocket); `subject` names it precisely in English, e.g. 'Mona Lisa "
         "painting by Leonardo da Vinci' or 'a tiger in the wild, photo'. If no suitable picture is found it is "
@@ -60,6 +72,10 @@ class ShowOnDisplay(Tool):
         "kind=steps: explain how something works or happens in 2 to 4 numbered panels (how a rocket reaches "
         "space, how a plane flies, how a seed grows, why it rains), with a short `title` and `steps`, each a short `caption` in their "
         "language and a `picture` subject in English that shows that step on its own. "
+        "kind=camera: when someone asks for a photo of themselves or of what you see, take one with your camera "
+        "and show it; it is taken 3 seconds after the call, so count down '3, 2, 1' as you call it. With `edit` "
+        "(in English, e.g. 'make him a pirate', 'show her as an astronaut', 'put a party hat on him') the photo "
+        "is redrawn with that change. Photos leave the screen after 10 minutes and are never saved. "
         "kind=now_playing: for 'what song is this?', shows the song playing on the Spotify speaker and returns "
         "its title, artist and album to say. While music plays the screen shows each song by itself. "
         "kind=home: back to the resting screen. Tell them to look at the screen in a moment."
@@ -67,9 +83,13 @@ class ShowOnDisplay(Tool):
     parameters_schema = {
         "type": "object",
         "properties": {
-            "kind": {"type": "string", "enum": ["drawing", "picture", "word", "text", "steps", "now_playing", "home"]},
+            "kind": {
+                "type": "string",
+                "enum": ["drawing", "picture", "word", "text", "steps", "camera", "now_playing", "home"],
+            },
             "subject": {"type": "string", "description": "For drawing and picture: what to show, in English."},
-            "caption": {"type": "string", "description": "For drawing and picture: a few words under it."},
+            "caption": {"type": "string", "description": "For drawing, picture and camera: a few words under it."},
+            "edit": {"type": "string", "description": "For camera: the change to draw into the photo, in English."},
             "word": {"type": "string", "description": "For word: the word or short phrase, shown large."},
             "pronunciation": {"type": "string", "description": "For word: how to say it."},
             "meaning": {"type": "string", "description": "For word: what it means."},
@@ -112,6 +132,27 @@ class ShowOnDisplay(Tool):
             if kind == "home":
                 display.show_home()
                 return result
+            if kind == "camera":
+                if not deps.camera_enabled:
+                    return {"error": "The camera is off."}
+                await asyncio.sleep(CAMERA_COUNTDOWN_S)
+                jpeg = await asyncio.to_thread(capture_jpeg, deps.reachy_mini.media)
+                if jpeg is None:
+                    return {"error": "The camera gave no picture.", "instruction": "Tell them kindly. Do not retry."}
+                caption, edit = _text(kwargs, "caption"), _text(kwargs, "edit")
+                if edit:
+                    try:
+                        photo_png = render_drawing(await display.edit_photo(jpeg, edit), caption)
+                    except DrawingError as error:
+                        logger.info("Photo edit failed: %s", error)
+                        return {
+                            "error": f"Could not make that change to the photo: {error}.",
+                            "instruction": "Tell them kindly; offer the plain photo instead. Do not retry.",
+                        }
+                else:
+                    with Image.open(io.BytesIO(jpeg)) as photo:
+                        photo_png = render_photo(photo.convert("RGB"), caption)
+                return self._show(display, photo_png, result, expires_after_s=PHOTO_ON_SCREEN_S)
             if kind == "now_playing":
                 if deps.now_playing is None:
                     return {"error": "The screen does not follow Spotify (it is not set up)."}
@@ -196,7 +237,14 @@ class ShowOnDisplay(Tool):
         except DrawingError as error:
             logger.warning("show_on_display drawing failed: %s", error)
             return {"error": f"Could not draw that: {error}.", "instruction": "Tell them kindly. Do not retry."}
-        display.show(png)
+        return self._show(display, png, result)
+
+    @staticmethod
+    def _show(
+        display: Any, png: bytes, result: dict[str, Any], expires_after_s: float | None = None
+    ) -> dict[str, Any]:
+        """Put ``png`` up and add a note when the TRMNL is asleep and will not show it for a while."""
+        display.show(png, expires_after_s=expires_after_s)
         if not display.awake():
             result["note"] = "The screen is asleep; it wakes and shows this within about five minutes."
             napping = (

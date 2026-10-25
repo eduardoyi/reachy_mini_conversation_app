@@ -278,3 +278,85 @@ async def test_what_song_is_this_without_music_or_spotify_says_so(tmp_path: Path
     assert "not set up" in (await ShowOnDisplay()(deps, kind="now_playing"))["error"]
     deps.now_playing = _FakeNowPlaying(None)
     assert (await ShowOnDisplay()(deps, kind="now_playing"))["error"] == "Nothing is playing on the Spotify speaker."
+
+
+def _camera_deps(display: EInkDisplay, frame: bytes | None = None, enabled: bool = True) -> ToolDependencies:
+    deps = _deps(display)
+    deps.camera_enabled = enabled
+    deps.reachy_mini.media.get_frame_jpeg.return_value = frame
+    return deps
+
+
+@pytest.fixture
+def no_countdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take camera photos at once in tests."""
+    from reachy_mini_conversation_app.tools import show_on_display
+
+    monkeypatch.setattr(show_on_display, "CAMERA_COUNTDOWN_S", 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_camera_photo_is_shown_for_ten_minutes_and_never_saved(tmp_path: Path, no_countdown: None) -> None:
+    """kind=camera shows the photo, marked to leave after 10 minutes, with nothing cached."""
+    from reachy_mini_conversation_app.eink_server import CURRENT, read_json
+
+    display = _display(tmp_path)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_camera_deps(display, _jpeg()), kind="camera", caption="¡Hola!")
+
+    assert result["ok"] is True and display.current() != home
+    current = read_json(display.spool / CURRENT)
+    assert current["private"] is True and current["expires_at"] == pytest.approx(current["shown_at"] + 600)
+    assert not (tmp_path / DRAWINGS_DIR).exists() and not (tmp_path / "pictures").exists()
+
+
+@pytest.mark.asyncio
+async def test_an_edited_photo_sends_the_photo_and_the_change(tmp_path: Path, no_countdown: None) -> None:
+    """With an edit, the photo and the change go to the image model and the result is not cached."""
+    display = _display(tmp_path)
+    models = display._client.aio.models
+    sent: list[Any] = []
+    original = models.generate_content
+
+    async def recording(**kwargs: Any) -> Any:
+        sent.append(kwargs["contents"])
+        return await original(**kwargs)
+
+    models.generate_content = recording
+
+    result = await ShowOnDisplay()(_camera_deps(display, _jpeg()), kind="camera", edit="make him a pirate")
+
+    assert result["ok"] is True
+    prompt, photo = sent[0]
+    assert "make him a pirate" in prompt and photo.inline_data.mime_type == "image/jpeg"
+    assert not (tmp_path / DRAWINGS_DIR).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "frame", "error"),
+    [(False, None, "camera is off"), (True, None, "gave no picture")],
+)
+async def test_no_camera_or_no_frame_is_an_error(
+    tmp_path: Path, no_countdown: None, enabled: bool, frame: Any, error: str
+) -> None:
+    """A disabled camera or an empty frame leaves the screen as it was."""
+    display = _display(tmp_path)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_camera_deps(display, frame, enabled), kind="camera")
+
+    assert error in result["error"] and display.current() == home
+
+
+@pytest.mark.asyncio
+async def test_a_failed_edit_offers_the_plain_photo(tmp_path: Path, no_countdown: None) -> None:
+    """When the edit cannot be made (refused, no key, too slow), Reachy offers the plain photo instead."""
+    display = _display(tmp_path, with_drawings=False)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_camera_deps(display, _jpeg()), kind="camera", edit="make her a superhero")
+
+    assert "Could not make that change" in result["error"] and "plain photo" in result["instruction"]
+    assert display.current() == home
