@@ -124,6 +124,8 @@ values. This keeps one-off commands such as
 | `FACE_RECOGNITION_ENABLED` | Recognize enrolled household members on camera, entirely locally; default `0`. Enroll by voice ("remember my face, I'm Ana"), from the live camera in Settings, or by uploading photos there. Only the recognized name is shared with the conversation provider. See [face recognition](docs/features/face-recognition.md). |
 | `TRMNL_ENABLED` | Serve screens to a TRMNL e-ink display on the LAN and offer `show_on_display`; default `0`. In the TRMNL's Wi-Fi setup set Advanced → API Server to `http://<this-computer>:<TRMNL_PORT>`. |
 | `TRMNL_PORT` / `TRMNL_REFRESH_SECONDS` | Display server port (default `8090`) and seconds the TRMNL sleeps between check-ins (default `1` for USB power, 1–3600; raise it on battery). Each check-in is held up to 10 s and answered as soon as a screen changes. |
+| `BRAVE_API_KEY` / `TYPESAFE_API_KEY` | Web pictures for `show_on_display`: Brave Image Search (strict SafeSearch) finds them, Jev checks each is fine for young children. Without both, pictures are drawn instead. |
+| `DISPLAY_CHECK_MODEL` / `DISPLAY_PICTURES_PER_DAY` | Jev model for the picture check (default `jev-latest`) and new picture searches allowed per day (default `30`; cached subjects do not count). |
 | `DISPLAY_IMAGE_MODEL` / `DISPLAY_DRAWINGS_PER_DAY` | Gemini image model for drawings (default `gemini-3.1-flash-lite-image`) and new drawings allowed per day (default `20`; cached subjects do not count). |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
@@ -615,7 +617,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
 | `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |
-| `show_on_display` | Show a drawing, a word card (word, pronunciation, meaning, optional picture) or short text on a TRMNL e-ink screen; it updates within about a minute. | Added automatically with `TRMNL_ENABLED=1`. Drawings use `GEMINI_API_KEY`. See [docs/features/eink-display.md](docs/features/eink-display.md). |
+| `show_on_display` | Show a drawing, a checked picture from the web, a word card (word, pronunciation, meaning, optional picture) or short text on a TRMNL e-ink screen; it updates within seconds. | Added automatically with `TRMNL_ENABLED=1`. Drawings use `GEMINI_API_KEY`; web pictures need `BRAVE_API_KEY` and `TYPESAFE_API_KEY`. See [docs/features/eink-display.md](docs/features/eink-display.md). |
 | `remember_face` / `forget_face` / `who_is_here` | Enroll or delete the face of the person in front of the camera; recognize who is there. | Added automatically with `FACE_RECOGNITION_ENABLED=1`. Requires the camera. |
 | `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Shared tool, enabled by default in the default profile. |

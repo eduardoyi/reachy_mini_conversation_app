@@ -1,4 +1,4 @@
-"""Calm e-ink screens for a TRMNL display: drawings, word cards and short text.
+"""Calm e-ink screens for a TRMNL display: drawings, web pictures, word cards and short text.
 
 The TRMNL polls a small HTTP server here (its "bring your own server" API: ``/api/setup``,
 ``/api/display``, ``/api/log``) and draws whatever PNG the reply points to. Screens are 800x480
@@ -29,8 +29,10 @@ import numpy as np
 from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageFilter
 from google import genai
 from google.genai import types
+from PIL.PngImagePlugin import PngInfo
 
 from reachy_mini_conversation_app.usage_costs import get_ledger
+from reachy_mini_conversation_app.web_pictures import WebPicture, WebPictures, PictureError
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,8 @@ IDLE_AFTER_S = 30 * 60
 # A check-in waits this long for a new screen before answering; the firmware gives up after 15 s.
 CHECK_IN_HOLD_S = 10.0
 DRAWING_TIMEOUT_S = 20.0
+# Leaves time to draw the subject instead within the conversation's 30 s tool deadline.
+PICTURE_TIMEOUT_S = 12.0
 MAX_TEXT_LINES = 6
 DRAWING_PROMPT = (
     "A friendly, simple cartoon of {subject} for young children. Bold clean black outlines on a plain white "
@@ -62,7 +66,7 @@ class DrawingLimitError(DrawingError):
 
 @functools.lru_cache(maxsize=64)
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    name = "AtkinsonHyperlegible-Bold.ttf" if bold else "AtkinsonHyperlegible-Regular.ttf"
+    name = "Atkinson-Bold.ttf" if bold else "Atkinson-Regular.ttf"
     return ImageFont.truetype(str(_ASSETS / name), size)
 
 
@@ -142,14 +146,30 @@ def render_home() -> bytes:
 
 def render_drawing(picture: Image.Image, caption: str = "") -> bytes:
     """Render a drawing filling the screen, with an optional caption below it."""
+    return _picture_screen(picture.convert("L"), caption)
+
+
+def render_photo(picture: Image.Image, caption: str = "", source: str = "") -> bytes:
+    """Render a photo dithered to the four grays, with an optional caption and its source site."""
+    gray = ImageOps.autocontrast(picture.convert("L"), cutoff=1)
+    palette = Image.new("P", (1, 1))
+    palette.putpalette([level for level in (0, 85, 170, 255) for _ in range(3)])
+    return _picture_screen(gray, caption, source, palette)
+
+
+def _picture_screen(picture: Image.Image, caption: str, source: str = "", palette: Image.Image | None = None) -> bytes:
+    """Lay out a picture over an optional caption; with ``palette``, dither it to those grays."""
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
     picture_height = HEIGHT - 80 if caption else HEIGHT - 20
-    fitted = ImageOps.contain(picture.convert("L"), (WIDTH - 20, picture_height))
+    fitted = ImageOps.contain(picture, (WIDTH - 20, picture_height))
+    if palette is not None:
+        fitted = fitted.convert("RGB").quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("L")
     canvas.paste(fitted, ((WIDTH - fitted.width) // 2, 10 + (picture_height - fitted.height) // 2))
+    draw = ImageDraw.Draw(canvas)
     if caption:
         font = _fitted(caption, WIDTH - 40, 48, 26)
         _draw_lines(
-            ImageDraw.Draw(canvas),
+            draw,
             _wrapped(caption, font, WIDTH - 40, 1),
             font,
             left=20,
@@ -157,6 +177,9 @@ def render_drawing(picture: Image.Image, caption: str = "") -> bytes:
             top=HEIGHT - 66,
             centered=True,
         )
+    if source:
+        font = _font(16)
+        draw.text((WIDTH - 12 - font.getlength(source), HEIGHT - 22), source, font=font, fill=_GREY)
     return encode_png(canvas)
 
 
@@ -243,7 +266,7 @@ class Screen:
 
 
 class EInkDisplay:
-    """The current screen, the device server and the drawings."""
+    """The current screen, the device server, drawings and web pictures."""
 
     def __init__(
         self,
@@ -254,6 +277,8 @@ class EInkDisplay:
         drawings_per_day: int,
         image_model: str,
         client: genai.Client | None = None,
+        pictures: WebPictures | None = None,
+        pictures_per_day: int = 30,
         clock: Callable[[], float] = time.time,
     ) -> None:
         """Prepare the resting screen; the device server starts with ``start()``."""
@@ -263,6 +288,8 @@ class EInkDisplay:
         self._drawings_per_day = drawings_per_day
         self._image_model = image_model
         self._client = client
+        self._pictures = pictures
+        self._pictures_per_day = pictures_per_day
         self._clock = clock
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
@@ -318,13 +345,14 @@ class EInkDisplay:
 
     async def drawing(self, subject: str) -> Image.Image:
         """Return a drawing of ``subject``: from the cache, else a new one counted against today's limit."""
-        path = self._cache_dir / f"{_cache_key(subject)}.png"
+        path = self._cache_dir / "drawings" / f"{_cache_key(subject)}.png"
         if path.is_file():
             with Image.open(path) as cached:
                 return cached.convert("L")
         if self._client is None:
             raise DrawingError("drawings need GEMINI_API_KEY")
-        self._take_drawing_allowance()
+        if not self._take_allowance("drawings", self._drawings_per_day):
+            raise DrawingLimitError("today's drawings are used up")
         try:
             response = await asyncio.wait_for(
                 self._client.aio.models.generate_content(
@@ -358,23 +386,49 @@ class EInkDisplay:
             picture = made.convert("L")
         picture.thumbnail((WIDTH, HEIGHT))
         picture = picture.filter(ImageFilter.MedianFilter(3))  # JPEG noise would speckle flat fills
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         picture.save(path)
         return picture
 
-    def _take_drawing_allowance(self) -> None:
-        """Count one new drawing for today, or raise DrawingLimitError when today's are used up."""
+    async def picture(self, subject: str) -> WebPicture:
+        """Return a checked web picture of ``subject``: from the cache, else a new search counted against today's."""
+        path = self._cache_dir / "pictures" / f"{_cache_key(subject)}.png"
+        if path.is_file():
+            with Image.open(path) as cached:
+                return WebPicture(cached.convert("L"), str(cached.info.get("source", "")))
+        if self._pictures is None:
+            raise PictureError("web pictures need BRAVE_API_KEY and TYPESAFE_API_KEY")
+        if not self._take_allowance("pictures", self._pictures_per_day):
+            raise PictureError("today's picture searches are used up")
+        try:
+            found = await asyncio.wait_for(self._pictures.find(subject), PICTURE_TIMEOUT_S)
+        except asyncio.TimeoutError as error:
+            raise PictureError("the picture search took too long") from error
+        picture = found.image.convert("L")
+        picture.thumbnail((WIDTH, HEIGHT))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        info = PngInfo()
+        info.add_text("source", found.source)
+        picture.save(path, pnginfo=info)
+        return WebPicture(picture, found.source)
+
+    def _take_allowance(self, kind: str, per_day: int) -> bool:
+        """Count one more new ``kind`` today; False when today's are used up."""
         today = datetime.fromtimestamp(self._clock()).date().isoformat()
-        counts_path = self._cache_dir / "drawings-per-day.json"
+        counts_path = self._cache_dir / "per-day.json"
         try:
             counts = json.loads(counts_path.read_text())
         except (OSError, ValueError):
             counts = {}
-        used = int(counts.get(today, 0)) if isinstance(counts, dict) else 0
-        if used >= self._drawings_per_day:
-            raise DrawingLimitError(f"{used} drawings made today")
+        if not isinstance(counts, dict) or counts.get("date") != today:
+            counts = {"date": today}
+        used = int(counts.get(kind, 0))
+        if used >= per_day:
+            return False
+        counts[kind] = used + 1
         self._cache_dir.mkdir(parents=True, exist_ok=True)
-        counts_path.write_text(json.dumps({today: used + 1}))
+        counts_path.write_text(json.dumps(counts))
+        return True
 
     def start(self) -> None:
         """Start the device server on all interfaces; the TRMNL reaches it over the LAN."""

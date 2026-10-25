@@ -32,6 +32,9 @@ image generation uses the existing `GEMINI_API_KEY`.
 | Speed | Hold each `/api/display` up to 10 s and answer when the screen changes; 1 s sleep between check-ins | The firmware deep-sleeps and reconnects Wi-Fi on every wake (~16 s cycle at a 5 s rate); it stores any server rate without a minimum and does not redraw an unchanged image (firmware source, 2026-10-22) |
 | Tool timing | `show_on_display` awaits the drawing (20 s timeout) | Generation takes ~3 s, under the 30 s Live tool deadline; the result is honest (shown or failed) |
 | Cost guard | 20 new drawings a day (`DISPLAY_DRAWINGS_PER_DAY`); a subject drawn before comes from the cache and does not count | ~$0.034 per drawing |
+| v2 picture search | Brave Image Search, strict SafeSearch; only Brave's proxied thumbnails (`imgs.search.brave.com`, ~500 px) are downloaded | Whole-web coverage (user wanted more than curated sources); thumbnails avoid slow or blocking sites, huge files and requests to LAN addresses from crafted results; ~$0.005 a search, $5 monthly credit |
+| v2 picture check | Jev (TypeSafe), one request with five Noul questions: shows the subject (≥ 0.7), sexual (classical and fine-art nudity excluded), violent, frightening for 2–5-year-olds, cluttered (each ≤ 0.2); top 4 checked in parallel, best-ranked approved one wins | User chose Jev over Gemini and OpenAI moderation; narrow per-risk questions per TypeSafe guidance; any serious risk vetoes. Thresholds are starting points to tune on real results |
+| v2 fallback | No approved picture, no keys, a used-up daily limit (30) or > 12 s: draw the subject instead | The child always gets something; drawing stays within the 30 s tool deadline |
 | Resting screen | Cartoon Reachy (generated from photos of the real robot) with "¡Hola! Soy Reachy / Hi, I'm Reachy"; returns 30 min after the last screen | The user chose a greeting over a blank page |
 
 ## v1 screens
@@ -41,8 +44,10 @@ image generation uses the existing `GEMINI_API_KEY`.
    small drawing, and an optional header. Also used for "how do you say X in Y" translations.
 3. **Text**: one big line (a name, a sum) or a short titled list of up to six lines.
 
-Deferred: v2 web pictures (any source; vision check; classical art with nudity allowed), v3
-multi-panel visual explanations, bedtime stories, morning page, calendar.
+v2 adds **pictures**: a real photo or artwork from the web, checked for young children, with its
+source site in small type; drawn instead when none passes.
+
+Deferred: v3 multi-panel visual explanations, bedtime stories, morning page, calendar.
 
 ## Implementation order
 
@@ -103,3 +108,16 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   image): 60 s rate ~35 s average; 5 s rate: 16 s cycle, median 5.7 s, max 9.7 s; held check-ins
   (10 s) with a 1 s rate: 12.5 s cycle, 0–2 s when a screen follows a quiet spell, ~5.5 s when shown
   6 s after the previous one; median 3.8 s, max 7.8 s over 8 screens. Firmware read timeout is 15 s.
+- 2026-10-25: v1 committed (`44715e6`). v2 started: user chose Brave Image Search and, mid-design,
+  Jev instead of Gemini Flash-Lite for the check. TypeSafe's model page lists Jev 1.14/1.13 as
+  text-input only while the API documents image assets behind `TypeSafe-Danger-Zone-Images: true`
+  ("image assets require a vision-language model"), so image support must be confirmed live.
+  Built `web_pictures.py`, `render_photo` (autocontrast + Floyd–Steinberg to four grays; a noisy
+  full-screen photo encodes to 65 KB of the 90 KB limit), `EInkDisplay.picture` (cache with the
+  source site, own daily limit, 12 s timeout) and the `picture` tool kind with drawing fallback.
+  Pending: `BRAVE_API_KEY` and `TYPESAFE_API_KEY` in `.env`, then a live check of real searches,
+  Jev's verdicts on real thumbnails, and the thresholds.
+- 2026-10-25: The v1 commit fails `tests/test_profile_paths.py::test_wheel_file_paths_stay_within_windows_budget`
+  (the wheel test builds from tracked files, so it passed before the font was committed): the font
+  path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.
+  Full gate after v2: ruff, format, mypy (100 files) clean; 1,836 passed, 4 skipped.

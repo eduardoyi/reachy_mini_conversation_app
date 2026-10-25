@@ -6,8 +6,10 @@ from reachy_mini_conversation_app.eink_display import (
     DrawingLimitError,
     render_text,
     render_word,
+    render_photo,
     render_drawing,
 )
+from reachy_mini_conversation_app.web_pictures import PictureError
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -20,13 +22,16 @@ def _text(kwargs: dict[str, Any], key: str) -> str:
 
 
 class ShowOnDisplay(Tool):
-    """Show a drawing, a word card or short text on the e-ink screen."""
+    """Show a drawing, a web picture, a word card or short text on the e-ink screen."""
 
     name = "show_on_display"
     description = (
         "Show something on the e-ink screen beside you: a calm black-and-white screen with no video that "
         "updates within about a minute. Use it when seeing helps, never for long text. "
         "kind=drawing: a picture of `subject` (in English) with a short `caption`. "
+        "kind=picture: a real photo or artwork from the web, for real things worth seeing as they are (a "
+        "painting, a monument, an animal, a rocket); `subject` names it precisely in English, e.g. 'Mona Lisa "
+        "painting by Leonardo da Vinci'. If no suitable picture is found it is drawn instead. "
         "kind=word: a word card with `word`, `pronunciation`, `meaning`, an optional `header` and an optional "
         "`picture` (its subject in English); for teaching a word or answering 'how do you say X in Y'. "
         "kind=text: one big line (a name, a sum) or a short `title` with up to six `lines`. "
@@ -35,9 +40,9 @@ class ShowOnDisplay(Tool):
     parameters_schema = {
         "type": "object",
         "properties": {
-            "kind": {"type": "string", "enum": ["drawing", "word", "text", "home"]},
-            "subject": {"type": "string", "description": "For drawing: what to draw, in English."},
-            "caption": {"type": "string", "description": "For drawing: a few words under the picture."},
+            "kind": {"type": "string", "enum": ["drawing", "picture", "word", "text", "home"]},
+            "subject": {"type": "string", "description": "For drawing and picture: what to show, in English."},
+            "caption": {"type": "string", "description": "For drawing and picture: a few words under it."},
             "word": {"type": "string", "description": "For word: the word or short phrase, shown large."},
             "pronunciation": {"type": "string", "description": "For word: how to say it."},
             "meaning": {"type": "string", "description": "For word: what it means."},
@@ -66,11 +71,21 @@ class ShowOnDisplay(Tool):
             if kind == "home":
                 display.show_home()
                 return result
-            if kind == "drawing":
+            if kind in ("drawing", "picture"):
                 subject = _text(kwargs, "subject")
                 if not subject:
-                    return {"error": "drawing needs a subject."}
-                png = render_drawing(await display.drawing(subject), _text(kwargs, "caption"))
+                    return {"error": f"{kind} needs a subject."}
+                caption = _text(kwargs, "caption")
+                png = None
+                if kind == "picture":
+                    try:
+                        found = await display.picture(subject)
+                        png = render_photo(found.image, caption, found.source)
+                    except PictureError as error:
+                        logger.info("No web picture, drawing instead: %s", error)
+                        result["note"] += " No suitable picture was found, so it is a drawing."
+                if png is None:
+                    png = render_drawing(await display.drawing(subject), caption)
             elif kind == "word":
                 word = _text(kwargs, "word")
                 if not word:

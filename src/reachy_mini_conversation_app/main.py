@@ -73,15 +73,25 @@ def _build_display() -> Any:
     from google import genai
 
     from reachy_mini_conversation_app.eink_display import EInkDisplay
+    from reachy_mini_conversation_app.web_pictures import WebPictures
 
     api_key = (config.GEMINI_API_KEY or "").strip()
+    pictures = None
+    if config.BRAVE_API_KEY and config.TYPESAFE_API_KEY:
+        pictures = WebPictures(
+            brave_api_key=config.BRAVE_API_KEY,
+            typesafe_api_key=config.TYPESAFE_API_KEY,
+            check_model=config.DISPLAY_CHECK_MODEL,
+        )
     return EInkDisplay(
         port=config.TRMNL_PORT,
         refresh_s=config.TRMNL_REFRESH_SECONDS,
-        cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "drawings",
+        cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "display",
         drawings_per_day=config.DISPLAY_DRAWINGS_PER_DAY,
         image_model=config.DISPLAY_IMAGE_MODEL,
         client=genai.Client(api_key=api_key) if api_key else None,
+        pictures=pictures,
+        pictures_per_day=config.DISPLAY_PICTURES_PER_DAY,
     )
 
 

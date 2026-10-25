@@ -13,6 +13,7 @@ from PIL import Image
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.eink_display import EInkDisplay
+from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.show_on_display import ShowOnDisplay
 
@@ -36,7 +37,19 @@ class _FakeModels:
         )
 
 
-def _display(tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: int = 20) -> EInkDisplay:
+class _FakePictures:
+    def __init__(self, found: bool = True) -> None:
+        self.found = found
+
+    async def find(self, subject: str) -> WebPicture:
+        if not self.found:
+            raise PictureError("no picture passed the check")
+        return WebPicture(Image.new("RGB", (500, 375), (90, 90, 90)), "wikipedia.org")
+
+
+def _display(
+    tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: int = 20, pictures: Any = None
+) -> EInkDisplay:
     client: Any = SimpleNamespace(aio=SimpleNamespace(models=_FakeModels())) if with_drawings else None
     return EInkDisplay(
         port=8090,
@@ -45,6 +58,7 @@ def _display(tmp_path: Path, *, with_drawings: bool = True, drawings_per_day: in
         drawings_per_day=drawings_per_day,
         image_model="gemini-3.1-flash-lite-image",
         client=client,
+        pictures=pictures,
     )
 
 
@@ -149,3 +163,30 @@ def test_the_tool_is_offered_only_with_trmnl_enabled(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(core_tools, "read_profile_tool_override", lambda *_args: None)
 
     assert ("show_on_display" in core_tools._read_profile_tool_names(None)) is enabled
+
+
+@pytest.mark.asyncio
+async def test_a_web_picture_is_shown_when_one_passes_the_check(tmp_path: Path) -> None:
+    """kind=picture shows the checked web picture and draws nothing."""
+    display = _display(tmp_path, pictures=_FakePictures())
+    home = display.current()
+
+    result = await ShowOnDisplay()(_deps(display), kind="picture", subject="Mona Lisa", caption="La Gioconda")
+
+    assert result == {"ok": True, "note": "The screen updates within about a minute."}
+    assert display.current() != home
+    assert not (tmp_path / "drawings").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pictures", [_FakePictures(found=False), None])
+async def test_without_a_suitable_picture_it_is_drawn_instead(tmp_path: Path, pictures: Any) -> None:
+    """No safe picture, or no picture search set up, still shows something: a drawing, and the note says so."""
+    display = _display(tmp_path, pictures=pictures)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_deps(display), kind="picture", subject="a tiger")
+
+    assert result["ok"] is True and "drawing" in result["note"]
+    assert display.current() != home
+    assert (tmp_path / "drawings" / "a-tiger.png").is_file()

@@ -29,8 +29,10 @@ from reachy_mini_conversation_app.eink_display import (
     render_home,
     render_text,
     render_word,
+    render_photo,
     render_drawing,
 )
+from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 
 
 def _jpeg(color: int = 200) -> bytes:
@@ -68,7 +70,7 @@ def _display(tmp_path: Path, models: _FakeModels | None = None, **kwargs: Any) -
     options: dict[str, Any] = {
         "port": 8090,
         "refresh_s": 60,
-        "cache_dir": tmp_path / "drawings",
+        "cache_dir": tmp_path,
         "drawings_per_day": 20,
         "image_model": "gemini-3.1-flash-lite-image",
         "client": client,
@@ -110,6 +112,10 @@ def test_light_grey_fills_become_one_even_grey() -> None:
         pytest.param(
             lambda: render_word("arcobaleno", "ar-co-ba-LÉ-no", "arcoíris", picture=Image.new("L", (300, 300), 170)),
             id="word-with-picture",
+        ),
+        pytest.param(
+            lambda: render_photo(Image.linear_gradient("L").resize((500, 375)), "La Gioconda", "wikipedia.org"),
+            id="photo",
         ),
         pytest.param(lambda: render_text(["3 + 4 = 7"]), id="big-line"),
         pytest.param(lambda: render_text(["leche", "plátanos", "¿huevos?"], title="Lista de la compra"), id="list"),
@@ -241,7 +247,7 @@ async def test_failed_drawings_raise_drawing_errors(tmp_path: Path, monkeypatch:
     with pytest.raises(DrawingError, match="too long"):
         await _display(tmp_path, _FakeModels(_jpeg(), delay_s=1.0)).drawing("cat")
 
-    assert not (tmp_path / "drawings" / "cat.png").exists()
+    assert not list(tmp_path.rglob("cat.png"))
 
 
 @pytest.fixture
@@ -303,3 +309,64 @@ def test_the_server_serves_nothing_but_the_current_screens(served_display: EInkD
     )
     with urllib.request.urlopen(log, timeout=5) as response:
         assert response.status == 204
+
+
+def test_photos_are_dithered_so_their_tones_survive_four_grays() -> None:
+    """A smooth photo keeps its gradient as a dither of all four levels rather than four flat bands."""
+    image = _decoded(render_photo(Image.linear_gradient("L").resize((800, 400)))).convert("L")
+    band = [image.getpixel((x, 200)) for x in range(300, 340)]
+    assert set(image.get_flattened_data()) == {0, 85, 170, 255}
+    assert len(set(band)) > 1 and len({band[i] != band[i + 1] for i in range(len(band) - 1)}) == 2
+
+
+class _FakePictures:
+    def __init__(self, error: Exception | None = None, delay_s: float = 0.0) -> None:
+        self.error = error
+        self.delay_s = delay_s
+        self.subjects: list[str] = []
+
+    async def find(self, subject: str) -> WebPicture:
+        self.subjects.append(subject)
+        await asyncio.sleep(self.delay_s)
+        if self.error:
+            raise self.error
+        return WebPicture(Image.new("RGB", (500, 375), (90, 90, 90)), "wikipedia.org")
+
+
+@pytest.mark.asyncio
+async def test_web_pictures_are_cached_with_their_source(tmp_path: Path) -> None:
+    """A found picture is kept with the site it came from; asking again does not search again."""
+    finder = _FakePictures()
+    display = _display(tmp_path, pictures=finder)
+
+    first = await display.picture("Mona Lisa")
+    again = await display.picture("mona lisa")
+
+    assert finder.subjects == ["Mona Lisa"]
+    assert first.source == again.source == "wikipedia.org"
+    assert again.image.size == (500, 375)
+
+
+@pytest.mark.asyncio
+async def test_picture_searches_have_their_own_daily_limit(tmp_path: Path) -> None:
+    """New searches stop at the daily limit while cached pictures and drawings still work."""
+    display = _display(tmp_path, _FakeModels(_jpeg()), pictures=_FakePictures(), pictures_per_day=1)
+
+    await display.picture("Eiffel Tower")
+    with pytest.raises(PictureError, match="used up"):
+        await display.picture("Big Ben")
+    assert (await display.picture("Eiffel Tower")).source == "wikipedia.org"
+    assert (await display.drawing("cat")).size == (643, 480)
+
+
+@pytest.mark.asyncio
+async def test_picture_failures_raise_picture_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without keys, after a failed search, or when it is too slow, there is no picture."""
+    with pytest.raises(PictureError, match="BRAVE_API_KEY"):
+        await _display(tmp_path).picture("cat")
+    with pytest.raises(PictureError, match="nothing"):
+        await _display(tmp_path, pictures=_FakePictures(PictureError("nothing"))).picture("cat")
+    monkeypatch.setattr(eink_display, "PICTURE_TIMEOUT_S", 0.01)
+    with pytest.raises(PictureError, match="too long"):
+        await _display(tmp_path, pictures=_FakePictures(delay_s=1.0)).picture("cat")
+    assert not list(tmp_path.rglob("cat.png"))

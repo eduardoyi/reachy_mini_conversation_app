@@ -777,6 +777,11 @@ class Config:
     TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
     DISPLAY_DRAWINGS_PER_DAY = _bounded_int("DISPLAY_DRAWINGS_PER_DAY", 20, 0, 500)
+    # Web pictures: Brave Image Search finds them, Jev (TypeSafe) checks each one. Both keys are needed.
+    BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
+    TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
+    DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
+    DISPLAY_PICTURES_PER_DAY = _bounded_int("DISPLAY_PICTURES_PER_DAY", 30, 0, 500)
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
@@ -966,6 +971,10 @@ def refresh_runtime_config_from_env() -> None:
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
     config.DISPLAY_DRAWINGS_PER_DAY = _bounded_int("DISPLAY_DRAWINGS_PER_DAY", 20, 0, 500)
+    config.BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
+    config.TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
+    config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
+    config.DISPLAY_PICTURES_PER_DAY = _bounded_int("DISPLAY_PICTURES_PER_DAY", 30, 0, 500)
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (
         _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode

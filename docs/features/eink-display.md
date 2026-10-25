@@ -6,19 +6,24 @@
 
 ## Overview
 
-Reachy shows drawings, word cards and short text on a TRMNL OG e-ink display (7.5", 800x480,
+Reachy shows drawings, checked pictures from the web, word cards and short text on a TRMNL OG e-ink display (7.5", 800x480,
 four grays). It is a deliberately slow, low-stimulation screen: no video, no feed, no apps. The
 screen changes only when someone asks; otherwise it shows a resting card with a cartoon Reachy and
 "¡Hola! Soy Reachy / Hi, I'm Reachy".
 
-Out of scope in v1: pictures from the web, multi-panel visual explanations, stories, scheduled
-pages (see the plan).
+Out of scope so far: multi-panel visual explanations, stories, scheduled pages (see the plan).
 
 ## User-visible behavior
 
 - "Draw me a dinosaur": Reachy says to look at the screen; a friendly line drawing with a caption
   appears a few seconds later (about 3 s to draw, usually 0–2 s for the TRMNL to fetch it, then the
   e-ink redraw). Asking for the same subject again reuses the saved drawing.
+- "Show me the Mona Lisa", "what does a Falcon 9 look like?": a real picture from the web, dithered
+  to the four grays, with its source site in small type. Brave Image Search (strict SafeSearch)
+  finds candidates and Jev checks each is fine for 2–5-year-olds and shows the subject; classical and
+  fine-art nudity is allowed. If none passes, the keys are missing, today's 30 searches are used or
+  it takes over 12 s, the subject is drawn instead and Reachy is told so. A subject shown before
+  comes from the cache.
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
   large type, its pronunciation written for a Spanish speaker ("la MÉ-la"), the Spanish meaning, an
   optional header and an optional small drawing. If the drawing fails the card shows without it.
@@ -41,6 +46,26 @@ pages (see the plan).
 3. Allow incoming connections for Python if macOS asks. Keep the TRMNL on USB power: with the
    default 1 s sleep and held check-ins its Wi-Fi is on most of the time, which would drain the
    battery in hours. On battery set `TRMNL_REFRESH_SECONDS` to several minutes.
+
+### Web pictures (v2)
+
+```mermaid
+flowchart LR
+  Tool -->|kind=picture| Pic[EInkDisplay.picture]
+  Pic -->|cache miss| Find[WebPictures.find]
+  Find -->|q, safesearch=strict| Brave[Brave Image Search]
+  Find -->|top 4 thumbnails, imgs.search.brave.com only| Thumbs[download]
+  Thumbs -->|each as a jpg asset, in parallel| Jev[Jev: 5 yes/no questions]
+  Jev -->|best-ranked approved| Pic
+  Pic -.->|PictureError| Draw[draw instead]
+```
+
+Jev's questions (all Noul, one request per candidate, state `{subject, audience, image}`):
+`shows_subject` (must be ≥ 0.7), `sexual` (criteria exclude classical and fine-art nudity),
+`violent`, `frightening` (for 2–5-year-olds; rockets and calm animals are fine), `cluttered`
+(text, screenshots, memes, collages) — each must be ≤ 0.2. A missing answer counts against the
+picture. Every verdict is logged as scores only (no subject). Requests send the image as a base64
+`jpg` asset with `TypeSafe-Danger-Zone-Images: true`.
 
 ## Architecture
 
@@ -70,21 +95,24 @@ flowchart LR
   when screens come seconds apart (the device is still drawing the last one).
 - The firmware does not redraw an image whose file name it has just shown, so frequent check-ins
   never flash the panel (`display_session.cpp`: "The image hasn't changed since the last wakeup").
-- Drawings are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/drawings/`, named
-  by the subject folded to ASCII ("A Cat" and "a cat" share one). The day's count is in
-  `drawings-per-day.json` there; an attempt counts even if it fails, which bounds cost.
-- Each drawing's tokens go to the usage ledger as feature `display_drawing`.
+- Drawings and pictures are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/display/`
+  (`drawings/`, `pictures/` with the source site in a PNG text chunk), named by the subject folded
+  to ASCII ("A Cat" and "a cat" share one). The day's counts are in `per-day.json` there; an attempt
+  counts even if it fails, which bounds cost.
+- Each drawing's tokens go to the usage ledger as feature `display_drawing`. Brave searches and Jev
+  checks are not in the ledger yet (Brave bills per search; Jev reports input tokens).
 
 ## Canonical files and contracts
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
 | Screens and server | `eink_display.py` | `render_home/drawing/word/text() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/screen_png/drawing/start/stop` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Web pictures | `web_pictures.py` | `WebPictures.find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
-| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `DISPLAY_DRAWINGS_PER_DAY` (20, 0–500) |
-| Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold and its `OFL.txt` |
+| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `DISPLAY_DRAWINGS_PER_DAY` (20, 0–500), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`), `DISPLAY_PICTURES_PER_DAY` (30, 0–500) |
+| Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt` |
 | Guidance | `profiles/household_companion/profile.md` | When to use the screen; Spanish-style pronunciation and Spanish meanings for Italian words |
 
 TRMNL device API, as served (firmware 1.8.17 checked):
@@ -118,6 +146,9 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 - The server listens on all interfaces without authentication (the TRMNL firmware sends no
   credential when fetching images). Anything on the LAN can read the current screen: drawings and
   short text, never audio, camera frames or memory. The setup `api_key` is a fixed placeholder.
+- Web pictures send the subject words (chosen by the model, never raw speech) to Brave, and web
+  thumbnails (never household images) to TypeSafe. Picture checks rely on TypeSafe's experimental
+  image input; if Jev rejects or cannot read images, every picture falls back to a drawing.
 - Logs carry the screen kind, firmware/model at setup, and battery/signal at debug level, never the
   words or subjects shown.
 - A port already in use logs an error; the app runs without the display.
@@ -134,7 +165,8 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, five Noul questions, fine-art criteria); only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
 | `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure and daily limit messages; word card without its picture; the `TRMNL_ENABLED` gate |
 | `tests/test_config.py` | `TRMNL_*` and `DISPLAY_DRAWINGS_PER_DAY` parsing and fallbacks |
 
@@ -155,4 +187,5 @@ through a spoken conversation.
 ## Changelog
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
+- 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback); live check pending keys.
 - 2026-10-25: Held check-ins and a 1 s default refresh: screens appear in seconds instead of up to a minute.

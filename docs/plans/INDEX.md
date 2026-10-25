@@ -9,7 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
-| [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | v1 drawings, word cards and text built; live voice check pending; v2 web pictures and v3 visual explanations planned |
+| [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | v1 committed; v2 web pictures (Brave + Jev check) built, live check pending keys; v3 visual explanations planned |
 | [Local music controls and a local command model](local-music-controls.md) | `in-progress` | 2026-10-14 | V1 music lowering, volume and wind-down accepted on hardware; V2 local music commands and V3 local command model planned |
 | [Reachy Mini Lite hardware bring-up](reachy-mini-lite-bringup.md) | `in-progress` | 2026-10-13 | Stepwise first power-on, robot audio, interruption, hybrid/wake re-tuning; SDK target 1.11 |
 | [TypeSafe judgment exploration](typesafe-judgment-exploration.md) | `draft` | 2026-09-17 | Synthetic evaluation complete; background memory verification proposed, no runtime integration |
