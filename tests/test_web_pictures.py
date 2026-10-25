@@ -192,6 +192,8 @@ async def test_failures_raise_picture_errors() -> None:
         pytest.param(CLASSICAL_NUDE, id="classical-nude"),
         # Measured on roaring T. rex and open-jawed shark pictures (2026-10-25).
         pytest.param({**SAFE, "violent": 0.18, "mature": 0.15}, id="fierce-animal"),
+        # Measured on Guardi's Piazzetta San Marco: a busy painting is shown rather than drawn.
+        pytest.param({**SAFE, "fine_art": 0.97, "clear_on_screen": 0.17}, id="busy-painting"),
         # Measured on Picasso's Guernica: violent, but stylised rather than graphic.
         pytest.param(
             {**SAFE, "fine_art": 0.95, "violent": 0.90, "graphic": 0.06, "nudity": 0.67, "mature": 0.20},

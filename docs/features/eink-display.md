@@ -73,7 +73,7 @@ policy applied in code (`WebPictures._approved`, calibrated on real searches 202
 | `graphic` | ≤ 0.3 for every picture: realistic blood, open wounds, gore or dead bodies. Guernica 0.04–0.07 (shown); Goya's Third of May 0.81–0.90, The Death of Marat 0.77–0.82, The Raft of the Medusa 0.43–0.79, a lion kill 0.48–0.57 (blocked) |
 | `mature` | ≤ 0.4: horror, gore, drugs, alcohol, smoking, gambling, crude gestures (smoking, beer, horror, zombies 0.84–0.98; Botticelli's Venus 0.17–0.27) |
 | `cluttered` | ≤ 0.3: logos, icons, clip art, text, screenshots, memes, collages (tiger logos 0.80–0.95) |
-| `clear_on_screen` | ≥ 0.5, judged on a second image, the candidate rendered by `render_photo` exactly as the TRMNL will show it: a dark crocodile 0.26–0.27, a tiny cat in a dark corner 0.27, a Louvre wall with the Mona Lisa small 0.19 are rejected; clear ducks, tigers and close-ups score 0.7–0.87. Among approved candidates the clearest wins (ties go to search rank) |
+| `clear_on_screen` | ≥ 0.5 except for fine art (busy paintings such as Guardi's Venice 0.16–0.22 or The Night Watch 0.12–0.20 are faithful reproductions, better than a drawing), judged on a second image, the candidate rendered by `render_photo` exactly as the TRMNL will show it: a dark crocodile 0.26–0.27, a tiny cat in a dark corner 0.27, a Louvre wall with the Mona Lisa small 0.19 are rejected; clear ducks, tigers and close-ups score 0.7–0.87. Among approved candidates the clearest wins (ties go to search rank) |
 
 A missing answer counts against the picture. Six candidates are checked in parallel; the
 approved one clearest on screen wins. Every verdict is logged as scores only (no subject). Requests send
@@ -207,6 +207,7 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Clarity no longer rejects fine art (Guardi's Venice was drawn instead); it still ranks copies.
 - 2026-10-25: Fine art may depict violence unless it is graphic (new `graphic` question): Guernica shows,
   Goya's Third of May and The Death of Marat do not.
 - 2026-10-25: Jev also judges each candidate as the screen will show it and the clearest approved one

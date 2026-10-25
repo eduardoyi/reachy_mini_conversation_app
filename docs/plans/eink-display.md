@@ -157,6 +157,11 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   the violence limit when fine_art ≥ 0.8. Real searches: Guernica graphic 0.04–0.07, 2 of 6 pass (the
   rest fail clarity 0.41–0.48); Goya's Third of May 0.81–0.90, The Death of Marat 0.77–0.82, The Raft
   of the Medusa 0.43–0.79 and battle paintings stay blocked; lion kills stay blocked (not art).
+- 2026-10-25: A Guardi painting of Venice seen at the Gulbenkian was drawn instead of shown: every
+  candidate cleared safety but scored clear_on_screen 0.13–0.35. Their screen renders are
+  recognisable, faithful reproductions; the question suits photos of subjects, not paintings, whose
+  subject is the painting. Fine art (≥ 0.8) is now exempt from the clarity minimum, still ranked by
+  it. The Night Watch scored 0.12–0.20 and Starry Night 0.32–0.59 on the same check.
 - 2026-10-25: The v1 commit fails `tests/test_profile_paths.py::test_wheel_file_paths_stay_within_windows_budget`
   (the wheel test builds from tracked files, so it passed before the font was committed): the font
   path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.
