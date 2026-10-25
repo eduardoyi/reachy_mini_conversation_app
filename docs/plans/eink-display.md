@@ -151,6 +151,12 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   question counted bare skin (a hand near a crocodile 0.51, the Mona Lisa 0.15–0.31); narrowed to
   bare breasts, buttocks, genitals or underwear: hand 0.05, Mona Lisa 0.03–0.13, David still
   0.76–0.98 (allowed as fine art), swimwear beach shots 0.10–0.34.
+- 2026-10-25: "Guernica" was drawn instead of shown: every candidate scored violent 0.79–0.93 with
+  no fine-art exception. User chose to allow violence in fine art when it is not graphic. Added a
+  `graphic` question (realistic blood, wounds, gore, dead bodies; ≤ 0.3 for every picture) and lifted
+  the violence limit when fine_art ≥ 0.8. Real searches: Guernica graphic 0.04–0.07, 2 of 6 pass (the
+  rest fail clarity 0.41–0.48); Goya's Third of May 0.81–0.90, The Death of Marat 0.77–0.82, The Raft
+  of the Medusa 0.43–0.79 and battle paintings stay blocked; lion kills stay blocked (not art).
 - 2026-10-25: The v1 commit fails `tests/test_profile_paths.py::test_wheel_file_paths_stay_within_windows_budget`
   (the wheel test builds from tracked files, so it passed before the font was committed): the font
   path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.

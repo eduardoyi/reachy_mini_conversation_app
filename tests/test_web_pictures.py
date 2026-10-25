@@ -24,6 +24,7 @@ SAFE = {
     "sexual": 0.02,
     "violent": 0.01,
     "mature": 0.03,
+    "graphic": 0.02,
     "clear_on_screen": 0.8,
     "cluttered": 0.05,
 }
@@ -127,6 +128,7 @@ async def test_jev_gets_the_image_and_one_narrow_question_per_risk() -> None:
     assert "classical paintings and sculptures" in body["questions"]["sexual"]["criteria"]["false"]
     assert "open jaws" in body["questions"]["violent"]["criteria"]["false"]
     assert "open jaws" in body["questions"]["mature"]["criteria"]["false"]
+    assert "cubist" in body["questions"]["graphic"]["criteria"]["false"]
 
 
 @pytest.mark.asyncio
@@ -152,6 +154,9 @@ async def test_only_brave_thumbnails_are_ever_downloaded() -> None:
         pytest.param({**SAFE, "cluttered": 0.9}, id="logo-or-collage"),
         pytest.param({**SAFE, "nudity": 0.9}, id="nudity-outside-fine-art"),
         pytest.param({**SAFE, "clear_on_screen": 0.3}, id="too-dark-or-small-on-screen"),
+        # Measured on Goya's The Third of May 1808: fine art, but realistic blood.
+        pytest.param({**SAFE, "fine_art": 0.97, "violent": 0.97, "graphic": 0.85}, id="graphic-even-as-art"),
+        pytest.param({**SAFE, "fine_art": 0.5, "violent": 0.94}, id="violent-and-unsure-it-is-art"),
         pytest.param({**CLASSICAL_NUDE, "sexual": 0.5}, id="suggestive-even-as-art"),
         pytest.param({**CLASSICAL_NUDE, "fine_art": 0.6}, id="unsure-it-is-art"),
         pytest.param({name: value for name, value in SAFE.items() if name != "mature"}, id="missing-answer"),
@@ -187,10 +192,15 @@ async def test_failures_raise_picture_errors() -> None:
         pytest.param(CLASSICAL_NUDE, id="classical-nude"),
         # Measured on roaring T. rex and open-jawed shark pictures (2026-10-25).
         pytest.param({**SAFE, "violent": 0.18, "mature": 0.15}, id="fierce-animal"),
+        # Measured on Picasso's Guernica: violent, but stylised rather than graphic.
+        pytest.param(
+            {**SAFE, "fine_art": 0.95, "violent": 0.90, "graphic": 0.06, "nudity": 0.67, "mature": 0.20},
+            id="non-graphic-violent-art",
+        ),
     ],
 )
-async def test_classical_nudes_and_fierce_animals_are_shown(verdict: dict[str, float]) -> None:
-    """Fine-art nudity is allowed, and sharks or dinosaurs with open jaws are neither violent nor mature."""
+async def test_classical_nudes_fierce_animals_and_non_graphic_art_are_shown(verdict: dict[str, float]) -> None:
+    """Fine-art nudity and non-graphic violence in fine art are allowed; open-jawed animals are not violence."""
     assert (await _FakeWeb([_result(1)], [verdict]).pictures().find("The Birth of Venus")).source == "site1.org"
 
 

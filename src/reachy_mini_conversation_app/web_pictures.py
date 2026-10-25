@@ -41,6 +41,8 @@ MAX_RISKS = {"sexual": 0.2, "violent": 0.3, "mature": 0.4, "cluttered": 0.3}
 # Nudity is allowed only in classical and fine-art paintings and sculptures, whose nudes still score
 # sexual 0.24-0.29 when Jev is sure they are fine art.
 MAX_NUDITY, MIN_FINE_ART, FINE_ART_MAX_SEXUAL = 0.2, 0.8, 0.4
+# Realistic blood or gore is never shown. Fine art may depict violence (Guernica) as long as it is not graphic.
+MAX_GRAPHIC = 0.3
 # Judged on the four-gray screen version: too dark or tiny subjects fall below this.
 MIN_CLEAR_ON_SCREEN = 0.5
 
@@ -79,6 +81,14 @@ _QUESTIONS: dict[str, dict[str, object]] = {
                 "against someone, or dead or suffering animals"
             ),
             "false": "No one being harmed, including fierce animals with open jaws and roaring dinosaurs",
+        },
+    },
+    "graphic": {
+        "type": "noul",
+        "instructions": "Does the `image` show blood, gore or injuries realistically?",
+        "criteria": {
+            "true": "Realistic blood, open wounds, gore or dead bodies shown in detail",
+            "false": "No blood or wounds, or violence shown in a stylised or abstract way, as in a cubist painting",
         },
     },
     "mature": {
@@ -249,11 +259,12 @@ class WebPictures:
             logger.warning("Picture check failed: %s", type(error).__name__)
             return None
         fine_art = answers.get("fine_art", 0.0) >= MIN_FINE_ART
-        limits = {**MAX_RISKS, "sexual": FINE_ART_MAX_SEXUAL} if fine_art else MAX_RISKS
+        limits = {**MAX_RISKS, "sexual": FINE_ART_MAX_SEXUAL, "violent": 1.0} if fine_art else MAX_RISKS
         approved = (
             answers.get("shows_subject", 0.0) >= MIN_SHOWS_SUBJECT
             and all(answers.get(name, 1.0) <= limit for name, limit in limits.items())
             and (answers.get("nudity", 1.0) <= MAX_NUDITY or fine_art)
+            and answers.get("graphic", 1.0) <= MAX_GRAPHIC
             and answers.get("clear_on_screen", 0.0) >= MIN_CLEAR_ON_SCREEN
         )
         scores = ", ".join(f"{name}={value:.2f}" for name, value in sorted(answers.items()))

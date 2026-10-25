@@ -69,7 +69,8 @@ policy applied in code (`WebPictures._approved`, calibrated on real searches 202
 | `shows_subject` | ≥ 0.7 |
 | `nudity`, `fine_art` | nudity ≤ 0.2, or fine_art ≥ 0.8 (classical and fine-art nudes allowed). Nudity means bare breasts, buttocks or genitals or underwear, not bare hands or faces (a hand in a crocodile photo scored 0.51 under broader wording, 0.05 now) |
 | `sexual` | ≤ 0.2; ≤ 0.4 when fine_art ≥ 0.8 (Venus and David score 0.19–0.29 while judged fine art) |
-| `violent` | ≤ 0.3: fighting, attacks, prey being caught, blood, injury; fierce animals with open jaws and roaring dinosaurs are not violence (boxing, battles, zombies, kills, a bloody T. rex 0.45–0.98; roaring T. rex and open-jawed sharks 0.05–0.18) |
+| `violent` | ≤ 0.3: fighting, attacks, prey being caught, blood, injury; fierce animals with open jaws and roaring dinosaurs are not violence (boxing, battles, zombies, kills, a bloody T. rex 0.45–0.98; roaring T. rex and open-jawed sharks 0.05–0.18). No limit when fine_art ≥ 0.8: famous art may depict violence if it is not graphic |
+| `graphic` | ≤ 0.3 for every picture: realistic blood, open wounds, gore or dead bodies. Guernica 0.04–0.07 (shown); Goya's Third of May 0.81–0.90, The Death of Marat 0.77–0.82, The Raft of the Medusa 0.43–0.79, a lion kill 0.48–0.57 (blocked) |
 | `mature` | ≤ 0.4: horror, gore, drugs, alcohol, smoking, gambling, crude gestures (smoking, beer, horror, zombies 0.84–0.98; Botticelli's Venus 0.17–0.27) |
 | `cluttered` | ≤ 0.3: logos, icons, clip art, text, screenshots, memes, collages (tiger logos 0.80–0.95) |
 | `clear_on_screen` | ≥ 0.5, judged on a second image, the candidate rendered by `render_photo` exactly as the TRMNL will show it: a dark crocodile 0.26–0.27, a tiny cat in a dark corner 0.27, a Louvre wall with the Mona Lisa small 0.19 are rejected; clear ducks, tigers and close-ups score 0.7–0.87. Among approved candidates the clearest wins (ties go to search rank) |
@@ -206,6 +207,8 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Fine art may depict violence unless it is graphic (new `graphic` question): Guernica shows,
+  Goya's Third of May and The Death of Marat do not.
 - 2026-10-25: Jev also judges each candidate as the screen will show it and the clearest approved one
   wins; nudity narrowed to bare breasts, buttocks, genitals or underwear.
 - 2026-10-25: Household policy: block violence, mature content and nudity (fine art excepted), not
