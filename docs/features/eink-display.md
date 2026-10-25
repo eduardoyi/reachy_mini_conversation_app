@@ -1,6 +1,6 @@
 # Feature: E-ink display (TRMNL)
 
-- Status: `in-progress` (v1 built and unit-tested; every screen kind shown on the household TRMNL; voice use not yet tried)
+- Status: `in-progress` (v1 and v2 checked live on the household TRMNL, including real web pictures; voice use not yet tried)
 - Last updated: 2026-10-25
 - Plan: [docs/plans/eink-display.md](../plans/eink-display.md)
 
@@ -20,8 +20,9 @@ Out of scope so far: multi-panel visual explanations, stories, scheduled pages (
   e-ink redraw). Asking for the same subject again reuses the saved drawing.
 - "Show me the Mona Lisa", "what does a Falcon 9 look like?": a real picture from the web, dithered
   to the four grays, with its source site in small type. Brave Image Search (strict SafeSearch)
-  finds candidates and Jev checks each is fine for 2–5-year-olds and shows the subject; classical and
-  fine-art nudity is allowed. If none passes, the keys are missing, today's 30 searches are used or
+  finds candidates and Jev checks each shows the subject and has no violence, mature content or
+  nudity; classical and fine-art nudity is allowed, and fierce animals (open-jawed sharks, roaring
+  dinosaurs) are fine, by the household's choice. If none passes, the keys are missing, today's 30 searches are used or
   it takes over 12 s, the subject is drawn instead and Reachy is told so. A subject shown before
   comes from the cache.
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
@@ -60,12 +61,24 @@ flowchart LR
   Pic -.->|PictureError| Draw[draw instead]
 ```
 
-Jev's questions (all Noul, one request per candidate, state `{subject, audience, image}`):
-`shows_subject` (must be ≥ 0.7), `sexual` (criteria exclude classical and fine-art nudity),
-`violent`, `frightening` (for 2–5-year-olds; rockets and calm animals are fine), `cluttered`
-(text, screenshots, memes, collages) — each must be ≤ 0.2. A missing answer counts against the
-picture. Every verdict is logged as scores only (no subject). Requests send the image as a base64
-`jpg` asset with `TypeSafe-Danger-Zone-Images: true`.
+Jev's questions (all Noul, one request per candidate, state `{subject, audience, image}`), and the
+policy applied in code (`WebPictures._approved`, calibrated on real searches 2026-10-25):
+
+| Question | Rule |
+|----------|------|
+| `shows_subject` | ≥ 0.7 |
+| `nudity`, `fine_art` | nudity ≤ 0.2, or fine_art ≥ 0.8 (classical and fine-art nudes allowed) |
+| `sexual` | ≤ 0.2; ≤ 0.4 when fine_art ≥ 0.8 (Venus and David score 0.19–0.29 while judged fine art) |
+| `violent` | ≤ 0.3: fighting, attacks, prey being caught, blood, injury; fierce animals with open jaws and roaring dinosaurs are not violence (boxing, battles, zombies, kills, a bloody T. rex 0.45–0.98; roaring T. rex and open-jawed sharks 0.05–0.18) |
+| `mature` | ≤ 0.4: horror, gore, drugs, alcohol, smoking, gambling, crude gestures (smoking, beer, horror, zombies 0.84–0.98; Botticelli's Venus 0.17–0.27) |
+| `cluttered` | ≤ 0.3: logos, icons, clip art, text, screenshots, memes, collages (tiger logos 0.80–0.95) |
+
+A missing answer counts against the picture. Six candidates are checked in parallel; the
+best-ranked approved one wins. Every verdict is logged as scores only (no subject). Requests send
+the image as a base64 `jpg` asset with `TypeSafe-Danger-Zone-Images: true`. Jev answers HTTP 400
+"Invalid image dimensions" for a short side under ~280 px or a long side over ~1000 px, so each
+candidate is resized to a 300 px short side within a 1000 px long side first. Brave's plan allows
+about one search a second (a burst returned 429, which falls back to a drawing).
 
 ## Architecture
 
@@ -133,7 +146,11 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 ### Do not change without updating this document and its tests
 
 - Filenames are `<name>-<id>-<unix time>` (13-character `<name>-<id>`, at most 31 characters) and
-  change with every screen. The TRMNL caches by name: a reused name hides a new screen.
+  change with every screen: the TRMNL caches by name, so a reused name hides a new screen.
+- Shown screens share one `<name>-<id>` (`reachy-000001`) and differ by timestamp; the resting card
+  is `reachy-000000`. The firmware deletes a saved image when a newer one shares its first 13
+  characters, otherwise only after 24 h (`filesystem_purge_old_file`). A new id per screen filled
+  the device's flash with photos and caused "File writing ERROR" reports (2026-10-25).
 - A held check-in must answer within the firmware's 15 s read timeout (`HTTP_DEFAULT_TIMEOUT_MS`);
   a timeout counts as a failed request and the device backs off to its retry ladder.
 - PNGs are 2-bit grayscale (color type 0) and at most 90,000 bytes (`MAX_PNG_BYTES`).
@@ -165,8 +182,8 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
-| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, five Noul questions, fine-art criteria); only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, own daily limit, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text; idle return; filename rules; held check-ins answered on change and after the hold; oversized screens; drawing cache, prompt and usage record; daily limit and day rollover; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); every doubt rejects; search, check, tiny and broken-image failures |
 | `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure and daily limit messages; word card without its picture; the `TRMNL_ENABLED` gate |
 | `tests/test_config.py` | `TRMNL_*` and `DISPLAY_DRAWINGS_PER_DAY` parsing and fallbacks |
 
@@ -187,5 +204,9 @@ through a spoken conversation.
 ## Changelog
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
-- 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback); live check pending keys.
+- 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Household policy: block violence, mature content and nudity (fine art excepted), not
+  scary-looking animals; "frightening" replaced by "mature", violence reworded and recalibrated.
+- 2026-10-25: Live calibration of Jev's questions and limits, resizing for Jev, six candidates; shown
+  screens share one id so the TRMNL's flash no longer fills up.
 - 2026-10-25: Held check-ins and a 1 s default refresh: screens appear in seconds instead of up to a minute.

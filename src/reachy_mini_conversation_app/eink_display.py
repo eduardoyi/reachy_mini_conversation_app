@@ -293,11 +293,13 @@ class EInkDisplay:
         self._clock = clock
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
-        # The TRMNL keeps images by file name: <name>-<id>-<unix time>, a new id for every screen.
+        # The TRMNL keeps images by file name, <name>-<id>-<unix time>, and deletes a saved image when a
+        # newer one shares its <name>-<id>. Shown screens therefore share one id and differ by time, so
+        # each replaces the last in the device's small flash instead of piling up for a day.
         self._home = Screen(f"reachy-000000-{int(clock())}", render_home())
         self._screen: Screen | None = None
         self._shown_at = 0.0
-        self._serial = 0
+        self._stamp = 0
         self._last_sent: str | None = None
         self._server: ThreadingHTTPServer | None = None
 
@@ -306,8 +308,8 @@ class EInkDisplay:
         if len(png) > MAX_PNG_BYTES:
             raise ValueError(f"Screen is {len(png)} bytes; the TRMNL draws at most {MAX_PNG_BYTES}.")
         with self._changed:
-            self._serial += 1
-            self._screen = Screen(f"reachy-{self._serial:06d}-{int(self._clock())}", png)
+            self._stamp = max(int(self._clock()), self._stamp + 1)  # unique even for two screens in a second
+            self._screen = Screen(f"reachy-000001-{self._stamp}", png)
             self._shown_at = self._clock()
             self._changed.notify_all()
 

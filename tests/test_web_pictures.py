@@ -17,7 +17,17 @@ from reachy_mini_conversation_app.web_pictures import (
 )
 
 
-SAFE = {"shows_subject": 0.95, "sexual": 0.02, "violent": 0.01, "frightening": 0.03, "cluttered": 0.05}
+SAFE = {
+    "shows_subject": 0.95,
+    "nudity": 0.02,
+    "fine_art": 0.03,
+    "sexual": 0.02,
+    "violent": 0.01,
+    "mature": 0.03,
+    "cluttered": 0.05,
+}
+# Measured on Botticelli's Venus (2026-10-25): sure it is fine art, yet "sexual" around a quarter.
+CLASSICAL_NUDE = {**SAFE, "nudity": 0.98, "fine_art": 0.98, "sexual": 0.25}
 
 
 def _jpeg(size: tuple[int, int] = (500, 375), shade: int = 120) -> bytes:
@@ -76,7 +86,7 @@ class _FakeWeb:
 @pytest.mark.asyncio
 async def test_the_first_ranked_picture_that_passes_every_check_is_chosen() -> None:
     """Top results are checked together; the best-ranked approved one wins, with its source site."""
-    web = _FakeWeb([_result(1), _result(2), _result(3)], [{**SAFE, "frightening": 0.6}, SAFE, SAFE])
+    web = _FakeWeb([_result(1), _result(2), _result(3)], [{**SAFE, "mature": 0.6}, SAFE, SAFE])
 
     found = await web.pictures().find("Mona Lisa painting")
 
@@ -88,7 +98,7 @@ async def test_the_first_ranked_picture_that_passes_every_check_is_chosen() -> N
 
 @pytest.mark.asyncio
 async def test_jev_gets_the_image_and_one_narrow_question_per_risk() -> None:
-    """Each check sends the thumbnail as an image asset with the danger-zone header and five yes/no questions."""
+    """Each check sends the thumbnail as an image asset with the danger-zone header and one yes/no question per risk."""
     web = _FakeWeb([_result(1)], [SAFE])
     await web.pictures().find("Falcon 9 rocket")
 
@@ -102,7 +112,9 @@ async def test_jev_gets_the_image_and_one_narrow_question_per_risk() -> None:
     placeholder, asset = next(iter(body["assets"].items()))
     assert body["state"]["image"] == placeholder and body["state"]["subject"] == "Falcon 9 rocket"
     assert asset["type"] == "image" and asset["format"] == "jpg"
-    assert "classical or fine-art" in body["questions"]["sexual"]["criteria"]["false"]
+    assert "classical paintings and sculptures" in body["questions"]["sexual"]["criteria"]["false"]
+    assert "open jaws" in body["questions"]["violent"]["criteria"]["false"]
+    assert "open jaws" in body["questions"]["mature"]["criteria"]["false"]
 
 
 @pytest.mark.asyncio
@@ -121,15 +133,19 @@ async def test_only_brave_thumbnails_are_ever_downloaded() -> None:
 @pytest.mark.parametrize(
     "verdict",
     [
-        {**SAFE, "shows_subject": 0.6},
-        {**SAFE, "sexual": 0.3},
-        {**SAFE, "violent": 0.25},
-        {**SAFE, "cluttered": 0.9},
-        {name: value for name, value in SAFE.items() if name != "frightening"},
+        pytest.param({**SAFE, "shows_subject": 0.6}, id="weak-match"),
+        pytest.param({**SAFE, "sexual": 0.3}, id="sexual"),
+        pytest.param({**SAFE, "violent": 0.35}, id="violent"),
+        pytest.param({**SAFE, "mature": 0.6}, id="mature"),
+        pytest.param({**SAFE, "cluttered": 0.9}, id="logo-or-collage"),
+        pytest.param({**SAFE, "nudity": 0.9}, id="nudity-outside-fine-art"),
+        pytest.param({**CLASSICAL_NUDE, "sexual": 0.5}, id="suggestive-even-as-art"),
+        pytest.param({**CLASSICAL_NUDE, "fine_art": 0.6}, id="unsure-it-is-art"),
+        pytest.param({name: value for name, value in SAFE.items() if name != "mature"}, id="missing-answer"),
     ],
 )
 async def test_any_doubt_rejects_the_picture(verdict: dict[str, float]) -> None:
-    """A weak subject match, any likely risk, or a missing answer means the picture is not shown."""
+    """A weak match, any likely risk, nudity outside fine art, or a missing answer means the picture is not shown."""
     with pytest.raises(PictureError, match="passed the check"):
         await _FakeWeb([_result(1)], [verdict]).pictures().find("cat")
 
@@ -149,3 +165,34 @@ async def test_failures_raise_picture_errors() -> None:
     broken = _FakeWeb([_result(1)], [SAFE], images={"1.jpg": b"not an image"})
     with pytest.raises(PictureError, match="downloaded"):
         await broken.pictures().find("cat")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        pytest.param(CLASSICAL_NUDE, id="classical-nude"),
+        # Measured on roaring T. rex and open-jawed shark pictures (2026-10-25).
+        pytest.param({**SAFE, "violent": 0.18, "mature": 0.15}, id="fierce-animal"),
+    ],
+)
+async def test_classical_nudes_and_fierce_animals_are_shown(verdict: dict[str, float]) -> None:
+    """Fine-art nudity is allowed, and sharks or dinosaurs with open jaws are neither violent nor mature."""
+    assert (await _FakeWeb([_result(1)], [verdict]).pictures().find("The Birth of Venus")).source == "site1.org"
+
+
+@pytest.mark.asyncio
+async def test_pictures_are_resized_to_sizes_jev_accepts() -> None:
+    """Jev refuses a short side under ~280 px or a long side over ~1000 px, so each check is resized first."""
+    web = _FakeWeb(
+        [_result(1), _result(2)],
+        [SAFE, SAFE],
+        images={"1.jpg": _jpeg((500, 266), shade=40), "2.jpg": _jpeg((2400, 1200), shade=80)},
+    )
+    await web.pictures().find("shark")
+
+    for request in web.requests:
+        if str(request.url) == TYPESAFE_URL:
+            asset = next(iter(json.loads(request.content)["assets"].values()))
+            size = Image.open(io.BytesIO(base64.b64decode(asset["data_base64"]))).size
+            assert min(size) >= 300 and max(size) <= 1000

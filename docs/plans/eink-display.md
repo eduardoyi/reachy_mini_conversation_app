@@ -33,7 +33,7 @@ image generation uses the existing `GEMINI_API_KEY`.
 | Tool timing | `show_on_display` awaits the drawing (20 s timeout) | Generation takes ~3 s, under the 30 s Live tool deadline; the result is honest (shown or failed) |
 | Cost guard | 20 new drawings a day (`DISPLAY_DRAWINGS_PER_DAY`); a subject drawn before comes from the cache and does not count | ~$0.034 per drawing |
 | v2 picture search | Brave Image Search, strict SafeSearch; only Brave's proxied thumbnails (`imgs.search.brave.com`, ~500 px) are downloaded | Whole-web coverage (user wanted more than curated sources); thumbnails avoid slow or blocking sites, huge files and requests to LAN addresses from crafted results; ~$0.005 a search, $5 monthly credit |
-| v2 picture check | Jev (TypeSafe), one request with five Noul questions: shows the subject (≥ 0.7), sexual (classical and fine-art nudity excluded), violent, frightening for 2–5-year-olds, cluttered (each ≤ 0.2); top 4 checked in parallel, best-ranked approved one wins | User chose Jev over Gemini and OpenAI moderation; narrow per-risk questions per TypeSafe guidance; any serious risk vetoes. Thresholds are starting points to tune on real results |
+| v2 picture check | Jev (TypeSafe), one request with seven Noul questions; limits in code (see the feature doc); top 6 checked in parallel, best-ranked approved one wins | User chose Jev over Gemini and OpenAI moderation; narrow per-risk questions per TypeSafe guidance; nudity vs fine art split so the art exception is explicit policy, not a hint inside one question; limits calibrated on real searches |
 | v2 fallback | No approved picture, no keys, a used-up daily limit (30) or > 12 s: draw the subject instead | The child always gets something; drawing stays within the 30 s tool deadline |
 | Resting screen | Cartoon Reachy (generated from photos of the real robot) with "¡Hola! Soy Reachy / Hi, I'm Reachy"; returns 30 min after the last screen | The user chose a greeting over a blank page |
 
@@ -117,6 +117,31 @@ generation failure. Gating: tool present only with `TRMNL_ENABLED`.
   source site, own daily limit, 12 s timeout) and the `picture` tool kind with drawing fallback.
   Pending: `BRAVE_API_KEY` and `TYPESAFE_API_KEY` in `.env`, then a live check of real searches,
   Jev's verdicts on real thumbnails, and the thresholds.
+- 2026-10-25: Live v2 check with real keys. Jev reads images: a dinosaur drawing vs a Reachy photo
+  scored 0.98/0.02 for "shows a dinosaur" (robot question reversed), 0.2–0.4 s per check, ~800
+  input tokens. First policy (five questions, every risk ≤ 0.2) passed art, landmarks and rockets but
+  rejected all 20 animals/volcanoes ("frightening" judged the subject) and most classical nudes
+  (sexual 0.23–0.29); "tiger" returned only logos. Jev returned 400 "Invalid image dimensions" for
+  500x266/500x273 thumbnails; probing showed short side ≥ ~280 and long side ≤ ~1000 accepted.
+  Reworded "frightening" to a children's-nature-book standard, split nudity/fine_art/sexual, widened
+  "cluttered" to logos and clip art, set frightening ≤ 0.45, cluttered ≤ 0.3, sexual ≤ 0.4 for
+  confident fine art, six candidates, resizing to 300–1000 px. Rerun: all David and Venus candidates
+  but a collage pass; "a tiger in the wild, photo" picks a calm tiger (snarling 0.87, yawning 0.61
+  rejected); spiders and volcanoes pass calm shots; dolphin clip art rejected as cluttered.
+- 2026-10-25: Through the tool on the TRMNL: Mona Lisa and a tiger, each found and checked in
+  1.1–1.4 s and fetched by the device ~1 s later. The device then reported "File writing ERROR":
+  its purge keeps images unless a newer one shares the first 13 characters, and every screen had a
+  new id, so photos filled its flash. Shown screens now share `reachy-000001`; the rerun reported
+  no write errors. Full gate: 1,844 passed, 4 skipped.
+- 2026-10-25: Household policy from the user: open-jawed sharks and roaring dinosaurs are fine;
+  block violence, mature content and nudity (fine art still allowed). Replaced "frightening" with
+  "mature" (horror, gore, drugs, alcohol, smoking, gambling, crude gestures; fierce animals and art
+  explicitly fine) and reworded "violent" (attacks, prey being caught, blood; open jaws are not
+  violence). Real searches: sharks 5/6 and T. rex 4/6 pass (a bloody T. rex 0.64 and a cluttered one
+  rejected), tigers roaring 6/6, Venus 5/5; horror monsters, zombies, smoking, beer, boxing and
+  battle paintings 0 passed (mature 0.84–0.98 or violent 0.45–0.98); "lion hunting a zebra" passed
+  only a distant watching lion (violent 0.30) and a calm pair (0.12), all kills and chases rejected
+  (0.59–0.98). Limits: violent ≤ 0.3, mature ≤ 0.4.
 - 2026-10-25: The v1 commit fails `tests/test_profile_paths.py::test_wheel_file_paths_stay_within_windows_budget`
   (the wheel test builds from tracked files, so it passed before the font was committed): the font
   path was 73 characters against a 71 budget. Fonts renamed `Atkinson-Regular.ttf`/`Atkinson-Bold.ttf`.

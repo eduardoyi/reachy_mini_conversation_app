@@ -3,8 +3,8 @@
 Brave Image Search (strict SafeSearch) finds candidates. Only Brave's own thumbnails are downloaded,
 never the source sites, so a search result cannot point this computer at the local network. Jev
 (TypeSafe) then answers narrow yes/no questions about each thumbnail: does it show what was asked,
-and is there anything sexual, violent, frightening or text-heavy. The first candidate that clears
-every question is used.
+is there nudity outside fine art, anything sexual, violent or meant for adults, and is it a logo or
+clutter rather than a picture. Fierce animals with open jaws are fine. The best-ranked candidate that clears every question is used.
 """
 
 import io
@@ -24,13 +24,20 @@ logger = logging.getLogger(__name__)
 BRAVE_IMAGES_URL = "https://api.search.brave.com/res/v1/images/search"
 THUMBNAIL_HOST = "imgs.search.brave.com"
 TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
-CANDIDATES = 4
+CANDIDATES = 6
 REQUEST_TIMEOUT_S = 8.0
 MAX_THUMBNAIL_BYTES = 3_000_000
 MIN_SHORT_SIDE = 200
+# Jev rejects images with a short side under ~280 px or a long side over ~1000 px (probed 2026-10-25).
+CHECK_SIDES = (300, 1000)
 # Show a picture only when it very likely shows the subject and every risk is unlikely.
 MIN_SHOWS_SUBJECT = 0.7
-MAX_RISK = 0.2
+# Calibrated on real searches (2026-10-25): smoking, beer, horror and zombies score mature 0.84-0.98
+# and Botticelli's Venus 0.17-0.27; boxing, battles, zombies and a bloody T. rex score violent 0.45-0.97.
+MAX_RISKS = {"sexual": 0.2, "violent": 0.3, "mature": 0.4, "cluttered": 0.3}
+# Nudity is allowed only in classical and fine-art paintings and sculptures, whose nudes still score
+# sexual 0.24-0.29 when Jev is sure they are fine art.
+MAX_NUDITY, MIN_FINE_ART, FINE_ART_MAX_SEXUAL = 0.2, 0.8, 0.4
 
 _AUDIENCE = "children aged 2 to 5, at home, on a small black-and-white screen"
 _QUESTIONS: dict[str, dict[str, object]] = {
@@ -38,29 +45,50 @@ _QUESTIONS: dict[str, dict[str, object]] = {
         "type": "noul",
         "instructions": "Does the `image` clearly show the `subject` as its main content?",
     },
+    "nudity": {
+        "type": "noul",
+        "instructions": "Does the `image` show a nude or partly nude person, or nude body parts?",
+    },
+    "fine_art": {
+        "type": "noul",
+        "instructions": "Is the `image` a classical or fine-art painting or sculpture, or a photo of one?",
+    },
     "sexual": {
         "type": "noul",
-        "instructions": "Does the `image` contain sexual content or nudity?",
+        "instructions": "Is the `image` sexual or suggestive?",
         "criteria": {
-            "true": "Nudity, sexualised poses, underwear or suggestive content in a photo, illustration or modern image",
-            "false": "Nothing of the kind, or only nudity in classical or fine-art paintings and sculptures",
+            "true": "Erotic content, sexualised poses, a focus on the body, or underwear or swimwear modelling",
+            "false": "Nothing sexual, including the nude figures of classical paintings and sculptures",
         },
     },
     "violent": {
         "type": "noul",
-        "instructions": "Does the `image` show violence, blood, injury, weapons used against someone, or dead or suffering animals?",
-    },
-    "frightening": {
-        "type": "noul",
-        "instructions": "Would the `image` frighten or upset a young child in the `audience`?",
+        "instructions": "Does the `image` show violence or harm?",
         "criteria": {
-            "true": "Horror, monsters, menacing faces or teeth, disasters, distress, or anything a toddler would find scary",
-            "false": "Friendly, neutral or merely impressive, like a rocket launch, a tall tower or a calm animal",
+            "true": (
+                "Fighting, an attack on a person or an animal, prey being caught, blood, injury, weapons used "
+                "against someone, or dead or suffering animals"
+            ),
+            "false": "No one being harmed, including fierce animals with open jaws and roaring dinosaurs",
+        },
+    },
+    "mature": {
+        "type": "noul",
+        "instructions": "Is the `image` meant for adults rather than children?",
+        "criteria": {
+            "true": "Horror, gore, drugs, alcohol, smoking, gambling, crude gestures or other adult themes",
+            "false": (
+                "Fine for children, including wild or fierce animals such as sharks, tigers and dinosaurs with "
+                "open jaws, natural events like volcanoes, and famous works of art"
+            ),
         },
     },
     "cluttered": {
         "type": "noul",
-        "instructions": "Is the `image` mostly text, a screenshot, a meme, a collage or a diagram full of labels rather than one clear picture?",
+        "instructions": (
+            "Is the `image` a logo, icon, clip art, text, a screenshot, a meme, a collage or a diagram full of "
+            "labels, rather than one clear photo, painting or illustration?"
+        ),
     },
 }
 
@@ -148,8 +176,12 @@ class WebPictures:
 
     async def _approved(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> bool:
         """Ask Jev about ``picture``; True only if it shows the subject and every risk is unlikely."""
+        short_side, long_side = CHECK_SIDES
+        scale = max(short_side / min(picture.size), 1.0)
+        scale = min(scale, long_side / max(picture.size))
+        sized = picture.resize((round(picture.width * scale), round(picture.height * scale)))
         jpeg = io.BytesIO()
-        picture.save(jpeg, format="JPEG", quality=85)
+        sized.save(jpeg, format="JPEG", quality=85)
         placeholder = str(uuid.uuid4())
         try:
             response = await client.post(
@@ -176,8 +208,13 @@ class WebPictures:
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
             logger.warning("Picture check failed: %s", type(error).__name__)
             return False
-        risks = [answers.get(name, 1.0) for name in _QUESTIONS if name != "shows_subject"]
-        approved = answers.get("shows_subject", 0.0) >= MIN_SHOWS_SUBJECT and max(risks) <= MAX_RISK
+        fine_art = answers.get("fine_art", 0.0) >= MIN_FINE_ART
+        limits = {**MAX_RISKS, "sexual": FINE_ART_MAX_SEXUAL} if fine_art else MAX_RISKS
+        approved = (
+            answers.get("shows_subject", 0.0) >= MIN_SHOWS_SUBJECT
+            and all(answers.get(name, 1.0) <= limit for name, limit in limits.items())
+            and (answers.get("nudity", 1.0) <= MAX_NUDITY or fine_art)
+        )
         scores = ", ".join(f"{name}={value:.2f}" for name, value in sorted(answers.items()))
         logger.info("Picture check: %s (%s)", "approved" if approved else "rejected", scores)
         return approved

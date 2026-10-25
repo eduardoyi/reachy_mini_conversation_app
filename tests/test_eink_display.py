@@ -149,8 +149,8 @@ def test_the_resting_card_returns_after_the_idle_time(tmp_path: Path) -> None:
 
 
 def test_each_screen_gets_a_new_firmware_friendly_filename(tmp_path: Path) -> None:
-    """The TRMNL caches by file name, so every screen has a new <name>-<id>-<unix time> name of at most 31 chars."""
-    display = _display(tmp_path)
+    """Names are <name>-<id>-<unix time>, at most 31 chars, new for every screen, even several in one second."""
+    display = _display(tmp_path, clock=_Clock())
     names = {display.current().filename}
     for _ in range(3):
         display.show(render_text(["hola"]))
@@ -162,6 +162,18 @@ def test_each_screen_gets_a_new_firmware_friendly_filename(tmp_path: Path) -> No
         assert len(name) <= 31 and len(f"{prefix}-{serial}") == 13 and len(stamp) == 10
     assert display.screen_png(display.current().filename) == display.current().png
     assert display.screen_png("reachy-999999-1792878594") is None
+
+
+def test_shown_screens_share_one_id_so_the_device_keeps_only_the_latest(tmp_path: Path) -> None:
+    """The TRMNL deletes a saved image when a newer one shares its <name>-<id>; the resting card has its own."""
+    display = _display(tmp_path)
+    home_id = display.current().filename.rsplit("-", 1)[0]
+    shown_ids = set()
+    for words in ("uno", "dos", "tres"):
+        display.show(render_text([words]))
+        shown_ids.add(display.current().filename.rsplit("-", 1)[0])
+
+    assert len(shown_ids) == 1 and home_id not in shown_ids
 
 
 def test_a_held_check_in_answers_as_soon_as_a_screen_is_shown(tmp_path: Path) -> None:
