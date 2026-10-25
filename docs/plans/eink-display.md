@@ -188,3 +188,7 @@ port answers setup/display/image like the device expects. Tool: no display, each
 - 2026-10-25: v3 visual explanations (`kind=steps`) built and shown on the TRMNL ("¿Cómo crece una
   planta?": four drawings in 3.0 s, a 9 KB screen); Brave searches and Jev checks added to the usage
   ledger; this plan's decisions brought up to date (separate server process, no caps, honest results).
+- 2026-10-25: Voice test: "¿me puedes explicar cómo funciona el cohete Starship?" showed one photo.
+  Tool description and profile now send every how/why question to `steps` and keep `picture` for what
+  things look like; live 12/12 correct; Gemini's own Starship explanation (launch, booster return,
+  orbit, landing) shown on the TRMNL.

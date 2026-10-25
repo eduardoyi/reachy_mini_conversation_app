@@ -239,6 +239,10 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: How and why questions about real machines now get steps: "explain how Starship works"
+  got a single photo because the picture kind listed "a rocket" and the profile limited explanations
+  to children. Live check, two runs each: Starship, volcano, rain and airplane → steps (8/8); "show me
+  Starship" and "show me the Eiffel Tower" → picture (4/4); before: Starship picture/none, airplane none.
 - 2026-10-25: Visual explanations (`kind=steps`): a title over 2–4 numbered panels, drawings made in
   parallel. Brave searches and Jev checks now go to the usage ledger with their costs.
 - 2026-10-25: Daily caps on new drawings (20) and picture searches (30) removed at the household's
