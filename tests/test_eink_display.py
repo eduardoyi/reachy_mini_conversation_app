@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_text,
     render_word,
     render_photo,
+    render_steps,
     render_drawing,
 )
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
@@ -120,6 +121,20 @@ def test_light_grey_fills_become_one_even_grey() -> None:
         pytest.param(lambda: render_text(["3 + 4 = 7"]), id="big-line"),
         pytest.param(lambda: render_text(["leche", "plátanos", "¿huevos?"], title="Lista de la compra"), id="list"),
         pytest.param(lambda: render_text(["palabra " * 80], title="Muy largo " * 20), id="overflowing-text"),
+        *(
+            pytest.param(
+                lambda count=count: render_steps(
+                    [(f"Paso {n}: algo pasa", Image.new("L", (400, 300), 170)) for n in range(count)],
+                    "¿Cómo crece una planta?",
+                ),
+                id=f"steps-{count}",
+            )
+            for count in (2, 3, 4)
+        ),
+        pytest.param(
+            lambda: render_steps([("muy largo " * 30, None), ("sin dibujo", None), ("x" * 200, None)], "Título " * 20),
+            id="steps-overflowing-without-pictures",
+        ),
     ],
 )
 def test_every_layout_renders_a_drawable_screen(png: Any) -> None:
@@ -462,3 +477,15 @@ def _exited(pid: int, timeout_s: float = 5.0) -> bool:
             return True
         time.sleep(0.05)
     return False
+
+
+def test_steps_show_numbered_panels_in_rows_of_up_to_three() -> None:
+    """Two or three steps sit in one row; four make two rows of two, each panel numbered."""
+
+    def panel_columns(count: int) -> int:
+        image = _decoded(render_steps([("x", None)] * count)).convert("L")
+        row = [image.getpixel((x, 19)) for x in range(WIDTH)]  # across the tops of the first row's badges
+        return sum(1 for x in range(1, WIDTH) if row[x] < 128 <= row[x - 1])
+
+    assert [panel_columns(count) for count in (2, 3, 4)] == [2, 3, 2]
+    assert render_steps([("x", None)] * 6) == render_steps([("x", None)] * 4)  # at most four

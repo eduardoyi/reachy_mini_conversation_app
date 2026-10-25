@@ -83,6 +83,15 @@ async def test_without_a_display_the_tool_says_so() -> None:
         {"kind": "word", "word": "arcobaleno", "meaning": "arcoíris", "header": "¿Cómo se dice «arcoíris»?"},
         {"kind": "text", "lines": ["3 + 4 = 7"]},
         {"kind": "text", "title": "Lista", "lines": ["leche", "pan"]},
+        {
+            "kind": "steps",
+            "title": "¿Cómo crece una planta?",
+            "steps": [
+                {"caption": "Una semilla", "picture": "a seed in soil"},
+                {"caption": "Sale un brote", "picture": "a sprout"},
+                {"caption": "¡Una planta!", "picture": "a young plant"},
+            ],
+        },
     ],
 )
 async def test_each_kind_becomes_the_next_screen(tmp_path: Path, kwargs: dict[str, Any]) -> None:
@@ -197,3 +206,43 @@ async def test_a_sleeping_screen_is_reported_instead_of_claimed_shown(tmp_path: 
     assert "asleep" in result["note"]
     assert "drew it instead" in result["instruction"] and "button on its back" in result["instruction"]
     assert display.current() != home
+
+
+@pytest.mark.asyncio
+async def test_explanation_panels_are_drawn_together(tmp_path: Path) -> None:
+    """Each step gets its own drawing, all requested at once, so four panels take about one drawing's time."""
+    display = _display(tmp_path)
+    steps = [{"caption": f"Paso {n}", "picture": f"step {n}"} for n in range(4)]
+
+    result = await ShowOnDisplay()(_deps(display), kind="steps", title="Volcán", steps=steps)
+
+    assert result == {"ok": True, "note": "The screen updates in a few seconds."}
+    assert sorted(path.name for path in (tmp_path / "drawings").iterdir()) == [f"step-{n}.png" for n in range(4)]
+
+
+@pytest.mark.asyncio
+async def test_explanation_panels_show_their_words_when_drawings_fail(tmp_path: Path) -> None:
+    """Without drawings the panels still show, and Reachy is told the pictures are missing."""
+    display = _display(tmp_path, with_drawings=False)
+    home = display.current()
+    steps = [{"caption": "Llueve", "picture": "rain"}, {"caption": "Sale el sol", "picture": "sun"}]
+
+    result = await ShowOnDisplay()(_deps(display), kind="steps", steps=steps)
+
+    assert result["ok"] is True and "2 of the 2 panels could not be drawn" in result["instruction"]
+    assert display.current() != home
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "steps", [None, [], [{"caption": "solo uno", "picture": "one"}], [{"picture": "no caption"}] * 3, "texto"]
+)
+async def test_an_explanation_needs_at_least_two_captioned_steps(tmp_path: Path, steps: Any) -> None:
+    """Fewer than two usable steps is an error and the screen does not change."""
+    display = _display(tmp_path)
+    home = display.current()
+
+    result = await ShowOnDisplay()(_deps(display), kind="steps", steps=steps)
+
+    assert "2 to 4 steps" in result["error"]
+    assert display.current() == home

@@ -54,6 +54,7 @@ DRAWING_TIMEOUT_S = 20.0
 PICTURE_TIMEOUT_S = 12.0
 SERVER_START_TIMEOUT_S = 5.0
 MAX_TEXT_LINES = 6
+MAX_STEPS = 4
 DRAWING_PROMPT = (
     "A friendly, simple cartoon of {subject} for young children. Bold clean black outlines on a plain white "
     "background, flat fills in light grey and medium grey only, no gradients, no shading texture, no text, "
@@ -227,6 +228,55 @@ def render_word(
         font = _font(44, bold=True)
         _draw_lines(
             draw, _wrapped(meaning, font, width, 2), font, left=left, width=width, top=top + 22, centered=centered
+        )
+    return encode_png(canvas)
+
+
+def render_steps(steps: list[tuple[str, Image.Image | None]], title: str = "") -> bytes:
+    """Render a visual explanation: up to four numbered panels (a row, or two rows of two) under a title."""
+    steps = steps[:MAX_STEPS]
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    top = 10
+    if title:
+        font = _fitted(title, WIDTH - 40, 40, 26)
+        top = _draw_lines(
+            draw, _wrapped(title, font, WIDTH - 40, 1), font, left=20, width=WIDTH - 40, top=8, centered=True
+        )
+    rows = 2 if len(steps) == 4 else 1
+    columns = (len(steps) + rows - 1) // rows
+    gap = 12
+    panel_width = (WIDTH - 20 - gap * (columns - 1)) // columns
+    panel_height = (HEIGHT - top - 10 - gap * (rows - 1)) // rows
+    caption_size = 26 if rows == 1 else 22
+    for index, (caption, picture) in enumerate(steps):
+        left = 10 + (index % columns) * (panel_width + gap)
+        panel_top = top + (index // columns) * (panel_height + gap)
+        draw.rounded_rectangle(
+            (left, panel_top, left + panel_width, panel_top + panel_height), radius=12, outline=_LIGHT_GREY, width=2
+        )
+        font = _fitted(caption, panel_width - 20, caption_size, 16, bold=False)
+        lines = _wrapped(caption, font, panel_width - 20, 2 if picture is not None else 5)
+        line_height = int(font.size * 1.2)
+        if picture is not None:
+            caption_top = panel_top + panel_height - 8 - line_height * len(lines)
+            box = (panel_width - 16, caption_top - panel_top - 14)
+            fitted = ImageOps.contain(picture.convert("L"), box)
+            canvas.paste(
+                fitted, (left + (panel_width - fitted.width) // 2, panel_top + 8 + (box[1] - fitted.height) // 2)
+            )
+        else:
+            caption_top = panel_top + (panel_height - line_height * len(lines)) // 2
+        _draw_lines(draw, lines, font, left=left + 10, width=panel_width - 20, top=caption_top, centered=True)
+        badge = 34 if rows == 1 else 28
+        draw.ellipse((left + 6, panel_top + 6, left + 6 + badge, panel_top + 6 + badge), fill=0)
+        number = _font(badge - 10, bold=True)
+        label = str(index + 1)
+        draw.text(
+            (left + 6 + (badge - number.getlength(label)) / 2, panel_top + 6 + badge * 0.12),
+            label,
+            font=number,
+            fill=255,
         )
     return encode_png(canvas)
 
