@@ -27,14 +27,16 @@ class ShowOnDisplay(Tool):
     name = "show_on_display"
     description = (
         "Show something on the e-ink screen beside you: a calm black-and-white screen with no video that "
-        "updates within about a minute. Use it when seeing helps, never for long text. "
+        "updates in a few seconds. Use it when seeing helps, never for long text. Every time you translate or "
+        "teach a word or short phrase, also show it with kind=word; do not only say it. "
         "kind=drawing: a picture of `subject` (in English) with a short `caption`. "
         "kind=picture: a real photo or artwork from the web, for real things worth seeing as they are (a "
         "painting, a monument, an animal, a rocket); `subject` names it precisely in English, e.g. 'Mona Lisa "
         "painting by Leonardo da Vinci' or 'a tiger in the wild, photo'. If no suitable picture is found it is "
         "drawn instead. "
         "kind=word: a word card with `word`, `pronunciation`, `meaning`, an optional `header` and an optional "
-        "`picture` (its subject in English); for teaching a word or answering 'how do you say X in Y'. "
+        "`picture` (its subject in English); for every translation ('how do you say X in Y') and every word you "
+        "teach. "
         "kind=text: one big line (a name, a sum) or a short `title` with up to six `lines`. "
         "kind=home: back to the resting screen. Tell them to look at the screen in a moment."
     )
@@ -67,7 +69,7 @@ class ShowOnDisplay(Tool):
             return {"error": "No e-ink screen is set up."}
         kind = kwargs.get("kind")
         logger.info("Tool call: show_on_display kind=%s", kind)
-        result: dict[str, Any] = {"ok": True, "note": "The screen updates within about a minute."}
+        result: dict[str, Any] = {"ok": True, "note": "The screen updates in a few seconds."}
         try:
             if kind == "home":
                 display.show_home()

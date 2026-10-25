@@ -173,7 +173,7 @@ async def test_a_web_picture_is_shown_when_one_passes_the_check(tmp_path: Path) 
 
     result = await ShowOnDisplay()(_deps(display), kind="picture", subject="Mona Lisa", caption="La Gioconda")
 
-    assert result == {"ok": True, "note": "The screen updates within about a minute."}
+    assert result == {"ok": True, "note": "The screen updates in a few seconds."}
     assert display.current() != home
     assert not (tmp_path / "drawings").exists()
 
