@@ -3904,3 +3904,54 @@ def test_follow_up_by_person_parses_names_and_seconds() -> None:
 
     assert _follow_up_by_person("Enzo=45, mara=40, bad, x=0, y=999") == {"enzo": 45.0, "mara": 40.0}
     assert _follow_up_by_person(None) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_that_cannot_connect_says_so_out_loud() -> None:
+    """No credits or no internet: instead of silence, Reachy says it cannot connect, then keeps listening."""
+    from reachy_mini_conversation_app.quick_commands import CANNOT_CONNECT
+
+    spoken: list[tuple[str, str]] = []
+
+    async def speak(text: str, language: str):  # type: ignore[no-untyped-def]
+        spoken.append((text, language))
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(lambda: FakeHandler(fail_start=True), reply_speaker=speak)
+
+    assert await runtime.activate()
+    await wait_until(lambda: bool(spoken))
+    assert spoken == [(CANNOT_CONNECT["es"], "es")]  # no request text: the household's language
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_that_drops_after_connecting_does_not_apologise() -> None:
+    """Only a conversation that never connected gets the apology; a dropped one closes as before."""
+
+    class DropsAfterConnecting(FakeHandler):
+        async def start_up(self) -> None:
+            self.events.append("start")
+            self.started.set()
+            self.set_connected(True)
+            await asyncio.sleep(0.05)
+            raise RuntimeError("dropped sentinel")
+
+    spoken: list[str] = []
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(lambda: DropsAfterConnecting(), reply_speaker=speak)
+
+    assert await runtime.activate()
+    for _ in range(200):
+        if runtime.mode is RuntimeMode.LOCAL_AMBIENT:
+            break
+        await asyncio.sleep(0.01)
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    await asyncio.sleep(0.1)
+    assert spoken == []
+    await runtime.close()

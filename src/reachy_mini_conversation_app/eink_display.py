@@ -29,6 +29,7 @@ import numpy as np
 from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageFilter
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 from PIL.PngImagePlugin import PngInfo
 
 from reachy_mini_conversation_app.eink_server import (
@@ -520,6 +521,11 @@ class EInkDisplay:
             )
         except asyncio.TimeoutError as error:
             raise DrawingError(f"{what} took too long") from error
+        except genai_errors.APIError as error:
+            logger.warning("Image model refused the request: HTTP %s", error.code)
+            if error.code in (402, 429):
+                raise DrawingError("Google's drawing service is out of credits or busy right now") from error
+            raise DrawingError("Google's drawing service did not answer") from error
         usage = response.usage_metadata
         if usage is not None:
             get_ledger().record(

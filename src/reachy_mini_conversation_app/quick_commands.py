@@ -1098,7 +1098,31 @@ def _spotify_configured() -> bool:
     return bool(os.getenv("SPOTIFY_CREDENTIALS_FILE", "").strip() and os.getenv("SPOTIFY_DEVICE_ID", "").strip())
 
 
+# Said when Reachy cannot reach Gemini for a conversation (no credits, no internet); the Mac's own voice
+# speaks it if Gemini's voice is unreachable too.
+CANNOT_CONNECT: Final[dict[str, str]] = {
+    "en": "Sorry, I can't connect right now. Try again in a little while.",
+    "es": "Lo siento, ahora no puedo conectarme. Inténtalo dentro de un rato.",
+    "it": "Scusa, ora non riesco a collegarmi. Riprova tra un po'.",
+    "pt": "Desculpa, agora não consigo ligar-me. Tenta daqui a pouco.",
+}
+_GUESS_MARKERS: Final[dict[str, frozenset[str]]] = {
+    "en": frozenset({"the", "you", "can", "what", "please", "show", "how", "my", "is", "are", "do", "i", "me", "and"}),
+    "es": _SPANISH_MARKERS | {"puedes", "por", "favor", "como", "un", "una", "haz", "eso", "esta", "de", "me", "mi"},
+    "pt": _PORTUGUESE_MARKERS | {"podes", "por", "favor", "como", "um", "uma", "faz", "isso", "esta", "de", "me"},
+    "it": _ITALIAN_MARKERS | {"puoi", "per", "favore", "come", "un", "una", "fai", "questo", "di", "mi"},
+}
+
+
+def guess_language(text: str, default: str = "en") -> str:
+    """Guess which household language ``text`` is in from common words; ``default`` when unsure."""
+    words = normalize(text).split()
+    counts = {language: sum(word in markers for word in words) for language, markers in _GUESS_MARKERS.items()}
+    best = max(counts, key=lambda language: counts[language])
+    return best if counts[best] else default
+
+
 # Replies that never change, worth keeping on disk for instant playback (local_speech cache).
 FIXED_PHRASES: Final[frozenset[str]] = frozenset(
-    {*_OK.values(), *_FAILED.values(), *_GOOD_NIGHT.values(), *_NOT_FOUND.values()}
+    {*_OK.values(), *_FAILED.values(), *_GOOD_NIGHT.values(), *_NOT_FOUND.values(), *CANNOT_CONNECT.values()}
 )

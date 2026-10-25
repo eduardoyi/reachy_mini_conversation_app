@@ -465,6 +465,7 @@ adversarial review found no remaining P0/P1 blocker.
 
 | Date | Change |
 |---|---|
+| 2026-10-25 | A conversation that never connects (Gemini out of credits, no internet) no longer ends in silence: once the runtime is back to listening, Reachy says `quick_commands.CANNOT_CONNECT` in the request's language (`guess_language`, Spanish when unsure) through the quick-reply speaker, which falls back to the Mac's own voice when Gemini's voice is unreachable too. A conversation that drops after connecting closes as before. Tests: `test_a_conversation_that_cannot_connect_says_so_out_loud`, `test_a_conversation_that_drops_after_connecting_does_not_apologise`, `test_guess_language_picks_the_household_language`. |
 | 2026-10-25 | The follow-up window no longer closes while someone is speaking (Gemini voice activity, speech begun after Reachy's reply), capped at twice the window; a long sentence whose transcript had not arrived was cut off at 15 s. Three regression tests fail on the old rule and pass on the new one. |
 | 2026-08-31 | Project `.env` loading now preserves explicit process/terminal values and fills only unset values; added regression coverage after the first direct Phase 1 benchmark command was unintentionally routed through hybrid mode. |
 | 2026-08-31 | Fenced seeded context strictly before the wake sequence, increased the bounded split-final wait to five seconds, kept text retention independent from raw audio, and hardened Gemini configuration reconnects. |

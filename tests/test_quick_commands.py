@@ -505,3 +505,20 @@ async def test_good_night_also_turns_the_tv_off_and_pauses_the_music() -> None:
     assert lights.calls == [{"action": "scene", "scene": "good night"}]
     assert {"action": "pause"} in spotify.calls
     assert tools["tv"].calls == [{"action": "power", "on": False}]
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        ("¿Puedes dibujar a Enzo como si fuese Spiderman?", "es"),
+        ("Can you show me the weather please?", "en"),
+        ("Puoi fare un disegno per favore?", "it"),
+        ("Podes fazer isso por favor?", "pt"),
+        ("Hmm", "es"),
+    ],
+)
+def test_guess_language_picks_the_household_language(text: str, language: str) -> None:
+    """The cannot-connect line is said in the language the request was made in."""
+    from reachy_mini_conversation_app.quick_commands import guess_language
+
+    assert guess_language(text, default="es") == language

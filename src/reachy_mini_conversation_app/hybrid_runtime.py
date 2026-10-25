@@ -1708,16 +1708,53 @@ class HybridRuntime:
         except Exception as error:
             logger.warning("Quick reply speech failed: %s", type(error).__name__)
 
+    async def _say_cannot_connect(self, request: str) -> None:
+        """Tell the room Reachy could not reach the cloud, in the request's language, then keep listening."""
+        speaker = self._reply_speaker
+        if speaker is None:
+            return
+        from reachy_mini_conversation_app.quick_commands import CANNOT_CONNECT, guess_language
+
+        language = guess_language(request, default="es")
+        text = CANNOT_CONNECT.get(language, CANNOT_CONNECT["en"])
+        with self._lifecycle_lock:
+            generation = self._generation
+
+        def still_listening() -> bool:
+            with self._lifecycle_lock:
+                return not self._closed and self._mode is RuntimeMode.LOCAL_AMBIENT and self._generation == generation
+
+        logger.info("Cloud conversation unreachable; telling the room (language=%s)", language)
+        self._local_output.append(AdditionalOutputs({"role": "assistant", "content": text}))
+        try:
+            async with asyncio.timeout(self._QUICK_REPLY_BASE_S + len(text) * self._QUICK_REPLY_PER_CHAR_S):
+                await self._queue_reply_audio(speaker(text, language), generation, self._clock(), still_listening)
+        except TimeoutError:
+            logger.warning("Cannot-connect speech took too long")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Cannot-connect speech failed: %s", type(error).__name__)
+
     async def _queue_reply_audio(
-        self, stream: AsyncIterator[tuple[int, np.ndarray]], generation: int, started_at: float
+        self,
+        stream: AsyncIterator[tuple[int, np.ndarray]],
+        generation: int,
+        started_at: float,
+        still_current: Callable[[], bool] | None = None,
     ) -> None:
         """Queue reply audio as it arrives, then wait until it has played."""
+        if still_current is None:
+
+            def still_current() -> bool:
+                return self._quick_generation_current(generation)
+
         queued_s = 0.0
         speaking = False
         try:
             async with aclosing(stream) as pieces:  # type: ignore[type-var]
                 async for sample_rate, frame in pieces:
-                    if not self._quick_generation_current(generation):
+                    if not still_current():
                         break
                     if not speaking:
                         started_at = self._clock()  # playback starts with the first piece
@@ -2131,7 +2168,13 @@ class HybridRuntime:
             detail = " ".join(str(error).split())[: self._PROVIDER_ERROR_DETAIL_CHARS]
             logger.warning("Hybrid provider task failed: %s %s", type(error).__name__, detail)
             if self._is_current_handler(handler, generation):
+                with self._lifecycle_lock:
+                    never_connected = not self._connection_ready
+                    pending = self._pending_activation_text
                 await self._deactivate_cloud("provider_failed")
+                if never_connected:
+                    # Without this the room hears nothing at all after asking (no credits, no internet).
+                    await self._say_cannot_connect(pending[1] if pending is not None else "")
         else:
             if self._is_current_handler(handler, generation):
                 await self._deactivate_cloud("provider_stopped")

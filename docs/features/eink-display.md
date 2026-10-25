@@ -138,8 +138,9 @@ photo and turns creatures into a costume with their face showing, so the result 
   device server shows the resting card, refuses to serve the photo (404) and deletes its file at the
   next check-in.
 - **Edits leave the house:** the photo goes to Google's image model; a plain photo does not.
-- **Failures:** a refused, slow or failed edit leaves the screen as it was and Reachy offers the
-  plain photo. Turning a child's drawing into a "real scene" does not work with this model (it
+- **Failures:** a refused, slow or failed edit (including Google being out of credits) leaves the
+  screen as it was and Reachy offers the plain photo. Named characters are often refused, so the tool
+  asks Gemini to describe the costume instead ("a red and blue superhero suit with a spider-web pattern"). Turning a child's drawing into a "real scene" does not work with this model (it
   redraws the drawing).
 
 ## Architecture
@@ -292,6 +293,9 @@ through a spoken conversation.
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
 - 2026-10-25: Camera photos and photo edits (`kind=camera`), never saved, 10 minutes on screen.
+- 2026-10-25: Image-model API errors (402 out of credits, 5xx) become a `DrawingError` Reachy can explain
+  instead of a tool crash; edits of famous characters describe the costume instead of the name
+  ("Spiderman" was refused live).
 - 2026-10-25: Now playing: the Spotify song on Reachy's speaker shows as a music card (album art,
   title, artist, album), following the household's rules for requested screens; "what song is this".
 - 2026-10-25: The encyclopedia style was too detailed for the TRMNL: thin lines broke into dashes (a

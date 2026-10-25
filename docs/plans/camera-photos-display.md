@@ -53,3 +53,8 @@ a real scene did not work (it redraws the drawing).
   photo, adding nothing (naming glasses made the model add them), more detail in faces, and a full
   costume with their own face showing when they become an animal or character. On synthetic photos a
   bearded man's pirate and a boy's and man's dinosaur costumes became clearly them.
+- 2026-10-25: Live: "draw me as …" photo edits worked for an adult (about 10 s). "Enzo as Spiderman"
+  first failed because Gemini's prepaid credits ran out (conversation could not start, then a 402
+  from the image model crashed the tool), then came back empty after credits were added (a named
+  character, likely refused). Image-model errors now become a polite `DrawingError`; the tool asks for
+  costume descriptions instead of character names; a conversation that cannot connect now says so.

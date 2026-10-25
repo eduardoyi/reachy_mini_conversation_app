@@ -583,3 +583,20 @@ async def test_photo_edits_record_their_cost_and_are_never_cached(tmp_path: Path
     assert "make him a pirate" in models.prompts[0][0]
     assert get_ledger().entries()[-1]["feature"] == "display_photo_edit"
     assert not (tmp_path / DRAWINGS_DIR).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("code", "reason"), [(402, "out of credits"), (500, "did not answer")])
+async def test_image_service_errors_become_drawing_errors(tmp_path: Path, code: int, reason: str) -> None:
+    """No credits or a server error is a DrawingError Reachy can explain, not a crash in the tool."""
+    from google.genai import errors as genai_errors
+
+    class FailingModels(_FakeModels):
+        async def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+            raise genai_errors.APIError(code, {"error": {"code": code, "message": "sentinel", "status": "X"}})
+
+    display = _display(tmp_path, FailingModels(None))
+    with pytest.raises(DrawingError, match=reason):
+        await display.edit_photo(_jpeg(), "make him a pirate")
+    with pytest.raises(DrawingError, match=reason):
+        await display.drawing("cat")
