@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, UnidentifiedImageError
 
+from reachy_mini_conversation_app.usage_costs import get_ledger
+
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,7 @@ class WebPictures:
                 headers={"X-Subscription-Token": self._brave_api_key, "Accept": "application/json"},
             )
             response.raise_for_status()
+            _record_usage("display_picture_search", "brave-image-search", {"request": 1})
             results = response.json().get("results", [])
         except (httpx.HTTPError, ValueError) as error:
             logger.warning("Image search failed: %s", type(error).__name__)
@@ -266,7 +269,17 @@ class WebPictures:
                 },
             )
             response.raise_for_status()
-            answers = {name: float(answer["noul"]) for name, answer in response.json()["answers"].items()}
+            body = response.json()
+            usage = body.get("usage") or {}
+            _record_usage(
+                "display_picture_check",
+                str(body.get("model") or self._check_model),
+                {
+                    "input_text": int(usage.get("input_tokens") or 0),
+                    "output_text": int(usage.get("output_tokens") or 0),
+                },
+            )
+            answers = {name: float(answer["noul"]) for name, answer in body["answers"].items()}
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
             logger.warning("Picture check failed: %s", type(error).__name__)
             return None, NO_ANSWER
@@ -286,3 +299,11 @@ class WebPictures:
         scores = ", ".join(f"{name}={value:.2f}" for name, value in sorted(answers.items()))
         logger.info("Picture check: %s (%s)", problem or "approved", scores)
         return (None, problem) if problem else (answers.get("clear_on_screen", 0.0), "")
+
+
+def _record_usage(feature: str, model: str, tokens: dict[str, int]) -> None:
+    """Add one search or check to the usage ledger; never raises."""
+    try:
+        get_ledger().record(feature, model, {kind: count for kind, count in tokens.items() if count})
+    except Exception as error:  # usage tracking must never break a feature
+        logger.debug("Usage tracking failed: %s", type(error).__name__)

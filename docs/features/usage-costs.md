@@ -1,7 +1,7 @@
 # Feature: AI usage and cost tracking
 
 - Status: `in-progress` (built and unit-tested; first live sessions pending)
-- Last updated: 2026-10-19
+- Last updated: 2026-10-25
 
 ## Overview
 
@@ -13,7 +13,9 @@ counts the provider reported, split by kind (`input_text`, `input_audio`,
 `thinking`), and an estimated cost.
 
 The OpenAI calls are memory capture, the daily memory tidy-up and the addressee
-check.
+check. The e-ink display adds `display_drawing` (Gemini image tokens), `display_picture_search`
+(one Brave Image Search request, `{"request": 1}`) and `display_picture_check` (Jev's reported
+tokens); see [eink-display.md](eink-display.md).
 
 Costs are estimates: tokens times list prices. The provider bills (Google AI
 Studio or Cloud Billing, and the OpenAI usage dashboard) are authoritative.
@@ -51,6 +53,11 @@ on plain `gemini-3.8-live` with the same setup.
   Google's paid tier; no official rate card was found on 2026-10-18.
 - **gpt-5.6-luna:** in 0.20, cached in 0.02, out and reasoning 1.20 (standard tier
   after the 2026-07-30 price cut).
+- **gemini-3.1-flash-lite-image** (e-ink drawings): output image 30.00 ($0.0336 per drawing).
+- **jev** (TypeSafe, picture checks): input 0.042, output free (TypeSafe's published rate,
+  2026-10-25). A check of two small images is a fraction of a cent.
+- **brave-image-search:** priced per request as `request` at 5,000 per 1M, i.e. $5 per 1,000
+  searches. Brave's $5 monthly credit (about 1,000 searches) is not deducted.
 - **Overrides:** set `USAGE_PRICES_FILE` to a JSON file shaped
   `{"model-prefix": {"rate": price}}` to change or add prices.
 - **Unknown models:** they record tokens with a `null` cost and count as

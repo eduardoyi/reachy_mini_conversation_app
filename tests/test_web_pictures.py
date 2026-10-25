@@ -9,6 +9,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.web_pictures import (
     UNSAFE,
     UNCLEAR,
@@ -83,7 +84,8 @@ class _FakeWeb:
             shade = Image.open(io.BytesIO(base64.b64decode(asset["data_base64"]))).convert("L").getpixel((10, 10))
             verdict = self.verdicts[round(float(shade) / 40) - 1]
             answers = {name: {"type": "noul", "noul": value} for name, value in verdict.items()}
-            return httpx.Response(self.check_status, json={"model": "jev-1.14.0", "answers": answers})
+            usage = {"input_tokens": 3000, "output_tokens": 180}
+            return httpx.Response(self.check_status, json={"model": "jev-1.14.0", "answers": answers, "usage": usage})
         name = request.url.path.rsplit("/", 1)[-1]
         return httpx.Response(200, content=self.images.get(name, _jpeg(shade=int(name.split(".")[0]) * 40)))
 
@@ -251,3 +253,29 @@ async def test_the_clearest_approved_picture_wins_over_a_higher_ranked_one() -> 
         [{**SAFE, "clear_on_screen": 0.55}, {**SAFE, "clear_on_screen": 0.9}, {**SAFE, "clear_on_screen": 0.9}],
     )
     assert (await web.pictures().find("crocodile")).source == "site2.org"
+
+
+@pytest.mark.asyncio
+async def test_each_search_and_check_is_recorded_with_its_cost() -> None:
+    """Brave bills per search and Jev per input token, so both land in the usage ledger."""
+    await _FakeWeb([_result(1), _result(2)], [SAFE, SAFE]).pictures().find("tiger")
+
+    records = get_ledger().entries()
+    searches = [r for r in records if r["feature"] == "display_picture_search"]
+    checks = [r for r in records if r["feature"] == "display_picture_check"]
+    assert [(r["model"], r["tokens"], r["cost_usd"]) for r in searches] == [
+        ("brave-image-search", {"request": 1}, 0.005)
+    ]
+    assert len(checks) == 2
+    assert all(r["model"] == "jev-1.14.0" and r["tokens"] == {"input_text": 3000, "output_text": 180} for r in checks)
+    assert checks[0]["cost_usd"] == round(3000 * 0.042 / 1_000_000, 6)
+
+
+@pytest.mark.asyncio
+async def test_failed_searches_and_checks_are_not_recorded() -> None:
+    """Nothing billed, nothing recorded: a refused search or check leaves the ledger alone."""
+    with pytest.raises(PictureError):
+        await _FakeWeb([], [], search_status=500).pictures().find("cat")
+    with pytest.raises(PictureError):
+        await _FakeWeb([_result(1)], [SAFE], check_status=429).pictures().find("cat")
+    assert [r["feature"] for r in get_ledger().entries()] == ["display_picture_search"]
