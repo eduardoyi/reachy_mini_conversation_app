@@ -465,6 +465,7 @@ adversarial review found no remaining P0/P1 blocker.
 
 | Date | Change |
 |---|---|
+| 2026-10-25 | The follow-up window no longer closes while someone is speaking (Gemini voice activity, speech begun after Reachy's reply), capped at twice the window; a long sentence whose transcript had not arrived was cut off at 15 s. Three regression tests fail on the old rule and pass on the new one. |
 | 2026-08-31 | Project `.env` loading now preserves explicit process/terminal values and fills only unset values; added regression coverage after the first direct Phase 1 benchmark command was unintentionally routed through hybrid mode. |
 | 2026-08-31 | Fenced seeded context strictly before the wake sequence, increased the bounded split-final wait to five seconds, kept text retention independent from raw audio, and hardened Gemini configuration reconnects. |
 | 2026-08-31 | Added the opt-in RAM-only transcript preview loopback-only HTTP endpoint and Talk-view panel, routed reads through the LocalStream owner loop, and kept status/log/cloud/persistence payloads clean. |
@@ -779,6 +780,10 @@ A conversation now ends in one of these ways, checked in this order by
    - When people speak and he does not answer for 15 s, it closes at the next 2 s
      pause, or at 30 s regardless.
    - A busy provider (thinking, a tool) holds the close up to 30 s.
+   - Nobody is cut off mid-sentence: while Gemini's voice activity says someone is speaking (speech
+     that began after the reply), the close waits, up to 30 s after the reply. Gemini can send a long
+     sentence's transcript only at its end; before 2026-10-25 the close waited just 3 s after the
+     speech began, and Adriana was cut off mid-sentence at exactly 15 s.
    - Each reply restarts the window.
 5. **The inactivity timeout** (unchanged) is the backstop.
 
@@ -821,6 +826,9 @@ Tests:
 - `test_follow_up_window_closes_15_s_after_reachys_reply`
 - `test_side_conversation_closes_the_follow_up_window_at_a_pause`
 - `test_follow_up_window_waits_while_reachy_is_working_and_restarts_after_his_answer`
+- `test_follow_up_window_waits_for_a_long_sentence_whose_transcript_has_not_arrived`
+- `test_speech_holds_the_follow_up_close_at_most_twice_the_window`
+- `test_an_unanswered_turn_does_not_close_while_someone_is_still_speaking`
 - `test_a_requested_close_waits_for_the_goodbye_to_play`
 - `test_after_his_goodbye_gemini_hears_silence`
 - `test_addressee_check_closes_early_when_people_talk_among_themselves`

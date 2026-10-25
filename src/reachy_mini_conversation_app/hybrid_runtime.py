@@ -383,7 +383,8 @@ class HybridRuntime:
     _MUSIC_WIND_DOWN_SPEECH_HOLD_S = 3.0
     # Follow-up window (outside music): people speaking since Reachy's reply without him answering for
     # the whole window closes the conversation at the next pause this long; twice the window closes it
-    # regardless (a side conversation or a TV can talk without pauses).
+    # regardless (a side conversation or a TV can talk without pauses). Nobody is cut off mid-sentence:
+    # while Gemini hears speech that began after his reply, the close waits, up to twice the window.
     _FOLLOW_UP_SPEECH_GAP_S = 2.0
     # A close Reachy asked for (end_conversation, go_to_sleep) waits for his goodbye to finish playing:
     # at least this long, and at most the cap if the provider stays busy.
@@ -2496,15 +2497,18 @@ class HybridRuntime:
             unanswered_for = now - self._user_turn_started_at
             if unanswered_for >= 2 * window:
                 return True  # busy and transcripts can both stick while a room keeps talking
-            if self._interaction_busy:
-                return False  # thinking or running a tool
+            if self._interaction_busy or self._user_speaking:
+                return False  # thinking, running a tool, or someone is mid-sentence
             return unanswered_for >= window and now - self._last_user_turn_at >= self._FOLLOW_UP_SPEECH_GAP_S
         silent_for = now - replied_at
         if self._interaction_busy and silent_for < 2 * window:
             return False  # he said "let me check" and is still working
         speech_start = self._last_user_speech_start_at
-        if speech_start > replied_at and now - speech_start < self._MUSIC_WIND_DOWN_SPEECH_HOLD_S:
-            return False  # the user may be starting a follow-up; its transcript is on the way
+        if speech_start > replied_at and silent_for < 2 * window:
+            # Someone started talking after his reply: wait while they speak, since the transcript can
+            # arrive only at the end of a long sentence, then a moment for it to land.
+            if self._user_speaking or now - speech_start < self._MUSIC_WIND_DOWN_SPEECH_HOLD_S:
+                return False
         return silent_for >= window
 
     def _reset_addressee_state_locked(self) -> None:

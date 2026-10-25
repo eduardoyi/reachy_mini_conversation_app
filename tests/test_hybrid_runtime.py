@@ -3138,6 +3138,68 @@ async def test_side_conversation_closes_the_follow_up_window_at_a_pause() -> Non
 
 
 @pytest.mark.asyncio
+async def test_follow_up_window_waits_for_a_long_sentence_whose_transcript_has_not_arrived() -> None:
+    """Someone mid-sentence is never cut off: Gemini hears speech, though no transcript has come yet."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.note_playback_queued(1.0)  # reply ends at t=1
+
+    clock.advance(10)  # t=10
+    runtime._on_handler_activity(handler, generation, "user_speech_started")
+    clock.advance(8)  # t=18: 17 s after the reply, still talking, nothing transcribed yet
+    assert not await runtime.check_inactivity()
+    clock.advance(2)  # t=20
+    runtime._on_handler_activity(handler, generation, "user_speech_stopped")
+    runtime._on_handler_transcript(handler, generation, "user", "and can you also show me the bridge", True)
+    clock.advance(5)  # t=25: her turn waits for Reachy's answer like any other
+    assert not await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_speech_holds_the_follow_up_close_at_most_twice_the_window() -> None:
+    """A speech flag that never clears (a TV, a stuck provider) still closes 30 s after the reply."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.note_playback_queued(1.0)
+    clock.advance(5)
+    runtime._on_handler_activity(handler, generation, "user_speech_started")
+
+    clock.advance(25)  # t=30: 29 s after the reply
+    assert not await runtime.check_inactivity()
+    clock.advance(1.5)  # t=31.5
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_turn_does_not_close_while_someone_is_still_speaking() -> None:
+    """After the window, the close waits for a pause in speech, not only a pause in transcripts."""
+    clock = FakeClock()
+    runtime, handler = _follow_up_session(clock)
+    assert await runtime.activate()
+    handler.set_connected(True)
+    generation = runtime.generation
+    runtime.note_playback_queued(1.0)
+    clock.advance(2)  # t=2
+    runtime._on_handler_transcript(handler, generation, "user", "so what I was thinking is", False)
+    runtime._on_handler_activity(handler, generation, "user_speech_started")
+
+    clock.advance(17)  # t=19: unanswered for 17 s, transcripts quiet, still speaking
+    assert not await runtime.check_inactivity()
+    runtime._on_handler_activity(handler, generation, "user_speech_stopped")
+    clock.advance(2.5)
+    assert await runtime.check_inactivity()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_follow_up_window_waits_while_reachy_is_working_and_restarts_after_his_answer() -> None:
     """A busy provider (thinking, a tool) holds the close, and each answer starts a new window."""
     clock = FakeClock()
