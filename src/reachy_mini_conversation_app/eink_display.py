@@ -56,10 +56,14 @@ SERVER_START_TIMEOUT_S = 5.0
 MAX_TEXT_LINES = 6
 MAX_STEPS = 4
 DRAWING_PROMPT = (
-    "A friendly, simple cartoon of {subject} for young children. Bold clean black outlines on a plain white "
-    "background, flat fills in light grey and medium grey only, no gradients, no shading texture, no text, "
-    "letters or numbers. One clear subject, centered, filling most of the frame. Cheerful and gentle, never scary."
+    "A clear, accurate illustration of {subject}, like a drawing in a good illustrated encyclopedia: true "
+    "proportions and real details, clean confident black ink outlines, flat fills in light grey and medium grey "
+    "on a plain white background. No gradients, photographic shading or texture. No text, letters, numbers or "
+    "labels. No cartoon faces or eyes on objects. One subject, centered, filling most of the frame. Calm and "
+    "suitable for a family home, nothing gory."
 )
+# Drawings are cached per style; the 2026-10-24 cartoon style lives on in drawings/ and is no longer used.
+DRAWINGS_DIR = "drawings-v2"
 _ASSETS = Path(__file__).parent / "static" / "eink"
 _GREY, _LIGHT_GREY = 85, 170
 _LEVEL_EDGES = (64, 128, 230)
@@ -398,7 +402,7 @@ class EInkDisplay:
 
     async def drawing(self, subject: str) -> Image.Image:
         """Return a drawing of ``subject``: from the cache, else a new one counted against today's limit."""
-        path = self._cache_dir / "drawings" / f"{_cache_key(subject)}.png"
+        path = self._cache_dir / DRAWINGS_DIR / f"{_cache_key(subject)}.png"
         if path.is_file():
             with Image.open(path) as cached:
                 return cached.convert("L")

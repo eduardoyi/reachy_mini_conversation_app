@@ -25,7 +25,7 @@ image generation uses the existing `GEMINI_API_KEY`.
 | HTTP stack | Standard-library `ThreadingHTTPServer`, standard library only so a replacement starts in 0.05 s; a new server stops the old one and rebinds within milliseconds | Three tiny endpoints; no new dependency; runs with or without `--ui` |
 | Image format | 800x480 2-bit grayscale PNG (four levels 0/85/170/255), < 90 KB | What the OG draws (TRMNL ImageMagick guide); encoded with zlib + numpy |
 | Drawing model | `gemini-3.1-flash-lite-image` (Nano Banana 2 Lite) | Listed for this key; 2.9 s for a 1200x896 drawing in a live test (2026-10-24); same API key; Google's safety filters |
-| Drawing style | Fixed prompt: friendly children's line art, bold black outlines, flat light/mid grey, white background, no text | Looks right in four grays; also the content guardrail; kids choose subjects, never the style |
+| Drawing style | Fixed prompt: an accurate encyclopedia-style illustration, real proportions and details, black ink outlines, flat light/mid grey, white background, no text or labels, no cartoon faces, nothing gory (since 2026-10-25; v1 used friendly children's cartoons) | Looks right in four grays and does not talk down to anyone; also the content guardrail; nobody chooses the style |
 | Text | Typed by our renderer, never drawn by the model | Image models misspell; Spanish/Italian need accents |
 | Font | Atkinson Hyperlegible (OFL, bundled, ~55 KB per weight) | Pillow's built-in font has no accents or ¡¿ñ; designed for legibility |
 | New dependency | Pillow (HPND license, no network access, wheels for Linux/macOS/Windows) | Decoding the model's JPEG, scaling, drawing text |
@@ -192,3 +192,13 @@ port answers setup/display/image like the device expects. Tool: no display, each
   Tool description and profile now send every how/why question to `steps` and keep `picture` for what
   things look like; live 12/12 correct; Gemini's own Starship explanation (launch, booster return,
   orbit, landing) shown on the TRMNL.
+- 2026-10-25: Drawings looked childish (smiling rockets and seeds). Compared live on five subjects
+  (Starship launch, Super Heavy landing, Eiffel Tower, T. rex, a sprouting seed):
+  - Lite (`gemini-3.1-flash-lite-image`), new encyclopedia-style prompt: no faces, real proportions,
+    2.8–3.9 s. Adopted; drawings cached in `drawings-v2/` so old cartoons are not reused.
+  - Nano Banana 2.1 (`gemini-nano-banana-2.1`, same $0.0336 at 1K) with Google Image Search grounding:
+    the most accurate (the booster caught by the tower's arms), but 13–30 s a drawing, past the 20 s
+    drawing timeout and near the conversation's 30 s tool deadline. Not adopted. Lite cannot ground.
+  - Lite redrawing a Brave + Jev reference photo: 4–8 s, faithful, but it traces the photo (clouds,
+    a crane) and cannot show a step no photo shows; Brave refused 4 of 5 simultaneous searches
+    (rate limit). Not adopted.

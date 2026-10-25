@@ -14,7 +14,7 @@ from PIL import Image
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.eink_server import DEVICE, write_json
-from reachy_mini_conversation_app.eink_display import EInkDisplay
+from reachy_mini_conversation_app.eink_display import DRAWINGS_DIR, EInkDisplay
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.show_on_display import ShowOnDisplay
@@ -175,7 +175,7 @@ async def test_a_web_picture_is_shown_when_one_passes_the_check(tmp_path: Path) 
 
     assert result == {"ok": True, "note": "The screen updates in a few seconds."}
     assert display.current() != home
-    assert not (tmp_path / "drawings").exists()
+    assert not (tmp_path / DRAWINGS_DIR).exists()
 
 
 @pytest.mark.asyncio
@@ -192,7 +192,7 @@ async def test_without_a_suitable_picture_it_is_drawn_instead(tmp_path: Path, pi
     assert result["instruction"].startswith("Tell them you could not show a real picture because")
     assert reason in result["instruction"] and result["instruction"].endswith("so you drew it instead.")
     assert display.current() != home
-    assert (tmp_path / "drawings" / "a-tiger.png").is_file()
+    assert (tmp_path / DRAWINGS_DIR / "a-tiger.png").is_file()
 
 
 @pytest.mark.asyncio
@@ -217,7 +217,7 @@ async def test_explanation_panels_are_drawn_together(tmp_path: Path) -> None:
     result = await ShowOnDisplay()(_deps(display), kind="steps", title="Volcán", steps=steps)
 
     assert result == {"ok": True, "note": "The screen updates in a few seconds."}
-    assert sorted(path.name for path in (tmp_path / "drawings").iterdir()) == [f"step-{n}.png" for n in range(4)]
+    assert sorted(path.name for path in (tmp_path / DRAWINGS_DIR).iterdir()) == [f"step-{n}.png" for n in range(4)]
 
 
 @pytest.mark.asyncio
