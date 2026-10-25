@@ -354,6 +354,7 @@ class LocalStream:
         hybrid_runtime: HybridRuntime | None = None,
         speaker_output_factory: Callable[[int], SpeakerOutput] | None = None,
         face_recognition: Any = None,
+        background_tasks: Optional[list[Callable[[], Coroutine[Any, Any, None]]]] = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
@@ -364,6 +365,8 @@ class LocalStream:
         """
         self._robot = robot
         self._face_recognition = face_recognition
+        # Long-running app coroutines (the e-ink now-playing watcher) that share the stream's event loop.
+        self._background_tasks = list(background_tasks or [])
         self._stop_event = asyncio.Event()
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
@@ -1895,6 +1898,10 @@ class LocalStream:
             self._tasks += [
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
+                *(
+                    asyncio.create_task(task(), name=f"background-{task.__qualname__}")
+                    for task in self._background_tasks
+                ),
             ]
             try:
                 await asyncio.gather(*self._tasks)

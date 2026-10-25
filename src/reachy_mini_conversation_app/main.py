@@ -94,6 +94,29 @@ def _build_display() -> Any:
     )
 
 
+def _build_now_playing(display: Any) -> Any:
+    """Return the watcher that shows Spotify songs on the e-ink screen, or None when it is off or not set up."""
+    from reachy_mini_conversation_app.config import config
+
+    if display is None or not config.DISPLAY_NOW_PLAYING:
+        return None
+    from reachy_mini_conversation_app.now_playing import NowPlaying, spotify_fetcher
+    from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER, SpotifyDucker
+
+    spotify = SpotifyDucker._configuration()
+    if spotify is None:
+        return None
+    credentials_path, device_id = spotify
+    now_playing = NowPlaying(
+        display,
+        spotify_fetcher(credentials_path, device_id),
+        in_conversation=lambda: SPOTIFY_DUCKER.in_conversation,
+        art_dir=display.spool.parent / "album-art",
+    )
+    SPOTIFY_DUCKER.playback_changed_callback = now_playing.refresh_soon
+    return now_playing
+
+
 def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     """Return the quick-command handler and its reply voice, or (None, None) when disabled."""
     from reachy_mini_conversation_app.config import config
@@ -381,6 +404,7 @@ def run(
     deps.home_hub = _build_home_devices()
     deps.tv = _build_tv()
     deps.display = _build_display()
+    deps.now_playing = _build_now_playing(deps.display)
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""
@@ -621,6 +645,7 @@ def run(
         startup_voice=startup_settings.voice,
         hybrid_runtime=hybrid_runtime,
         face_recognition=face_service,
+        background_tasks=[deps.now_playing.run] if deps.now_playing is not None else None,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.

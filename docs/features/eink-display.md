@@ -95,6 +95,32 @@ the image as a base64 `jpg` asset with `TypeSafe-Danger-Zone-Images: true`. Jev 
 candidate is resized to a 300 px short side within a 1000 px long side first. Brave's plan allows
 about one search a second (a burst returned 429, which falls back to a drawing).
 
+## Now playing
+
+While Spotify plays on Reachy's speaker (`SPOTIFY_DEVICE_ID`), the screen shows a music card: the
+album art (dithered to four greys; show art for podcasts) on the left, a small drawn note, the title
+in bold, the artist, and the album in grey. Music on any other device is ignored. Plan:
+[now-playing-display.md](../plans/now-playing-display.md).
+
+- **Detection** (`now_playing.py`, `NowPlaying`): Spotify has no playback push, so the watcher asks
+  `/me/player?additional_types=episode` every 10 s while music plays, right when the song should end,
+  every 30 s otherwise, and at once after Reachy's own play, resume, pause or next
+  (`SPOTIFY_DUCKER.playback_changed_callback` → `refresh_soon`). It runs as a task on the app's
+  event loop (`LocalStream(background_tasks=...)`).
+- **Who wins the screen:** the display records each screen's owner (`requested` or `music`). A
+  screen someone asked for holds while their conversation is open (`SPOTIFY_DUCKER.in_conversation`);
+  after it ends, the music card returns at the next song change or after 2 minutes. The music card
+  replaces itself per song, is exempt from the 30-minute idle return while music plays
+  (`keep_alive`), and stays 2 minutes after the music stops before the resting card returns.
+- **"What song is this?"**: `show_on_display kind=now_playing` puts the card up at once (even over a
+  requested screen) and returns `song: {title, artist, album}` for Reachy to say.
+- **Album art:** only from `i.scdn.co` over https (the 640 px image), cached per album or show in
+  `display/album-art/`. Covers and explicit tracks are shown as they are (household choice; no Jev
+  check). A missing cover leaves a card with a note placeholder.
+- **Off switch:** `DISPLAY_NOW_PLAYING=0`. Needs `TRMNL_ENABLED` and Spotify (`SPOTIFY_CREDENTIALS_FILE`,
+  `SPOTIFY_DEVICE_ID`).
+- Logs say "Now playing card updated" and whether it had art, never titles, artists or albums.
+
 ## Architecture
 
 ```mermaid
@@ -146,10 +172,11 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps() -> bytes` (PNG); `encode_png`; `EInkDisplay.show/show_home/current/awake/drawing/picture/start/stop` |
+| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner)/show_home/current/owner/keep_alive/awake/drawing/picture/start/stop` |
+| Now playing | `now_playing.py` | `parse_playback(body, device_id) -> Playback`; `NowPlaying(display, fetch, in_conversation, art_dir).run/check/show_now/refresh_soon`; `spotify_fetcher(credentials, device)` |
 | Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
@@ -218,9 +245,11 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/test_now_playing.py` | Track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
+| `tests/tools/test_spotify_control.py` | Pause, next and resume refresh the screen; rejected commands do not |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
@@ -241,6 +270,8 @@ through a spoken conversation.
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
+- 2026-10-25: Now playing: the Spotify song on Reachy's speaker shows as a music card (album art,
+  title, artist, album), following the household's rules for requested screens; "what song is this".
 - 2026-10-25: The encyclopedia style was too detailed for the TRMNL: thin lines broke into dashes (a
   RAV4) and a busy scene (Parque das Nações) became dark noisy blobs. Smoothing at screen size erased
   the lines instead. Drawings now ask for bold thick outlines, large flat greys and only the main

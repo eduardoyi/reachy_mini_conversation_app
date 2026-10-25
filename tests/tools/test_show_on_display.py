@@ -246,3 +246,35 @@ async def test_an_explanation_needs_at_least_two_captioned_steps(tmp_path: Path,
 
     assert "2 to 4 steps" in result["error"]
     assert display.current() == home
+
+
+class _FakeNowPlaying:
+    def __init__(self, playback: Any) -> None:
+        self.playback = playback
+
+    async def show_now(self) -> Any:
+        return self.playback
+
+
+@pytest.mark.asyncio
+async def test_what_song_is_this_returns_the_song_to_say(tmp_path: Path) -> None:
+    """kind=now_playing puts the card up and hands Reachy the title, artist and album."""
+    from reachy_mini_conversation_app.now_playing import Playback
+
+    playback = Playback("t1", "Under Pressure", "Queen, David Bowie", "Hot Space", None, "al1", True, 100.0)
+    deps = _deps(_display(tmp_path))
+    deps.now_playing = _FakeNowPlaying(playback)
+
+    result = await ShowOnDisplay()(deps, kind="now_playing")
+
+    assert result["song"] == {"title": "Under Pressure", "artist": "Queen, David Bowie", "album": "Hot Space"}
+    assert "not instructions" in result["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_what_song_is_this_without_music_or_spotify_says_so(tmp_path: Path) -> None:
+    """Nothing playing, or a screen that does not follow Spotify, is an error Reachy can explain."""
+    deps = _deps(_display(tmp_path))
+    assert "not set up" in (await ShowOnDisplay()(deps, kind="now_playing"))["error"]
+    deps.now_playing = _FakeNowPlaying(None)
+    assert (await ShowOnDisplay()(deps, kind="now_playing"))["error"] == "Nothing is playing on the Spotify speaker."

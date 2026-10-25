@@ -295,3 +295,10 @@ Tests: `test_ducker_pauses_an_episode_and_resumes_it_afterwards`,
 `test_restore_on_exit_puts_the_volume_back_after_the_event_loop_ended`,
 `test_pausing_the_music_returns_the_conversation_to_the_normal_timeout`.
 
+## Now playing on the e-ink screen — 2026-10-25
+
+`SPOTIFY_DUCKER.playback_changed_callback` is called after every successful play, resume, pause and
+next, so the e-ink now-playing watcher looks at once instead of at its next 10 s check. The watcher
+reads `/me/player` with the same credentials (`spotify_access_token`) and only for
+`SPOTIFY_DEVICE_ID`; see [eink-display.md](eink-display.md#now-playing). Tests:
+`test_playback_changes_tell_the_now_playing_screen`, `test_a_rejected_command_does_not_refresh_the_screen`.

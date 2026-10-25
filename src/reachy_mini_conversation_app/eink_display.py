@@ -239,6 +239,55 @@ def render_word(
     return encode_png(canvas)
 
 
+def _draw_note(draw: ImageDraw.ImageDraw, left: int, top: int, size: int, fill: int) -> None:
+    """Draw a music note in a ``size`` square (the bundled font has no note glyph)."""
+    head = size * 0.42
+    stem = max(2, size // 12)
+    head_top = top + size - head
+    draw.ellipse((left, head_top, left + head * 1.3, top + size), fill=fill)
+    x = left + head * 1.3 - stem
+    draw.rectangle((x, top, x + stem, head_top + head / 2), fill=fill)
+    draw.polygon(
+        [(x, top), (x + size * 0.45, top + size * 0.22), (x + size * 0.45, top + size * 0.4), (x, top + size * 0.18)],
+        fill=fill,
+    )
+
+
+def render_now_playing(art: Image.Image | None, title: str, artist: str = "", album: str = "") -> bytes:
+    """Render the music card: album art on the left, a small note, the title, the artist and the album."""
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    side = HEIGHT - 40
+    if art is not None:
+        gray = ImageOps.autocontrast(ImageOps.fit(art.convert("L"), (side, side)), cutoff=1)
+        palette = Image.new("P", (1, 1))
+        palette.putpalette([level for level in (0, 85, 170, 255) for _ in range(3)])
+        dithered = gray.convert("RGB").quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("L")
+        canvas.paste(dithered, (20, 20))
+    else:
+        draw.rounded_rectangle((20, 20, 20 + side, 20 + side), radius=16, fill=_LIGHT_GREY)
+        _draw_note(draw, 20 + side // 2 - 70, 20 + side // 2 - 80, 160, _GREY)
+    left = 20 + side + 30
+    width = WIDTH - left - 24
+    blocks: list[tuple[list[str], ImageFont.FreeTypeFont, int]] = []
+    font = _fitted(title, width, 46, 30)
+    blocks.append((_wrapped(title, font, width, 4), font, 0))
+    if artist:
+        font = _font(30)
+        blocks.append((_wrapped(artist, font, width, 2), font, 0))
+    if album:
+        font = _font(24)
+        blocks.append((_wrapped(album, font, width, 2), font, _GREY))
+    gaps = 14
+    height = 44 + sum(int(f.size * 1.2) * len(lines) + gaps for lines, f, _ in blocks)
+    top = max(24, (HEIGHT - height) // 2)
+    _draw_note(draw, left, top, 30, _GREY)
+    top += 44
+    for lines, font, fill in blocks:
+        top = _draw_lines(draw, lines, font, left=left, width=width, top=top, fill=fill) + gaps
+    return encode_png(canvas)
+
+
 def render_steps(steps: list[tuple[str, Image.Image | None]], title: str = "") -> bytes:
     """Render a visual explanation: up to four numbered panels (a row, or two rows of two) under a title."""
     steps = steps[:MAX_STEPS]
@@ -362,8 +411,11 @@ class EInkDisplay:
             (self.spool / f"{home}.png").write_bytes(home_png)
             self._update(home=home)
 
-    def show(self, png: bytes) -> None:
-        """Make ``png`` the screen the TRMNL fetches at its next check-in."""
+    def show(self, png: bytes, owner: str = "requested") -> None:
+        """Make ``png`` the screen the TRMNL fetches at its next check-in.
+
+        ``owner`` says who put it up: "requested" (someone asked) or "music" (the now-playing card).
+        """
         if len(png) > MAX_PNG_BYTES:
             raise ValueError(f"Screen is {len(png)} bytes; the TRMNL draws at most {MAX_PNG_BYTES}.")
         with self._lock:
@@ -372,12 +424,26 @@ class EInkDisplay:
             stamp = max(int(self._clock()), last_stamp + 1)  # unique even for two screens in a second
             filename = f"reachy-000001-{stamp}"
             (self.spool / f"{filename}.png").write_bytes(png)
-            self._update(screen=filename, shown_at=self._clock())
+            self._update(screen=filename, shown_at=self._clock(), owner=owner)
 
     def show_home(self) -> None:
         """Go back to the resting card."""
         with self._lock:
-            self._update(screen=None)
+            self._update(screen=None, owner=None)
+
+    def owner(self) -> str:
+        """Who the screen showing now belongs to: "home", "requested" or "music"."""
+        current = read_json(self.spool / CURRENT)
+        if current_filename(self.spool, self._clock()) in (None, current.get("home")):
+            return "home"
+        owner = current.get("owner")
+        return owner if isinstance(owner, str) else "requested"
+
+    def keep_alive(self) -> None:
+        """Keep the music card from idling back to the resting card while music plays."""
+        with self._lock:
+            if self.owner() == "music":
+                self._update(shown_at=self._clock())
 
     def current(self) -> Screen:
         """Return the screen to show now: the last one shown, or the resting card once it is old."""

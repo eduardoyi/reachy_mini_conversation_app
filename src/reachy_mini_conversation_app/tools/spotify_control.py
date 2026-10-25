@@ -124,6 +124,8 @@ class SpotifyDucker:
         # so when the user pauses it.
         self.music_playing_callback: Callable[[], None] | None = None
         self.music_stopped_callback: Callable[[], None] | None = None
+        # Called after Reachy plays, resumes, pauses or skips, so the e-ink screen can follow at once.
+        self.playback_changed_callback: Callable[[], None] | None = None
 
     @property
     def in_conversation(self) -> bool:
@@ -162,6 +164,10 @@ class SpotifyDucker:
         """Restore the volume lowered during the conversation."""
         self._session_active = False
         await self._restore()
+
+    def playback_changed(self) -> None:
+        """Tell the now-playing screen that Reachy just changed what plays."""
+        self._notify(self.playback_changed_callback)
 
     def playback_paused(self) -> None:
         """Keep user-paused playback paused afterwards and stop closing the conversation quickly."""
@@ -576,6 +582,7 @@ class SpotifyControl(Tool):
                                 headers=headers,
                             )
                         response.raise_for_status()
+                        SPOTIFY_DUCKER.playback_changed()
                         if action == "play":
                             logger.info("Spotify play accepted kind=%s", uri.split(":")[1])
                             SPOTIFY_DUCKER.playback_started()
@@ -594,6 +601,7 @@ class SpotifyControl(Tool):
                         headers=headers,
                     )
                     response.raise_for_status()
+                    SPOTIFY_DUCKER.playback_changed()
                     if action == "resume":
                         SPOTIFY_DUCKER.playback_started()
                     elif action == "pause":

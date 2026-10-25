@@ -34,6 +34,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_photo,
     render_steps,
     render_drawing,
+    render_now_playing,
 )
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 
@@ -135,6 +136,19 @@ def test_light_grey_fills_become_one_even_grey() -> None:
         pytest.param(
             lambda: render_steps([("muy largo " * 30, None), ("sin dibujo", None), ("x" * 200, None)], "Título " * 20),
             id="steps-overflowing-without-pictures",
+        ),
+        pytest.param(
+            lambda: render_now_playing(
+                Image.effect_noise((640, 640), 80),
+                "Bohemian Rhapsody - Remastered 2011",
+                "Queen",
+                "A Night At The Opera",
+            ),
+            id="now-playing",
+        ),
+        pytest.param(
+            lambda: render_now_playing(None, "Episodio " * 30, "Artista " * 10, "Álbum " * 10),
+            id="now-playing-without-art-overflowing",
         ),
     ],
 )
@@ -492,3 +506,33 @@ def test_steps_show_numbered_panels_in_rows_of_up_to_three() -> None:
 
     assert [panel_columns(count) for count in (2, 3, 4)] == [2, 3, 2]
     assert render_steps([("x", None)] * 6) == render_steps([("x", None)] * 4)  # at most four
+
+
+def test_screens_remember_who_put_them_up(tmp_path: Path) -> None:
+    """The now-playing watcher needs to know whether a screen was asked for or is its own music card."""
+    display = _display(tmp_path)
+    assert display.owner() == "home"
+    display.show(render_text(["hola"]))
+    assert display.owner() == "requested"
+    display.show(render_text(["♪"]), owner="music")
+    assert display.owner() == "music"
+    display.show_home()
+    assert display.owner() == "home"
+
+
+def test_keep_alive_holds_only_the_music_card(tmp_path: Path) -> None:
+    """keep_alive stops the music card idling away, but never keeps a requested screen past its time."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    display.show(render_text(["canción"]), owner="music")
+    card = display.current()
+    clock.now += IDLE_AFTER_S - 1
+    display.keep_alive()
+    clock.now += IDLE_AFTER_S - 1
+    assert display.current() == card
+
+    display.show(render_text(["hola"]))
+    clock.now += IDLE_AFTER_S - 1
+    display.keep_alive()
+    clock.now += 1
+    assert display.owner() == "home"

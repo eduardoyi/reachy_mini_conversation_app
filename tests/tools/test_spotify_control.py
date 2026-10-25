@@ -638,3 +638,41 @@ def test_restore_on_exit_puts_the_volume_back_after_the_event_loop_ended(configu
     ducker.restore_on_exit()  # nothing left to do
 
     assert puts == [20, 60]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["pause", "next", "resume"])
+async def test_playback_changes_tell_the_now_playing_screen(configured, monkeypatch, action):
+    """Reachy's own pause, skip and resume refresh the e-ink screen at once instead of at its next look."""
+
+    def handler(request):
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        return httpx.Response(204)
+
+    install_transport(monkeypatch, handler)
+    changed: list[bool] = []
+    monkeypatch.setattr(spotify_control.SPOTIFY_DUCKER, "playback_changed_callback", lambda: changed.append(True))
+
+    result = await SpotifyControl()(Mock(spec=ToolDependencies), action=action)
+
+    assert result == {"status": f"Spotify accepted the {action} command."}
+    assert changed == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_command_does_not_refresh_the_screen(configured, monkeypatch):
+    """Nothing changed, nothing to refresh."""
+
+    def handler(request):
+        if request.url.path.endswith("/devices"):
+            return httpx.Response(200, json={"devices": [{"id": "mac", "is_restricted": False, "is_active": True}]})
+        return httpx.Response(403)
+
+    install_transport(monkeypatch, handler)
+    changed: list[bool] = []
+    monkeypatch.setattr(spotify_control.SPOTIFY_DUCKER, "playback_changed_callback", lambda: changed.append(True))
+
+    await SpotifyControl()(Mock(spec=ToolDependencies), action="next")
+
+    assert changed == []

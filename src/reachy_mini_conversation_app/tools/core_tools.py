@@ -56,6 +56,7 @@ class ToolDependencies:
     home_hub: Any = None  # HomeDevices from home_devices.py, when lights are set up
     tv: Any = None  # AndroidTV from android_tv.py, when a TV is paired
     display: Any = None  # EInkDisplay from eink_display.py, when TRMNL_ENABLED
+    now_playing: Any = None  # NowPlaying from now_playing.py, when the display shows Spotify songs
     # Recognized person in front of the camera (household person ID), when face recognition is enabled.
     current_person_id: Callable[[], str | None] | None = None
 

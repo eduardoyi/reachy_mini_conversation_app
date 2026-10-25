@@ -777,6 +777,8 @@ class Config:
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
+    # While Spotify plays on Reachy's speaker, show the song on the e-ink screen (needs Spotify set up).
+    DISPLAY_NOW_PLAYING = _env_flag("DISPLAY_NOW_PLAYING", default=True)
     DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
     # Web pictures: Brave Image Search finds them, Jev (TypeSafe) checks each one. Both keys are needed.
     BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
@@ -970,6 +972,7 @@ def refresh_runtime_config_from_env() -> None:
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
+    config.DISPLAY_NOW_PLAYING = _env_flag("DISPLAY_NOW_PLAYING", default=True)
     config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
     config.BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     config.TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
