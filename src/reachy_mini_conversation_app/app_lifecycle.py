@@ -106,8 +106,8 @@ def _is_sleep_head_pose(head_pose: npt.ArrayLike) -> bool:
 def wake_up_if_sleeping(robot: ReachyMini, logger: logging.Logger, *, stay_asleep: bool = False) -> bool:
     """Run the SDK wake-up movement when Reachy starts from the sleep pose.
 
-    With ``stay_asleep`` he is left in the pose (motors on) so the caller can keep him asleep until
-    someone says his name. Returns whether he started in the sleep pose (and, without
+    With ``stay_asleep`` he is left in the pose (motors on) to rest there until
+    someone calls him. Returns whether he started in the sleep pose (and, without
     ``stay_asleep``, was woken).
     """
     try:
@@ -120,7 +120,7 @@ def wake_up_if_sleeping(robot: ReachyMini, logger: logging.Logger, *, stay_aslee
         return False
 
     if stay_asleep:
-        logger.info("Robot is in sleep pose; staying asleep until someone says my name.")
+        logger.info("Robot is in sleep pose; resting in it until someone calls me.")
         try:
             robot.enable_motors()
         except Exception as e:
