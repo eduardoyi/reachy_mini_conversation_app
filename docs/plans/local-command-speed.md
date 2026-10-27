@@ -1,6 +1,6 @@
 # Plan: Faster local commands on the Mac mini
 
-- Status: `in-progress` (built and tested; live timings on the Mac mini pending)
+- Status: `in-progress` (deployed on the Mac mini; a spoken command not yet timed end to end)
 - Last updated: 2026-10-27
 - Feature doc: [Hybrid runtime](../features/hybrid-runtime.md) (local STT server)
 
@@ -47,8 +47,9 @@ second engine and changes some text; not now.
 - [x] Each clip is encoded once, including the loop retry (unit test).
 - [x] A request clip goes before background clips already waiting; a cancelled one does not block them.
 - [x] Full gate passes.
-- [ ] On the Mac mini: `took_s` for whisper-large-v3-turbo about half of before; request clips show
-      `waited_s` near 0; logs survive a restart.
+- [x] On the Mac mini: `took_s` for whisper-large-v3-turbo about half of before (1.59-1.62 s on three
+      saved 4 s clips sent to the live server, was 3.1-3.2 s); logs survive a restart.
+- [ ] A spoken command timed end to end, with the request clip's `waited_s` near 0.
 
 ## Risks
 
@@ -66,3 +67,4 @@ cancellation); full gate; live `Transcribed` lines on the Mac mini.
 | Date | Update |
 |------|--------|
 | 2026-10-27 | Logs read, MLX and PyTorch benchmarked on 61 saved clips, encode-once, request priority and dated logs built. |
+| 2026-10-27 | Deployed (`35c799d`) at 20:31. Live server: turbo 1.59-1.62 s, small 0.41-0.48 s per 4 s clip. Today's earlier logs were carried into `~/Library/Logs/Reachy/*-2026-10-27.log`. |
