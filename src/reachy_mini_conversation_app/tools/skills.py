@@ -4,7 +4,8 @@ Realtime models reread every tool declaration on every turn, and Gemini Live has
 repeats cheap. A skill appears only as one line in the ``use_skill`` menu; the model reads its full
 instructions with ``skill_help`` when it needs them (they then sit in the conversation until context
 compression drops them), or calls ``use_skill`` straight away and gets the instructions back with
-any argument error. Frequently used, latency-sensitive and system tools stay ordinary tools.
+any argument error. Frequently used, latency-sensitive and system tools stay ordinary tools, and so do
+tools that take several calls in a row: behind a skill, Spotify's search-then-play stalled after the search.
 """
 
 from typing import TYPE_CHECKING, Any, Dict
@@ -21,7 +22,6 @@ USE_SKILL = "use_skill"
 SKILL_SUMMARIES: Dict[str, str] = {
     "home_lights": "home lights and smart plugs: what is on, on/off, brightness, warmth, color, scenes",
     "tv": "the TV: on/off, volume, mute, play/pause, remote buttons, open an app, search YouTube",
-    "spotify_control": "music on Spotify, only when asked: search, play, queue, pause, resume, next, volume",
     "remember": "save a household memory, only when someone explicitly asks you to remember something",
     "forget": "remove a saved memory when someone asks you to forget it",
     "update_memory": "correct a saved household memory",

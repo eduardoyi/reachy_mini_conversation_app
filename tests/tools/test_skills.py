@@ -56,6 +56,11 @@ def test_skill_tools_become_one_menu_line_each(tools: dict[str, Tool], monkeypat
     assert "action=status" not in specs["use_skill"]["description"]  # the full instructions wait for skill_help
 
 
+def test_spotify_stays_a_direct_tool() -> None:
+    """Playing music is search then play; behind a skill Gemini re-read the help after the search and never played."""
+    assert "spotify_control" not in skills.SKILL_SUMMARIES
+
+
 def test_switching_skills_off_restores_every_declaration(
     tools: dict[str, Tool], monkeypatch: pytest.MonkeyPatch
 ) -> None:

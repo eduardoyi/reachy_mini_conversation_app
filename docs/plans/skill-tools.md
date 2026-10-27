@@ -32,3 +32,7 @@ can switch back if it feels clunky. The `dance` move list no longer repeats ever
   at 141 turns, minus one extra generation (~8–10k prompt tokens) for the first use of each skill in
   a session. Live behaviour: lights, TV and remember went `skill_help` → valid `use_skill`; weather
   stayed direct. Household test pending.
+- 2026-10-27: Household test on the Mac mini: "play Spotify" went `skill_help` → `use_skill` search →
+  `skill_help` again, then a spoken reply; the follow-up window closed with nothing playing. Spotify
+  needs search and play in a row, so `spotify_control` is a direct tool again (about +350 tokens per
+  turn); the other skills stay.

@@ -1,7 +1,7 @@
 # Feature: Skill tools (progressive tool disclosure)
 
 - Status: `in-progress` (on by default as a test; `SKILL_TOOLS_ENABLED=0` switches back)
-- Last updated: 2026-10-25
+- Last updated: 2026-10-27
 - Plan: [skill-tools.md](../plans/skill-tools.md)
 
 ## Overview
@@ -18,8 +18,8 @@ mid-session (Gemini Live cannot change its configuration while connected).
 ## User-facing behavior
 
 - Nothing changes for always-on tools: camera, emotions, dances, head moves, sleep, end
-  conversation, turn off, weather, time, the e-ink display, and background task status/cancel.
-- Skills: `home_lights`, `tv`, `spotify_control`, `remember`, `forget`, `update_memory`,
+  conversation, turn off, weather, time, the e-ink display, Spotify, and background task status/cancel.
+- Skills: `home_lights`, `tv`, `remember`, `forget`, `update_memory`,
   `remember_face`, `forget_face`, `who_is_here`, `head_tracking`, `sweep_look` (only those enabled).
   The first use of a skill in a conversation usually adds one `skill_help` round trip, about 1–2 s
   and one extra model generation. Lights, TV and music are mostly handled by local quick commands
@@ -71,6 +71,9 @@ flowchart LR
   handlers treat the camera result specially, the session tools must work at once, and the
   background manager injects itself into the task tools by name.
 - `use_skill` must never run a tool that is not an enabled skill.
+- `spotify_control` stays direct: playing music takes a search and then a play with its result. As a
+  skill, Gemini re-read `skill_help` after the search and closed the conversation without playing
+  (2026-10-27). Keep any tool that needs several calls in a row out of the skills.
 
 ## Constraints, privacy, and failure modes
 
@@ -103,3 +106,4 @@ YouTube on the TV and "remember Enzo's swimming class moved to Thursdays" each w
 ## Changelog
 
 - 2026-10-25: Added as a switchable test (`SKILL_TOOLS_ENABLED`, default on).
+- 2026-10-27: `spotify_control` is a direct tool again; as a skill, "play Spotify" stalled after the search.
