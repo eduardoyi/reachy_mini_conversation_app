@@ -782,7 +782,7 @@ class Config:
     TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     # While Spotify plays on Reachy's speaker, show the song on the e-ink screen (needs Spotify set up).
     DISPLAY_NOW_PLAYING = _env_flag("DISPLAY_NOW_PLAYING", default=True)
-    DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
+    DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gpt-image-2.5-flare"
     # Web pictures: Brave Image Search finds them, Jev (TypeSafe) checks each one. Both keys are needed.
     BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
@@ -978,7 +978,7 @@ def refresh_runtime_config_from_env() -> None:
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)
     config.DISPLAY_NOW_PLAYING = _env_flag("DISPLAY_NOW_PLAYING", default=True)
-    config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gemini-3.1-flash-lite-image"
+    config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gpt-image-2.5-flare"
     config.BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     config.TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
     config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"

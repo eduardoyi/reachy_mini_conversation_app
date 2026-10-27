@@ -72,11 +72,14 @@ def _build_display() -> Any:
     if not config.TRMNL_ENABLED:
         return None
     from google import genai
+    from openai import AsyncOpenAI
 
-    from reachy_mini_conversation_app.eink_display import EInkDisplay, render_photo
+    from reachy_mini_conversation_app.eink_display import OPENAI_IMAGE_PREFIX, EInkDisplay, render_photo
     from reachy_mini_conversation_app.web_pictures import WebPictures
 
     api_key = (config.GEMINI_API_KEY or "").strip()
+    openai_key = (config.OPENAI_API_KEY or "").strip()
+    uses_openai = config.DISPLAY_IMAGE_MODEL.startswith(OPENAI_IMAGE_PREFIX)
     pictures = None
     if config.BRAVE_API_KEY and config.TYPESAFE_API_KEY:
         pictures = WebPictures(
@@ -90,7 +93,8 @@ def _build_display() -> Any:
         refresh_s=config.TRMNL_REFRESH_SECONDS,
         cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "display",
         image_model=config.DISPLAY_IMAGE_MODEL,
-        client=genai.Client(api_key=api_key) if api_key else None,
+        client=genai.Client(api_key=api_key) if api_key and not uses_openai else None,
+        openai_client=AsyncOpenAI(api_key=openai_key, max_retries=0) if openai_key and uses_openai else None,
         pictures=pictures,
     )
 

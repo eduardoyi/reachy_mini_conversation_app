@@ -4,6 +4,7 @@ import io
 import os
 import json
 import time
+import base64
 import signal
 import socket
 import asyncio
@@ -14,6 +15,8 @@ from types import SimpleNamespace
 from typing import Any, Iterator
 from pathlib import Path
 
+import httpx
+import openai
 import pytest
 from PIL import Image
 
@@ -600,3 +603,98 @@ async def test_image_service_errors_become_drawing_errors(tmp_path: Path, code: 
         await display.edit_photo(_jpeg(), "make him a pirate")
     with pytest.raises(DrawingError, match=reason):
         await display.drawing("cat")
+
+
+class _FakeImages:
+    """The two OpenAI Images API calls drawings use, answering with ``image`` (or raising ``error``)."""
+
+    def __init__(self, image: bytes | None, error: Exception | None = None) -> None:
+        self.image = image
+        self.error = error
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def generate(self, **kwargs: Any) -> Any:
+        return self._answer("generate", kwargs)
+
+    async def edit(self, **kwargs: Any) -> Any:
+        return self._answer("edit", kwargs)
+
+    def _answer(self, call: str, kwargs: dict[str, Any]) -> Any:
+        self.calls.append((call, kwargs))
+        if self.error is not None:
+            raise self.error
+        data = [SimpleNamespace(b64_json=base64.b64encode(self.image).decode())] if self.image else []
+        usage = SimpleNamespace(
+            input_tokens=959,
+            input_tokens_details=SimpleNamespace(text_tokens=191, image_tokens=768),
+            output_tokens=301,
+        )
+        return SimpleNamespace(data=data, usage=usage)
+
+
+def _openai_display(tmp_path: Path, images: _FakeImages | None) -> EInkDisplay:
+    client: Any = SimpleNamespace(images=images) if images else None
+    return _display(tmp_path, image_model="gpt-image-2.5-flare", openai_client=client)
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_models_draw_through_openai(tmp_path: Path) -> None:
+    """A gpt-image model draws a 4:3 medium-quality picture, records its tokens and caches it like Gemini's."""
+    images = _FakeImages(_jpeg())
+    display = _openai_display(tmp_path, images)
+
+    first = await display.drawing("A Cat")
+    again = await display.drawing("a cat")
+
+    assert first.size == again.size == (643, 480)
+    assert len(images.calls) == 1
+    call, kwargs = images.calls[0]
+    assert call == "generate" and "A Cat" in kwargs["prompt"]
+    assert kwargs["model"] == "gpt-image-2.5-flare"
+    assert (kwargs["size"], kwargs["quality"]) == ("1024x768", "medium")
+    record = get_ledger().entries()[-1]
+    assert record["feature"] == "display_drawing"
+    assert record["tokens"] == {"input_text": 191, "input_image": 768, "output_image": 301}
+    assert record["cost_usd"] is not None
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_photo_edits_send_the_photo(tmp_path: Path) -> None:
+    """An edit goes to the Images edit call with the JPEG and the change, and is not cached."""
+    images = _FakeImages(_jpeg())
+    photo = _jpeg(90)
+
+    edited = await _openai_display(tmp_path, images).edit_photo(photo, "make him a pirate")
+
+    assert edited.size == (643, 480)
+    call, kwargs = images.calls[0]
+    assert call == "edit" and "make him a pirate" in kwargs["prompt"]
+    assert kwargs["image"] == ("photo.jpg", photo, "image/jpeg")
+    assert get_ledger().entries()[-1]["feature"] == "display_photo_edit"
+    assert not (tmp_path / DRAWINGS_DIR).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "reason"), [(402, "out of credits"), (429, "busy"), (400, "blocked"), (500, "did not answer")]
+)
+async def test_openai_image_errors_become_drawing_errors(tmp_path: Path, code: int, reason: str) -> None:
+    """OpenAI's credit, rate, moderation and server errors are DrawingErrors Reachy can explain."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/images/generations")
+    error = openai.APIStatusError("sentinel", response=httpx.Response(code, request=request), body=None)
+    display = _openai_display(tmp_path, _FakeImages(None, error))
+
+    with pytest.raises(DrawingError, match=reason):
+        await display.drawing("cat")
+    with pytest.raises(DrawingError, match=reason):
+        await display.edit_photo(_jpeg(), "make him a pirate")
+    assert not list(tmp_path.rglob("cat.png"))
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_models_need_the_openai_key_and_a_picture(tmp_path: Path) -> None:
+    """Without an OpenAI client the error names the key; an answer with no image is a blocked drawing."""
+    with pytest.raises(DrawingError, match="OPENAI_API_KEY"):
+        await _openai_display(tmp_path, None).drawing("cat")
+    with pytest.raises(DrawingError, match="blocked"):
+        await _openai_display(tmp_path, _FakeImages(None)).drawing("cat")

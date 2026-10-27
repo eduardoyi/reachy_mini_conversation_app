@@ -14,7 +14,7 @@ an astronaut" redraws that photo with the change, in the screen's bold illustrat
 | Question | Choice |
 |----------|--------|
 | Who may use it | Anyone in the household, kids included, on request only |
-| Edits | Sent to Google's image model (`DISPLAY_IMAGE_MODEL`) with the photo; plain photos stay local |
+| Edits | Sent to the image model (`DISPLAY_IMAGE_MODEL`; Google's until 2026-10-27, OpenAI's `gpt-image-2.5-flare` since) with the photo; plain photos stay local |
 | Saving | Never: camera photos and edits are not cached; the usage ledger records only token counts |
 | Time on screen | 10 minutes, then the resting card; the screen file is deleted then, and never served after |
 | Posing | The photo is taken 3 s after the call, while Reachy counts down |

@@ -1,7 +1,7 @@
 # Feature: E-ink display (TRMNL)
 
 - Status: `in-progress` (drawings, web pictures, word cards, text and visual explanations checked live on the household TRMNL; pictures used by voice; explanations not yet asked for by voice)
-- Last updated: 2026-10-25
+- Last updated: 2026-10-27
 - Plan: [docs/plans/eink-display.md](../plans/eink-display.md)
 
 ## Overview
@@ -40,7 +40,7 @@ Out of scope so far: stories, scheduled pages such as a morning page or calendar
 - "Go back to the start screen": the resting card. It also returns 30 minutes after the last screen.
 - There is no daily cap on new drawings or picture searches (removed 2026-10-25 at the household's
   request); a subject drawn or found before still comes from the cache.
-- A drawing that fails (no API key, blocked by Google's filter, over 20 s) leaves the screen as it
+- A drawing that fails (no API key, blocked by the image model's filter, over 20 s) leaves the screen as it
   was, and Reachy is told to say so and not retry.
 - If the TRMNL has not checked in for over 30 s (plus the refresh rate), the screen is still set,
   but Reachy is told to say the screen is napping and will show it within a few minutes, or at once
@@ -51,8 +51,8 @@ Out of scope so far: stories, scheduled pages such as a morning page or calendar
 
 ## Setup
 
-1. `.env`: `TRMNL_ENABLED=1` (and optionally `TRMNL_PORT`, `TRMNL_REFRESH_SECONDS`). Drawings use
-   `GEMINI_API_KEY`.
+1. `.env`: `TRMNL_ENABLED=1` (and optionally `TRMNL_PORT`, `TRMNL_REFRESH_SECONDS`). Drawings and photo edits use
+   `OPENAI_API_KEY` with the default `gpt-image-2.5-flare`, or `GEMINI_API_KEY` with a Gemini image model.
 2. On the TRMNL, hold the back button until the setup screen shows; join the `TRMNL-xxxx` Wi-Fi
    from a phone. On the setup page tap **Advanced** and set **API Server** to
    `http://<computer's LAN IP>:8090` (no trailing slash), then **Back**, choose the home Wi-Fi
@@ -137,11 +137,11 @@ photo and turns creatures into a costume with their face showing, so the result 
 - **Ten minutes on screen:** the spool marks the screen `private` with `expires_at`; after that the
   device server shows the resting card, refuses to serve the photo (404) and deletes its file at the
   next check-in.
-- **Edits leave the house:** the photo goes to Google's image model; a plain photo does not.
-- **Failures:** a refused, slow or failed edit (including Google being out of credits) leaves the
+- **Edits leave the house:** the photo goes to the image model (OpenAI's `gpt-image-2.5-flare` since 2026-10-27, Google's before); a plain photo does not.
+- **Failures:** a refused, slow or failed edit (including the image service being out of credits) leaves the
   screen as it was and Reachy offers the plain photo. Named characters are often refused, so the tool
-  asks Gemini to describe the costume instead ("a red and blue superhero suit with a spider-web pattern"). Turning a child's drawing into a "real scene" does not work with this model (it
-  redraws the drawing).
+  asks Gemini to describe the costume instead ("a red and blue superhero suit with a spider-web pattern"). Turning a child's drawing into a "real scene" did not work with the Gemini model (it
+  redraws the drawing); not yet tried with GPT Image.
 
 ## Architecture
 
@@ -149,7 +149,7 @@ photo and turns creatures into a costume with their face showing, so the result 
 flowchart LR
   Live[Gemini Live] -->|show_on_display| Tool[tools/show_on_display.py]
   Tool -->|drawing subject| Draw[EInkDisplay.drawing]
-  Draw -->|cache miss| Gemini[gemini-3.1-flash-lite-image]
+  Draw -->|cache miss| Model[gpt-image-2.5-flare, or a Gemini image model]
   Tool --> Render[render_drawing / render_word / render_text]
   Render -->|2-bit PNG| State[EInkDisplay.show]
   State -->|PNG + current.json| Spool[(display/screen/)]
@@ -201,7 +201,7 @@ flowchart LR
 | Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
-| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL`, `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
+| Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL` (`gpt-image-2.5-flare`), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
 | Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt` |
 | Guidance | `profiles/household_companion/profile.md` | When to use the screen (explanations for how and why questions); Spanish-style pronunciation and Spanish meanings for Italian words |
 
@@ -260,14 +260,14 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 ## Dependencies
 
 - Pillow (added for this feature): image decoding, scaling, text. HPND license, no network access.
-- `google-genai` (existing) for drawings.
+- `openai` (existing) for drawings and edits with `gpt-image-*` models; `google-genai` (existing) for Gemini image models.
 - Atkinson Hyperlegible, SIL Open Font License 1.1 (bundled with its license).
 
 ## Testing
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; gpt-image models through OpenAI (1024x768 medium, edits send the JPEG, token record, credit / rate / moderation / server errors, missing `OPENAI_API_KEY`); the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
 | `tests/tools/test_show_on_display.py` | No display; each kind; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
 | `tests/test_now_playing.py` | Track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
@@ -296,6 +296,9 @@ through a spoken conversation.
 - 2026-10-25: Image-model API errors (402 out of credits, 5xx) become a `DrawingError` Reachy can explain
   instead of a tool crash; edits of famous characters describe the costume instead of the name
   ("Spiderman" was refused live).
+- 2026-10-27: Drawings and photo edits default to OpenAI's `gpt-image-2.5-flare` (1024x768, medium:
+  10-12 s, about $0.009 a drawing); Gemini stays available through `DISPLAY_IMAGE_MODEL`. Plan:
+  [openai-drawings.md](../plans/openai-drawings.md).
 - 2026-10-25: Now playing: the Spotify song on Reachy's speaker shows as a music card (album art,
   title, artist, album), following the household's rules for requested screens; "what song is this".
 - 2026-10-25: The encyclopedia style was too detailed for the TRMNL: thin lines broke into dashes (a

@@ -128,7 +128,7 @@ values. This keeps one-off commands such as
 | `TRMNL_PORT` / `TRMNL_REFRESH_SECONDS` | Display server port (default `8090`) and seconds the TRMNL sleeps between check-ins (default `1` for USB power, 1–3600; raise it on battery). Each check-in is held up to 10 s and answered as soon as a screen changes. |
 | `BRAVE_API_KEY` / `TYPESAFE_API_KEY` | Web pictures for `show_on_display`: Brave Image Search (strict SafeSearch) finds them, Jev checks each is fine for young children. Without both, pictures are drawn instead. |
 | `DISPLAY_CHECK_MODEL` | Jev model for the picture check (default `jev-latest`). |
-| `DISPLAY_IMAGE_MODEL` | Gemini image model for drawings (default `gemini-3.1-flash-lite-image`). |
+| `DISPLAY_IMAGE_MODEL` | Image model for drawings and photo edits (default `gpt-image-2.5-flare`, uses `OPENAI_API_KEY`); a Gemini image model such as `gemini-3.1-flash-lite-image` uses `GEMINI_API_KEY`. |
 | `OPENAI_API_KEY` | Required for `openai_live`; local environment only, never accepted or displayed by settings. |
 | `OPENAI_LIVE_MODEL` | Speech model, default `gpt-live-1`. |
 | `OPENAI_LIVE_BACKEND_MODEL` | Delegated tool/image model, default `gpt-5.6-luna`. |

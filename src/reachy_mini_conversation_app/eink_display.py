@@ -13,6 +13,7 @@ import re
 import sys
 import time
 import zlib
+import base64
 import struct
 import asyncio
 import hashlib
@@ -21,13 +22,15 @@ import functools
 import threading
 import subprocess
 import unicodedata
-from typing import Any, Callable
+from typing import Any, Literal, Callable
 from pathlib import Path
 from dataclasses import dataclass
 
 import numpy as np
+import openai
 from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageFilter
 from google import genai
+from openai import AsyncOpenAI
 from google.genai import types
 from google.genai import errors as genai_errors
 from PIL.PngImagePlugin import PngInfo
@@ -51,6 +54,13 @@ logger = logging.getLogger(__name__)
 WIDTH, HEIGHT = 800, 480
 MAX_PNG_BYTES = 90_000  # the TRMNL OG does not draw larger images
 DRAWING_TIMEOUT_S = 20.0
+# Models named gpt-image-* are OpenAI's; any other DISPLAY_IMAGE_MODEL is a Gemini image model. Medium
+# quality at 4:3 took 10-12 s and 301 image tokens for a drawing or an edit with gpt-image-2.5-flare; low
+# left blotchy fills (checked 2026-10-27).
+OPENAI_IMAGE_PREFIX = "gpt-image"
+# Typed Any: openai 2.28 lists only the older fixed sizes, though the API takes any multiple-of-16 size.
+OPENAI_IMAGE_SIZE: Any = "1024x768"
+OPENAI_IMAGE_QUALITY: Literal["medium"] = "medium"
 # Leaves time to draw the subject instead within the conversation's 30 s tool deadline.
 PICTURE_TIMEOUT_S = 12.0
 SERVER_START_TIMEOUT_S = 5.0
@@ -400,16 +410,22 @@ class EInkDisplay:
         cache_dir: Path,
         image_model: str,
         client: genai.Client | None = None,
+        openai_client: AsyncOpenAI | None = None,
         pictures: WebPictures | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        """Write the resting screen to the spool folder the device server reads; ``start()`` starts the server."""
+        """Write the resting screen to the spool folder the device server reads; ``start()`` starts the server.
+
+        ``client`` draws with a Gemini image model and ``openai_client`` with a gpt-image model; only the one
+        matching ``image_model`` is used.
+        """
         self.port = port
         self.refresh_s = refresh_s
         self.spool = cache_dir / "screen"
         self._cache_dir = cache_dir
         self._image_model = image_model
         self._client = client
+        self._openai_client = openai_client
         self._pictures = pictures
         self._clock = clock
         self._lock = threading.Lock()
@@ -494,58 +510,105 @@ class EInkDisplay:
         if path.is_file():
             with Image.open(path) as cached:
                 return cached.convert("L")
-        picture = await self._generate(DRAWING_PROMPT.format(subject=subject), "display_drawing", "the drawing")
+        picture = await self._generate(DRAWING_PROMPT.format(subject=subject), None, "display_drawing", "the drawing")
         path.parent.mkdir(parents=True, exist_ok=True)
         picture.save(path)
         return picture
 
     async def edit_photo(self, jpeg: bytes, edit: str) -> Image.Image:
         """Redraw a camera photo with ``edit`` in the drawing style; nothing is cached."""
-        photo = types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")
-        return await self._generate([PHOTO_EDIT_PROMPT.format(edit=edit), photo], "display_photo_edit", "the edit")
+        return await self._generate(PHOTO_EDIT_PROMPT.format(edit=edit), jpeg, "display_photo_edit", "the edit")
 
-    async def _generate(self, contents: Any, feature: str, what: str) -> Image.Image:
+    async def _generate(self, prompt: str, photo: bytes | None, feature: str, what: str) -> Image.Image:
         """Ask the image model for one picture, record its cost, and return it cleaned for four grays."""
-        if self._client is None:
-            raise DrawingError("drawings need GEMINI_API_KEY")
         try:
-            response = await asyncio.wait_for(
-                self._client.aio.models.generate_content(
-                    model=self._image_model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="4:3")
-                    ),
-                ),
-                DRAWING_TIMEOUT_S,
-            )
+            if self._image_model.startswith(OPENAI_IMAGE_PREFIX):
+                data, tokens = await asyncio.wait_for(self._openai_image(prompt, photo), DRAWING_TIMEOUT_S)
+            else:
+                data, tokens = await asyncio.wait_for(self._gemini_image(prompt, photo), DRAWING_TIMEOUT_S)
         except asyncio.TimeoutError as error:
             raise DrawingError(f"{what} took too long") from error
-        except genai_errors.APIError as error:
-            logger.warning("Image model refused the request: HTTP %s", error.code)
-            if error.code in (402, 429):
-                raise DrawingError("Google's drawing service is out of credits or busy right now") from error
-            raise DrawingError("Google's drawing service did not answer") from error
-        usage = response.usage_metadata
-        if usage is not None:
-            get_ledger().record(
-                feature,
-                self._image_model,
-                {
-                    "input_text": int(usage.prompt_token_count or 0),
-                    "output_image": int(usage.candidates_token_count or 0),
-                },
-            )
-        parts = response.candidates[0].content.parts if response.candidates and response.candidates[0].content else []
-        data = next(
-            (part.inline_data.data for part in parts or [] if part.inline_data and part.inline_data.data), None
-        )
+        if tokens:
+            get_ledger().record(feature, self._image_model, tokens)
         if data is None:
             raise DrawingError("no picture came back (it may have been blocked)")
         with Image.open(io.BytesIO(data)) as made:
             picture = made.convert("L")
         picture.thumbnail((WIDTH, HEIGHT))
         return picture.filter(ImageFilter.MedianFilter(3))  # JPEG noise would speckle flat fills
+
+    async def _gemini_image(self, prompt: str, photo: bytes | None) -> tuple[bytes | None, dict[str, int]]:
+        """Return a Gemini image model's picture (None when it sent none) and its token counts."""
+        if self._client is None:
+            raise DrawingError("drawings need GEMINI_API_KEY")
+        contents: Any = (
+            prompt if photo is None else [prompt, types.Part.from_bytes(data=photo, mime_type="image/jpeg")]
+        )
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self._image_model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="4:3")
+                ),
+            )
+        except genai_errors.APIError as error:
+            logger.warning("Image model refused the request: HTTP %s", error.code)
+            if error.code in (402, 429):
+                raise DrawingError("Google's drawing service is out of credits or busy right now") from error
+            raise DrawingError("Google's drawing service did not answer") from error
+        usage = response.usage_metadata
+        tokens = (
+            {
+                "input_text": int(usage.prompt_token_count or 0),
+                "output_image": int(usage.candidates_token_count or 0),
+            }
+            if usage is not None
+            else {}
+        )
+        parts = response.candidates[0].content.parts if response.candidates and response.candidates[0].content else []
+        data = next(
+            (part.inline_data.data for part in parts or [] if part.inline_data and part.inline_data.data), None
+        )
+        return data, tokens
+
+    async def _openai_image(self, prompt: str, photo: bytes | None) -> tuple[bytes | None, dict[str, int]]:
+        """Return a gpt-image model's picture (None when it sent none) and its token counts."""
+        if self._openai_client is None:
+            raise DrawingError("drawings need OPENAI_API_KEY")
+        try:
+            if photo is None:
+                response = await self._openai_client.images.generate(
+                    model=self._image_model, prompt=prompt, size=OPENAI_IMAGE_SIZE, quality=OPENAI_IMAGE_QUALITY
+                )
+            else:
+                response = await self._openai_client.images.edit(
+                    model=self._image_model,
+                    image=("photo.jpg", photo, "image/jpeg"),
+                    prompt=prompt,
+                    size=OPENAI_IMAGE_SIZE,
+                    quality=OPENAI_IMAGE_QUALITY,
+                )
+        except openai.APIStatusError as error:
+            logger.warning("Image model refused the request: HTTP %s", error.status_code)
+            if error.status_code in (402, 429):
+                raise DrawingError("OpenAI's drawing service is out of credits or busy right now") from error
+            if error.status_code == 400:  # moderation_blocked comes back as a 400
+                raise DrawingError("the drawing service refused it (it may have been blocked)") from error
+            raise DrawingError("OpenAI's drawing service did not answer") from error
+        except openai.APIConnectionError as error:
+            raise DrawingError("OpenAI's drawing service did not answer") from error
+        usage = response.usage
+        tokens = {}
+        if usage is not None:
+            details = usage.input_tokens_details
+            tokens = {
+                "input_text": details.text_tokens if details else usage.input_tokens,
+                "input_image": details.image_tokens if details else 0,
+                "output_image": usage.output_tokens,
+            }
+        encoded = response.data[0].b64_json if response.data else None
+        return (base64.b64decode(encoded) if encoded else None), tokens
 
     async def picture(self, subject: str) -> WebPicture:
         """Return a checked web picture of ``subject``: from the cache, else a new search counted against today's."""

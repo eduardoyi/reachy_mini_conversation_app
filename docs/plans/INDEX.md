@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Drawings with GPT Image 2.5 Flare](openai-drawings.md) | `in-progress` | 2026-10-27 | TRMNL drawings and photo edits move from Gemini to `gpt-image-2.5-flare` (medium, 1024x768); Gemini stays configurable; live check pending |
 | [Wake clip capture](wake-clip-capture.md) | `in-progress` | 2026-10-27 | Short local clips around wakes, near misses, names only local STT heard, and random background, to retrain the wake word (music); running on the Mac mini since 2026-10-27 |
 | [Wake antenna cue](wake-antenna-cue.md) | `in-progress` | 2026-10-25 | Antennas perk out and hold while Reachy listens, release when he answers; head lift replaces the nod; built and tested, robot check pending |
 | [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | Drawings, web pictures (Jev check), word cards, text and v3 visual explanations live on the TRMNL; device server is its own process; no daily caps; stories, morning page and calendar deferred |
