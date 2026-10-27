@@ -860,7 +860,11 @@ It transcribes everything, kids talking to Reachy included, but bounds the work 
   sentence repeated;
 - the language is chosen among `WHISPER_LANGUAGES` (default `en,es,it,pt`; `auto` for any)
   unless the request gives one;
-- a clip whose client disconnected while queued is skipped.
+- a clip whose client disconnected while queued is skipped;
+- each clip is encoded once and the language pick and text share it (2026-10-27, M1 Mac mini, 61
+  saved clips: whisper-small 0.74 → 0.46 s, whisper-large-v3-turbo 3.19 → 1.64 s, identical text);
+- request-model clips go before background clips already waiting (`TurnLock`), so a command never
+  queues behind the room's chatter (2026-10-27). Plan: [local-command-speed.md](../plans/local-command-speed.md).
 
 Measured on the same machine: 8 s of noise 26 s → 0.3 s; English and Spanish commands unchanged
 (0.3–0.5 s); overlapped speech 1.6 s with the retry. Each clip logs one line

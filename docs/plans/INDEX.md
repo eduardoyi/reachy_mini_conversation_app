@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Faster local commands](local-command-speed.md) | `in-progress` | 2026-10-27 | Whisper server encodes each clip once (turbo 3.19 → 1.64 s on the mini), request clips skip the queue, dated logs kept 7 days; MLX benchmarked and not adopted |
 | [Drawings with GPT Image 2.5 Flare](openai-drawings.md) | `in-progress` | 2026-10-27 | TRMNL drawings and photo edits move from Gemini to `gpt-image-2.5-flare` (medium, 1024x768); Gemini stays configurable; live check pending |
 | [Wake clip capture](wake-clip-capture.md) | `in-progress` | 2026-10-27 | Short local clips around wakes, near misses, names only local STT heard, and random background, to retrain the wake word (music); running on the Mac mini since 2026-10-27 |
 | [Wake antenna cue](wake-antenna-cue.md) | `in-progress` | 2026-10-25 | Antennas perk out and hold while Reachy listens, release when he answers; head lift replaces the nod; built and tested, robot check pending |

@@ -15,6 +15,7 @@ WHISPER_MODEL="${WHISPER_MODEL:-openai/whisper-small}"
 WHISPER_REQUEST_MODEL="${WHISPER_REQUEST_MODEL-openai/whisper-large-v3-turbo}"
 WHISPER_PORT="${WHISPER_PORT:-8766}"
 WHISPER_URL="http://127.0.0.1:${WHISPER_PORT}/v1/models"
+# Appended to, so a restart keeps the earlier timings.
 WHISPER_LOG="${WHISPER_LOG:-${TMPDIR:-/tmp}/reachy-whisper.log}"
 WHISPER_READY_TIMEOUT_S="${WHISPER_READY_TIMEOUT_S:-180}"
 # Reachy's own Whisper server (scripts/whisper_server.py) bounds the work per clip so background
@@ -90,9 +91,9 @@ else
     request_args=()
     [[ -n "$WHISPER_REQUEST_MODEL" ]] && request_args=(--request-model "$WHISPER_REQUEST_MODEL")
     "$WHISPER_PYTHON" "$REPO_DIR/scripts/whisper_server.py" --host 127.0.0.1 --port "$WHISPER_PORT" \
-      "${request_args[@]}" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+      "${request_args[@]}" "$WHISPER_MODEL" >>"$WHISPER_LOG" 2>&1 &
   else
-    transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >"$WHISPER_LOG" 2>&1 &
+    transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >>"$WHISPER_LOG" 2>&1 &
   fi
   whisper_pid=$!
   waited=0
