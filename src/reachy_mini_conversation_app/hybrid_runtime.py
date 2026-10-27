@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from collections.abc import Callable, Awaitable, AsyncIterator
 
 import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.config import (
     MAX_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
@@ -370,6 +371,10 @@ class HybridRuntime:
     # A segment cut at an acoustic wake, with no name in it, this short is the misheard name plus the start
     # of the request.
     _UNNAMED_WAKE_MAX_WORDS = 4
+    # While asleep, the last this many seconds the wake model heard stay in memory so the accurate model can
+    # check the name itself when the fast transcript missed it (2026-10-27: "Richie!" in the audio, while the
+    # live transcript held no name, and Reachy stayed asleep through two calls).
+    _WAKE_NAME_WINDOW_S = 2.5
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
@@ -481,6 +486,9 @@ class HybridRuntime:
         self._wake_clips = wake_clips
         self._acoustic_epoch = 0
         self._acoustic_stream_epoch: int | None = None
+        self._wake_window = bytearray()
+        self._wake_window_rate = 0
+        self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
         self._intent_router = intent_router
         self._action_executor = action_executor
         self._quick_commands = quick_commands
@@ -1300,7 +1308,7 @@ class HybridRuntime:
                         wake_sequence = wake_segment_sequence
                 if confirm_wake:
                     leading_text = wake_text if wake_word_found else followup_text
-                    if not _name_leads(leading_text):
+                    if not _name_leads(leading_text) and not await self._name_heard_accurately():
                         return await self._stay_asleep(generation)
                     with self._lifecycle_lock:
                         self._asleep = False
@@ -1571,6 +1579,34 @@ class HybridRuntime:
         held = sum(self._frame_duration(kept) for kept in frames)
         if held < self._REQUEST_CLIP_START_S + self._REQUEST_CLIP_MAX_S:
             frames.append(frame)
+
+    def _keep_wake_window(self, pcm: bytes, sample_rate: int) -> None:
+        """Keep the last ``_WAKE_NAME_WINDOW_S`` of the audio the wake model hears, in memory only."""
+        if sample_rate != self._wake_window_rate:
+            self._wake_window.clear()
+            self._wake_window_rate = sample_rate
+        self._wake_window += pcm
+        excess = len(self._wake_window) - int(sample_rate * self._WAKE_NAME_WINDOW_S) * 2
+        if excess > 0:
+            del self._wake_window[:excess]
+
+    async def _name_heard_accurately(self) -> bool:
+        """Return whether the accurate model hears the name leading the audio the wake model fired on."""
+        with self._lifecycle_lock:
+            audio, self._wake_name_audio = self._wake_name_audio, None
+        transcriber = self._request_transcriber
+        if transcriber is None or audio is None or not audio[0] or not audio[1].size:
+            return False
+        try:
+            text = await asyncio.wait_for(transcriber(audio), self._REQUEST_CLIP_STT_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Wake name check failed: %s", type(error).__name__)
+            return False
+        heard = isinstance(text, str) and _name_leads(text)
+        logger.info("Wake name checked again with the accurate model heard=%s", heard)
+        return heard
 
     async def _stay_asleep(self, generation: int) -> bool:
         """Drop an acoustic wake that local STT did not confirm, without moving or opening the cloud."""
@@ -2380,8 +2416,10 @@ class HybridRuntime:
                 await asyncio.to_thread(detector.reset)
                 if self._wake_clips is not None:
                     self._wake_clips.clear()
+                self._wake_window.clear()
                 self._acoustic_stream_epoch = epoch
             pcm = audio_to_mono_int16(frame[1]).astype("<i2", copy=False).tobytes()
+            self._keep_wake_window(pcm, frame[0])
             if self._wake_clips is not None:
                 self._wake_clips.feed(pcm, frame[0])
             detection = await asyncio.to_thread(detector.process_audio, pcm, frame[0])
@@ -2404,6 +2442,9 @@ class HybridRuntime:
                 with self._lifecycle_lock:
                     self._request_clip_queued = []
                     self._request_clip_queued_epoch = epoch
+                    if self._asleep:
+                        window = np.frombuffer(bytes(self._wake_window), dtype="<i2").copy()
+                        self._wake_name_audio = (self._wake_window_rate, window)
             # Activate in its own task: awaiting it here would stall this worker, so frames after the wake
             # (the spoken request) would not reach local STT until activation finished.
             task = asyncio.create_task(self.activate("acoustic_wake"), name="hybrid-acoustic-activation")

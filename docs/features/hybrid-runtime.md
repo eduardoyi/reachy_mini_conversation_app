@@ -808,16 +808,21 @@ sets `_asleep`. While it is set:
 - An acoustic wake does not acknowledge, so the head stays down, until local STT
   confirms the name opened the utterance or one of its sentences (`_name_leads`:
   "Reachy, ...", "hey Reachy", "ok. Reachy, ...").
+- When the fast transcript does not put the name first, the request model rereads the last 2.5 s
+  the wake model heard (kept in memory while listening locally) and the name leading that confirms
+  the wake (2026-10-27; the missed call was "Richie!").
 - Without that confirmation the runtime returns to ambient
   (`unconfirmed_wake_while_asleep`) without moving or opening the cloud.
 - A transcript wake needs the name first in the same way.
 - Any confirmed wake, or a keyboard activation, clears `_asleep`. After that chat
   he stays awake in the idle pose.
-- Restarting the app while he is in the sleep pose keeps him asleep (2026-10-19):
-  startup enables the motors without the wake-up movement, holds the pose and starts
-  the runtime with `start_asleep=True`. Before, a restart woke him, and the next
-  acoustic hit on the kids talking (0.99, no name in the transcript) opened a
-  conversation. Without the hybrid runtime, startup still wakes him.
+- Restarting the app while he is in the sleep pose keeps the pose (motors on, no wake-up
+  movement) but, since 2026-10-27, not the strict check: a restart is not bedtime, so
+  the wake word alone wakes him. From 2026-10-19 the runtime started asleep, which stopped
+  a 0.99 hit on the kids talking from opening a conversation, but after an update it
+  missed two real calls. The plan is to drop the check once the wake model is good
+  enough: [sleep-wake-check.md](../plans/sleep-wake-check.md). Without the hybrid
+  runtime, startup still wakes him.
 
 The new `turn_off` tool keeps the old sleep-and-stop behavior, and the shutdown path
 (`run_go_to_sleep_tool`) now uses it. With the hybrid runtime, `end_conversation`
@@ -837,7 +842,9 @@ Tests:
 - `test_addressee_check_closes_early_when_people_talk_among_themselves`
 - `test_addressee_verdicts_that_keep_him_or_come_too_late_do_not_close`
 - `test_sleep_holds_the_pose_until_an_activation_wakes_him`
-- the `asleep` wake tests and `test_name_leads_only_when_the_name_opens_a_sentence`
+- the `asleep` wake tests (including the accurate recheck of the wake audio),
+  `test_the_wake_window_keeps_only_the_last_seconds_at_the_current_rate` and
+  `test_name_leads_only_when_the_name_opens_a_sentence`
 - `tests/test_addressee_check.py`
 - the standby tool tests in `tests/tools/test_go_to_sleep.py`
 

@@ -15,7 +15,7 @@ Before this, the only physical acknowledgment was a 0.18 s, 4° nod, and listeni
 froze the antennas wherever they happened to be, so a wake was easy to miss.
 
 Out of scope: sound cues (an earcon), lights, and any change to when a wake is
-accepted. An acoustic wake while asleep still shows nothing until local STT
+accepted. An acoustic wake while asleep (after "go to sleep") still shows nothing until local STT
 confirms the name (see [hybrid runtime](hybrid-runtime.md)).
 
 ## User-facing behavior

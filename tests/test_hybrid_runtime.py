@@ -4012,3 +4012,68 @@ async def test_a_conversation_that_drops_after_connecting_does_not_apologise() -
     await asyncio.sleep(0.1)
     assert spoken == []
     await runtime.close()
+
+
+def _asleep_runtime_with_wake_audio(heard: str) -> tuple[HybridRuntime, FakeHandler, list[str], list[Any]]:
+    """Return an asleep runtime whose fast transcript has no name; the accurate model hears ``heard``."""
+    processor = _processor_with_open_wake_segment("people are over there")
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    asked: list[Any] = []
+    wake_audio = (16000, np.full(16000, 300, dtype=np.int16))
+
+    async def accurate(audio: Any) -> str:
+        asked.append(audio)
+        return heard if audio is wake_audio else ""
+
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        request_transcriber=accurate,
+        wake_followup_timeout_s=0.1,
+    )
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime._asleep = True
+    runtime._wake_name_audio = wake_audio
+    return runtime, handler, acknowledged, asked
+
+
+@pytest.mark.asyncio
+async def test_asleep_the_accurate_model_can_confirm_a_name_the_fast_transcript_missed() -> None:
+    """The wake audio heard as "Richie!" by the accurate model wakes him, as his name first would."""
+    runtime, handler, acknowledged, asked = _asleep_runtime_with_wake_audio("Richie!")
+    try:
+        await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert acknowledged == ["acoustic_wake"]
+        assert not runtime._asleep
+        assert any(audio[0] == 16000 and audio[1].size == 16000 for audio in asked)
+        assert runtime._wake_name_audio is None  # used once, not kept
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_asleep_the_accurate_model_without_the_name_keeps_him_asleep() -> None:
+    """Ordinary words in the wake audio ("Thank you.") still leave him asleep and the cloud closed."""
+    runtime, handler, acknowledged, _asked = _asleep_runtime_with_wake_audio("Thank you.")
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert acknowledged == [] and not handler.started.is_set()
+        assert runtime._asleep
+    finally:
+        await runtime.close()
+
+
+def test_the_wake_window_keeps_only_the_last_seconds_at_the_current_rate() -> None:
+    """The in-memory window holds at most 2.5 s, and a new sample rate starts it over."""
+    runtime = HybridRuntime(lambda: FakeHandler())
+    second = np.ones(16000, dtype="<i2").tobytes()
+    for _ in range(4):
+        runtime._keep_wake_window(second, 16000)
+    assert len(runtime._wake_window) == int(16000 * runtime._WAKE_NAME_WINDOW_S) * 2
+
+    runtime._keep_wake_window(np.ones(100, dtype="<i2").tobytes(), 24000)
+    assert (len(runtime._wake_window), runtime._wake_window_rate) == (200, 24000)

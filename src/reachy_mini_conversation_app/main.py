@@ -364,8 +364,9 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Restarted while asleep (e.g. after "good night"): stay asleep, so only his name wakes him and
-    # the acoustic detector firing on ordinary speech does not open a conversation.
+    # Restarted in the sleep pose: he rests there quietly until called, but a restart is not bedtime, so the
+    # wake word alone wakes him (household choice, 2026-10-27, after the strict check missed two real calls
+    # following an update). Only "go to sleep" makes the name check strict.
     started_asleep = app_lifecycle.wake_up_if_sleeping(robot, logger, stay_asleep=config.HYBRID_RUNTIME_ENABLED)
     started_asleep = started_asleep and config.HYBRID_RUNTIME_ENABLED
 
@@ -598,7 +599,6 @@ def run(
             request_transcriber=request_transcriber,
             listening_observer=on_listening,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
-            start_asleep=started_asleep,
         )
         runtime_for_tools = hybrid_runtime
 
