@@ -360,3 +360,58 @@ async def test_a_failed_edit_offers_the_plain_photo(tmp_path: Path, no_countdown
 
     assert "Could not make that change" in result["error"] and "plain photo" in result["instruction"]
     assert display.current() == home
+
+
+def _held_models(display: EInkDisplay) -> tuple[_FakeModels, asyncio.Event]:
+    """Make the display's image model wait until the returned event is set."""
+    models = display._client.aio.models
+    release = asyncio.Event()
+    original = models.generate_content
+
+    async def held(**kwargs: Any) -> Any:
+        await release.wait()
+        return await original(**kwargs)
+
+    models.generate_content = held
+    return models, release
+
+
+@pytest.mark.asyncio
+async def test_only_one_picture_is_made_at_a_time(tmp_path: Path, no_countdown: None) -> None:
+    """While a drawing is made, other pictures are refused without calling the model; text still shows."""
+    display = _display(tmp_path)
+    models, release = _held_models(display)
+    tool = ShowOnDisplay()
+    deps = _camera_deps(display, _jpeg())
+    first = asyncio.create_task(tool(deps, kind="drawing", subject="a cat"))
+    await asyncio.sleep(0)
+
+    for kwargs in (
+        {"kind": "camera", "edit": "make him a Minecraft character"},
+        {"kind": "drawing", "subject": "a blocky character"},
+        {"kind": "word", "word": "gato", "picture": "a cat"},
+    ):
+        refused = await tool(deps, **kwargs)
+        assert "still being made" in refused["error"] and "Do not call" in refused["instruction"]
+    assert (await tool(deps, kind="text", lines=["hola"]))["ok"] is True
+
+    release.set()
+    assert (await first)["ok"] is True
+    assert models.calls == 1
+    assert (await tool(deps, kind="drawing", subject="a dog"))["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_picture_does_not_block_the_next(tmp_path: Path) -> None:
+    """A picture cancelled with its conversation frees the screen for the next one."""
+    display = _display(tmp_path)
+    _held_models(display)
+    tool = ShowOnDisplay()
+    first = asyncio.create_task(tool(_deps(display), kind="drawing", subject="a cat"))
+    await asyncio.sleep(0)
+
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert tool._making_picture is False

@@ -47,7 +47,8 @@ OpenAI's `gpt-image-2.5-flare` (household request, 2026-10-27), keeping Gemini o
 
 - Privacy: photo edits now leave the house to OpenAI instead of Google.
 - Moderation may refuse different subjects than Gemini did; refusals already become a spoken apology.
-- Latency: 10-12 s measured, inside the 20 s timeout but slower than Gemini's 2.7 s fox.
+- Latency: 10-12 s measured, inside the 20 s timeout but slower than Gemini's 2.7 s fox. Seen live:
+  the wait led to repeated requests, now refused while a picture is being made.
 
 ## Test strategy
 
@@ -59,3 +60,4 @@ no image); the full repository gate; a live voice check on the mini.
 | Date | Update |
 |------|--------|
 | 2026-10-27 | Probed the API (sizes, quality, edits); built the OpenAI path and tests. |
+| 2026-10-27 | Deployed to the Mac mini (`a1ab7ac`). First live photo edit (Minecraft) worked, but people kept talking during the ~14 s wait and Gemini Live asked again: two edits and a plain drawing replaced each other. `show_on_display` now makes one picture at a time and tells Reachy the first is coming; the tool description says edits take about 15 s. |

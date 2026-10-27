@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 CAMERA_COUNTDOWN_S = 3.0
 # Camera photos leave the screen (and its file is deleted) after this long; they are never saved.
 PHOTO_ON_SCREEN_S = 10 * 60
+# Screens that wait for the image model or a web search. A drawing or photo edit takes 10-15 s, long enough
+# for people to keep talking and the model to ask again; on 2026-10-27 one "draw me as a Minecraft
+# character" became two edits and a plain drawing, each replacing the last. Only one is made at a time.
+PICTURE_KINDS = ("camera", "drawing", "picture", "steps")
 
 
 def _text(kwargs: dict[str, Any], key: str) -> str:
@@ -52,7 +56,8 @@ class ShowOnDisplay(Tool):
     name = "show_on_display"
     description = (
         "Show something on the e-ink screen beside you: a calm black-and-white screen with no video that "
-        "updates in a few seconds. Use it when seeing helps, never for long text. Every time you translate or "
+        "updates in a few seconds; drawings and photo edits take about 15 seconds, so call it once and wait. "
+        "Use it when seeing helps, never for long text. Every time you translate or "
         "teach a word or short phrase, also show it with kind=word; do not only say it. Every time someone asks "
         "how something works or why something happens, show it with kind=steps, also for real machines like a "
         "rocket or a plane; kind=picture only shows what something looks like. Every time someone wants to see "
@@ -122,7 +127,29 @@ class ShowOnDisplay(Tool):
         "required": ["kind"],
     }
 
+    _making_picture = False
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
+        """Make the requested screen, refusing another picture while one is still being made."""
+        kind = kwargs.get("kind")
+        if kind not in PICTURE_KINDS and not (kind == "word" and _text(kwargs, "picture")):
+            return await self._make(deps, **kwargs)
+        if self._making_picture:
+            logger.info("Tool call: show_on_display kind=%s refused: a picture is still being made", kind)
+            return {
+                "error": "The picture asked for a moment ago is still being made; it shows in a few seconds.",
+                "instruction": (
+                    "Do not call show_on_display again for it; tell them it is coming. If they asked for something "
+                    "different, ask them to say it again once this one is on the screen."
+                ),
+            }
+        self._making_picture = True
+        try:
+            return await self._make(deps, **kwargs)
+        finally:
+            self._making_picture = False
+
+    async def _make(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Render the requested screen and make it the display's next screen."""
         display = deps.display
         if display is None:
