@@ -21,6 +21,7 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     log_connection_troubleshooting,
 )
+from reachy_mini_conversation_app.wake_clips import WakeClipRecorder, wake_clips_directory
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 
 
@@ -296,19 +297,26 @@ def run(
             logger.warning("Failed to load startup settings: %s", e)
 
     acoustic_wake_detector: OpenWakeWordDetector | None = None
+    wake_clips: WakeClipRecorder | None = None
     if config.LOCAL_ACOUSTIC_WAKE_ENABLED:
         if not config.HYBRID_RUNTIME_ENABLED:
             raise ValueError("Acoustic wake requires HYBRID_RUNTIME_ENABLED=1")
         if not config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR:
             raise ValueError("Acoustic wake requires LOCAL_ACOUSTIC_WAKE_MODEL_DIR")
+        if config.WAKE_CLIPS_ENABLED:
+            wake_clips = WakeClipRecorder(wake_clips_directory(), keep_days=config.WAKE_CLIPS_KEEP_DAYS)
+            logger.info("Wake clips enabled: saving locally for %d days", config.WAKE_CLIPS_KEEP_DAYS)
         acoustic_wake_detector = OpenWakeWordDetector.from_directory(
             Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser(),
             threshold=config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
+            event_observer=wake_clips.save_wake_event if wake_clips is not None else None,
         )
         logger.info(
             "Supervised official33 acoustic wake enabled; threshold=%.2f cooldown=3s",
             config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
         )
+    elif config.WAKE_CLIPS_ENABLED:
+        logger.warning("WAKE_CLIPS_ENABLED needs LOCAL_ACOUSTIC_WAKE_ENABLED=1; no wake clips are saved")
 
     realtime_provider = get_realtime_provider()
     if realtime_provider == REALTIME_PROVIDER_GEMINI:
@@ -570,6 +578,7 @@ def run(
             context_processor=context_processor,
             wake_detector=wake_detector,
             acoustic_wake_detector=acoustic_wake_detector,
+            wake_clips=wake_clips,
             intent_router=intent_router,
             action_executor=action_executor,
             local_processing_close_callback=context_processor.close if context_processor is not None else None,

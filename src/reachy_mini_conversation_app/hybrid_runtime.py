@@ -25,6 +25,7 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
+from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
@@ -430,6 +431,7 @@ class HybridRuntime:
         context_processor: AmbientContextProcessor | None = None,
         wake_detector: TranscriptWakeWordDetector | None = None,
         acoustic_wake_detector: AcousticWakeWordDetector | None = None,
+        wake_clips: WakeClipRecorder | None = None,
         intent_router: LocalIntentRouter | None = None,
         action_executor: LocalActionExecutor | None = None,
         local_processing_close_callback: LocalProcessingCloseCallback | None = None,
@@ -475,6 +477,8 @@ class HybridRuntime:
         # spoken mid-sentence that the acoustic model scored below threshold. activate() admits only one.
         self._wake_detector = wake_detector
         self._acoustic_wake_detector = acoustic_wake_detector
+        # Fed only the audio the wake model hears while listening locally; saves clips to retrain it.
+        self._wake_clips = wake_clips
         self._acoustic_epoch = 0
         self._acoustic_stream_epoch: int | None = None
         self._intent_router = intent_router
@@ -1018,6 +1022,9 @@ class HybridRuntime:
         if detection is None:
             return
         detector.consume_detection()
+        if self._wake_clips is not None and self._acoustic_wake_detector is not None:
+            # Still listening locally, so the wake model missed a name that local STT heard.
+            self._wake_clips.save_name_heard(segment.ended_at - segment.started_at)
         with self._lifecycle_lock:
             asleep = self._asleep
         if asleep and not (detection.wake_word_is_first_word or _name_leads(segment.text)):
@@ -2371,8 +2378,12 @@ class HybridRuntime:
         try:
             if self._acoustic_stream_epoch != epoch:
                 await asyncio.to_thread(detector.reset)
+                if self._wake_clips is not None:
+                    self._wake_clips.clear()
                 self._acoustic_stream_epoch = epoch
             pcm = audio_to_mono_int16(frame[1]).astype("<i2", copy=False).tobytes()
+            if self._wake_clips is not None:
+                self._wake_clips.feed(pcm, frame[0])
             detection = await asyncio.to_thread(detector.process_audio, pcm, frame[0])
         except asyncio.CancelledError:
             raise

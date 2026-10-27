@@ -1,5 +1,6 @@
 """Tests for the local/cloud hybrid runtime lifecycle."""
 
+import wave
 import asyncio
 import logging
 import threading
@@ -14,6 +15,7 @@ from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.local_actions import LocalActionExecutor
 from reachy_mini_conversation_app.hybrid_runtime import (
     RuntimeMode,
@@ -2504,6 +2506,12 @@ def test_invalid_transition_is_rejected_and_logs_metadata_only(caplog: pytest.Lo
     assert "CLOUD_CONVERSATION" not in caplog.text
 
 
+def wave_frames(path) -> bytes:
+    """Return a WAV file's PCM bytes."""
+    with wave.open(str(path), "rb") as clip:
+        return clip.readframes(clip.getnframes())
+
+
 class AcousticScoreModel:
     """Recognize one synthetic marker without accessing a model or microphone."""
 
@@ -2567,6 +2575,55 @@ async def test_acoustic_wake_uses_existing_barrier_and_returns_to_listening() ->
     await runtime.close()
     await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)))
     assert len(handlers) == 2
+
+
+@pytest.mark.asyncio
+async def test_wake_clips_hold_only_audio_heard_while_listening_locally(tmp_path) -> None:
+    """The wake is saved from local audio; what is said in the conversation never reaches a clip."""
+    clips = WakeClipRecorder(tmp_path, keep_days=14)
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel(), event_observer=clips.save_wake_event),
+        wake_clips=clips,
+    )
+    runtime.set_capture_barrier_provider(lambda: 3)
+    await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+    await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+    await runtime.handle_frame((16000, np.full(1280, 333, dtype=np.int16)), capture_sequence=3)
+    clips.save_name_heard(1.0)
+
+    saved = sorted(tmp_path.glob("*/*.wav"))
+    assert sorted(path.name.split("-", 1)[1] for path in saved) == ["name_heard.wav", "wake-1.00.wav"]
+    for path in saved:
+        samples = set(np.frombuffer(wave_frames(path), dtype="<i2").tolist())
+        assert samples == {111, 222}
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_heard_only_by_local_stt_is_saved_as_a_clip(tmp_path) -> None:
+    """When the transcript wakes Reachy while the wake model stayed quiet, that utterance is kept for retraining."""
+    clips = WakeClipRecorder(tmp_path, keep_days=14)
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        wake_clips=clips,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, what time is it?", 3, 4, 2))
+    await handler.started.wait()
+
+    [clip] = tmp_path.glob("*/*.wav")
+    assert clip.name.endswith("-name_heard.wav")
+    await runtime.close()
 
 
 @pytest.mark.asyncio

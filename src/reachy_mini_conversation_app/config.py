@@ -728,6 +728,9 @@ class Config:
     LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
     LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
+    # Save short local clips around wake events to retrain the wake word; deleted after the keep period.
+    WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
+    WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)
     LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS
@@ -932,6 +935,8 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
     config.LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
+    config.WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
+    config.WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)
     config.LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     config.LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(
         LOCAL_WAKE_COOLDOWN_SECONDS_ENV, DEFAULT_LOCAL_WAKE_COOLDOWN_SECONDS

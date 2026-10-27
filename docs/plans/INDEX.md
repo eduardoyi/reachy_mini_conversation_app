@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Wake clip capture](wake-clip-capture.md) | `in-progress` | 2026-10-27 | Short local clips around wakes, near misses, names only local STT heard, and random background, to retrain the wake word (music); running on the Mac mini since 2026-10-27 |
 | [Wake antenna cue](wake-antenna-cue.md) | `in-progress` | 2026-10-25 | Antennas perk out and hold while Reachy listens, release when he answers; head lift replaces the nod; built and tested, robot check pending |
 | [E-ink display (TRMNL)](eink-display.md) | `in-progress` | 2026-10-25 | Drawings, web pictures (Jev check), word cards, text and v3 visual explanations live on the TRMNL; device server is its own process; no daily caps; stories, morning page and calendar deferred |
 | [Skill tools](skill-tools.md) | `in-progress` | 2026-10-25 | Rare tools behind use_skill/skill_help; fixed block −25% measured live; household test pending |

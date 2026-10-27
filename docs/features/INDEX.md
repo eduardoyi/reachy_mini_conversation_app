@@ -18,6 +18,7 @@ the implementation.
 | Simulator speaker output bypass | [simulator-speaker-output.md](simulator-speaker-output.md) | in-progress |
 | Local transcript wake word | [wake-word.md](wake-word.md) | in-progress |
 | Wake cue (antennas) | [wake-cue.md](wake-cue.md) | in-progress |
+| Wake clip capture | [wake-clip-capture.md](wake-clip-capture.md) | in-progress |
 | Deterministic local intents | [local-intents.md](local-intents.md) | in-progress |
 | Speaker following | [speaker-following.md](speaker-following.md) | in-progress |
 | Face recognition | [face-recognition.md](face-recognition.md) | in-progress |

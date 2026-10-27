@@ -327,3 +327,18 @@ def test_logs_detection_scores_and_near_miss_peaks(caplog: pytest.LogCaptureFixt
         "Acoustic wake near miss peak=0.45 threshold=0.50",
         "Acoustic wake detected score=0.80 threshold=0.50",
     ]
+
+
+def test_event_observer_gets_each_detection_at_once_and_each_near_miss_when_it_ends() -> None:
+    """The observer sees what the log sees: the near miss's peak once it falls back, the wake score at once."""
+    scores = [0.1, 0.3, 0.45, 0.25, 0.05, 0.4, 0.8, 0.6]
+    events: list[tuple[float, bool]] = []
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        FakeWakeModel(scores=scores), event_observer=lambda score, detected: events.append((score, detected))
+    )
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    for _ in scores:
+        detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0)
+
+    assert events == [(0.45, False), (0.8, True)]
