@@ -6,8 +6,9 @@ import logging
 import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 
+import httpx
 import numpy as np
 import pytest
 
@@ -4077,3 +4078,185 @@ def test_the_wake_window_keeps_only_the_last_seconds_at_the_current_rate() -> No
 
     runtime._keep_wake_window(np.ones(100, dtype="<i2").tobytes(), 24000)
     assert (len(runtime._wake_window), runtime._wake_window_rate) == (200, 24000)
+
+
+def _runtime_with_wake_audio(
+    fast: str | Exception, accurate: str | Exception, *, asleep: bool = False
+) -> tuple[HybridRuntime, FakeHandler, list[str], list[bool], list[str]]:
+    """Return a runtime holding wake audio; the fast and accurate models hear ``fast`` and ``accurate`` in it."""
+    processor = _processor_with_open_wake_segment("people are over there")
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    listening: list[bool] = []
+    asked: list[str] = []
+    wake_audio = (16000, np.full(16000, 300, dtype=np.int16))
+
+    def hearing(label: str, heard: str | Exception) -> Callable[[Any], Awaitable[str]]:
+        async def transcribe(audio: Any) -> str:
+            if audio is not wake_audio:
+                return ""
+            asked.append(label)
+            if isinstance(heard, Exception):
+                raise heard
+            return heard
+
+        return transcribe
+
+    async def on_listening(active: bool) -> None:
+        listening.append(active)
+
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        request_transcriber=hearing("accurate", accurate),
+        name_check_transcriber=hearing("fast", fast),
+        listening_observer=on_listening,
+        wake_followup_timeout_s=0.1,
+    )
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime._asleep = asleep
+    runtime._wake_name_audio = wake_audio
+    return runtime, handler, acknowledged, listening, asked
+
+
+@pytest.mark.asyncio
+async def test_the_fast_model_hearing_the_name_wakes_him_without_asking_the_accurate_one() -> None:
+    """Awake, "Richie." from whisper-small is enough: he reacts and the conversation opens."""
+    runtime, handler, acknowledged, listening, asked = _runtime_with_wake_audio("Richie.", "unused")
+    try:
+        assert await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert asked == ["fast"]
+        assert acknowledged == ["acoustic_wake"] and listening[0] is True
+        await handler.started.wait()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_the_accurate_model_gets_a_second_try_when_the_fast_one_misses_the_name() -> None:
+    """Whisper-small heard "Pretty!" but turbo hears "Ritchie.": he wakes (2026-10-28, 09:53)."""
+    runtime, handler, acknowledged, _listening, asked = _runtime_with_wake_audio("Pretty!", "Ritchie.")
+    try:
+        assert await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert asked == ["fast", "accurate"]
+        assert acknowledged == ["acoustic_wake"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wake_with_no_name_in_its_audio_goes_back_to_listening_without_reacting() -> None:
+    """Breakfast clinks scored 0.98 but neither model hears a name: no cue, no conversation, still listening."""
+    runtime, handler, acknowledged, listening, asked = _runtime_with_wake_audio("so", "I")
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert asked == ["fast", "accurate"]
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert acknowledged == [] and listening == []
+        assert not handler.started.is_set()
+        assert runtime._request_clip is None and runtime._wake_name_audio is None
+        assert not runtime._asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_when_whisper_is_down_an_awake_reachy_still_wakes_on_the_wake_model() -> None:
+    """Both checks failing is not a reason to ignore him: awake, he wakes as before the check."""
+    runtime, handler, acknowledged, _listening, asked = _runtime_with_wake_audio(
+        httpx.ConnectError("down"), httpx.ConnectError("down")
+    )
+    try:
+        assert await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert asked == ["fast", "accurate"]
+        assert acknowledged == ["acoustic_wake"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("fast", "accurate"),
+    [
+        ("Háblale a Richi, salúdalo.", "Háblale a Richi, salúdalo."),
+        (httpx.ConnectError("down"), httpx.ConnectError("down")),
+    ],
+)
+@pytest.mark.asyncio
+async def test_asleep_only_the_name_leading_the_wake_audio_wakes_him(
+    fast: str | Exception, accurate: str | Exception
+) -> None:
+    """Asleep, the name mid-sentence or a failed check keeps him asleep and still."""
+    runtime, handler, acknowledged, listening, _asked = _runtime_with_wake_audio(fast, accurate, asleep=True)
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert acknowledged == [] and listening == []
+        assert not handler.started.is_set()
+        assert runtime._asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_no_cue_until_the_name_check_passes() -> None:
+    """The antennas, the head turn and music lowering wait for Whisper to hear the name."""
+    release = asyncio.Event()
+    runtime, handler, acknowledged, listening, _asked = _runtime_with_wake_audio("unused", "unused")
+    wake_audio = runtime._wake_name_audio
+
+    async def slow_fast(audio: Any) -> str:
+        if audio is not wake_audio:
+            return ""
+        await release.wait()
+        return "Reachy!"
+
+    runtime._name_check_transcriber = slow_fast
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        await asyncio.sleep(0.05)
+        assert acknowledged == [] and listening == []
+        release.set()
+        assert await asyncio.wait_for(activation, timeout=3.0)
+        assert acknowledged == ["acoustic_wake"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.parametrize(("heard", "opens"), [("Richie.", True), ("so", False)])
+@pytest.mark.asyncio
+async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(heard: str, opens: bool) -> None:
+    """Awake, the wake model's own audio (in memory) is what Whisper checks; only a heard name opens the cloud."""
+    checked: list[set[int]] = []
+
+    async def fast(audio: AudioFrame) -> str:
+        checked.append(set(audio[1].tolist()))
+        return heard
+
+    async def accurate(_audio: AudioFrame) -> str:
+        return ""
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+    )
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime.set_capture_barrier_provider(lambda: 2)
+    try:
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+        await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+        await wait_until(lambda: bool(checked))
+        assert checked[0] == {111, 222}
+        if opens:
+            await asyncio.wait_for(handler.started.wait(), timeout=3.0)
+        else:
+            await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT and not runtime._local_event_tasks)
+            assert not handler.started.is_set()
+        assert runtime._wake_name_audio is None
+    finally:
+        await runtime.close()

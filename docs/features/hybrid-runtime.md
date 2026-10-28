@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-10-17
+- Last updated: 2026-10-28
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -805,12 +805,12 @@ Asleep, waking is stricter. The first live test woke him repeatedly on ordinary
 conversation: the acoustic model scored that talk 0.95–0.99, as high as real wakes,
 and the transcript detector caught people talking about him. `request_close("go_to_sleep")`
 sets `_asleep`. While it is set:
-- An acoustic wake does not acknowledge, so the head stays down, until local STT
-  confirms the name opened the utterance or one of its sentences (`_name_leads`:
-  "Reachy, ...", "hey Reachy", "ok. Reachy, ...").
-- When the fast transcript does not put the name first, the request model rereads the last 2.5 s
-  the wake model heard (kept in memory while listening locally) and the name leading that confirms
-  the wake (2026-10-27; the missed call was "Richie!").
+- An acoustic wake does not acknowledge, so the head stays down, until Whisper hears the
+  name open the wake audio or one of its sentences (`_name_leads`: "Reachy, ...", "hey Reachy",
+  "ok. Reachy, ..."). Since 2026-10-28 this is the same early name check every acoustic wake
+  gets (see "Whisper checks the name before every acoustic wake" below), with the stricter
+  `_name_leads` match and no waking when the check cannot run. Without a request transcriber, the
+  fast transcript of the utterance must put the name first, as before.
 - Without that confirmation the runtime returns to ambient
   (`unconfirmed_wake_while_asleep`) without moving or opening the cloud.
 - A transcript wake needs the name first in the same way.
@@ -842,7 +842,7 @@ Tests:
 - `test_addressee_check_closes_early_when_people_talk_among_themselves`
 - `test_addressee_verdicts_that_keep_him_or_come_too_late_do_not_close`
 - `test_sleep_holds_the_pose_until_an_activation_wakes_him`
-- the `asleep` wake tests (including the accurate recheck of the wake audio),
+- the `asleep` wake tests (including the name check of the wake audio),
   `test_the_wake_window_keeps_only_the_last_seconds_at_the_current_rate` and
   `test_name_leads_only_when_the_name_opens_a_sentence`
 - `tests/test_addressee_check.py`
@@ -892,3 +892,34 @@ everyone seen in that conversation applies, and the list resets when the convers
 `main.follow_up_window_for` feeds it to `HybridRuntime(follow_up_window_for=...)`. Tests:
 `test_follow_up_window_is_longer_while_a_child_who_needs_time_is_talking`,
 `test_follow_up_by_person_parses_names_and_seconds`.
+
+### Whisper checks the name before every acoustic wake — 2026-10-28
+
+The household found Reachy hard to wake, especially from far away. A day of wake clips showed two
+failures at threshold 0.95: real calls scoring 0.3-0.93 were dropped, and 59 of 86 wakes had no
+name in them (breakfast clinks at 3-4 kHz on 2026-10-28), each opening a silent 15 s cloud session.
+
+Now, with a request transcriber configured, every acoustic detection snapshots the last 2.5 s the
+wake model heard (`_wake_name_audio`, in memory, used once). `_run_activation` enters
+`LOCAL_COMMAND` quietly and starts the request clip at once, so nothing said after the name is
+lost, then `_name_in_wake_audio` asks whisper-small (`name_check_transcriber`, the ambient model)
+and, only if it did not hear the name, the request model (turbo). Awake, a Whisper spelling of the
+name anywhere in the window counts (`_WAKE_WORD_TRANSCRIPT_PATTERN`); asleep it must lead a
+sentence. Heard: the listening notice, antenna cue and head turn follow (about 0.4 s later than
+before, about 2 s when only turbo heard it). Not heard: `_drop_unconfirmed_wake` returns to
+`LOCAL_AMBIENT` (`unconfirmed_wake`, or `unconfirmed_wake_while_asleep`) without moving or opening
+the cloud. If every check fails with an error, an awake Reachy wakes as before and an asleep one
+stays asleep. Each check is bounded by `_WAKE_NAME_CHECK_TIMEOUT_S` (4 s).
+
+With the check, a low `LOCAL_ACOUSTIC_WAKE_THRESHOLD` is safe: on the 269 saved clips, threshold
+0.3 with both checks woke 34 of 38 named calls with no false wake (threshold 0.95 alone: 27 and
+59). The Mac mini runs 0.3; the code default stays 0.5. Logs carry only
+`Wake name check heard=… model=…`, never the text. Plan: [wake-name-check.md](../plans/wake-name-check.md).
+
+Tests (`tests/test_hybrid_runtime.py`):
+`test_the_fast_model_hearing_the_name_wakes_him_without_asking_the_accurate_one`,
+`test_the_accurate_model_gets_a_second_try_when_the_fast_one_misses_the_name`,
+`test_a_wake_with_no_name_in_its_audio_goes_back_to_listening_without_reacting`,
+`test_when_whisper_is_down_an_awake_reachy_still_wakes_on_the_wake_model`,
+`test_asleep_only_the_name_leading_the_wake_audio_wakes_him`, `test_no_cue_until_the_name_check_passes`,
+`test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`.

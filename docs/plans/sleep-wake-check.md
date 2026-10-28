@@ -1,7 +1,8 @@
 # Plan: Gentler sleep mode, then no name check
 
-- Status: `in-progress` (steps 1-2 built and tested; step 3 waiting on data)
-- Last updated: 2026-10-27
+- Status: `in-progress` (steps 1-2 built and tested; step 2 superseded on 2026-10-28 by
+  [wake-name-check.md](wake-name-check.md); step 3 waiting on data)
+- Last updated: 2026-10-28
 - Feature doc: [Hybrid runtime](../features/hybrid-runtime.md) (go_to_sleep standby)
 
 ## Goal
@@ -21,13 +22,16 @@ smarter, and the check should go away once the wake model is good enough.
    memory, only while listening locally. Asleep, when the fast transcript has no name first, the request
    model (whisper-large-v3-turbo) transcribes that window; the name leading it confirms the wake. The
    missed call at 21:32 was "Richie!" in that audio. Costs about 1.6 s, only in that case.
+   Superseded 2026-10-28: every acoustic wake now gets a name check of that window, whisper-small
+   first and turbo second, before Reachy reacts ([wake-name-check.md](wake-name-check.md)). Asleep
+   it keeps the stricter "name first" match.
 3. **Drop the check** (later). Decide from data, not guesses:
    - Label the `wake` clips saved while asleep (`unconfirmed_wake_while_asleep` in the dated logs) as
      a real call or not, for a week or more of normal use.
    - Drop the check when false wakes while asleep are rare enough for the household (proposal: about
      one a week or fewer), most likely after the wake model is retrained on the collected clips.
-   - Then remove `_asleep` confirmation, `_name_heard_accurately` and the wake window, keeping
-     `go_to_sleep` as a pose.
+   - Then drop the stricter asleep match (`_name_leads`), keeping `go_to_sleep` as a pose. The
+     wake window stays: the name check for every wake uses it.
 
 ## Risks
 
@@ -44,8 +48,7 @@ smarter, and the check should go away once the wake model is good enough.
 - [x] Asleep, the accurate model hearing the name in the wake audio wakes him; "Thank you." does not.
 - [x] The window holds at most 2.5 s and restarts on a new sample rate.
 - [x] Full gate passes.
-- [ ] Live: a call after "go to sleep" whose fast transcript misses the name logs
-      `Wake name checked again with the accurate model heard=True` and wakes him.
+- [ ] Live: a call after "go to sleep" logs `Wake name check heard=True` and wakes him.
 - [ ] Step 3 decided from labelled clips.
 
 ## Test strategy
@@ -58,3 +61,4 @@ tests (unchanged). Live on the Mac mini after "go to sleep".
 | Date | Update |
 |------|--------|
 | 2026-10-27 | Two calls at 21:32 missed after the 20:31 restart; steps 1-2 built and tested; step 3 agreed as the goal. |
+| 2026-10-28 | Step 2's late turbo recheck replaced by the early name check on every wake ([wake-name-check.md](wake-name-check.md)). |

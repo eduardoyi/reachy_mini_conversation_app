@@ -15,8 +15,9 @@ Before this, the only physical acknowledgment was a 0.18 s, 4° nod, and listeni
 froze the antennas wherever they happened to be, so a wake was easy to miss.
 
 Out of scope: sound cues (an earcon), lights, and any change to when a wake is
-accepted. An acoustic wake while asleep (after "go to sleep") still shows nothing until local STT
-confirms the name (see [hybrid runtime](hybrid-runtime.md)).
+accepted. Since 2026-10-28 every acoustic wake shows nothing until Whisper hears the name in the wake
+audio (about 0.4 s, up to about 2 s); asleep, the name must come first (see
+[hybrid runtime](hybrid-runtime.md)).
 
 ## User-facing behavior
 

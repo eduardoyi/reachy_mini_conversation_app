@@ -503,6 +503,7 @@ def run(
         action_executor: LocalActionExecutor | None = None
         local_processor: AmbientContextProcessor | None = None
         request_transcriber: Callable[[Any], Awaitable[str]] | None = None
+        name_check_transcriber: Callable[[Any], Awaitable[str]] | None = None
         if config.LOCAL_STT_BASE_URL is not None:
             context_strategy = (
                 AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
@@ -519,6 +520,8 @@ def run(
             )
             if config.LOCAL_STT_REQUEST_MODEL:
                 request_transcriber = local_stt.transcribe_request
+                # The ambient model checks the name in the wake audio first; the request model is the second try.
+                name_check_transcriber = local_stt.transcribe
             context_processor = AmbientContextProcessor(
                 vad=RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD),
                 stt=local_stt,
@@ -597,6 +600,7 @@ def run(
             reply_speaker=reply_speaker,
             speaking_callback=getattr(movement_manager, "set_speaking", None),
             request_transcriber=request_transcriber,
+            name_check_transcriber=name_check_transcriber,
             listening_observer=on_listening,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
