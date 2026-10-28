@@ -959,3 +959,17 @@ room; about 60 kitchen-clatter candidates ran at most 0.12 s at 14 dB. Asleep th
 Logged as `Wake trusted without the name: True|False score=… loud_run=…`. Tests:
 `test_a_word_length_sound_is_a_voice_and_clinks_are_not`,
 `test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name`.
+
+### Awaited answers and announcements — 2026-10-28
+
+Two thread-safe entry points for work that is not a wake. `expect_answer(handler)` queues an
+`awaited_answer` turn: once the current reply has played, a listening activation (`_LISTENING_WAKES`, the
+request clip waits `_ANSWER_START_S` = 15 s for speech, no name check) hands the text to `handler` in place
+of the quick commands; silence returns to ambient listening without opening Gemini.
+`request_announcement(text, language, answer=None)` queues an `announcement` turn: a short activation that
+speaks the text and then expects `answer`. Queued turns start only in `LOCAL_AMBIENT` with no activation
+running (`_run_pending_turns`); an awaited answer expires after 30 s, an announcement after 2 minutes.
+`QuickReply.after_timeout_s` lets a reply's `after` step outlast `_QUICK_COMMAND_TIMEOUT_S`. Used by the
+[Maribel hand-off](maribel-handoff.md). Tests: `test_a_question_listens_once_for_the_answer_without_the_name`,
+`test_no_answer_after_a_question_goes_back_to_listening_for_the_name`,
+`test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer`.

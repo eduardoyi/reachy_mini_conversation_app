@@ -261,8 +261,9 @@ ACTIVATION_CUE = (
     "to you; answer it."
 )
 # Wakes after which Reachy listens for the request himself (antenna cue, request clip, quick commands): hearing
-# his name, or someone bending an antenna (a touch needs no name check and wakes him from sleep too).
-_LISTENING_WAKES = frozenset({"acoustic_wake", "antenna_touch"})
+# his name, someone bending an antenna (a touch needs no name check and wakes him from sleep too), or the answer
+# to a question a quick reply asked (expect_answer).
+_LISTENING_WAKES = frozenset({"acoustic_wake", "antenna_touch", "awaited_answer"})
 # Whisper spellings of the wake word; the acoustic wake keeps the word itself local.
 _WAKE_WORD_VARIANTS = (
     r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi|"
@@ -362,6 +363,17 @@ QuickCommandHandler: TypeAlias = Callable[[str], Awaitable[object | None]]
 ReplySpeaker: TypeAlias = Callable[[str, str], AsyncIterator[tuple[int, np.ndarray]]]
 
 
+@dataclass(frozen=True)
+class _PendingTurn:
+    """Something Reachy does once he is free: speak an announcement, or listen for an awaited answer."""
+
+    reason: str  # "announcement" or "awaited_answer"
+    expires_at: float
+    text: str = ""
+    language: str = "en"
+    answer: QuickCommandHandler | None = None
+
+
 class HybridRuntime:
     """Coordinate local ambient capture with one on-demand cloud handler."""
 
@@ -390,6 +402,13 @@ class HybridRuntime:
     _REQUEST_CLIP_SILENCE_S = 0.8
     _REQUEST_CLIP_MAX_S = 8.0
     _REQUEST_CLIP_STT_TIMEOUT_S = 6.0
+    # After a question (expect_answer), Reachy waits this long for the answer to start, without his name.
+    _ANSWER_START_S = 15.0
+    # An awaited answer not started within this (Reachy still speaking or busy) is dropped.
+    _ANSWER_PENDING_S = 30.0
+    # An announcement waits at most this long for Reachy to be free (no conversation or command).
+    _ANNOUNCEMENT_PENDING_S = 120.0
+    _PENDING_TURN_POLL_S = 0.1
     # A segment cut at an acoustic wake, with no name in it, this short is the misheard name plus the start
     # of the request.
     _UNNAMED_WAKE_MAX_WORDS = 4
@@ -628,6 +647,9 @@ class HybridRuntime:
         self._local_start_event = asyncio.Event()
         self._output_wakeup_event = asyncio.Event()
         self._local_event_tasks: set[asyncio.Task[bool]] = set()
+        self._pending_turns: deque[_PendingTurn] = deque()
+        self._pending_turns_task: asyncio.Task[bool] | None = None
+        self._next_turn: _PendingTurn | None = None  # handed from the pending-turn loop to its activation
         self._local_processing_queue: asyncio.Queue[LocalProcessingItem] | None = None
         self._local_processing_task: asyncio.Task[None] | None = None
         self._postactivation_speech_observed = False
@@ -1170,6 +1192,7 @@ class HybridRuntime:
         listening_notified = False
         # Gemini hears the request itself (the clip's audio) with the local text only as a hint.
         request_in_audio = False
+        turn, self._next_turn = self._next_turn, None
         try:
             async with self._state_lock:
                 with self._lifecycle_lock:
@@ -1229,7 +1252,11 @@ class HybridRuntime:
             # Recording starts now, so the request is kept while the name is checked; the cue waits for it.
             clip_task = (
                 asyncio.create_task(
-                    self._transcribe_request_clip(generation, lead_in=wake_audio),
+                    self._transcribe_request_clip(
+                        generation,
+                        lead_in=wake_audio,
+                        start_s=self._ANSWER_START_S if reason == "awaited_answer" else self._REQUEST_CLIP_START_S,
+                    ),
                     name=f"hybrid-request-clip-{generation}",
                 )
                 if clip_request
@@ -1250,6 +1277,13 @@ class HybridRuntime:
                 closed = self._closed
             if closed:
                 raise asyncio.CancelledError
+            if reason == "announcement":
+                if turn is not None:
+                    await self._speak_locally(turn.text, turn.language, generation)
+                    if turn.answer is not None:
+                        self.expect_answer(turn.answer)
+                await self._return_to_ambient(generation, "announcement_spoken")
+                return True
 
             request_sequence: int | None = None  # the transcript-wake segment that holds the request
             request_is_followup = False
@@ -1369,6 +1403,14 @@ class HybridRuntime:
                     self._notify_listening(True)
                     listening_notified = True
                     await self._invoke_acknowledgement(reason)
+            if reason == "awaited_answer":
+                # Whatever was said is the answer; silence means none, and never opens the conversation.
+                answer = turn.answer if turn is not None else None
+                logger.info("Awaited answer heard=%s", bool(quick_text))
+                if quick_text and answer is not None and await self._try_quick_command(quick_text, generation, answer):
+                    return True
+                await self._return_to_ambient(generation, "no_answer")
+                return True
             if quick_text and await self._try_quick_command(quick_text, generation):
                 return True
             # The clip can still miss words the fast transcript caught; try that before the conversation.
@@ -1540,7 +1582,11 @@ class HybridRuntime:
             return ""
 
     async def _transcribe_request_clip(
-        self, generation: int, *, lead_in: tuple[int, NDArray[np.int16]] | None = None
+        self,
+        generation: int,
+        *,
+        lead_in: tuple[int, NDArray[np.int16]] | None = None,
+        start_s: float = _REQUEST_CLIP_START_S,
     ) -> str:
         """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip.
 
@@ -1578,7 +1624,7 @@ class HybridRuntime:
             index = len(clip)
             now = loop.time()
             if speech_started_at is None:
-                if now - started_at > self._REQUEST_CLIP_START_S:
+                if now - started_at > start_s:
                     return ""
                 continue
             if silence_s >= self._REQUEST_CLIP_SILENCE_S or now - speech_started_at > self._REQUEST_CLIP_MAX_S:
@@ -1765,12 +1811,15 @@ class HybridRuntime:
         with self._lifecycle_lock:
             return not self._closed and self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
 
-    async def _try_quick_command(self, addressed_text: str, generation: int) -> bool:
+    async def _try_quick_command(
+        self, addressed_text: str, generation: int, quick: QuickCommandHandler | None = None
+    ) -> bool:
         """Answer an everyday command locally; returns whether the cloud conversation can stay closed.
 
-        ``addressed_text`` is only what was said to Reachy (after his name, or the next sentence).
+        ``addressed_text`` is only what was said to Reachy (after his name, or the next sentence). ``quick``
+        replaces the quick commands, e.g. with the handler of an awaited answer.
         """
-        quick = self._quick_commands
+        quick = quick or self._quick_commands
         if quick is None:
             return False
         request = addressed_text
@@ -1805,8 +1854,9 @@ class HybridRuntime:
         await self._speak_locally(getattr(reply, "text", None), language, generation)
         after = getattr(reply, "after", None)
         if after is not None and self._quick_generation_current(generation):
+            after_timeout_s = getattr(reply, "after_timeout_s", None) or self._QUICK_COMMAND_TIMEOUT_S
             try:
-                follow_up = await asyncio.wait_for(after(), self._QUICK_COMMAND_TIMEOUT_S)
+                follow_up = await asyncio.wait_for(after(), after_timeout_s)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -1819,16 +1869,94 @@ class HybridRuntime:
 
     async def _finish_quick_command(self, generation: int, *, sleep: bool) -> None:
         """Return to listening for the wake word after a quick command."""
+        if sleep:
+            with self._lifecycle_lock:
+                if self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation:
+                    self._asleep = True
+        await self._return_to_ambient(generation, "quick_command_completed")
+        with self._metrics_lock:
+            self._local_commands_executed += 1
+
+    async def _return_to_ambient(self, generation: int, reason: str) -> None:
+        """Listen for the wake word again, unless this generation was already superseded."""
         async with self._state_lock:
             with self._lifecycle_lock:
                 still_command = self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
-                if still_command and sleep:
-                    self._asleep = True
             if still_command:
                 self._clear_postactivation_queue()
-                self._transition(RuntimeMode.LOCAL_AMBIENT, "quick_command_completed")
-        with self._metrics_lock:
-            self._local_commands_executed += 1
+                self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
+
+    def expect_answer(self, answer: QuickCommandHandler) -> None:
+        """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
+
+        Thread-safe. Silence for ``_ANSWER_START_S`` ends it without opening the conversation.
+        """
+        self._queue_turn(_PendingTurn("awaited_answer", self._clock() + self._ANSWER_PENDING_S, answer=answer))
+
+    def request_announcement(self, text: str, language: str, *, answer: QuickCommandHandler | None = None) -> None:
+        """Say ``text`` once Reachy is free (no conversation or command), then await ``answer`` if given.
+
+        Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
+        """
+        self._queue_turn(
+            _PendingTurn(
+                "announcement",
+                self._clock() + self._ANNOUNCEMENT_PENDING_S,
+                text=text,
+                language=language,
+                answer=answer,
+            )
+        )
+
+    def _queue_turn(self, turn: _PendingTurn) -> None:
+        with self._lifecycle_lock:
+            loop = self._owner_loop
+            closed = self._closed
+        if loop is None or closed or loop.is_closed():
+            logger.info("Pending %s dropped: runtime not running", turn.reason)
+            return
+
+        def queue() -> None:
+            if turn.reason == "awaited_answer":
+                self._pending_turns.appendleft(turn)  # it belongs to the reply being spoken now
+            else:
+                self._pending_turns.append(turn)
+            if self._pending_turns_task is None or self._pending_turns_task.done():
+                task = asyncio.create_task(self._run_pending_turns(), name="hybrid-pending-turns")
+                self._pending_turns_task = task
+                self._local_event_tasks.add(task)
+                task.add_done_callback(self._local_event_tasks.discard)
+
+        try:
+            loop.call_soon_threadsafe(queue)
+        except RuntimeError:  # the loop closed between the check and the call
+            logger.debug("Pending %s dropped: runtime loop closed", turn.reason)
+
+    async def _run_pending_turns(self) -> bool:
+        """Start each pending turn as its own activation once Reachy is free; returns whether any ran."""
+        ran = False
+        while self._pending_turns:
+            turn = self._pending_turns[0]
+            if self._clock() > turn.expires_at:
+                self._pending_turns.popleft()
+                logger.info("Pending %s dropped: Reachy stayed busy", turn.reason)
+                continue
+            with self._lifecycle_lock:
+                closed = self._closed
+                busy = self._mode is not RuntimeMode.LOCAL_AMBIENT or (
+                    self._activation_task is not None and not self._activation_task.done()
+                )
+            if closed:
+                self._pending_turns.clear()
+                break
+            if busy:
+                await asyncio.sleep(self._PENDING_TURN_POLL_S)
+                continue
+            self._pending_turns.popleft()
+            self._next_turn = turn
+            await self.activate(turn.reason)
+            ran = True
+        return ran
 
     async def _speak_locally(self, text: object, language: str, generation: int) -> None:
         """Queue a spoken reply for playback and wait until it has been heard."""

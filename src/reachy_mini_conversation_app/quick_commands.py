@@ -19,7 +19,9 @@ from datetime import datetime
 from dataclasses import field, replace, dataclass
 from collections.abc import Awaitable
 
+from reachy_mini_conversation_app.maribel import RETRY_PAUSE_S, POST_TIMEOUT_S, FIRST_REPLY_WAIT_S
 from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
+from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,8 @@ class QuickReply:
     kind: str
     sleep: bool = False
     after: Callable[[], Awaitable[str | None]] | None = None
+    # How long ``after`` may take; None for the usual quick-command bound.
+    after_timeout_s: float | None = None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -590,6 +594,31 @@ def resolve_light_target(phrase: str, devices: list[Any]) -> LightTarget | None:
 
 
 # ---------------------------------------------------------------------------------------------
+# Maribel (Grok Bot): only a request that names her goes to her ("ask Maribel to...", "dile a Maribel que...")
+
+_MARIBEL = r"(?:mari|mary|marie) ?bel(?:l|le|el)?"
+_ASK_MARIBEL = {
+    "en": rf"(?:ask|tell|message|text|let) {_MARIBEL}",
+    "es": rf"(?:preguntale|pregunta|pidele|pide|dile|avisale|escribele|mandale un mensaje) a {_MARIBEL}",
+    "it": rf"(?:chiedi|domanda|di|dici|scrivi) a {_MARIBEL}",
+    "pt": rf"(?:pergunta|pergunte|pede|peca|diz|diga|avisa|manda uma mensagem) (?:a )?{_MARIBEL}",
+}
+# Something must follow her name: "ask Maribel" alone is left to the conversation.
+_ASK_MARIBEL_RE = {language: re.compile(rf"^{pattern}\s+\S") for language, pattern in _ASK_MARIBEL.items()}
+# Saying "Asking Maribel", sending (two tries) and waiting for her first reply.
+MARIBEL_STEP_TIMEOUT_S: Final[float] = 2 * POST_TIMEOUT_S + RETRY_PAUSE_S + FIRST_REPLY_WAIT_S + 1.0
+
+
+def maribel_request(text: str) -> str | None:
+    """Return the language of a request explicitly for Maribel, or None."""
+    command = strip_politeness(normalize(text))
+    for language, pattern in _ASK_MARIBEL_RE.items():
+        if pattern.match(command):
+            return language
+    return None
+
+
+# ---------------------------------------------------------------------------------------------
 # Replies
 
 _OK = {"en": "Okay.", "es": "Listo.", "it": "Fatto.", "pt": "Pronto."}
@@ -606,6 +635,24 @@ _PARTLY = {
     "pt": "Feito, mas {names} não respondeu.",
 }
 _GOOD_NIGHT = {"en": "Good night!", "es": "¡Buenas noches!", "it": "Buonanotte!", "pt": "Boa noite!"}
+MARIBEL_ASKING: Final[dict[str, str]] = {
+    "en": "Asking Maribel.",
+    "es": "Le pregunto a Maribel.",
+    "it": "Chiedo a Maribel.",
+    "pt": "Vou perguntar à Maribel.",
+}
+MARIBEL_PASSED_ON: Final[dict[str, str]] = {
+    "en": "I've passed that to Maribel. She'll get back to you.",
+    "es": "Se lo he pasado a Maribel. Ya te dirá algo.",
+    "it": "L'ho passato a Maribel. Ti farà sapere.",
+    "pt": "Passei isso à Maribel. Ela depois diz-te alguma coisa.",
+}
+MARIBEL_UNREACHABLE: Final[dict[str, str]] = {
+    "en": "I couldn't reach Maribel right now.",
+    "es": "Ahora no he podido hablar con Maribel.",
+    "it": "Ora non sono riuscito a contattare Maribel.",
+    "pt": "Agora não consegui falar com a Maribel.",
+}
 _PLAYING_TRACK = {"en": "Playing {name} by {artist}.", "es": "Pongo {name}, de {artist}.",
                   "it": "Metto {name}, di {artist}.", "pt": "A tocar {name}, de {artist}."}  # fmt: skip
 _SPEAKER_UNAVAILABLE = {
@@ -702,10 +749,16 @@ class QuickCommands:
         self._spotify = spotify or SpotifyControl()
         self._tv = tv or TV()
         self._spotify_configured = spotify_configured or _spotify_configured
-        self._background: set[asyncio.Task[None]] = set()
+        self._background: set[asyncio.Task[object]] = set()
+        # The language of the last request to Maribel, for what Reachy says around her answers.
+        self._maribel_language = "en"
 
     async def handle(self, text: str) -> QuickReply | None:
         """Run ``text`` if it is an everyday command; return None to leave it to the conversation."""
+        maribel_language = maribel_request(text) if getattr(self._deps, "maribel", None) is not None else None
+        if maribel_language is not None:
+            self._maribel_language = maribel_language
+            return self._ask_maribel(text, MARIBEL_ASKING[maribel_language])
         routine = self._routine_for(text)
         if routine is not None:
             try:
@@ -721,6 +774,35 @@ class QuickCommands:
         except Exception as error:  # a tool bug must not break the wake; the conversation can try
             logger.warning("Quick command %s failed: %s", command.kind, type(error).__name__)
             return None
+
+    async def answer_maribel(self, text: str) -> QuickReply:
+        """Pass ``text``, heard just after Maribel's question, to her as the answer."""
+        return self._ask_maribel(text, None)
+
+    def _ask_maribel(self, text: str, said: str | None) -> QuickReply:
+        """Say ``said``, send ``text`` to Maribel and speak her first reply (or that she will follow up)."""
+        language = self._maribel_language
+        link = self._deps.maribel
+
+        async def hand_over() -> str | None:
+            request_id = await link.send(text.strip())
+            if request_id is None:
+                return MARIBEL_UNREACHABLE[language]
+            thinking = asyncio.create_task(
+                asyncio.to_thread(queue_intent_move, self._deps.movement_manager, "thinking"),
+                name="maribel-thinking",
+            )
+            self._background.add(thinking)
+            thinking.add_done_callback(self._background.discard)
+            reply = await link.first_reply(request_id)
+            if reply is None:
+                return MARIBEL_PASSED_ON[language]
+            expect_answer = getattr(self._deps, "expect_answer", None)
+            if reply.type == "question" and expect_answer is not None:
+                expect_answer(self.answer_maribel)
+            return reply.speak or None
+
+        return QuickReply(said, language, "maribel", after=hand_over, after_timeout_s=MARIBEL_STEP_TIMEOUT_S)
 
     def _routine_for(self, text: str) -> Any:
         """Return the household routine (from the home layout) whose phrase is the whole request."""
@@ -1124,5 +1206,14 @@ def guess_language(text: str, default: str = "en") -> str:
 
 # Replies that never change, worth keeping on disk for instant playback (local_speech cache).
 FIXED_PHRASES: Final[frozenset[str]] = frozenset(
-    {*_OK.values(), *_FAILED.values(), *_GOOD_NIGHT.values(), *_NOT_FOUND.values(), *CANNOT_CONNECT.values()}
+    {
+        *_OK.values(),
+        *_FAILED.values(),
+        *_GOOD_NIGHT.values(),
+        *_NOT_FOUND.values(),
+        *CANNOT_CONNECT.values(),
+        *MARIBEL_ASKING.values(),
+        *MARIBEL_PASSED_ON.values(),
+        *MARIBEL_UNREACHABLE.values(),
+    }
 )

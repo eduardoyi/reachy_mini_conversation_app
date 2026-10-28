@@ -1,20 +1,27 @@
 """Tests for everyday commands answered without the cloud conversation."""
 
+import asyncio
 from typing import Any
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
+from reachy_mini_conversation_app import quick_commands
+from reachy_mini_conversation_app.maribel import MaribelReply
 from reachy_mini_conversation_app.weather import Forecast, DayForecast
 from reachy_mini_conversation_app.android_tv import TVState
 from reachy_mini_conversation_app.home_devices import HubDevice
 from reachy_mini_conversation_app.quick_commands import (
+    MARIBEL_ASKING,
+    MARIBEL_PASSED_ON,
+    MARIBEL_UNREACHABLE,
     QuickCommands,
     parse,
     say_date,
     say_time,
     normalize,
+    maribel_request,
     resolve_light_target,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -522,3 +529,114 @@ def test_guess_language_picks_the_household_language(text: str, language: str) -
     from reachy_mini_conversation_app.quick_commands import guess_language
 
     assert guess_language(text, default="es") == language
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        ("Ask Maribel to book a table for Friday.", "en"),
+        ("Can you tell Maribel that I'll be late?", "en"),
+        ("Let Maribel know the plumber called.", "en"),
+        ("Pregúntale a Maribel si mañana llueve.", "es"),
+        ("Dile a Maribel que compre leche.", "es"),
+        ("Chiedi a Maribel di prenotare.", "it"),
+        ("Pergunta à Maribel a que horas é o jantar.", "pt"),
+        ("ask Marybel what's on my calendar", "en"),
+    ],
+)
+def test_a_request_that_names_maribel_goes_to_her(text: str, language: str) -> None:
+    """Requests that start with ask or tell Maribel, in the household's languages, go to her."""
+    assert maribel_request(text) == language
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Ask Maribel.", "What did Maribel say?", "Maribel is coming tonight", "turn off the lights", "ask Mario to call"],
+)
+def test_other_requests_do_not_go_to_maribel(text: str) -> None:
+    """Mentioning her, or naming nothing to pass on, stays with Reachy."""
+    assert maribel_request(text) is None
+
+
+@pytest.fixture(autouse=True)
+def _thinking_moves(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the thinking move instead of loading the emotion library."""
+    queued: list[str] = []
+    monkeypatch.setattr(quick_commands, "queue_intent_move", lambda _manager, intent: queued.append(intent))
+    return queued
+
+
+class _Maribel:
+    """A stand-in for MaribelLink: accepts unless told not to, then replies with ``reply``."""
+
+    def __init__(self, reply: MaribelReply | None, *, reachable: bool = True) -> None:
+        self.reply = reply
+        self.reachable = reachable
+        self.sent: list[str] = []
+
+    async def send(self, text: str) -> str | None:
+        self.sent.append(text)
+        return "r-1" if self.reachable else None
+
+    async def first_reply(self, request_id: str, timeout_s: float = 10.0) -> MaribelReply | None:
+        return self.reply
+
+
+@pytest.mark.asyncio
+async def test_asking_maribel_says_so_then_speaks_her_reply(_thinking_moves: list[str]) -> None:
+    """Reachy says he is asking, then sends the words verbatim and speaks her reply."""
+    runner, _, deps = _runner()
+    deps.maribel = _Maribel(MaribelReply("r-1", "c-1", "answer", "It's Wednesday."))
+
+    reply = await runner.handle("Pregúntale a Maribel qué día es hoy")
+
+    assert reply is not None and reply.kind == "maribel"
+    assert reply.text == MARIBEL_ASKING["es"] and reply.after is not None
+    assert reply.after_timeout_s is not None and reply.after_timeout_s > 10
+    assert deps.maribel.sent == []  # she is asked after Reachy says so
+    assert await reply.after() == "It's Wednesday."
+    assert deps.maribel.sent == ["Pregúntale a Maribel qué día es hoy"]
+    await asyncio.sleep(0.05)
+    assert _thinking_moves == ["thinking"]  # while she works
+
+
+@pytest.mark.asyncio
+async def test_maribel_unreachable_or_slow_gets_the_agreed_lines() -> None:
+    """Unreachable and no reply within the wait each have their own line."""
+    runner, _, deps = _runner()
+    deps.maribel = _Maribel(None, reachable=False)
+    reply = await runner.handle("Ask Maribel to call the plumber")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == MARIBEL_UNREACHABLE["en"]
+
+    deps.maribel = _Maribel(None)
+    reply = await runner.handle("Ask Maribel to call the plumber")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == MARIBEL_PASSED_ON["en"]
+
+
+@pytest.mark.asyncio
+async def test_her_question_listens_for_the_answer_and_sends_it_back() -> None:
+    """Her question opens the answer window; the answer is sent without the acknowledgement."""
+    runner, _, deps = _runner()
+    deps.maribel = _Maribel(MaribelReply("r-1", "c-1", "question", "For how many?", "q-1"))
+    expected: list[Any] = []
+    deps.expect_answer = expected.append
+
+    reply = await runner.handle("Ask Maribel to book dinner")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == "For how many?"
+    (answer,) = expected
+
+    deps.maribel.reply = MaribelReply("r-2", "c-1", "answer", "Booked for four.")
+    answered = await answer("four of us")
+    assert answered.text is None and answered.after is not None  # no "Asking Maribel" for an answer
+    assert await answered.after() == "Booked for four."
+    assert deps.maribel.sent[-1] == "four of us"
+
+
+@pytest.mark.asyncio
+async def test_without_maribel_configured_her_name_is_an_ordinary_request() -> None:
+    """Without Maribel set up, the request goes to the conversation."""
+    runner, _, _ = _runner()
+    assert await runner.handle("Ask Maribel to book dinner") is None

@@ -171,3 +171,10 @@ Phrases that set several lights at once live in the home layout file (`HOME_LAYO
   playing and the TV is on, they change the TV volume.
 - "set volume to 25" also accepts "said volume to 25%" (how Whisper often hears "set"), "put the
   volume at 25" and "volume 25".
+
+## Requests for Maribel — 2026-10-28
+
+A request that starts with "ask / tell Maribel…" (or the Spanish, Italian or Portuguese equivalent;
+`maribel_request`) is checked before routines and the grammar, with no word limit, when Maribel is set up.
+The reply says "Asking Maribel"; its `after` step sends the request to her and returns her spoken reply
+(`after_timeout_s` 23 s). See [Maribel hand-off](maribel-handoff.md).

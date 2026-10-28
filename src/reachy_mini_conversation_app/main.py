@@ -65,6 +65,27 @@ def _build_tv() -> Any:
     return AndroidTV(config.ANDROID_TV_HOST, Path(config.ANDROID_TV_CERT_DIR))
 
 
+def _build_maribel() -> Any:
+    """Return the link to Maribel with its callback server running, or None when she is not configured."""
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.maribel import MaribelLink, serve_replies
+    from reachy_mini_conversation_app.tools.core_tools import maribel_configured
+
+    if not maribel_configured():
+        return None
+    link = MaribelLink(
+        config.MARIBEL_WEBHOOK_URL or "",
+        config.MARIBEL_WEBHOOK_KEY or "",
+        config.MARIBEL_CALLBACK_URL or "",
+        config.REACHY_CALLBACK_SECRET or "",
+    )
+    try:
+        serve_replies(link, config.MARIBEL_CALLBACK_PORT)
+    except OSError as error:
+        logging.getLogger(__name__).error("Maribel callback server failed to start: %s", error)
+    return link
+
+
 def _build_display() -> Any:
     """Return the TRMNL e-ink display, or None when TRMNL_ENABLED is off."""
     from reachy_mini_conversation_app.config import config
@@ -123,7 +144,7 @@ def _build_now_playing(display: Any) -> Any:
 
 
 def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
-    """Return the quick-command handler and its reply voice, or (None, None) when disabled."""
+    """Return the quick commands and their reply voice, or (None, None) when disabled."""
     from reachy_mini_conversation_app.config import config
 
     if not config.QUICK_COMMANDS_ENABLED:
@@ -145,7 +166,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
     )
-    return QuickCommands(deps, weather=weather).handle, speech.stream
+    return QuickCommands(deps, weather=weather), speech.stream
 
 
 def _start_inactivity_timeout_thread(
@@ -426,6 +447,7 @@ def run(
     deps.tv = _build_tv()
     deps.display = _build_display()
     deps.now_playing = _build_now_playing(deps.display)
+    deps.maribel = _build_maribel()
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""
@@ -465,8 +487,9 @@ def run(
         def queue_activation_acknowledgement(reason: str) -> None:
             """Queue a small movement-layer acknowledgment without motor I/O, then face the speaker."""
             movement_manager.acknowledge_activation()
-            # Whoever bent an antenna is right there; the last voice heard may be someone else's.
-            if config.SPEAKER_FOLLOWING_ENABLED and reason != "antenna_touch":
+            # Whoever bent an antenna is right there; the last voice heard may be someone else's. An awaited
+            # answer or an announcement follows Reachy's own voice.
+            if config.SPEAKER_FOLLOWING_ENABLED and reason not in ("antenna_touch", "awaited_answer", "announcement"):
                 movement_manager.turn_toward_speaker()
             if face_service is not None:
                 # Start recognizing now so the name is known when the provider's startup context is sent.
@@ -577,7 +600,7 @@ def run(
             )
             logger.info("Addressee check enabled: side conversations close the conversation early")
 
-        quick_commands, reply_speaker = _build_quick_commands(deps)
+        quick, reply_speaker = _build_quick_commands(deps)
 
         async def on_listening(listening: bool) -> None:
             """Lower Spotify the moment Reachy hears his name, like a smart speaker; restore it afterwards."""
@@ -605,7 +628,7 @@ def run(
             follow_up_window_s=config.HYBRID_FOLLOW_UP_SECONDS,
             follow_up_window_for=follow_up_window_for,
             addressee_check=addressee_check,
-            quick_commands=quick_commands,
+            quick_commands=quick.handle if quick is not None else None,
             reply_speaker=reply_speaker,
             speaking_callback=getattr(movement_manager, "set_speaking", None),
             request_transcriber=request_transcriber,
@@ -615,6 +638,17 @@ def run(
         )
         antenna_touch_handlers.append(lambda: hybrid_runtime.request_activation("antenna_touch"))
         runtime_for_tools = hybrid_runtime
+        deps.expect_answer = hybrid_runtime.expect_answer
+        if deps.maribel is not None:
+            from reachy_mini_conversation_app.maribel import MaribelReply
+            from reachy_mini_conversation_app.quick_commands import guess_language
+
+            def speak_late_reply(reply: MaribelReply) -> None:
+                """Say a reply that came after Reachy stopped waiting, once he is free."""
+                answer = quick.answer_maribel if quick is not None and reply.type == "question" else None
+                runtime_for_tools.request_announcement(reply.speak, guess_language(reply.speak), answer=answer)
+
+            deps.maribel.on_late_reply = speak_late_reply
 
         def go_to_standby() -> dict[str, Any]:
             """Sleep pose, then close the conversation after the good night; the wake word still works."""

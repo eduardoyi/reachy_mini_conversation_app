@@ -264,6 +264,9 @@ def test_hybrid_run_defers_provider_factory_until_activation(
             self.factory = factory
             assert _kwargs["acoustic_wake_detector"] is (acoustic_loader.return_value if acoustic_enabled else None)
 
+        def expect_answer(self, _answer: object) -> None:
+            return None
+
     class FakeLocalStream:
         def __init__(self, handler: object, _robot: object, **_kwargs: object) -> None:
             self.handler = handler
@@ -329,6 +332,9 @@ def test_face_recognition_is_wired_into_tools_console_wake_and_sessions(monkeypa
     class FakeHybridRuntime:
         def __init__(self, _factory: object, **kwargs: object) -> None:
             runtime_kwargs.update(kwargs)
+
+        def expect_answer(self, _answer: object) -> None:
+            return None
 
     class FakeLocalStream:
         def __init__(self, _handler: object, _robot: object, **kwargs: object) -> None:
@@ -419,6 +425,9 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
             FakeHybridRuntime.instance = self
 
         def observe_local_transcript(self, _segment: object) -> None:
+            return None
+
+        def expect_answer(self, _answer: object) -> None:
             return None
 
     class FakeLocalStream:

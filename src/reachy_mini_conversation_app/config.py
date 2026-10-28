@@ -778,6 +778,13 @@ class Config:
     ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
     # TRMNL e-ink display: the app serves the screens it polls (point the TRMNL at http://<this-mac>:<port>).
     TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    # Maribel (Grok Bot): her webhook and key, and the public URL of Reachy's callback (Tailscale Funnel) with
+    # the secret she must send. Requests go to her only when all four are set.
+    MARIBEL_WEBHOOK_URL = (os.getenv("MARIBEL_WEBHOOK_URL") or "").strip() or None
+    MARIBEL_WEBHOOK_KEY = (os.getenv("MARIBEL_WEBHOOK_KEY") or "").strip() or None
+    MARIBEL_CALLBACK_URL = (os.getenv("MARIBEL_CALLBACK_URL") or "").strip() or None
+    REACHY_CALLBACK_SECRET = (os.getenv("REACHY_CALLBACK_SECRET") or "").strip() or None
+    MARIBEL_CALLBACK_PORT = _bounded_int("MARIBEL_CALLBACK_PORT", 8791, 1024, 65535)
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -977,6 +984,11 @@ def refresh_runtime_config_from_env() -> None:
     config.ANDROID_TV_HOST = (os.getenv("ANDROID_TV_HOST") or "").strip() or None
     config.ANDROID_TV_CERT_DIR = os.path.expanduser(os.getenv("ANDROID_TV_CERT_DIR") or "~/.config/reachy-tv")
     config.TRMNL_ENABLED = _env_flag("TRMNL_ENABLED", default=False)
+    config.MARIBEL_WEBHOOK_URL = (os.getenv("MARIBEL_WEBHOOK_URL") or "").strip() or None
+    config.MARIBEL_WEBHOOK_KEY = (os.getenv("MARIBEL_WEBHOOK_KEY") or "").strip() or None
+    config.MARIBEL_CALLBACK_URL = (os.getenv("MARIBEL_CALLBACK_URL") or "").strip() or None
+    config.REACHY_CALLBACK_SECRET = (os.getenv("REACHY_CALLBACK_SECRET") or "").strip() or None
+    config.MARIBEL_CALLBACK_PORT = _bounded_int("MARIBEL_CALLBACK_PORT", 8791, 1024, 65535)
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

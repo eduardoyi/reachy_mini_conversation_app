@@ -4470,3 +4470,132 @@ async def test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name(
         assert bool(acknowledged) is wakes and result is wakes
     finally:
         await runtime.close()
+
+
+async def _eventually(predicate: Callable[[], bool], timeout_s: float = 5.0) -> None:
+    """Wait in real time (reply tails and the pending-turn poll sleep) until ``predicate`` holds."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition did not become true")
+        await asyncio.sleep(0.01)
+
+
+def _answering_runtime(
+    handler: FakeHandler, spoken: list[str], acknowledged: list[str], quick: Callable[[str], Any], heard: str
+) -> HybridRuntime:
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def accurate(_audio: AudioFrame) -> str:
+        return heard
+
+    processor = _processor_with_open_wake_segment("")
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        quick_commands=quick,
+        reply_speaker=speak,
+        request_transcriber=accurate,
+        name_check_transcriber=accurate,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    return runtime
+
+
+@pytest.mark.asyncio
+async def test_a_question_listens_once_for_the_answer_without_the_name() -> None:
+    """After a reply that asks something, the next words go to the asker, with no name and no conversation."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    acknowledged: list[str] = []
+    answers: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply("Booked for four.")
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer)
+        return _QuickReply("For how many people?")
+
+    runtime = _answering_runtime(handler, spoken, acknowledged, quick, "four of us")
+    try:
+        assert await runtime.activate("keyboard", addressed_text="ask Maribel to book dinner")
+        await _eventually(lambda: runtime._request_clip is not None)
+        assert acknowledged == ["keyboard", "awaited_answer"]  # the antennas perk again: he is listening
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        await _eventually(lambda: spoken == ["For how many people?", "Booked for four."])
+        assert answers == ["four of us"]
+        await _eventually(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_no_answer_after_a_question_goes_back_to_listening_for_the_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Silence after the question ends the wait quietly; the conversation never opens."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply(None)
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer)
+        return _QuickReply("For how many people?")
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    monkeypatch.setattr(runtime, "_ANSWER_START_S", 0.2)
+    try:
+        assert await runtime.activate("keyboard", addressed_text="ask Maribel to book dinner")
+        await _eventually(lambda: runtime._request_clip is not None)
+        await _eventually(lambda: runtime._request_clip is None and runtime.mode is RuntimeMode.LOCAL_AMBIENT)
+        assert answers == [] and spoken == ["For how many people?"]
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer() -> None:
+    """A late reply from another thread is spoken only once Reachy is free; a question then listens."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    acknowledged: list[str] = []
+
+    async def answer(_text: str) -> _QuickReply:
+        return _QuickReply(None)
+
+    async def quick(_text: str) -> None:
+        return None  # everything goes to the conversation
+
+    runtime = _answering_runtime(handler, spoken, acknowledged, quick, "")
+    try:
+        assert await runtime.activate("keyboard", addressed_text="tell me a story")
+        await handler.started.wait()
+        thread = threading.Thread(
+            target=runtime.request_announcement, args=("Which day?", "en"), kwargs={"answer": answer}
+        )
+        thread.start()
+        thread.join()
+        await asyncio.sleep(0.3)
+        assert spoken == []  # not over the conversation
+        await runtime.deactivate_cloud("test")
+        await _eventually(lambda: spoken == ["Which day?"])
+        await _eventually(lambda: "awaited_answer" in acknowledged)
+        assert acknowledged[-2:] == ["announcement", "awaited_answer"]
+    finally:
+        await runtime.close()

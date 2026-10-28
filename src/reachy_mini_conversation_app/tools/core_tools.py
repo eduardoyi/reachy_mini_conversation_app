@@ -8,7 +8,7 @@ import importlib
 import threading
 import importlib.util
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Callable, ClassVar, Sequence, TypedDict
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Callable, ClassVar, Sequence, Awaitable, TypedDict
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -59,6 +59,9 @@ class ToolDependencies:
     now_playing: Any = None  # NowPlaying from now_playing.py, when the display shows Spotify songs
     # Recognized person in front of the camera (household person ID), when face recognition is enabled.
     current_person_id: Callable[[], str | None] | None = None
+    maribel: Any = None  # MaribelLink from maribel.py, when Maribel (Grok Bot) is configured
+    # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
+    expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
 
 
 class ToolSpec(TypedDict):
@@ -105,7 +108,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -298,7 +301,7 @@ def _build_tool_registry(
 
 def _tool_registry_signature(
     instance_path: str | Path | None,
-) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool]:
+) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -311,6 +314,7 @@ def _tool_registry_signature(
         _lights_configured(),
         _tv_configured(),
         config.TRMNL_ENABLED,
+        maribel_configured(),
     )
 
 
@@ -339,6 +343,20 @@ def _tv_configured() -> bool:
 
 # Enabled automatically with TRMNL_ENABLED, unless the profile's tools were customized.
 DISPLAY_TOOLS = ("show_on_display",)
+
+
+# Enabled automatically once Maribel's webhook and Reachy's callback are configured, unless customized.
+MARIBEL_TOOLS = ("ask_maribel",)
+
+
+def maribel_configured() -> bool:
+    """Return whether Maribel's webhook and Reachy's callback are both configured."""
+    return bool(
+        config.MARIBEL_WEBHOOK_URL
+        and config.MARIBEL_WEBHOOK_KEY
+        and config.MARIBEL_CALLBACK_URL
+        and config.REACHY_CALLBACK_SECRET
+    )
 
 
 # Registry & specs (dynamic)
@@ -389,6 +407,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in DISPLAY_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in DISPLAY_TOOLS if name not in tool_names)
+
+    if not maribel_configured():
+        tool_names = [name for name in tool_names if name not in MARIBEL_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in MARIBEL_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]
