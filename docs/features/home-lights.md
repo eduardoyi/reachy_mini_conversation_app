@@ -160,13 +160,18 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
   libffi, because uv rebuilds the `pygobject` and `pycairo` source distributions
   for metadata.
 - Blinds, sensors, remotes and speakers on the hub are ignored.
+- Each `set` logs the kind of change (`change=on,brightness`), `on`, and the device names it
+  matched, changed, failed and found unreachable, or that it matched nothing. The target as said
+  is never logged. On 2026-10-28 the Living lamp stayed on after a spoken "off" and the log could
+  not show what the call had targeted; the plug itself switched off at once when sent the command.
 
 ## Tests
 
 - `tests/test_dirigera_hub.py`: device parsing, routes, errors, PKCE pairing.
 - `tests/tools/test_home_lights.py`: room, partial and accent-free matching;
   brightness, warmth and colors; plugs; offline duplicates; unreachable lights;
-  status; scenes; errors; the tool loading only once something is set up.
+  status; scenes; errors; the tool loading only once something is set up; the
+  log naming matched and changed devices but never the spoken target.
 - `tests/test_tuya_devices.py`: wizard-file filtering, state reading, bulb and
   plug commands, relighting a strip that wrongly reports on, retrying a plug that
   misses connections (and stopping at the deadline or on a key error), reusing fresh

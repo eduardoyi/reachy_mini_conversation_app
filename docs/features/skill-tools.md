@@ -82,12 +82,15 @@ flowchart LR
 - A skill's instructions stay in the conversation until compression drops them, so repeated use in
   one session needs no new help call.
 - No new data leaves the machine; the same tool descriptions are sent, later and less often.
+- A rejected `use_skill` logs `use_skill rejected: skill=... missing=[...] unknown=[...] invalid=[...]`
+  with argument names only (an unknown skill logs no name): values can carry the person's words.
+  Before 2026-10-28 a rejected call left no trace.
 
 ## Testing
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/tools/test_skills.py` | Skills become menu lines and leave the declarations; switching off restores every declaration; no skills, no extra tools; `skill_help` returns the tool's description and schema; `use_skill` runs the tool with its arguments; missing / bad enum / unknown / non-object arguments return the instructions; direct tools, disabled skills and missing names are refused |
+| `tests/tools/test_skills.py` | Skills become menu lines and leave the declarations; switching off restores every declaration; no skills, no extra tools; `skill_help` returns the tool's description and schema; `use_skill` runs the tool with its arguments; missing / bad enum / unknown / non-object arguments return the instructions and log argument names but no values; direct tools, disabled skills and missing names are refused |
 | `tests/test_external_loading.py` | Registry reload tests pin `SKILL_TOOLS_ENABLED=0`, since they check the full list |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
@@ -107,3 +110,4 @@ YouTube on the TV and "remember Enzo's swimming class moved to Thursdays" each w
 
 - 2026-10-25: Added as a switchable test (`SKILL_TOOLS_ENABLED`, default on).
 - 2026-10-27: `spotify_control` is a direct tool again; as a skill, "play Spotify" stalled after the search.
+- 2026-10-28: Rejected `use_skill` calls are logged by argument name.

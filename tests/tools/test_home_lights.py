@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 from dataclasses import replace
 from unittest.mock import MagicMock
@@ -88,6 +89,20 @@ async def test_unknown_targets_list_the_names_and_offline_lights_are_reported() 
     assert (result["ok"], result["changed"], result["unreachable"]) == (False, [], ["Kids lamp"])
     assert "Do not retry" in result["instruction"]
     assert home.changes == []
+
+
+@pytest.mark.asyncio
+async def test_a_change_logs_the_devices_it_matched_and_changed_but_not_the_words(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The log names the matched devices and the results; the target as said never appears."""
+    home = _FakeHome([LAMP, CEILING, OFFLINE])
+    with caplog.at_level(logging.INFO):
+        await HomeLights()(_deps(home), action="set", target="lampara de pie", on=False)
+        await HomeLights()(_deps(home), action="set", target="the garage thing", on=False)
+    assert "change=on on=False matched=['Lámpara de pie'] changed=['Lámpara de pie'] failed=[]" in caplog.text
+    assert "home_lights set matched nothing change=on" in caplog.text
+    assert "lampara de pie" not in caplog.text and "garage" not in caplog.text
 
 
 @pytest.mark.asyncio

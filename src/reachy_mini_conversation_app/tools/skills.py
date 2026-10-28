@@ -8,12 +8,15 @@ any argument error. Frequently used, latency-sensitive and system tools stay ord
 tools that take several calls in a row: behind a skill, Spotify's search-then-play stalled after the search.
 """
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict
 
 
 if TYPE_CHECKING:
     from reachy_mini_conversation_app.tools.core_tools import Tool, ToolSpec
 
+
+logger = logging.getLogger(__name__)
 
 SKILL_HELP = "skill_help"
 USE_SKILL = "use_skill"
@@ -83,19 +86,32 @@ def check_arguments(tools: "dict[str, Tool]", args: Dict[str, Any]) -> tuple["To
     """Return (the skill's tool, its arguments) for use_skill, or (None, an error with the skill's help)."""
     tool = _skill(tools, args.get("skill"))
     if tool is None:
+        logger.info("use_skill rejected: unknown skill")
         return None, _unknown(tools, args.get("skill"))
     arguments = args.get("arguments") or {}
     if not isinstance(arguments, dict):
+        logger.info("use_skill rejected: skill=%s arguments not an object", tool.name)
         return None, {"error": "arguments must be an object.", **skill_help(tools, {"skill": tool.name})}
     schema = tool.parameters_schema
     properties = schema.get("properties") or {}
     problems = [f"missing {name}" for name in schema.get("required") or [] if name not in arguments]
-    problems += [f"unknown argument {name}" for name in arguments if name not in properties]
+    unknown = [name for name in arguments if name not in properties]
+    problems += [f"unknown argument {name}" for name in unknown]
+    invalid = []
     for name, value in arguments.items():
         allowed = (properties.get(name) or {}).get("enum")
         if allowed and value not in allowed:
             problems.append(f"{name} must be one of {allowed}")
+            invalid.append(name)
     if problems:
+        # Argument names only: their values can carry the person's words.
+        logger.info(
+            "use_skill rejected: skill=%s missing=%s unknown=%s invalid=%s",
+            tool.name,
+            [name for name in schema.get("required") or [] if name not in arguments],
+            unknown,
+            invalid,
+        )
         return None, {"error": "; ".join(problems), **skill_help(tools, {"skill": tool.name})}
     return tool, arguments
 

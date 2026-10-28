@@ -1,5 +1,6 @@
 """Tests for offering rarely used tools as skills."""
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -115,6 +116,23 @@ async def test_a_wrong_use_skill_call_returns_the_instructions(
     )
     assert problem in result["error"]
     assert result["instructions"] == _Lights.description and result["arguments"] == _Lights.parameters_schema
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_use_skill_call_logs_the_argument_names_only(
+    tools: dict[str, Tool], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Why a call failed goes to the log by argument name; the values, which can be the person's words, do not."""
+    with caplog.at_level(logging.INFO):
+        await core_tools._dispatch_tool_call(
+            "use_skill",
+            {"skill": "home_lights", "arguments": {"action": "dim", "room": "la cocina de abuela"}},
+            _deps(),
+        )
+        await core_tools._dispatch_tool_call("use_skill", {"skill": "grandma's secret"}, _deps())
+    assert "use_skill rejected: skill=home_lights missing=[] unknown=['room'] invalid=['action']" in caplog.text
+    assert "use_skill rejected: unknown skill" in caplog.text
+    assert "abuela" not in caplog.text and "dim" not in caplog.text and "secret" not in caplog.text
 
 
 @pytest.mark.asyncio

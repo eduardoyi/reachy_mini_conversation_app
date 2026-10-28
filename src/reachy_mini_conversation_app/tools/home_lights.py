@@ -255,7 +255,14 @@ class HomeLights(Tool):
 
         devices = await home.devices()
         targets = _match_targets(devices, target)
+        # Device names and the kind of change only: the target as said is the person's words.
+        fields = ",".join(
+            name
+            for name, value in (("on", on), ("brightness", brightness), ("warmth", warmth), ("color", color_name))
+            if value is not None and value != ""
+        )
         if targets is None:
+            logger.info("home_lights set matched nothing change=%s", fields)
             return {
                 "error": f"Nothing called {target!r}.",
                 "rooms": sorted({device.room for device in devices if device.room}),
@@ -278,6 +285,15 @@ class HomeLights(Tool):
             notes.append("Some of these lights have fixed white.")
         if notes:
             response["note"] = " ".join(notes)
+        logger.info(
+            "home_lights set change=%s on=%s matched=%s changed=%s failed=%s unreachable=%s",
+            fields,
+            change.on,
+            [device.name for device in targets],
+            response.get("changed", []),
+            response.get("failed", []),
+            response.get("unreachable", []),
+        )
         return response
 
     async def _routine(self, home: Any, routine: Routine) -> dict[str, Any]:
