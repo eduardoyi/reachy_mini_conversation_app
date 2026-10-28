@@ -139,6 +139,7 @@ class OpenWakeWordDetector:
                 source="acoustic",
                 detected_at=time.monotonic() if observed_at is None else observed_at,
                 latency_seconds=None,
+                score=score,
             )
         return detection
 

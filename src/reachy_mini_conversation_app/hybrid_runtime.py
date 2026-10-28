@@ -287,6 +287,25 @@ def _name_leads(text: str) -> bool:
     )
 
 
+def _longest_loud_run_s(
+    audio: tuple[int, NDArray[np.int16]], frame_s: float, *, over_floor: float, min_rms: float
+) -> float:
+    """Return the longest stretch (s) of frames louder than ``over_floor`` times the quiet floor and ``min_rms``."""
+    rate, samples = audio
+    frame = max(1, int(rate * frame_s))
+    count = samples.size // frame
+    if count < 2:
+        return 0.0
+    blocks = samples[: count * frame].astype(np.float64).reshape(count, frame)
+    rms = np.sqrt((blocks**2).mean(axis=1))
+    loud = rms > max(float(np.percentile(rms, 10)) * over_floor, min_rms)
+    longest = run = 0
+    for flag in loud:
+        run = run + 1 if flag else 0
+        longest = max(longest, run)
+    return longest * frame / rate
+
+
 def frame_activation_context(transcript: str, max_chars: int) -> str:
     """Frame activation context: background transcript (if any) plus a cue that the request is addressed."""
     text = transcript.strip()
@@ -380,6 +399,15 @@ class HybridRuntime:
     _WAKE_NAME_WINDOW_S = 2.5
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
+    # Whisper can mishear a real call ("Reggie.", "Preciso.", "What did she do?" for three "Richie, lights
+    # off" on 2026-10-28). Awake, a wake model this sure still counts when the window holds a voice: a loud run
+    # as long as a word, where kitchen clatter is clinks (word runs 0.33-0.45 s at 21-30 dB over the room;
+    # about 60 clatter candidates at most 0.12 s and 14 dB).
+    _TRUSTED_WAKE_SCORE = 0.8
+    _VOICE_FRAME_S = 0.03
+    _VOICE_RUN_S = 0.25
+    _VOICE_OVER_FLOOR = 4.0
+    _VOICE_MIN_RMS = 300.0
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
@@ -495,6 +523,7 @@ class HybridRuntime:
         self._wake_window = bytearray()
         self._wake_window_rate = 0
         self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
+        self._wake_score: float | None = None  # the wake model's score for that audio
         self._intent_router = intent_router
         self._action_executor = action_executor
         self._quick_commands = quick_commands
@@ -1189,7 +1218,9 @@ class HybridRuntime:
                     asleep = self._asleep
                     # The audio the wake model fired on: Whisper checks the name in it before Reachy reacts.
                     wake_audio = self._wake_name_audio if reason == "acoustic_wake" else None
+                    wake_score = self._wake_score if wake_audio is not None else None
                     self._wake_name_audio = None
+                    self._wake_score = None
                     # Without that audio, asleep, an acoustic wake counts once the transcript has the name first.
                     confirm_wake = asleep and transcribe_request and wake_audio is None and reason == "acoustic_wake"
                     if asleep and not confirm_wake and wake_audio is None:
@@ -1205,7 +1236,9 @@ class HybridRuntime:
                 else None
             )
             if wake_audio is not None:
-                if not await self._name_in_wake_audio(wake_audio, asleep=asleep):
+                if not await self._name_in_wake_audio(wake_audio, asleep=asleep) and not self._trusted_voice_wake(
+                    wake_audio, wake_score, asleep=asleep
+                ):
                     return await self._drop_unconfirmed_wake(generation, asleep=asleep)
                 with self._lifecycle_lock:
                     self._asleep = False
@@ -1654,6 +1687,17 @@ class HybridRuntime:
             return not asleep
         logger.info("Wake name check heard=False")
         return False
+
+    def _trusted_voice_wake(self, audio: tuple[int, NDArray[np.int16]], score: float | None, *, asleep: bool) -> bool:
+        """Whether a sure wake model and a voice in the window outweigh Whisper missing the name (awake only)."""
+        if asleep or score is None or score < self._TRUSTED_WAKE_SCORE:
+            return False
+        run_s = _longest_loud_run_s(
+            audio, self._VOICE_FRAME_S, over_floor=self._VOICE_OVER_FLOOR, min_rms=self._VOICE_MIN_RMS
+        )
+        trusted = run_s >= self._VOICE_RUN_S
+        logger.info("Wake trusted without the name: %s score=%.2f loud_run=%.2fs", trusted, score, run_s)
+        return trusted
 
     async def _drop_unconfirmed_wake(self, generation: int, *, asleep: bool) -> bool:
         """Drop an acoustic wake whose name Whisper did not hear, without moving or opening the cloud."""
@@ -2496,6 +2540,7 @@ class HybridRuntime:
                     self._request_clip_queued_epoch = epoch
                     window = np.frombuffer(bytes(self._wake_window), dtype="<i2").copy()
                     self._wake_name_audio = (self._wake_window_rate, window) if window.size else None
+                    self._wake_score = detection.score
             # Activate in its own task: awaiting it here would stall this worker, so frames after the wake
             # (the spoken request) would not reach local STT until activation finished.
             task = asyncio.create_task(self.activate("acoustic_wake"), name="hybrid-acoustic-activation")

@@ -947,3 +947,15 @@ without a touch. Plan: [antenna-touch-wake.md](../plans/antenna-touch-wake.md). 
 `test_an_antenna_touch_wakes_him_from_sleep_and_listens_for_the_request`,
 `test_a_touch_from_the_movement_thread_starts_listening_on_the_runtime_loop` and the antenna touch
 tests in `tests/test_moves.py`.
+
+### A sure wake with a voice counts when Whisper mishears the name — 2026-10-28
+
+Three real "Richie, lights off" calls (wake scores 0.87, 0.95, 0.83) were dropped because Whisper heard
+"Reggie.", "Preciso." and "What did she do?". Awake, when neither model hears the name, the wake still
+counts if the wake model's score (`WakeWordDetection.score`) is at least `_TRUSTED_WAKE_SCORE` (0.8) and
+the window holds a voice: a loud run (30 ms frames, 4 times the quiet floor and at least RMS 300) of
+`_VOICE_RUN_S` (0.25 s) or longer (`_longest_loud_run_s`). Real calls ran 0.33-0.45 s at 21-30 dB over the
+room; about 60 kitchen-clatter candidates ran at most 0.12 s at 14 dB. Asleep the name must still lead.
+Logged as `Wake trusted without the name: True|False score=… loud_run=…`. Tests:
+`test_a_word_length_sound_is_a_voice_and_clinks_are_not`,
+`test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name`.

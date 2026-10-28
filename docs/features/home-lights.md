@@ -147,7 +147,12 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
   still broadcasting (2026-10-28 on the Mac mini: no ping reply, connections timing
   out, then fine seconds later). With one 2 s try, "lights" skipped both and
   Reachy said it was done. The 6 s retry covers those gaps; a plug that is really
-  off now makes a lights command about 6 s slower before it is reported. A Tuya light switched off with
+  off now makes a lights command about 6 s slower before it is reported.
+- Reading the Tuya devices before each change took about 2.8 s of a 4.4 s "lights"
+  (2026-10-28). A background thread (`tuya-readings`) now reads them every 30 s and a
+  change uses a reading up to 60 s old; a failed read keeps the last good one, and a
+  change updates the remembered on/off. Status can lag a change made in the Smart
+  Life app or at the plug by up to about 30 s. A Tuya light switched off with
   its own remote can keep reporting "on" while dark (the TV strip, 2026-10-19), so
   a plain "on" for a light that already reports on switches it off and on again.
 - New dependency: `tinytuya` (MIT; pulls in `cryptography`, `requests` and
@@ -164,5 +169,6 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
   status; scenes; errors; the tool loading only once something is set up.
 - `tests/test_tuya_devices.py`: wizard-file filtering, state reading, bulb and
   plug commands, relighting a strip that wrongly reports on, retrying a plug that
-  misses connections (and stopping at the deadline or on a key error),
+  misses connections (and stopping at the deadline or on a key error), reusing fresh
+  readings and keeping the last good one when a reading fails,
   `LightChange.for_device`, and merging with one system down.

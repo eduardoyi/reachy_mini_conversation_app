@@ -31,6 +31,7 @@ class WakeWordDetection:
     source: WakeWordSource
     detected_at: float
     latency_seconds: float | None
+    score: float | None = None  # the acoustic model's score at the detection; None for a transcript wake
 
     @property
     def command_text(self) -> str:

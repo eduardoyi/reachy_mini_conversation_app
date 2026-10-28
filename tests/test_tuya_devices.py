@@ -301,3 +301,42 @@ async def test_a_wrong_key_is_not_retried(tmp_path: Path) -> None:
     home, pauses = _napping_home(tmp_path, plug)
     _strip, lamp, _offline = await home.devices()
     assert not lamp.reachable and pauses == [] and plug.tries == 1
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_reading_is_reused_and_a_change_updates_it(tmp_path: Path) -> None:
+    """A change within a minute of a reading does not read the plug again; on/off is remembered; a stale one reads."""
+    now = [0.0]
+    connections: list[str] = []
+    plug = _FakePlug()
+
+    def factory(entry: TuyaEntry, _ip: str, _version: str) -> Any:
+        connections.append(entry.id)
+        return _FakeBulb() if entry.kind == "light" else plug
+
+    home = TuyaHome(_write_wizard_files(tmp_path), device_factory=factory, clock=lambda: now[0], sleep=lambda _s: None)
+    _strip, lamp, _offline = await home.devices()
+    assert lamp.is_on and connections.count("plug") == 1
+
+    now[0] = 30.0
+    await home.apply(lamp, LightChange(on=False))
+    _strip, lamp, _offline = await home.devices()
+    assert not lamp.is_on and connections.count("plug") == 2  # the change connected; the listing did not
+
+    now[0] = 100.0
+    _strip, lamp, _offline = await home.devices()
+    assert lamp.is_on and connections.count("plug") == 3  # stale: read again (the fake plug reports on)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reading_keeps_the_last_good_one(tmp_path: Path) -> None:
+    """A plug that misses a background reading is still offered to a change made soon after."""
+    plug = _NappingPlug(misses=0)
+    home, _pauses = _napping_home(tmp_path, plug)
+    _strip, lamp, _offline = await home.devices()
+    assert lamp.reachable
+    plug.tries, plug.misses = 0, 100
+    entry = next(entry for entry in load_entries(_write_wizard_files(tmp_path)) if entry.id == "plug")
+    assert not home._read(entry).reachable  # what the background poll would get during a dropout
+    _strip, lamp, _offline = await home.devices()
+    assert lamp.reachable and lamp.is_on

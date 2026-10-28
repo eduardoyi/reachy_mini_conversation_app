@@ -18,7 +18,7 @@ import colorsys
 import threading
 from typing import Any, Final, Callable
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import replace, dataclass
 
 from reachy_mini_conversation_app.home_devices import HubScene, HubDevice, LightChange, HomeDeviceError
 
@@ -38,6 +38,11 @@ BROADCAST_PORTS: Final[tuple[int, ...]] = (6666, 6667, 7000)
 REACH_DEADLINE_S: Final[float] = 6.0
 RETRY_PAUSE_S: Final[float] = 0.5
 NETWORK_ERRORS: Final[frozenset[str]] = frozenset({"901", "905"})  # TinyTuya: cannot connect, unreachable
+# Reading three devices before a change took about 2.8 s of a 4.4 s "lights" (2026-10-28), so a background
+# thread reads them every POLL_EVERY_S and a change uses a reading up to STATE_FRESH_S old. A failed read
+# keeps the last good one; status may lag a change made elsewhere by up to the poll period.
+POLL_EVERY_S: Final[float] = 30.0
+STATE_FRESH_S: Final[float] = 60.0
 # Nominal white range of Tuya CCT lights; they only take a 0-100 % position.
 TUYA_KELVIN_RANGE: Final[tuple[int, int]] = (2700, 6500)
 
@@ -110,6 +115,9 @@ class TuyaHome:
         self._sleep = sleep
         self._stop = threading.Event()
         self._listener: threading.Thread | None = None
+        self._poller: threading.Thread | None = None
+        # Last good reading per device id, with the clock time it was taken.
+        self._states: dict[str, tuple[float, HubDevice]] = {}
 
     @property
     def configured(self) -> bool:
@@ -117,18 +125,23 @@ class TuyaHome:
         return bool(self._entries)
 
     def start_listening(self) -> None:
-        """Follow address changes from device broadcasts in a background thread."""
+        """Follow address changes from device broadcasts, and keep readings fresh, in background threads."""
         if self._listener is None:
             self._listener = threading.Thread(target=self._listen, name="tuya-broadcasts", daemon=True)
             self._listener.start()
+        if self._poller is None:
+            self._poller = threading.Thread(target=self._poll, name="tuya-readings", daemon=True)
+            self._poller.start()
 
     async def close(self) -> None:
         """Stop the broadcast listener."""
         self._stop.set()
 
     async def devices(self) -> list[HubDevice]:
-        """Read every device's state in parallel; devices without an address are unreachable."""
-        return list(await asyncio.gather(*(asyncio.to_thread(self._read, entry) for entry in self._entries.values())))
+        """Every device's state: a fresh reading when there is one, else read now (in parallel)."""
+        return list(
+            await asyncio.gather(*(asyncio.to_thread(self._fresh_or_read, entry) for entry in self._entries.values()))
+        )
 
     async def scenes(self) -> list[HubScene]:
         """Tuya scenes live in the cloud; none are offered locally."""
@@ -139,9 +152,26 @@ class TuyaHome:
         raise HomeDeviceError("Tuya scenes are not available")
 
     async def apply(self, device: HubDevice, change: LightChange) -> None:
-        """Change one device."""
+        """Change one device, and remember whether it is now on."""
         entry = self._entries[device.id]
         await asyncio.to_thread(self._apply, entry, change, device.color_only)
+        self._remember(replace(device, is_on=change.on is not False, reachable=True))
+
+    def _remember(self, device: HubDevice) -> None:
+        with self._lock:
+            self._states[device.id] = (self._clock(), device)
+
+    def _fresh_or_read(self, entry: TuyaEntry) -> HubDevice:
+        with self._lock:
+            cached = self._states.get(entry.id)
+        if cached is not None and self._clock() - cached[0] < STATE_FRESH_S:
+            return cached[1]
+        return self._read(entry)
+
+    def _poll(self) -> None:
+        while not self._stop.wait(POLL_EVERY_S):
+            for entry in list(self._entries.values()):
+                self._read(entry)
 
     def _address(self, device_id: str) -> tuple[str, str] | None:
         with self._lock:
@@ -163,6 +193,13 @@ class TuyaHome:
         return self._device_factory(entry, *address)
 
     def _read(self, entry: TuyaEntry) -> HubDevice:
+        """Read one device now; a good reading is remembered, a failed one keeps the last good reading."""
+        device = self._read_now(entry)
+        if device.reachable:
+            self._remember(device)
+        return device
+
+    def _read_now(self, entry: TuyaEntry) -> HubDevice:
         unreachable = HubDevice(
             id=entry.id,
             kind=entry.kind,

@@ -4419,3 +4419,54 @@ async def test_a_touch_from_the_movement_thread_starts_listening_on_the_runtime_
     assert acknowledged == ["antenna_touch"]
     await runtime.close()
     runtime.request_activation("antenna_touch")  # closed: ignored without error
+
+
+def _call_window(loud_s: float, clicks: int = 0) -> tuple[int, Any]:
+    """2.5 s of room noise with a word-like loud run of ``loud_s`` and ``clicks`` 30 ms clinks."""
+    rng = np.random.default_rng(1)
+    samples = rng.normal(0, 60, 40_000)
+    if loud_s:
+        samples[20_000 : 20_000 + int(16_000 * loud_s)] += rng.normal(0, 3_000, int(16_000 * loud_s))
+    for index in range(clicks):
+        start = 2_000 + index * 4_000
+        samples[start : start + 480] += rng.normal(0, 3_000, 480)
+    return 16_000, np.clip(samples, -32768, 32767).astype(np.int16)
+
+
+def test_a_word_length_sound_is_a_voice_and_clinks_are_not() -> None:
+    """The voice test behind trusting a sure wake: a 0.4 s run counts, 30 ms clinks do not."""
+    from reachy_mini_conversation_app.hybrid_runtime import _longest_loud_run_s
+
+    assert _longest_loud_run_s(_call_window(0.4), 0.03, over_floor=4.0, min_rms=300.0) >= 0.36
+    assert _longest_loud_run_s(_call_window(0.0, clicks=8), 0.03, over_floor=4.0, min_rms=300.0) <= 0.06
+
+
+@pytest.mark.parametrize(
+    ("window", "score", "asleep", "wakes"),
+    [
+        (_call_window(0.4), 0.87, False, True),  # "Reggie." for a real call
+        (_call_window(0.0, clicks=8), 0.95, False, False),  # kitchen clinks
+        (_call_window(0.4), 0.6, False, False),  # the wake model is not sure enough
+        (_call_window(0.4), 0.95, True, False),  # asleep: the name must still lead
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name(
+    window: tuple[int, Any], score: float, asleep: bool, wakes: bool
+) -> None:
+    """2026-10-28: three "Richie, lights off" heard as "Reggie.", "Preciso." and "What did she do?" were dropped."""
+    runtime, handler, acknowledged, _listening, asked = _runtime_with_wake_audio("Reggie.", "Reggie.", asleep=asleep)
+    runtime._wake_name_audio = window
+    runtime._wake_score = score
+    seen_audio = window
+
+    async def hears(audio: Any) -> str:
+        return "Reggie." if audio is seen_audio else ""
+
+    runtime._name_check_transcriber = hears
+    runtime._request_transcriber = hears
+    try:
+        result = await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert bool(acknowledged) is wakes and result is wakes
+    finally:
+        await runtime.close()
