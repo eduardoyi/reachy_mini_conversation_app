@@ -4355,3 +4355,67 @@ async def test_gemini_never_gets_the_wake_audio_that_leads_the_local_clip() -> N
         assert "what is a comet?" in context and "we were saying" not in context
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_an_antenna_touch_wakes_him_from_sleep_and_listens_for_the_request() -> None:
+    """A touch needs no name: asleep or not, he reacts, records the request and the talk at the touch stays context."""
+    seen: list[str] = []
+    asked: list[float] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def accurate(audio: AudioFrame) -> str:
+        asked.append(audio[1].size / audio[0])
+        return "what time is it"
+
+    processor = _processor_with_open_wake_segment("we were talking about dinner")
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        acknowledgement_callback=acknowledged.append,
+        quick_commands=quick,
+        request_transcriber=accurate,
+        name_check_transcriber=accurate,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    runtime._asleep = True
+    try:
+        activation = asyncio.create_task(runtime.activate("antenna_touch"))
+        await wait_until(lambda: runtime._request_clip is not None)
+        assert acknowledged == ["antenna_touch"] and not runtime._asleep  # no name check before reacting
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        assert seen == ["what time is it"]
+        assert asked == [pytest.approx(1.5)]  # only the request clip: no wake audio, no name check
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_touch_from_the_movement_thread_starts_listening_on_the_runtime_loop() -> None:
+    """The movement worker reports touches from its own thread; ignored before start, after close."""
+    handler = FakeHandler()
+    acknowledged: list[str] = []
+    runtime = HybridRuntime(lambda: handler, acknowledgement_callback=acknowledged.append)
+    runtime.request_activation("antenna_touch")  # before the runtime ran on a loop: nothing happens
+    await asyncio.sleep(0.05)
+    assert acknowledged == []
+
+    await runtime.handle_frame((16_000, np.zeros(160, dtype=np.int16)))  # binds the runtime to this loop
+    thread = threading.Thread(target=runtime.request_activation, args=("antenna_touch",))
+    thread.start()
+    thread.join()
+    await handler.started.wait()
+    assert acknowledged == ["antenna_touch"]
+    await runtime.close()
+    runtime.request_activation("antenna_touch")  # closed: ignored without error

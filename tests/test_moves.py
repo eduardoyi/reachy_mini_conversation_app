@@ -12,9 +12,11 @@ from reachy_mini_conversation_app.moves import (
     ATTENTIVE_HOLD_S,
     ATTENTIVE_ANTENNAS,
     PERK_MAX_SPEED_RAD_S,
+    ANTENNA_TOUCH_PRESS_RAD,
     GazeTurnMove,
     BreathingMove,
     MovementManager,
+    AntennaTouchDetector,
     ActivationAcknowledgementMove,
     head_world_yaw,
 )
@@ -528,3 +530,82 @@ def test_sleep_and_wake_ease_between_the_sleep_and_neutral_poses() -> None:
     wake = wake_move()
     wake.begin((np.asarray(SLEEP_HEAD_POSE), (-3.05, 3.05), 0.0))
     assert np.allclose(wake.evaluate(wake.duration)[0], np.eye(4), atol=1e-3)
+
+
+def _touch_ticks(
+    detector: AntennaTouchDetector,
+    seconds: float,
+    target: Callable[[float], tuple[float, float]],
+    measured: Callable[[float], tuple[float, float]],
+    start: float = 0.0,
+) -> list[float]:
+    """Feed the detector at the 20 Hz check rate; return when touches fired."""
+    fired = []
+    for step in range(round(seconds / 0.05)):
+        now = round(start + step * 0.05, 3)
+        if detector.update(now, target(now), measured(now)):
+            fired.append(now)
+    return fired
+
+
+def test_antenna_sway_and_the_perk_are_not_touches() -> None:
+    """Breathing sways 15 deg at 0.5 Hz and the perk moves at 6 rad/s; a measurement 0.1 s behind is not a touch."""
+
+    def sway(t: float) -> tuple[float, float]:
+        angle = np.deg2rad(15) * np.sin(2 * np.pi * 0.5 * t)
+        return (float(angle), float(-angle))
+
+    def perk(t: float) -> tuple[float, float]:
+        angle = min(0.61, 6.0 * (t % 2.0))
+        return (-angle, angle)
+
+    for target in (sway, perk):
+        detector = AntennaTouchDetector()
+        assert _touch_ticks(detector, 10.0, target, lambda t, target=target: target(t - 0.1)) == []
+        assert detector.peak_deviation < ANTENNA_TOUCH_PRESS_RAD
+
+
+def test_a_held_bend_is_one_touch_and_a_bump_is_none() -> None:
+    """Held 20 deg off for a moment: one touch while held; a 0.1 s bump or a second press within 2 s: none."""
+    still = (-0.17, 0.17)
+    detector = AntennaTouchDetector()
+    bent = np.deg2rad(20)
+
+    def held(t: float) -> tuple[float, float]:
+        return (still[0] + bent, still[1]) if 1.0 <= t < 3.0 else still
+
+    fired = _touch_ticks(detector, 4.0, lambda t: still, held)
+    assert fired == [pytest.approx(1.2, abs=0.06)]
+
+    def bump(t: float) -> tuple[float, float]:
+        return (still[0], still[1] - bent) if 5.0 <= t < 5.1 else still
+
+    assert _touch_ticks(detector, 1.0, lambda t: still, bump, start=4.5) == []
+
+    def twice(t: float) -> tuple[float, float]:
+        return (still[0] + bent, still[1]) if 6.0 <= t < 6.5 or 7.0 <= t < 7.5 or 10.0 <= t < 10.5 else still
+
+    assert _touch_ticks(detector, 6.0, lambda t: still, twice, start=5.5) == [
+        pytest.approx(6.2, abs=0.06),
+        pytest.approx(10.2, abs=0.06),
+    ]
+
+
+def test_the_worker_reports_a_touch_from_the_robots_measured_antennas() -> None:
+    """The control loop compares the cached measured antennas with its own targets and calls the handler."""
+    robot = MagicMock()
+    touches: list[bool] = []
+    manager = MovementManager(robot, on_antenna_touch=lambda: touches.append(True))
+    manager._last_commanded_pose = (np.eye(4), (-0.17, 0.17), 0.0)
+    robot.get_current_joint_positions.return_value = ([0.0] * 7, [-0.17, 0.17])
+    for step in range(10):
+        manager._check_antenna_touch(100.0 + step * 0.05)
+    assert touches == []
+
+    robot.get_current_joint_positions.return_value = ([0.0] * 7, [0.3, 0.17])
+    for step in range(10, 20):
+        manager._check_antenna_touch(100.0 + step * 0.05)
+    assert touches == [True]
+
+    robot.get_current_joint_positions.side_effect = RuntimeError("no state yet")
+    manager._check_antenna_touch(200.0)  # a missing reading is skipped, not raised

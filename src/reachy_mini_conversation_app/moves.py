@@ -25,6 +25,7 @@ Safety
 """
 
 from __future__ import annotations
+import math
 import time
 import logging
 import threading
@@ -225,6 +226,55 @@ class GazeTurnMove(Move):  # type: ignore
         return head, np.asarray(start_antennas, dtype=np.float64), body_yaw
 
 
+# Antenna touch: an antenna held this far from where it was commanded counts as a touch, and is released
+# once back within RELEASE (Pollen's daemon watcher uses the same 0.25 / 0.10 rad). The antennas sway and perk
+# on their own, so the measured position is compared with every target of the last LAG_S, never just the
+# latest, and must stay out for HOLD_S.
+ANTENNA_TOUCH_PRESS_RAD = 0.25
+ANTENNA_TOUCH_RELEASE_RAD = 0.10
+ANTENNA_TOUCH_HOLD_S = 0.2
+ANTENNA_TOUCH_LAG_S = 0.15
+ANTENNA_TOUCH_COOLDOWN_S = 2.0
+ANTENNA_TOUCH_CHECK_PERIOD_S = 0.05
+
+
+class AntennaTouchDetector:
+    """Notice a person bending an antenna: the measured antennas stay away from every recent target."""
+
+    def __init__(self) -> None:
+        """Start released, with no target history."""
+        self._targets: deque[tuple[float, Tuple[float, float]]] = deque()
+        self._out_since: float | None = None
+        self._pressed = False
+        self._last_touch = -math.inf
+        self.peak_deviation = 0.0  # largest deviation seen while released, for tuning from the logs
+
+    def update(self, now: float, target: Tuple[float, float], measured: Tuple[float, float]) -> bool:
+        """Record this tick's target and measurement; return True once per touch."""
+        self._targets.append((now, (float(target[0]), float(target[1]))))
+        while self._targets and now - self._targets[0][0] > ANTENNA_TOUCH_LAG_S:
+            self._targets.popleft()
+        deviation = min(max(abs(measured[0] - left), abs(measured[1] - right)) for _, (left, right) in self._targets)
+        if self._pressed:
+            if deviation <= ANTENNA_TOUCH_RELEASE_RAD:
+                self._pressed = False
+            return False
+        if deviation < ANTENNA_TOUCH_PRESS_RAD:
+            self._out_since = None
+            self.peak_deviation = max(self.peak_deviation, deviation)
+            return False
+        if self._out_since is None:
+            self._out_since = now
+        if now - self._out_since < ANTENNA_TOUCH_HOLD_S:
+            return False
+        self._pressed = True
+        self._out_since = None
+        if now - self._last_touch < ANTENNA_TOUCH_COOLDOWN_S:
+            return False
+        self._last_touch = now
+        return True
+
+
 SLEEP_TRANSITION_S = 2.0
 WAKE_TRANSITION_S = 1.5
 
@@ -346,13 +396,19 @@ class MovementManager:
         self,
         current_robot: ReachyMini,
         speaker_direction: Callable[[], float | None] | None = None,
+        on_antenna_touch: Callable[[], None] | None = None,
     ):
         """Initialize movement manager.
 
         ``speaker_direction`` returns the world yaw recent speech came from, or None; when given,
-        the robot turns toward whoever starts talking.
+        the robot turns toward whoever starts talking. ``on_antenna_touch`` is called from the worker
+        thread when someone bends an antenna.
         """
         self.current_robot = current_robot
+        self._on_antenna_touch = on_antenna_touch
+        self._antenna_touch = AntennaTouchDetector()
+        self._next_antenna_check = 0.0
+        self._next_antenna_peak_log = 0.0
         self._head_tracking = False
         self._speaker_direction = speaker_direction
         # World yaw the robot faces when idle: toward the last speaker, 0 when facing forward.
@@ -973,6 +1029,38 @@ class MovementManager:
             with self._status_lock:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
+    def _check_antenna_touch(self, now: float) -> None:
+        """Compare the measured antennas with recent targets and report a touch (worker thread only)."""
+        if self._on_antenna_touch is None or now < self._next_antenna_check:
+            return
+        self._next_antenna_check = now + ANTENNA_TOUCH_CHECK_PERIOD_S
+        try:
+            # Cached state from the robot's stream; no I/O here (as for breathing).
+            _, measured = self.current_robot.get_current_joint_positions()
+            measured_pair = (float(measured[0]), float(measured[1]))
+        except Exception as e:
+            logger.debug("Antenna touch check skipped: %s", e)
+            return
+        with self._status_lock:
+            target = self._last_commanded_pose[1]
+        touched = self._antenna_touch.update(now, target, measured_pair)
+        if now >= self._next_antenna_peak_log:
+            if self._next_antenna_peak_log:
+                logger.info(
+                    "Antenna touch: largest untouched deviation in 10 min %.0f deg (touch at %.0f deg)",
+                    math.degrees(self._antenna_touch.peak_deviation),
+                    math.degrees(ANTENNA_TOUCH_PRESS_RAD),
+                )
+            self._antenna_touch.peak_deviation = 0.0
+            self._next_antenna_peak_log = now + 600.0
+        if not touched:
+            return
+        logger.info("Antenna touched")
+        try:
+            self._on_antenna_touch()
+        except Exception as e:
+            logger.warning("Antenna touch handler failed: %s", e)
+
     def _update_frequency_stats(
         self,
         loop_start: float,
@@ -1156,6 +1244,7 @@ class MovementManager:
 
             # 5) Single set_target call - the only control point
             self._issue_control_command(head, antennas_cmd, body_yaw)
+            self._check_antenna_touch(loop_start)
 
             # 6) Adaptive sleep to align to next tick, then publish shared state
             sleep_time, freq_stats = self._schedule_next_tick(loop_start, freq_stats)

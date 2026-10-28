@@ -154,3 +154,4 @@ skips, 2 expected warnings; ruff, ruff format and mypy clean.
 |------|--------|
 | 2026-10-25 | Initial implementation: antenna perk and hold, head lift replaces the nod. |
 | 2026-10-28 | Waking from sleep: no head lift after the rise (it dipped the head back down); `test_sleep_holds_the_pose_until_an_activation_wakes_him`. |
+| 2026-10-28 | Bending an antenna wakes him too (same cue); see [antenna-touch-wake.md](../plans/antenna-touch-wake.md). |

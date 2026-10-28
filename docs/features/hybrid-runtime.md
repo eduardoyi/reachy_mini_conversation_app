@@ -933,3 +933,17 @@ clip reads "Richie, lights out." and the request is what follows the name (`requ
 on, and its text hint is only what followed the name, so words said before the name stay local.
 Tests: `test_the_request_clip_starts_with_the_wake_audio_so_a_first_word_said_early_is_kept`,
 `test_gemini_never_gets_the_wake_audio_that_leads_the_local_clip`.
+
+### Antenna touch wakes him — 2026-10-28
+
+Bending an antenna wakes Reachy as hearing his name does. The movement worker detects the touch
+(`moves.AntennaTouchDetector`: measured antennas held 0.25 rad from every target of the last 0.15 s
+for 0.2 s, re-armed within 0.10 rad, one per 2 s) and calls `HybridRuntime.request_activation(
+"antenna_touch")` from its thread. `antenna_touch` is in `_LISTENING_WAKES`, so it takes the
+acoustic-wake listening path (cue, request clip, quick commands, else Gemini) with no name check; it also
+wakes him from sleep, the sentence in progress stays context, and he does not turn toward the last
+voice. `ANTENNA_TOUCH_WAKE=0` turns it off. Every 10 minutes the log notes the largest deviation seen
+without a touch. Plan: [antenna-touch-wake.md](../plans/antenna-touch-wake.md). Tests:
+`test_an_antenna_touch_wakes_him_from_sleep_and_listens_for_the_request`,
+`test_a_touch_from_the_movement_thread_starts_listening_on_the_runtime_loop` and the antenna touch
+tests in `tests/test_moves.py`.

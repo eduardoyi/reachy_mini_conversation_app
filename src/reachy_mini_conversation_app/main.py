@@ -381,9 +381,17 @@ def run(
             # The mic array is in the head, so its directions are relative to where the head faces.
             head_yaw=lambda: head_world_yaw(robot.get_current_head_pose()),
         )
+    # Filled once the hybrid runtime exists: bending an antenna wakes Reachy as his name does.
+    antenna_touch_handlers: list[Callable[[], None]] = []
+
+    def on_antenna_touch() -> None:
+        for handler in antenna_touch_handlers:
+            handler()
+
     movement_manager = MovementManager(
         current_robot=robot,
         speaker_direction=speaker_direction.recent_speech_yaw if speaker_direction is not None else None,
+        on_antenna_touch=on_antenna_touch if config.ANTENNA_TOUCH_WAKE else None,
     )
     if started_asleep:
         movement_manager.go_to_sleep()
@@ -454,10 +462,11 @@ def run(
                 startup_voice = stream_manager.get_startup_voice() or startup_voice
             return build_handler(startup_voice)
 
-        def queue_activation_acknowledgement(_reason: str) -> None:
+        def queue_activation_acknowledgement(reason: str) -> None:
             """Queue a small movement-layer acknowledgment without motor I/O, then face the speaker."""
             movement_manager.acknowledge_activation()
-            if config.SPEAKER_FOLLOWING_ENABLED:
+            # Whoever bent an antenna is right there; the last voice heard may be someone else's.
+            if config.SPEAKER_FOLLOWING_ENABLED and reason != "antenna_touch":
                 movement_manager.turn_toward_speaker()
             if face_service is not None:
                 # Start recognizing now so the name is known when the provider's startup context is sent.
@@ -604,6 +613,7 @@ def run(
             listening_observer=on_listening,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
+        antenna_touch_handlers.append(lambda: hybrid_runtime.request_activation("antenna_touch"))
         runtime_for_tools = hybrid_runtime
 
         def go_to_standby() -> dict[str, Any]:

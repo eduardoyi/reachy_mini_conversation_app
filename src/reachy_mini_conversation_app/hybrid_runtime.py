@@ -260,6 +260,9 @@ ACTIVATION_CUE = (
     "The user has just called you by name and is talking to you now. Their request follows and is addressed "
     "to you; answer it."
 )
+# Wakes after which Reachy listens for the request himself (antenna cue, request clip, quick commands): hearing
+# his name, or someone bending an antenna (a touch needs no name check and wakes him from sleep too).
+_LISTENING_WAKES = frozenset({"acoustic_wake", "antenna_touch"})
 # Whisper spellings of the wake word; the acoustic wake keeps the word itself local.
 _WAKE_WORD_VARIANTS = (
     r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi|"
@@ -1151,11 +1154,11 @@ class HybridRuntime:
                     self._clear_postactivation_queue()
                     self._postactivation_speech_observed = False
                     self._pending_acoustic_ack_generation = (
-                        generation if reason == "acoustic_wake" and not addressed_text else None
+                        generation if reason in _LISTENING_WAKES and not addressed_text else None
                     )
                     processor = self._context_processor
                     clip_request = (
-                        reason == "acoustic_wake" and not addressed_text and self._request_transcriber is not None
+                        reason in _LISTENING_WAKES and not addressed_text and self._request_transcriber is not None
                     )
                     self._request_clip = [] if clip_request else None
                     self._request_clip_late = [] if clip_request else None
@@ -1165,7 +1168,7 @@ class HybridRuntime:
                     if set_request_mode is not None and not clip_request:
                         set_request_mode(True)  # the request is transcribed with the accurate model
                     transcribe_request = (
-                        reason == "acoustic_wake"
+                        reason in _LISTENING_WAKES
                         and not addressed_text
                         and processor is not None
                         and processor.config.strategy is AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
@@ -1180,14 +1183,15 @@ class HybridRuntime:
                         self._clear_wake_followup_waiter()
                         self._wake_followup_future = asyncio.get_running_loop().create_future()
                         self._wake_followup_after_sequence = processor.latest_sequence
-                        if open_at_wake:
+                        if open_at_wake and reason == "acoustic_wake":
+                            # A touch can come mid-sentence: that sentence is context, never the request.
                             wake_segment_sequence = processor.latest_sequence
                     asleep = self._asleep
                     # The audio the wake model fired on: Whisper checks the name in it before Reachy reacts.
                     wake_audio = self._wake_name_audio if reason == "acoustic_wake" else None
                     self._wake_name_audio = None
                     # Without that audio, asleep, an acoustic wake counts once the transcript has the name first.
-                    confirm_wake = asleep and transcribe_request and wake_audio is None
+                    confirm_wake = asleep and transcribe_request and wake_audio is None and reason == "acoustic_wake"
                     if asleep and not confirm_wake and wake_audio is None:
                         self._asleep = False
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
@@ -1247,7 +1251,7 @@ class HybridRuntime:
             # What quick commands may act on: only words addressed to Reachy, never an overheard sentence.
             quick_text = (request_after_wake(addressed_text) or addressed_text) if addressed_text else ""
             segment_quick_text = ""
-            if reason == "acoustic_wake" and self._context_processor is not None:
+            if reason in _LISTENING_WAKES and self._context_processor is not None:
                 quick_text = ""
                 await self._settle_local_transcript()
                 wake_text = self._segment_text(wake_segment_sequence)
@@ -2594,6 +2598,24 @@ class HybridRuntime:
             self._music_wind_down_requested_at = None
             self._last_conversation_activity = self._clock()
         logger.info("Music paused; conversation uses the normal inactivity timeout again")
+
+    def request_activation(self, reason: str) -> None:
+        """Start an activation from another thread (an antenna touch); ignored before the runtime has started."""
+        with self._lifecycle_lock:
+            loop = self._owner_loop
+            closed = self._closed
+        if loop is None or closed or loop.is_closed():
+            return
+
+        def start() -> None:
+            task = asyncio.create_task(self.activate(reason), name=f"hybrid-{reason}-activation")
+            self._local_event_tasks.add(task)
+            task.add_done_callback(self._local_event_tasks.discard)
+
+        try:
+            loop.call_soon_threadsafe(start)
+        except RuntimeError:  # the loop closed between the check and the call
+            logger.debug("Activation request dropped: runtime loop closed")
 
     def request_close(self, reason: str) -> bool:
         """Close the conversation once Reachy's reply has finished playing; thread-safe.

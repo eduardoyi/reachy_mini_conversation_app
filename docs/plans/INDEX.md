@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Bend an antenna to wake Reachy](antenna-touch-wake.md) | `in-progress` | 2026-10-28 | A held antenna bend (14° from every recent target, 0.2 s) wakes him like his name, even from sleep, no name check; Pollen's daemon version only works with no app running; robot check pending |
 | [Whisper checks the name before every wake](wake-name-check.md) | `in-progress` | 2026-10-28 | Every acoustic wake waits for whisper-small (then turbo) to hear the name in the 2.5 s it fired on; threshold 0.95 → 0.3 on the mini; offline 27 → 34 of 38 calls, 59 → 0 false wakes; live check pending |
 | [Gentler sleep mode, then no name check](sleep-wake-check.md) | `in-progress` | 2026-10-27 | Restarts start awake; asleep, the accurate model rechecks the name in the wake audio; drop the check once labelled clips show few false wakes |
 | [Faster local commands](local-command-speed.md) | `in-progress` | 2026-10-27 | Whisper server encodes each clip once (turbo 3.19 → 1.64 s on the mini), request clips skip the queue, dated logs kept 7 days; MLX benchmarked and not adopted |
