@@ -34,7 +34,10 @@ audio (about 0.4 s, up to about 2 s); asleep, the name must come first (see
 - **No answer:** the pose relaxes 8 s after the wake or the user's last words,
   when the conversation closes, or when Reachy goes to sleep.
 - **Waking from sleep:** the perk swings the antennas up from the folded sleep
-  pose at no more than 6 rad/s.
+  pose at no more than 6 rad/s. The 1.5 s rise to the neutral pose is the
+  acknowledgement; there is no head lift after it. The lift started from the sleep
+  pose captured at the wake, so it pulled the head back down after the rise and
+  then up again (2026-10-28).
 
 ## Current architecture and target changes
 
@@ -150,3 +153,4 @@ skips, 2 expected warnings; ruff, ruff format and mypy clean.
 | Date | Change |
 |------|--------|
 | 2026-10-25 | Initial implementation: antenna perk and hold, head lift replaces the nod. |
+| 2026-10-28 | Waking from sleep: no head lift after the rise (it dipped the head back down); `test_sleep_holds_the_pose_until_an_activation_wakes_him`. |

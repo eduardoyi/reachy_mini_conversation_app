@@ -1,7 +1,7 @@
 # Feature: home lights (IKEA DIRIGERA and Tuya)
 
 - Status: `in-progress` (built and unit-tested; live pairing and control pending)
-- Last updated: 2026-10-17
+- Last updated: 2026-10-28
 
 ## Overview
 
@@ -45,7 +45,10 @@ integration) is the path that scales.
   - Addresses come from `snapshot.json`. A background thread then follows Tuya
     UDP broadcasts on ports 6666, 6667 and 7000 (`tinytuya.decrypt_udp`), so a
     DHCP change is picked up.
-  - It drives `BulbDevice` and `OutletDevice` with a 2 s connect timeout:
+  - It drives `BulbDevice` and `OutletDevice` with a 2 s connect timeout. Reads and
+    on/off steps that get a network error (TinyTuya `901`/`905`) are tried again
+    every 0.5 s until 6 s after they began (`REACH_DEADLINE_S`); other errors, such
+    as a wrong key (`914`), fail at once:
     - color: `set_hsv`, keeping the current color brightness;
     - warmth: `set_white_percentage`;
     - brightness: `set_brightness_percentage`, which handles color mode.
@@ -93,7 +96,8 @@ integration) is the path that scales.
   device that shares a name with an online one, such as an old bulb left in an
   app, is ignored. `set`
   patches the matched devices concurrently, skips unreachable ones and reports
-  them. Warmth maps onto each light's kelvin range: warm is the warmest end,
+  them, with an instruction to tell the person which lights did not respond, even
+  when others changed. Warmth maps onto each light's kelvin range: warm is the warmest end,
   neutral the middle, cool the coolest. The hub reports `colorTemperatureMin`
   and `colorTemperatureMax` in either order, so the range is sorted.
 - Wiring: `main._build_home_devices` puts a `HomeDevices` on
@@ -138,7 +142,12 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
 - The token grants full control of the hub. It lives only in `.env` and is never
   logged. Tuya local keys stay in `~/.config/reachy-tuya` and are never logged.
 - Tuya scenes live in the cloud, so none are offered. A Tuya device that is
-  switched off at the wall reports as unreachable. A Tuya light switched off with
+  switched off at the wall reports as unreachable.
+- The Living and Dining lamp plugs drop off the network for 5-10 s at a time while
+  still broadcasting (2026-10-28 on the Mac mini: no ping reply, connections timing
+  out, then fine seconds later). With one 2 s try, "lights" skipped both and
+  Reachy said it was done. The 6 s retry covers those gaps; a plug that is really
+  off now makes a lights command about 6 s slower before it is reported. A Tuya light switched off with
   its own remote can keep reporting "on" while dark (the TV strip, 2026-10-19), so
   a plain "on" for a light that already reports on switches it off and on again.
 - New dependency: `tinytuya` (MIT; pulls in `cryptography`, `requests` and
@@ -154,5 +163,6 @@ trial that is only needed while running the wizard. On 2026-10-17 it found:
   brightness, warmth and colors; plugs; offline duplicates; unreachable lights;
   status; scenes; errors; the tool loading only once something is set up.
 - `tests/test_tuya_devices.py`: wizard-file filtering, state reading, bulb and
-  plug commands, relighting a strip that wrongly reports on,
+  plug commands, relighting a strip that wrongly reports on, retrying a plug that
+  misses connections (and stopping at the deadline or on a key error),
   `LightChange.for_device`, and merging with one system down.

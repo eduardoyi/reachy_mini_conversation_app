@@ -341,7 +341,9 @@ class HomeLights(Tool):
                 logger.warning("home_lights: %s failed: %s: %s", device.name, type(result).__name__, result)
         if failed:
             response["failed"] = failed
-        if failed or (unreachable and not changed):
-            # A device that failed once fails again; retrying only loops (seen live with a color bug).
+        if failed or unreachable:
+            # A device that failed once fails again; retrying only loops (seen live with a color bug). Name the
+            # ones left out even when others changed: on 2026-10-28 "lights" lit the hub lights, skipped both
+            # plugs, and Reachy said it was done.
             response["instruction"] = "Tell the person which lights did not respond. Do not retry this change."
         return response

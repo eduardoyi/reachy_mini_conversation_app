@@ -625,9 +625,15 @@ class MovementManager:
 
     def _handle_sleeping_command(self, command: str, payload: Any) -> bool:
         """Apply a command while asleep; return True when it is fully handled here (worker thread only)."""
-        if command in ("acknowledge_activation", "wake_up") or (command == "set_conversation_active" and payload):
+        if command == "acknowledge_activation":
+            # Rising out of the sleep pose is the acknowledgement. The usual head lift would start from the sleep
+            # pose captured now, so it pulled the head back down after the rise and then up again (2026-10-28).
             self._wake()
-            return command == "wake_up"  # the acknowledgement and conversation start still run, after waking
+            self._attentive_until = self._now() + ATTENTIVE_HOLD_S
+            return True
+        if command == "wake_up" or (command == "set_conversation_active" and payload):
+            self._wake()
+            return command == "wake_up"  # the conversation start still runs, after waking
         if command == "clear_queue":
             # Stopping a conversation keeps the sleep pose, even when it has not started yet.
             self.move_queue = deque(move for move in self.move_queue if move is self._sleep_hold)

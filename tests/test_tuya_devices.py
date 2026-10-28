@@ -228,3 +228,76 @@ async def test_home_devices_merges_systems_and_survives_one_failing() -> None:
 
     with pytest.raises(HomeDeviceError):
         await HomeDevices({"tuya": tuya}).devices()
+
+
+class _NappingPlug(_FakePlug):
+    """A Wi-Fi plug in power saving: the first ``misses`` calls get ``error`` (TinyTuya's reply), then it answers."""
+
+    def __init__(self, misses: int, error: str = "905") -> None:
+        super().__init__()
+        self.misses = misses
+        self.error = error
+        self.tries = 0
+
+    def _miss(self) -> dict[str, Any] | None:
+        self.tries += 1
+        if self.tries <= self.misses:
+            return {"Error": "Network Error: Device Unreachable", "Err": self.error, "Payload": None}
+        return None
+
+    def status(self) -> dict[str, Any]:
+        return self._miss() or super().status()
+
+    def turn_off(self) -> dict[str, Any]:
+        return self._miss() or super().turn_off()
+
+
+def _napping_home(tmp_path: Path, plug: _NappingPlug) -> tuple[TuyaHome, list[float]]:
+    """Return a home whose clock only moves when it sleeps, so the retry deadline is exact."""
+    now = [0.0]
+    pauses: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+        now[0] += seconds
+
+    home = TuyaHome(
+        _write_wizard_files(tmp_path),
+        device_factory=lambda entry, _ip, _version: _FakeBulb() if entry.kind == "light" else plug,
+        clock=lambda: now[0],
+        sleep=sleep,
+    )
+    return home, pauses
+
+
+@pytest.mark.asyncio
+async def test_a_plug_that_misses_a_few_connections_is_still_read_and_switched(tmp_path: Path) -> None:
+    """2026-10-28: the lamp plugs missed connections for a few seconds; a short retry reaches them."""
+    plug = _NappingPlug(misses=2)
+    home, pauses = _napping_home(tmp_path, plug)
+    _strip, lamp, _offline = await home.devices()
+    assert (lamp.reachable, lamp.is_on) == (True, True)
+    assert pauses == [0.5, 0.5]
+
+    plug.tries, plug.misses = 0, 3
+    await home.apply(lamp, LightChange(on=False))
+    assert plug.calls == ["off"]
+
+
+@pytest.mark.asyncio
+async def test_a_plug_still_missing_at_the_deadline_is_unreachable(tmp_path: Path) -> None:
+    """Retries stop about 6 s after the read began; the plug is then reported unreachable."""
+    plug = _NappingPlug(misses=100)
+    home, pauses = _napping_home(tmp_path, plug)
+    _strip, lamp, _offline = await home.devices()
+    assert not lamp.reachable
+    assert sum(pauses) < 6.0 and plug.tries == len(pauses) + 1
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_key_is_not_retried(tmp_path: Path) -> None:
+    """Only network errors are worth waiting for; a key or version error fails at once."""
+    plug = _NappingPlug(misses=100, error="914")
+    home, pauses = _napping_home(tmp_path, plug)
+    _strip, lamp, _offline = await home.devices()
+    assert not lamp.reachable and pauses == [] and plug.tries == 1

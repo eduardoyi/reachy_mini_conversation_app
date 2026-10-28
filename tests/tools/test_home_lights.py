@@ -314,3 +314,12 @@ async def test_a_routine_runs_as_a_scene_and_is_listed(tmp_path: Any) -> None:
     ]  # the offline lamp is skipped
     status = await HomeLights()(_deps(home), action="status")
     assert status["scenes"] == ["movie mode", "lights", "good night"]
+
+
+@pytest.mark.asyncio
+async def test_lights_left_out_are_named_even_when_others_changed() -> None:
+    """One light switched and one unreachable: the reply still tells the person which one did not respond."""
+    home = _FakeHome([LAMP, OFFLINE])
+    result = await HomeLights()(_deps(home), action="set", target="all", on=True)
+    assert (result["ok"], result["changed"], result["unreachable"]) == (True, ["Lámpara de pie"], ["Kids lamp"])
+    assert "which lights did not respond" in result["instruction"]

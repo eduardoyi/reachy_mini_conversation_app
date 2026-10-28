@@ -506,9 +506,10 @@ def test_sleep_holds_the_pose_until_an_activation_wakes_him() -> None:
     manager.acknowledge_activation()
     manager._poll_signals(manager._now())
     assert not manager._sleeping
-    wake, ack = manager.move_queue
+    # The rise is the acknowledgement: a head lift from the captured sleep pose would dip the head after it.
+    [wake] = manager.move_queue
     assert isinstance(wake, PoseTransitionMove) and wake.duration < float("inf")
-    assert isinstance(ack, ActivationAcknowledgementMove)
+    assert manager._attentive_until is not None
 
 
 def test_sleep_and_wake_ease_between_the_sleep_and_neutral_poses() -> None:

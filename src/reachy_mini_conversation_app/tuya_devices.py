@@ -9,6 +9,7 @@ broadcasts every Tuya device sends on UDP 6666/6667/7000. No Tuya cloud call hap
 
 from __future__ import annotations
 import json
+import time
 import select
 import socket
 import asyncio
@@ -31,6 +32,12 @@ LIGHT_CATEGORIES: Final[frozenset[str]] = frozenset({"dj", "dd", "dc", "xdd"})
 PLUG_CATEGORIES: Final[frozenset[str]] = frozenset({"cz", "pc", "kg"})
 CONNECT_TIMEOUT_S: Final[float] = 2.0
 BROADCAST_PORTS: Final[tuple[int, ...]] = (6666, 6667, 7000)
+# Wi-Fi plugs saving power miss connections for 5-10 s at a time while still broadcasting (2026-10-28: the
+# living and dining lamps were skipped by "lights"). Each step is retried on a network error until this long
+# after the read or change began, pausing between tries; other errors (a wrong key) fail at once.
+REACH_DEADLINE_S: Final[float] = 6.0
+RETRY_PAUSE_S: Final[float] = 0.5
+NETWORK_ERRORS: Final[frozenset[str]] = frozenset({"901", "905"})  # TinyTuya: cannot connect, unreachable
 # Nominal white range of Tuya CCT lights; they only take a 0-100 % position.
 TUYA_KELVIN_RANGE: Final[tuple[int, int]] = (2700, 6500)
 
@@ -91,12 +98,16 @@ class TuyaHome:
         devices_file: Path = DEFAULT_DEVICES_FILE,
         *,
         device_factory: Callable[[TuyaEntry, str, str], Any] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Load the wizard's files; ``device_factory`` replaces TinyTuya in tests."""
+        """Load the wizard's files; ``device_factory``, ``clock`` and ``sleep`` replace TinyTuya and time in tests."""
         self._entries = {entry.id: entry for entry in load_entries(devices_file)}
         self._addresses = load_addresses(devices_file)
         self._lock = threading.Lock()
         self._device_factory = device_factory or _tinytuya_device
+        self._clock = clock
+        self._sleep = sleep
         self._stop = threading.Event()
         self._listener: threading.Thread | None = None
 
@@ -136,6 +147,15 @@ class TuyaHome:
         with self._lock:
             return self._addresses.get(device_id)
 
+    def _patiently(self, call: Callable[[], Any], deadline: float) -> Any:
+        """Run one TinyTuya call, again after a short pause while it reports a network error and time remains."""
+        while True:
+            result = call()
+            unreachable = isinstance(result, dict) and str(result.get("Err")) in NETWORK_ERRORS
+            if not unreachable or self._clock() + RETRY_PAUSE_S >= deadline:
+                return result
+            self._sleep(RETRY_PAUSE_S)
+
     def _connect(self, entry: TuyaEntry) -> Any | None:
         address = self._address(entry.id)
         if address is None:
@@ -157,9 +177,10 @@ class TuyaHome:
         device = self._connect(entry)
         if device is None:
             return unreachable
+        deadline = self._clock() + REACH_DEADLINE_S
         try:
             if entry.kind == "outlet":
-                dps = (device.status() or {}).get("dps")
+                dps = (self._patiently(device.status, deadline) or {}).get("dps")
                 if not isinstance(dps, dict):
                     return unreachable
                 return HubDevice(
@@ -171,7 +192,7 @@ class TuyaHome:
                     reachable=True,
                     source="tuya",
                 )
-            state = device.state()
+            state = self._patiently(device.state, deadline)
             if not isinstance(state, dict) or "Error" in state:
                 return unreachable
             dpset = getattr(device, "dpset", {}) or {}
@@ -200,9 +221,10 @@ class TuyaHome:
         device = self._connect(entry)
         if device is None:
             raise HomeDeviceError(f"{entry.name} is not on the network")
+        deadline = self._clock() + REACH_DEADLINE_S
         results = []
         if change.on is False:
-            results.append(device.turn_off())
+            results.append(self._patiently(device.turn_off, deadline))
         else:
             if change.on:
                 plain_on = change.brightness is None and change.warmth is None and change.color is None
@@ -210,7 +232,7 @@ class TuyaHome:
                     # A strip switched off with its own remote can keep reporting "on" while dark, so a plain
                     # "on" changes nothing; switching it off first makes "on" light it (2026-10-19, TV Lights).
                     results.append(device.turn_off())
-                results.append(device.turn_on())
+                results.append(self._patiently(device.turn_on, deadline))
             if entry.kind == "light":
                 in_colour = change.warmth is None and device.get_mode() == "colour"
                 if color_only and not in_colour and change.color is None:
