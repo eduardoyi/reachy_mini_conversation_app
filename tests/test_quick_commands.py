@@ -541,6 +541,10 @@ def test_guess_language_picks_the_household_language(text: str, language: str) -
         ("Dile a Maribel que compre leche.", "es"),
         ("Chiedi a Maribel di prenotare.", "it"),
         ("Pergunta à Maribel a que horas é o jantar.", "pt"),
+        ("Le puedes preguntar a Maribel qué tengo en mi agenda para el viernes?", "es"),
+        ("¿Puedes pedirle a Maribel que reserve mesa?", "es"),
+        ("Puoi chiedere a Maribel cosa c'è in agenda?", "it"),
+        ("Podes perguntar à Maribel se há reuniões amanhã?", "pt"),
         ("ask Marybel what's on my calendar", "en"),
     ],
 )
@@ -590,7 +594,7 @@ async def test_asking_maribel_says_so_then_speaks_her_reply(_thinking_moves: lis
 
     reply = await runner.handle("Pregúntale a Maribel qué día es hoy")
 
-    assert reply is not None and reply.kind == "maribel"
+    assert reply is not None and reply.kind == "maribel" and reply.whole_request
     assert reply.text == MARIBEL_ASKING["es"] and reply.after is not None
     assert reply.after_timeout_s is not None and reply.after_timeout_s > 10
     assert deps.maribel.sent == []  # she is asked after Reachy says so

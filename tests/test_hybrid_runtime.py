@@ -3514,12 +3514,20 @@ async def test_asleep_a_transcript_mention_mid_sentence_does_not_wake_him() -> N
 
 
 class _QuickReply:
-    def __init__(self, text: str | None, *, sleep: bool = False, after: Callable[[], Any] | None = None) -> None:
+    def __init__(
+        self,
+        text: str | None,
+        *,
+        sleep: bool = False,
+        after: Callable[[], Any] | None = None,
+        whole_request: bool = False,
+    ) -> None:
         self.text = text
         self.language = "en"
         self.kind = "lights"
         self.sleep = sleep
         self.after = after
+        self.whole_request = whole_request
 
 
 def _quick_runtime(
@@ -3782,6 +3790,52 @@ async def test_acoustic_wake_transcribes_the_whole_request_as_one_clip() -> None
         assert clips == [pytest.approx(2.0)]
         assert not handler.started.is_set()
         assert listening == [True, False]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("whole_request", "to_gemini"), [(True, True), (False, False)])
+async def test_a_request_cut_off_mid_sentence_goes_to_gemini_when_its_command_needs_every_word(
+    whole_request: bool, to_gemini: bool
+) -> None:
+    """A clip still full of speech at its cap is a cut-off request: Maribel's needs it all, the lights do not."""
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None, whole_request=whole_request)
+
+    async def transcribe_request(_frame: AudioFrame) -> str:
+        return "ask Maribel what is on my calendar for the"
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=transcribe_request,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime._REQUEST_CLIP_MAX_S = 0.5
+    runtime.set_capture_barrier_provider(lambda: 1)
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_COMMAND)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        sequence = 2
+        while not activation.done() and not handler.started.is_set():
+            await runtime.handle_frame((16_000, speech), capture_sequence=sequence)
+            sequence += 1
+            await asyncio.sleep(0.02)
+        if to_gemini:
+            await asyncio.wait_for(handler.started.wait(), timeout=5.0)
+        else:
+            assert await asyncio.wait_for(activation, timeout=5.0)
+            assert not handler.started.is_set()
+        assert seen == ["ask Maribel what is on my calendar for the"]
     finally:
         await runtime.close()
 

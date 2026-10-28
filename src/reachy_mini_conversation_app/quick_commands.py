@@ -52,6 +52,8 @@ class QuickReply:
     after: Callable[[], Awaitable[str | None]] | None = None
     # How long ``after`` may take; None for the usual quick-command bound.
     after_timeout_s: float | None = None
+    # Acts on the request word for word: a request clip cut off mid-sentence goes to the conversation instead.
+    whole_request: bool = False
 
 
 # ---------------------------------------------------------------------------------------------
@@ -599,9 +601,13 @@ def resolve_light_target(phrase: str, devices: list[Any]) -> LightTarget | None:
 _MARIBEL = r"(?:mari|mary|marie) ?bel(?:l|le|el)?"
 _ASK_MARIBEL = {
     "en": rf"(?:ask|tell|message|text|let) {_MARIBEL}",
-    "es": rf"(?:preguntale|pregunta|pidele|pide|dile|avisale|escribele|mandale un mensaje) a {_MARIBEL}",
-    "it": rf"(?:chiedi|domanda|di|dici|scrivi) a {_MARIBEL}",
-    "pt": rf"(?:pergunta|pergunte|pede|peca|diz|diga|avisa|manda uma mensagem) (?:a )?{_MARIBEL}",
+    # "le puedes preguntar a Maribel" (2026-10-28): "puedes" is politeness, "le" is not stripped.
+    "es": rf"(?:le (?:puedes |podrias |quieres )?)?(?:preguntarle|preguntar|preguntale|pregunta|pedirle|pedir|"
+    rf"pidele|pide|decirle|decir|dile|avisarle|avisar|avisale|escribirle|escribir|escribele|"
+    rf"mandarle un mensaje|mandale un mensaje) a {_MARIBEL}",
+    "it": rf"(?:chiedere|chiedi|domandare|domanda|dire|di|dici|scrivere|scrivi) a {_MARIBEL}",
+    "pt": rf"(?:perguntar|pergunta|pergunte|pedir|pede|peca|dizer|diz|diga|avisar|avisa|"
+    rf"mandar uma mensagem|manda uma mensagem) (?:a )?{_MARIBEL}",
 }
 # Something must follow her name: "ask Maribel" alone is left to the conversation.
 _ASK_MARIBEL_RE = {language: re.compile(rf"^{pattern}\s+\S") for language, pattern in _ASK_MARIBEL.items()}
@@ -802,7 +808,9 @@ class QuickCommands:
                 expect_answer(self.answer_maribel)
             return reply.speak or None
 
-        return QuickReply(said, language, "maribel", after=hand_over, after_timeout_s=MARIBEL_STEP_TIMEOUT_S)
+        return QuickReply(
+            said, language, "maribel", after=hand_over, after_timeout_s=MARIBEL_STEP_TIMEOUT_S, whole_request=True
+        )
 
     def _routine_for(self, text: str) -> Any:
         """Return the household routine (from the home layout) whose phrase is the whole request."""

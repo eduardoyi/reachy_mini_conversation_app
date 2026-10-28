@@ -177,4 +177,5 @@ Phrases that set several lights at once live in the home layout file (`HOME_LAYO
 A request that starts with "ask / tell Maribel…" (or the Spanish, Italian or Portuguese equivalent;
 `maribel_request`) is checked before routines and the grammar, with no word limit, when Maribel is set up.
 The reply says "Asking Maribel"; its `after` step sends the request to her and returns her spoken reply
-(`after_timeout_s` 23 s). See [Maribel hand-off](maribel-handoff.md).
+(`after_timeout_s` 23 s). The reply sets `whole_request`, so a request clip cut off at its 8 s cap goes
+to the conversation rather than sending half a sentence. See [Maribel hand-off](maribel-handoff.md).

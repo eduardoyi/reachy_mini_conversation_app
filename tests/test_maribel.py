@@ -246,3 +246,17 @@ async def test_the_callback_server_listens_on_loopback_and_answers_at_once() -> 
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.asyncio
+async def test_the_webhook_address_never_reaches_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Httpx logs every request's URL; hers works as a credential, so that line is dropped."""
+    sent: list[httpx.Request] = []
+    link = _link([200], sent)
+    with caplog.at_level(logging.DEBUG):
+        assert await link.send("what is on my calendar") is not None
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(204))) as other:
+            await other.get("https://other.example/ping")
+    assert len(sent) == 1
+    assert WEBHOOK not in caplog.text
+    assert "https://other.example/ping" in caplog.text

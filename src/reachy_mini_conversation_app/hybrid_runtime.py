@@ -564,6 +564,8 @@ class HybridRuntime:
         # audio is transcribed again with the accurate model before the conversation opens.
         self._transcript_wake_segment_sequence: int | None = None
         self._request_clip_vad = RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD)
+        # The last request clip stopped at its length cap while the speaker was still talking.
+        self._request_clip_cut_off = False
         # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
         # without a conversation; a conversation reports through cloud_session_observer instead.
         self._listening_observer = listening_observer
@@ -1411,10 +1413,12 @@ class HybridRuntime:
                     return True
                 await self._return_to_ambient(generation, "no_answer")
                 return True
-            if quick_text and await self._try_quick_command(quick_text, generation):
+            # Still talking when the clip stopped: commands that need every word leave it to the conversation.
+            cut_off = bool(clip_request) and self._request_clip_cut_off
+            if quick_text and await self._try_quick_command(quick_text, generation, cut_off=cut_off):
                 return True
             # The clip can still miss words the fast transcript caught; try that before the conversation.
-            if segment_quick_text and await self._try_quick_command(segment_quick_text, generation):
+            if segment_quick_text and await self._try_quick_command(segment_quick_text, generation, cut_off=cut_off):
                 return True
             # A transcript wake heard by whisper-small ("prendela los" for "prende las luces"): listen again
             # with the accurate model before handing a misheard request to the conversation.
@@ -1596,6 +1600,7 @@ class HybridRuntime:
         never gets the lead-in audio.
         """
         transcriber = self._request_transcriber
+        self._request_clip_cut_off = False
         if transcriber is None:
             return ""
         loop = asyncio.get_running_loop()
@@ -1627,7 +1632,10 @@ class HybridRuntime:
                 if now - started_at > start_s:
                     return ""
                 continue
-            if silence_s >= self._REQUEST_CLIP_SILENCE_S or now - speech_started_at > self._REQUEST_CLIP_MAX_S:
+            if silence_s >= self._REQUEST_CLIP_SILENCE_S:
+                break
+            if now - speech_started_at > self._REQUEST_CLIP_MAX_S:
+                self._request_clip_cut_off = True
                 break
         frames = self._request_clip_frames()
         if not frames:
@@ -1638,7 +1646,12 @@ class HybridRuntime:
             parts.insert(0, lead_in[1])
         audio = np.concatenate(parts)
         text = await asyncio.wait_for(transcriber((sample_rate, audio)), self._REQUEST_CLIP_STT_TIMEOUT_S)
-        logger.info("Request clip transcribed audio_s=%.1f chars=%d", audio.size / sample_rate, len(text.strip()))
+        logger.info(
+            "Request clip transcribed audio_s=%.1f chars=%d cut_off=%s",
+            audio.size / sample_rate,
+            len(text.strip()),
+            self._request_clip_cut_off,
+        )
         if config.QUICK_COMMANDS_LOG_TEXT:
             logger.info("Request clip text: %r", text)
         return text if isinstance(text, str) else ""
@@ -1812,12 +1825,19 @@ class HybridRuntime:
             return not self._closed and self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation
 
     async def _try_quick_command(
-        self, addressed_text: str, generation: int, quick: QuickCommandHandler | None = None
+        self,
+        addressed_text: str,
+        generation: int,
+        quick: QuickCommandHandler | None = None,
+        *,
+        cut_off: bool = False,
     ) -> bool:
         """Answer an everyday command locally; returns whether the cloud conversation can stay closed.
 
         ``addressed_text`` is only what was said to Reachy (after his name, or the next sentence). ``quick``
-        replaces the quick commands, e.g. with the handler of an awaited answer.
+        replaces the quick commands, e.g. with the handler of an awaited answer. ``cut_off`` means the speaker
+        was still talking when the clip stopped: a reply that needs the whole request goes to the conversation,
+        which hears all of it (2026-10-28: "...qué tengo en mi agenda para el" would have gone to Maribel).
         """
         quick = quick or self._quick_commands
         if quick is None:
@@ -1840,9 +1860,14 @@ class HybridRuntime:
             if config.QUICK_COMMANDS_LOG_TEXT:
                 logger.info("Quick command not recognized; to the conversation: %r", request)
             return False
+        kind = str(getattr(reply, "kind", "command"))
+        if cut_off and getattr(reply, "whole_request", False):
+            logger.info(
+                "Quick command kind=%s needs the whole request; the clip was cut off, to the conversation", kind
+            )
+            return False
         if not self._quick_generation_current(generation):
             return True  # it ran; the activation was superseded meanwhile
-        kind = str(getattr(reply, "kind", "command"))
         language = str(getattr(reply, "language", "en"))
         logger.info(
             "Quick command kind=%s language=%s handled_ms=%.0f", kind, language, (self._clock() - started_at) * 1000

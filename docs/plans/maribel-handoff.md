@@ -1,6 +1,6 @@
 # Plan: Hand voice requests to Maribel and speak her replies
 
-- Status: `in-progress` (deployed with Funnel on the Mac mini; a live spoken request not yet checked)
+- Status: `in-progress` (deployed with Funnel on the Mac mini; first spoken test done, fixes from it deployed)
 - Last updated: 2026-10-28
 - Feature doc: [Maribel hand-off](../features/maribel-handoff.md)
 
@@ -85,7 +85,8 @@ since no callback was set up yet) came 25-85 s later.
 - [x] The tool sends the person's words and returns only her `speak` text.
 - [x] Full gate passes.
 - [x] Funnel publishes only `/maribel/reply`; `fake-reply` from outside gets 401 without the secret.
-- [ ] Live: a spoken request reaches Maribel and Reachy speaks her answer.
+- [x] Live: a spoken request reaches Maribel and Reachy speaks her answer.
+- [ ] Live: a spoken request caught locally ("Richie, ask Maribel…") speaks her answer.
 
 ## Test strategy
 
@@ -104,3 +105,4 @@ since no callback was set up yet) came 25-85 s later.
 |------|--------|
 | 2026-10-28 | Webhook tested (Bearer, 200 in 0.65 s, reply 25-85 s later in the app). Secret generated into the mini's `.env` and given to Maribel by the household. Plan written and built. |
 | 2026-10-28 | Deployed (4439182); callback server on 127.0.0.1:8791. Funnel needed HTTPS and the funnel node attribute in the tailnet (the Mac App Store CLI only runs from a Terminal window, not over SSH). Its first HTTPS request waited for the certificate; the three public relays started answering over about 5 minutes. From outside: no or wrong secret 401, unknown request 404, other paths 404. |
+| 2026-10-28 | First spoken test, in Spanish: "le puedes preguntar a Maribel…" missed the local catch and went to Gemini. The person kept talking, so Gemini's first call was cancelled and a second sent (two requests); the latest one's answer came 17 s later and was spoken once the conversation closed. The 8 s clip cut the request off ("…para el"), and httpx logged the webhook address. Fixes: more phrasings, `QuickReply.whole_request` sends cut-off clips to the conversation, and an `httpx` log filter hides the address. |

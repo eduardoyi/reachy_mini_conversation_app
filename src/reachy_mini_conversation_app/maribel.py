@@ -43,6 +43,23 @@ REPLY_TYPES: Final[frozenset[str]] = frozenset({"answer", "accepted", "question"
 HOME_TIMEZONE: Final[str] = "Europe/Lisbon"
 
 
+class _WebhookLogFilter(logging.Filter):
+    """Keep Maribel's webhook address out of httpx's request logs: anyone holding it can start her."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: set[str] = set()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Drop the request line for her webhook; keep every other one."""
+        message = record.getMessage()
+        return not any(url in message for url in self.urls)
+
+
+_WEBHOOK_LOG_FILTER = _WebhookLogFilter()
+logging.getLogger("httpx").addFilter(_WEBHOOK_LOG_FILTER)
+
+
 @dataclass(frozen=True)
 class MaribelReply:
     """One callback from Maribel."""
@@ -88,6 +105,8 @@ class MaribelLink:
     ) -> None:
         """Talk to ``webhook_url`` with ``webhook_key``; accept callbacks bearing ``callback_secret``."""
         self._webhook_url = webhook_url
+        if webhook_url:
+            _WEBHOOK_LOG_FILTER.urls.update({webhook_url, str(httpx.URL(webhook_url))})
         self._webhook_key = webhook_key
         self._callback_url = callback_url
         self._callback_secret = callback_secret.encode()
