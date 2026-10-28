@@ -78,7 +78,7 @@ Configuration (`.env`): `MARIBEL_WEBHOOK_URL`, `MARIBEL_WEBHOOK_KEY` (sent as `A
 as her routine panel says), `MARIBEL_CALLBACK_URL` (the public Funnel URL Maribel posts to),
 `REACHY_CALLBACK_SECRET` (she sends it as `Authorization: Bearer`), `MARIBEL_CALLBACK_PORT` (default 8791).
 
-Publishing on the Mac mini (once; Funnel must be allowed in the tailnet policy):
+Publishing on the Mac mini (once; the tailnet needs HTTPS and the `funnel` node attribute; with the Mac App Store app, run it in a Terminal window on the mini, not over SSH):
 
 ```bash
 /Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg --set-path /maribel/reply http://127.0.0.1:8791/maribel/reply
@@ -126,7 +126,7 @@ Publishing on the Mac mini (once; Funnel must be allowed in the tailnet policy):
 
 | Command or artifact | Scenarios |
 |---------------------|-----------|
-| `fake-reply` against the Funnel URL | Pending: strangers turned away from outside the house |
+| `fake-reply` against the Funnel URL | 2026-10-28: no or wrong secret 401, unknown request 404, other paths 404, through all three public relays |
 | Spoken request on the robot | Pending: "Richie, ask Maribel…" end to end |
 
 ### Test commands
