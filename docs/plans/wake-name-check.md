@@ -1,6 +1,6 @@
 # Plan: Whisper checks the name before every acoustic wake
 
-- Status: `in-progress` (built and tested; live check on the Mac mini pending)
+- Status: `in-progress` (deployed on the Mac mini 2026-10-28; a live call not yet checked)
 - Last updated: 2026-10-28
 - Feature doc: [Hybrid runtime](../features/hybrid-runtime.md)
 - Related: [Wake clip capture](wake-clip-capture.md), [Gentler sleep mode](sleep-wake-check.md)
@@ -100,3 +100,4 @@ threshold, plans index.
 | Date | Update |
 |------|--------|
 | 2026-10-28 | Logs and clips reviewed; offline evaluation above; plan written and built. |
+| 2026-10-28 | Deployed to the Mac mini (a410cc6), `LOCAL_ACOUSTIC_WAKE_THRESHOLD` 0.95 → 0.3 (`.env` backup in `~/Coding/.env.bak-2026-10-28`), restarted 10:50. First live candidate (score 0.56, 10:51) was rejected: whisper-small 0.41 s + turbo 1.68 s, no cue, back to listening. In the first 8 minutes that was the only candidate. A live call has not been checked yet. |
