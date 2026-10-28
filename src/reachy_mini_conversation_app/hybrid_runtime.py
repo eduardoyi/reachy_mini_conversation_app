@@ -1194,7 +1194,8 @@ class HybridRuntime:
             # Recording starts now, so the request is kept while the name is checked; the cue waits for it.
             clip_task = (
                 asyncio.create_task(
-                    self._transcribe_request_clip(generation), name=f"hybrid-request-clip-{generation}"
+                    self._transcribe_request_clip(generation, lead_in=wake_audio),
+                    name=f"hybrid-request-clip-{generation}",
                 )
                 if clip_request
                 else None
@@ -1303,6 +1304,10 @@ class HybridRuntime:
                 )
                 clip_text = await self._await_request_clip(clip_task)
                 clip_task = None
+                if clip_text and wake_audio is not None:
+                    # The clip opens with the audio the wake model fired on, so the name leads it; the request
+                    # is what follows the name (or the whole text when the name was spelled past recognizing).
+                    clip_text = request_after_wake(clip_text) or request_after_misheard_wake(clip_text) or clip_text
                 if clip_text and quick_text and quick_text.casefold() != clip_text.casefold():
                     segment_quick_text = quick_text
                 if clip_text:
@@ -1497,8 +1502,16 @@ class HybridRuntime:
             logger.warning("Request clip failed: %s", type(error).__name__)
             return ""
 
-    async def _transcribe_request_clip(self, generation: int) -> str:
-        """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip."""
+    async def _transcribe_request_clip(
+        self, generation: int, *, lead_in: tuple[int, NDArray[np.int16]] | None = None
+    ) -> str:
+        """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip.
+
+        ``lead_in`` is the audio the wake model fired on. It goes in front of the clip for local transcription
+        only: the wake fires a moment after the name, so the request's first word ("Richie, lights | out") can
+        fall before the clip; one clip keeps that word whole (2026-10-28: the clip alone heard "off"). Gemini
+        never gets the lead-in audio.
+        """
         transcriber = self._request_transcriber
         if transcriber is None:
             return ""
@@ -1537,7 +1550,10 @@ class HybridRuntime:
         if not frames:
             return ""
         sample_rate = frames[0][0]
-        audio = np.concatenate([audio_to_mono_int16(frame[1]) for frame in frames if frame[0] == sample_rate])
+        parts = [audio_to_mono_int16(frame[1]) for frame in frames if frame[0] == sample_rate]
+        if lead_in is not None and lead_in[0] == sample_rate and lead_in[1].size:
+            parts.insert(0, lead_in[1])
+        audio = np.concatenate(parts)
         text = await asyncio.wait_for(transcriber((sample_rate, audio)), self._REQUEST_CLIP_STT_TIMEOUT_S)
         logger.info("Request clip transcribed audio_s=%.1f chars=%d", audio.size / sample_rate, len(text.strip()))
         if config.QUICK_COMMANDS_LOG_TEXT:

@@ -4260,3 +4260,98 @@ async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(he
         assert runtime._wake_name_audio is None
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_the_request_clip_starts_with_the_wake_audio_so_a_first_word_said_early_is_kept() -> None:
+    """2026-10-28: "Richie, lights out" fired after "lights"; the clip alone heard "off". The wake audio leads it now."""
+    seen: list[str] = []
+    clips: list[tuple[float, int]] = []
+    wake_audio = (16_000, np.full(16_000, 300, dtype=np.int16))
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def fast(audio: AudioFrame) -> str:
+        return "Richie, lights" if audio is wake_audio else ""
+
+    async def accurate(audio: AudioFrame) -> str:
+        if audio is wake_audio:
+            return "Richie, lights"
+        clips.append((audio[1].size / audio[0], int(audio[1][0])))
+        return "Richie, lights out."
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    runtime._wake_name_audio = wake_audio
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        assert clips == [(pytest.approx(2.5), 300)]  # 1 s of wake audio, then 1.5 s recorded after the wake
+        assert seen[0] == "lights out."
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_gemini_never_gets_the_wake_audio_that_leads_the_local_clip() -> None:
+    """The lead-in is for local transcription only: Gemini hears the request from the wake on, hint after the name."""
+    wake_audio = (16_000, np.full(16_000, 300, dtype=np.int16))
+
+    async def quick(_text: str) -> _QuickReply | None:
+        return None  # not a quick command: it goes to the conversation
+
+    async def fast(audio: AudioFrame) -> str:
+        return "Richie" if audio is wake_audio else ""
+
+    async def accurate(audio: AudioFrame) -> str:
+        return "Richie" if audio is wake_audio else "we were saying Richie, what is a comet?"
+
+    processor = _processor_with_open_wake_segment("Reachy")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    runtime._wake_name_audio = wake_audio
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        assert await asyncio.wait_for(activation, timeout=5.0)
+        await handler.started.wait()
+        handler.set_connected(True)
+        await wait_until(lambda: bool(handler.receive_frames))
+        await asyncio.sleep(0.1)
+        sent = np.concatenate([frame[1].ravel() for frame in handler.receive_frames])
+        assert 300 not in set(sent.tolist())
+        context = handler.get_initial_context()
+        assert "what is a comet?" in context and "we were saying" not in context
+    finally:
+        await runtime.close()

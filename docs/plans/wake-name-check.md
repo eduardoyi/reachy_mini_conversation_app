@@ -101,3 +101,4 @@ threshold, plans index.
 |------|--------|
 | 2026-10-28 | Logs and clips reviewed; offline evaluation above; plan written and built. |
 | 2026-10-28 | Deployed to the Mac mini (a410cc6), `LOCAL_ACOUSTIC_WAKE_THRESHOLD` 0.95 → 0.3 (`.env` backup in `~/Coding/.env.bak-2026-10-28`), restarted 10:50. First live candidate (score 0.56, 10:51) was rejected: whisper-small 0.41 s + turbo 1.68 s, no cue, back to listening. In the first 8 minutes that was the only candidate. A live call has not been checked yet. |
+| 2026-10-28 | Live 11:33-11:36: real calls woke him, noise at 0.53-0.76 was rejected. One miss: "Richie, lights out" fired after "lights", so the request clip heard only "off". The wake audio now leads the request clip for local transcription (Gemini never gets it). A "Richie, lights" the wake model missed was caught by the transcript wake. |

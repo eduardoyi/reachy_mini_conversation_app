@@ -923,3 +923,13 @@ Tests (`tests/test_hybrid_runtime.py`):
 `test_when_whisper_is_down_an_awake_reachy_still_wakes_on_the_wake_model`,
 `test_asleep_only_the_name_leading_the_wake_audio_wakes_him`, `test_no_cue_until_the_name_check_passes`,
 `test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`.
+
+The same wake audio also leads the request clip, for local transcription only
+(`_transcribe_request_clip(lead_in=...)`). The wake fires a moment after the name, so a request said in
+one breath can lose its first word to the clip: on 2026-10-28 "Richie, lights out" fired after
+"lights" and the clip alone heard "off", which went to Gemini and did nothing. With the lead-in the
+clip reads "Richie, lights out." and the request is what follows the name (`request_after_wake`, then
+`request_after_misheard_wake`, else the whole text). Gemini still hears only the audio from the wake
+on, and its text hint is only what followed the name, so words said before the name stay local.
+Tests: `test_the_request_clip_starts_with_the_wake_audio_so_a_first_word_said_early_is_kept`,
+`test_gemini_never_gets_the_wake_audio_that_leads_the_local_clip`.
