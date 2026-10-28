@@ -260,3 +260,63 @@ async def test_the_webhook_address_never_reaches_the_log(caplog: pytest.LogCaptu
     assert len(sent) == 1
     assert WEBHOOK not in caplog.text
     assert "https://other.example/ping" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_of_an_unanswered_request_waits_on_the_one_already_sent() -> None:
+    """Gemini's second call after an interruption reuses the request; new words, an answer or time send again."""
+    sent: list[httpx.Request] = []
+    clock = Clock()
+    link = _link([200, 200, 200, 200, 200], sent, clock)
+
+    first = await link.send("¿Qué tengo en mi agenda el viernes?", reuse_repeat=True)
+    clock.now += 5
+    assert await link.send("que tengo en mi agenda el viernes", reuse_repeat=True) == first
+    assert await link.send("que tengo en mi agenda", reuse_repeat=True) == first
+    assert len(sent) == 1
+
+    extended = await link.send("¿Qué tengo en mi agenda el viernes por la tarde?", reuse_repeat=True)
+    assert extended != first and len(sent) == 2  # it adds words: a new request
+
+    assert link.receive(SIGNED, _callback(sent[1])) == 200
+    answered = await link.send("¿Qué tengo en mi agenda el viernes por la tarde?", reuse_repeat=True)
+    assert answered != extended and len(sent) == 3  # she already answered: asked again
+
+    clock.now += maribel.REPEAT_WINDOW_S + 1
+    assert await link.send("¿Qué tengo en mi agenda el viernes por la tarde?", reuse_repeat=True) != answered
+    assert len(sent) == 4  # too late to be a repeat
+    assert await link.send("¿Qué tengo en mi agenda el viernes por la tarde?") is not None
+    assert len(sent) == 5  # quick commands never reuse
+
+
+@pytest.mark.asyncio
+async def test_a_request_cancelled_before_her_webhook_accepted_it_is_sent_again() -> None:
+    """A call cancelled mid-POST may never have reached her, so its repeat is posted."""
+    sent: list[httpx.Request] = []
+    accepted = asyncio.Event()
+
+    async def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if len(sent) == 1:
+            await asyncio.sleep(10)  # the interruption cancels the call while this POST hangs
+        accepted.set()
+        return httpx.Response(200, json={"success": True})
+
+    link = MaribelLink(
+        WEBHOOK,
+        KEY,
+        CALLBACK,
+        SECRET,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(answer)),
+        clock=Clock(),
+        retry_pause_s=0.0,
+    )
+    first = asyncio.create_task(link.send("what is on my calendar", reuse_repeat=True))
+    while not sent:
+        await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert await link.send("what is on my calendar", reuse_repeat=True) is not None
+    assert accepted.is_set() and len(sent) == 2

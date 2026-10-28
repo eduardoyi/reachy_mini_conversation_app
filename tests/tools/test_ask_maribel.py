@@ -14,7 +14,8 @@ class _Maribel:
         self.reply = reply
         self.sent: list[str] = []
 
-    async def send(self, text: str) -> str | None:
+    async def send(self, text: str, *, reuse_repeat: bool = False) -> str | None:
+        assert reuse_repeat  # a call repeated after an interruption must not reach her twice
         self.sent.append(text)
         return "r-1"
 

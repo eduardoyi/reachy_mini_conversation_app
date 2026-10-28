@@ -9,6 +9,7 @@ Logs keep request and conversation ids, reply types and delays; never the texts 
     python -m reachy_mini_conversation_app.maribel fake-reply [--request-id ID --conversation-id ID]
 """
 
+import re
 import sys
 import hmac
 import json
@@ -18,6 +19,7 @@ import asyncio
 import logging
 import argparse
 import threading
+import unicodedata
 from typing import Final, Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -36,6 +38,9 @@ FIRST_REPLY_WAIT_S: Final[float] = 10.0
 LATE_REPLY_S: Final[float] = 120.0
 # Her question stays open this long: a "tell Maribel..." meanwhile answers it.
 QUESTION_OPEN_S: Final[float] = 120.0
+# A repeat of an unanswered request this soon reuses it: Gemini calls the tool again after the person's
+# speech cancels the first call, which has already reached her (2026-10-28, twice in two tests).
+REPEAT_WINDOW_S: Final[float] = 20.0
 POST_TIMEOUT_S: Final[float] = 5.0
 RETRY_PAUSE_S: Final[float] = 2.0
 MAX_BODY_BYTES: Final[int] = 16_384
@@ -78,6 +83,10 @@ class _Request:
     waiter: "asyncio.Future[MaribelReply] | None" = None
     loop: asyncio.AbstractEventLoop | None = None
     answered: bool = False
+    # Her webhook accepted it; a call cancelled mid-POST may never have reached her, so a repeat sends again.
+    posted: bool = False
+    # Its words, folded, to recognize a repeat; kept in memory only, never logged.
+    words: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -118,18 +127,35 @@ class MaribelLink:
         self._latest_request_id: str | None = None
         self._question: _Question | None = None
 
-    async def send(self, text: str) -> str | None:
-        """POST ``text`` to Maribel; return its request id once accepted, or None if she could not be reached."""
+    async def send(self, text: str, *, reuse_repeat: bool = False) -> str | None:
+        """POST ``text`` to Maribel; return its request id once accepted, or None if she could not be reached.
+
+        With ``reuse_repeat``, a request that adds no words to the latest one, sent within ``REPEAT_WINDOW_S``
+        and still waiting for her first reply, is not sent again: its id is returned to wait on.
+        """
         request_id = str(uuid.uuid4())
         now = self._clock()
+        words = _words(text)
         with self._lock:
+            latest = self._requests.get(self._latest_request_id or "")
+            if (
+                reuse_repeat
+                and latest is not None
+                and latest.posted
+                and not latest.answered
+                and latest.waiter is not None
+                and now - latest.sent_at <= REPEAT_WINDOW_S
+                and words <= latest.words
+            ):
+                logger.info("Maribel request repeated; reusing request_id=%s", self._latest_request_id)
+                return self._latest_request_id
             question = self._question
             if question is not None and now - question.asked_at > QUESTION_OPEN_S:
                 question = self._question = None
             conversation_id = question.conversation_id if question is not None else str(uuid.uuid4())
             loop = asyncio.get_running_loop()
             self._forget_old_requests(now)
-            self._requests[request_id] = _Request(conversation_id, now, loop.create_future(), loop)
+            self._requests[request_id] = _Request(conversation_id, now, loop.create_future(), loop, words=words)
             self._latest_request_id = request_id
         body = {
             "version": 1,
@@ -149,6 +175,10 @@ class MaribelLink:
                 logger.warning("Maribel webhook attempt %d failed: %s", attempt, type(error).__name__)
                 continue
             if response.is_success:
+                with self._lock:
+                    request = self._requests.get(request_id)
+                    if request is not None:
+                        request.posted = True
                 logger.info(
                     "Maribel request sent request_id=%s conversation_id=%s answers_question=%s attempt=%d",
                     request_id,
@@ -251,6 +281,12 @@ class MaribelLink:
     def _forget_old_requests(self, now: float) -> None:
         for request_id in [rid for rid, request in self._requests.items() if now - request.sent_at > LATE_REPLY_S]:
             del self._requests[request_id]
+
+
+def _words(text: str) -> frozenset[str]:
+    """Return the words of ``text``, lowercased and without accents ("¿Qué?" -> {"que"})."""
+    folded = unicodedata.normalize("NFKD", text.casefold()).encode("ascii", "ignore").decode("ascii")
+    return frozenset(re.findall(r"\w+", folded))
 
 
 def _resolve(waiter: "asyncio.Future[MaribelReply]", reply: MaribelReply) -> None:

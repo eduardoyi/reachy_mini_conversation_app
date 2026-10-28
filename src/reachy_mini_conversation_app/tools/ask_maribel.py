@@ -36,7 +36,8 @@ class AskMaribel(Tool):
             return {"error": "Say what to pass to Maribel."}
         language = guess_language(text)
         logger.info("Tool call: ask_maribel answers_question=%s", link.has_open_question())
-        request_id = await link.send(text)
+        # The person talking over the first call cancels it after it has reached her; the repeat waits on it.
+        request_id = await link.send(text, reuse_repeat=True)
         if request_id is None:
             return {"status": "unreachable", "say": MARIBEL_UNREACHABLE[language], "note": _SAY_EXACTLY}
         reply = await link.first_reply(request_id)

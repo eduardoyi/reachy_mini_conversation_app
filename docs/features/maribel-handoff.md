@@ -69,7 +69,7 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Protocol | `maribel.py`: `MaribelLink.send`, `first_reply`, `receive`, `has_open_question` | Request body `{version: 1, request_id, conversation_id, in_reply_to, text, sent_at (Europe/Lisbon), callback_url}`; callbacks `{version, request_id, conversation_id, type: answer/accepted/question/error, speak, question_id}` |
+| Protocol | `maribel.py`: `MaribelLink.send(text, reuse_repeat=)`, `first_reply`, `receive`, `has_open_question` | Request body `{version: 1, request_id, conversation_id, in_reply_to, text, sent_at (Europe/Lisbon), callback_url}`; callbacks `{version, request_id, conversation_id, type: answer/accepted/question/error, speak, question_id}` |
 | Callback server | `maribel.serve_replies` | `ThreadingHTTPServer` on 127.0.0.1:`MARIBEL_CALLBACK_PORT`; only `POST /maribel/reply`; 401 bad secret, 400 bad body, 404 unknown request, 413 over 16 KB, 200 otherwise |
 | Trigger | `quick_commands.maribel_request`, `QuickCommands.answer_maribel` | Language of an explicit request, or None; phrases `MARIBEL_ASKING`, `MARIBEL_PASSED_ON`, `MARIBEL_UNREACHABLE`; replies have `whole_request=True` |
 | Cut-off clips | `HybridRuntime._try_quick_command(cut_off=...)` | A `whole_request` reply to a clip that hit `_REQUEST_CLIP_MAX_S` is skipped; the request goes to the conversation |
@@ -111,8 +111,10 @@ Publishing on the Mac mini (once; the tailnet needs HTTPS and the `funnel` node 
 - If the callback port is taken, the server logs an error; requests still go out and replies time out.
 - A late reply waits while Reachy is in a conversation and is dropped if he stays busy 2 minutes.
 - In a conversation, if the person keeps talking after Gemini calls the tool, the interruption cancels the
-  call but the request has already gone; Gemini usually calls again, so Maribel gets both. Only the latest
-  request's reply is spoken.
+  call after the request has reached her, and Gemini calls again. The tool sends with `reuse_repeat`: a
+  call within 20 s (`REPEAT_WINDOW_S`) that adds no words to her latest accepted, unanswered request waits
+  on that one instead of asking her twice. A repeat with new words (the end of a cut-off sentence) is sent,
+  and only the latest request's reply is spoken. Quick commands never reuse.
 
 ## Dependencies
 
@@ -125,10 +127,10 @@ Publishing on the Mac mini (once; the tailnet needs HTTPS and the `funnel` node 
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_maribel.py` | Body and Bearer key; the webhook address kept out of httpx's log; one retry then unreachable; first reply reaches the waiter across threads; 401/400/404 and no secrets or texts in logs; late replies only for the latest request, once, within 2 minutes; a question continues the conversation with `in_reply_to` and expires; the loopback server's paths, size cap and auth |
+| `tests/test_maribel.py` | Body and Bearer key; the webhook address kept out of httpx's log; a repeated call reuses an accepted, unanswered request unless it adds words, she answered, 20 s passed or the POST never finished; one retry then unreachable; first reply reaches the waiter across threads; 401/400/404 and no secrets or texts in logs; late replies only for the latest request, once, within 2 minutes; a question continues the conversation with `in_reply_to` and expires; the loopback server's paths, size cap and auth |
 | `tests/test_quick_commands.py` | Trigger phrases in four languages and near misses; acknowledgement then verbatim send, thinking move, her reply; unreachable and passed-on lines; a question registers the answer handler and the answer is sent; not configured |
 | `tests/test_hybrid_runtime.py` | `test_a_request_cut_off_mid_sentence_goes_to_gemini_when_its_command_needs_every_word`, `test_a_question_listens_once_for_the_answer_without_the_name`, `test_no_answer_after_a_question_goes_back_to_listening_for_the_name`, `test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer` |
-| `tests/tools/test_ask_maribel.py` | Verbatim request, only `speak` returned, question note, passed-on line, errors |
+| `tests/tools/test_ask_maribel.py` | Verbatim request sent with `reuse_repeat`, only `speak` returned, question note, passed-on line, errors |
 
 ### Live checks
 
@@ -149,4 +151,5 @@ REACHY_MINI_SKIP_DOTENV=1 .venv/bin/pytest tests/test_hybrid_runtime.py -q -k "a
 | Date | Change |
 |------|--------|
 | 2026-10-28 | Initial implementation. |
+| 2026-10-28 | Repeated tool calls after an interruption reuse the request instead of asking her twice. |
 | 2026-10-28 | After the first spoken test: more phrasings ("le puedes preguntar", infinitives in es/it/pt), cut-off clips go to the conversation, webhook address kept out of httpx logs. |
