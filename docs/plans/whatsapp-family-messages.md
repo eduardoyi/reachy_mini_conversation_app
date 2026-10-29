@@ -163,3 +163,8 @@ messages, video.
   their median, and readings while his speech plays (plus 0.5 s) are dropped. See
   [speaker following](../features/speaker-following.md). A front / left / right test with a person is
   still to do.
+- 2026-10-29: tooling for the touch-to-end step. The first probe ran outside the app, which cannot see
+  where the head is told to be (the daemon's state API omits targets in 1.11), and stopping the app also
+  stopped the daemon. "Richie, head test" / "haz la prueba de cabeza" now runs the test inside the app
+  (see [quick commands](../features/quick-commands.md#head-touch-test--2026-10-29)); its CSV decides
+  tap, press or neither.
