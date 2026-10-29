@@ -17,7 +17,7 @@ WhatsApp server on this computer).
 family group holds that relative, the spare number and both parents.
 
 Out of scope: sending anywhere but the photos group and the groups in the contacts file, photo edits,
-video, replies, ending a message by touch, and messages from a Gemini conversation.
+video, replies, and messages from a Gemini conversation.
 
 ## User-facing behavior
 
@@ -65,8 +65,14 @@ video, replies, ending a message by touch, and messages from a Gemini conversati
 - **No name, or one he does not know** (or two groups at once): "Who should I send it to? I can send to
   Tío Sergio." He listens once without his name (as after Maribel's questions); a known name goes on, an
   unknown one gets "Sorry, I can only send to Tío Sergio.", "never mind" ends it. Nothing is guessed.
-- **A message.** "Okay! Tell me your message for Tío Sergio after the beep." The antennas perk and idle
-  breathing stops; a rising two-note beep; then he records until 3 s of silence after the speech, or 60 s.
+- **A message.** "Okay! Tell me your message for Tío Sergio after the beep, and touch my head when you're
+  done." The antennas perk, the head holds still (no breathing, no turns toward voices) and the speech
+  wobble pauses; a rising two-note beep; then he records until someone touches his head, 5 s of silence
+  after the speech, or 60 s. A touch is the held head suddenly moving: more than 1 mm or 0.7 degrees in
+  0.2 s (`HeadTouchDetector`, tuned from two head tests; see
+  [quick commands](quick-commands.md#head-touch-test--2026-10-29)); a touch before anyone speaks is
+  ignored, the last 0.6 s (the hand) is dropped, and a message of under 0.8 s is only the touch and is not
+  sent.
   Nothing said within 8 s of the beep: "I didn't hear a message, so I didn't send anything." The
   recording (with 0.5 s kept around the speech) is encoded to OGG Opus and sent as a voice note:
   "Sent to Tío Sergio!", or "I couldn't send the message." / "I'm not sure the message went through.".
@@ -124,7 +130,7 @@ flowchart LR
 | Wiring | `main._build_whatsapp`, `deps.whatsapp`, `_prepare_photos` | `deps.whatsapp` is None unless `whatsapp_photos_configured()` |
 | Contacts | `whatsapp_contacts.py`: `load_contacts(path, fold)`, `find_contact(phrase, contacts)` | `{"contacts": [{"name", "chat" (`@g.us` only), "say": [...]}]}` read on each request; unknown, empty or ambiguous → None |
 | Voice note | `voice_notes.encode_voice_note(rate, pcm) -> bytes | None`; `WhatsAppLink.send_audio(chat, ogg)` | GStreamer `opusenc ! oggmux`, 48 kHz mono 32 kbit/s; `/send/audio` with `ptt=true` and `message.ogg` (`audio/ogg`), same retry and deadline rules as photos |
-| Recording | `HybridRuntime.record_message() -> (rate, mono int16) | None`, `deps.record_message` | Only during the current quick command; beep (`local_speech.beep`), then `_request_clip` with the post-activation queue paused; `_MESSAGE_START_S` 8, `_MESSAGE_SILENCE_S` 3, `_MESSAGE_MAX_S` 60, `_MESSAGE_MARGIN_S` 0.5 |
+| Recording | `HybridRuntime.record_message(touches) -> (rate, mono int16) | None`, `deps.record_message` | Only during the current quick command; beep (`local_speech.beep`), then `_request_clip` with the post-activation queue paused; `_MESSAGE_START_S` 8, `_MESSAGE_SILENCE_S` 5, `_MESSAGE_MAX_S` 60, `_MESSAGE_MARGIN_S` 0.5; `touches` (`MovementManager.head_touches`) growing after speech starts ends it, less `_MESSAGE_TOUCH_TRIM_S` 0.6, None under `_MESSAGE_MIN_S` 0.8 |
 | Messages | `quick_commands`: kinds `message` / `send_photo` with `{"to": phrase or None}`; `MESSAGE_PROMPT`, `SENT_TO`, `SEND_TO_WHO`, `SEND_TO_ONLY`, `MESSAGE_NOTHING`, `MESSAGE_NOT_SENT`, `MESSAGE_UNSURE`; `MESSAGE_STEP_TIMEOUT_S` | The three outcome sets are in `FIXED_PHRASES` |
 | Config | `WHATSAPP_API_URL`, `WHATSAPP_API_AUTH` (`user:password`, GOWA's `APP_BASIC_AUTH`), `WHATSAPP_PHOTOS_CHAT` (group id, `...@g.us`) | All three needed; `WHATSAPP_SERVER_BIN` and `WHATSAPP_SERVER_DIR` are for the start script only |
 
@@ -200,18 +206,21 @@ flowchart LR
 | `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more |
 | `tests/test_quick_commands.py` | Messages: grammar with and without a name, Maribel's left alone; prompt, recording with antennas perked, voice note to the group; nothing said, not sent, unsure; a picture to his group; "who?" and its answers (known, unknown, cancel), nothing sent to an unknown name; no contacts or WhatsApp → conversation; outcome phrases cached. Photos: the grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
+| `tests/test_moves.py` (touches) | A sudden push is one touch and staying pushed is not more; a small tilt counts and the untouched jitter does not; a moving command or a fresh hold never counts; touches counted only while held still |
 | `tests/test_moves.py` | `test_speaker_turns_wait_while_a_photo_is_framed`, `test_a_photo_that_never_ends_stops_holding_speaker_turns`, `test_a_photo_frames_the_face_then_lets_go`, `test_a_photo_leaves_tracking_someone_turned_on`, `test_a_conversation_started_during_a_photo_ends_its_tracking` |
 | `tests/tools/test_take_photo.py` | A photo for a family member goes to their group, framed; an unknown name takes nothing; waits the countdown, sends to the group, each outcome; no picture sends nothing; needs the link, the group and the camera; offered only with WhatsApp photos set up |
 | `tests/test_whatsapp_contacts.py` | Folded names; only named groups (a person's number, missing fields, junk skipped, not logged); missing or broken file; articles and accents; unknown and ambiguous names |
 | `tests/test_voice_notes.py` | A tone encodes to OGG Opus (skipped without GStreamer); empty → None |
-| `tests/test_hybrid_runtime.py` (messages) | Beep then recording until silence, trailing silence trimmed, post-activation queue left empty, no conversation; the length cap; nothing said → None; outside a command → None |
+| `tests/test_hybrid_runtime.py` (messages) | Beep then recording until silence, trailing silence trimmed, post-activation queue left empty, no conversation; the length cap; nothing said → None; outside a command → None; a touch ends it without the hand; a touch before speech is ignored; only the touch → None |
 | `tests/test_config.py` | `test_whatsapp_photos_need_all_three_settings` (trimmed values; `_build_whatsapp` None unless all three) |
 
 ### Not yet validated
 
 - Checked live 2026-10-29: "vamos a mandar un mensaje a Sergio" (10.2 s recorded, ended by silence,
   42 KB voice note sent in 1.1 s) and "mándale una foto a Sergio" (sent in 0.9 s) both arrived. Not yet:
-  the 3 s silence ending with the children, and face framing during the countdown.
+  ending a message by touch with the children (the detector only replayed the two head-test recordings:
+  17 touches in the touch phases, none untouched), the 5 s silence ending, and face framing during the
+  countdown.
 - Gemini's `take_photo` in a live conversation.
 - Checked live on 2026-10-29: install, pairing by code, the group listing, the LaunchAgent restart
   keeping the link, and one "tomemos una foto": countdown and settle 6.7 s (beats about 1.8 s each),
@@ -231,6 +240,7 @@ pytest tests/test_hybrid_runtime.py -v -k "countdown or message or beep"
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | A touch on his head ends a voice message; the silence ending is 5 s (was 3 s). |
 | 2026-10-29 | Speaker turns wait while a photo is framed; `take_photo` takes `to`; "pon una foto a [x]". |
 | 2026-10-29 | Photos frame the face in view during the countdown (live: the head did not turn to the person asking). |
 | 2026-10-29 | Voice messages and pictures to family groups from a contacts file; "who?" when no name is known. |

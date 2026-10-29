@@ -26,9 +26,8 @@ message") or with one Reachy does not know, he asks "Who should I send it to?" a
 4. **Requests:** "send a message to [x]", "vamos a mandar un mensaje a [x]" and variations in the four
    languages; "send a message" without a name asks who. The same for "send a picture (to [x])".
 5. **No quiet hours, no limits, adults too, one way** (replies later).
-6. **A beep** says recording has started. Ending by touching his head waits for a robot test (the first
-   probe on 2026-10-29 was inconclusive: an idle head motion hid the touches); here a message ends after
-   3 s of silence or at 60 s.
+6. **A beep** says recording has started. A message ends when someone touches his head (since the head
+   tests of 2026-10-29), after 5 s of silence, or at 60 s.
 
 ## Context (current code this relies on)
 
@@ -124,7 +123,8 @@ message") or with one Reachy does not know, he asks "Who should I send it to?" a
 
 | Risk | Mitigation |
 |------|------------|
-| A kid pauses longer than 3 s mid-message | Accepted for now; the touch-to-end step will let the silence be longer. |
+| A kid pauses longer than 5 s mid-message | The silence ending is 5 s now that a touch ends a message. |
+| A bump on the table ends a message early | The head must move more than 1 mm or 0.7 degrees in 0.2 s; the untouched head moved at most 0.38 mm. The parents see a cut-off message in the group. |
 | Speech recognition mishears the name | The "who?" question; nothing is sent to an unknown name. |
 | The recording picks up Reachy's own beep | Recording starts after the beep has played. |
 | Background noise keeps the VAD "speaking" until 60 s | Capped at 60 s; the parents see it in the group. |
@@ -132,7 +132,7 @@ message") or with one Reachy does not know, he asks "Who should I send it to?" a
 
 ## Out of scope
 
-Replies, Abuelo and nonni groups (only contacts-file entries), ending by touch, the Gemini path for
+Replies, Abuelo and nonni groups (only contacts-file entries), the Gemini path for
 messages, video.
 
 ## Execution log
@@ -176,3 +176,9 @@ messages, video.
   as sudden movement (more than 1 mm or 0.7 degrees within 0.2 s), not distance from the command. That never
   fired untouched (at most 0.38 mm / 0.19 degrees) and fired during taps, presses and pats alike. Touch-to-send
   can use it while the head is held still.
+- 2026-10-29: touch-to-send. While a message records, the head holds still with the speech wobble off, and
+  `HeadTouchDetector` counts sudden moves (`MovementManager.head_touches`); a touch after speech starts ends
+  the recording, less 0.6 s for the hand. The prompt says to touch his head when done; the silence ending
+  went from 3 s to 5 s. Replaying both head-test recordings: 17 touches in the touch phases, none when
+  untouched, none on the breathing run. Also: the post-activation queue warned once per dropped frame
+  (6,912 lines in the 90 s test); it now warns once per filling and logs the total when cleared.

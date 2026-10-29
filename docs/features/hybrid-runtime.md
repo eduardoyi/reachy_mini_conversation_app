@@ -1032,10 +1032,19 @@ countdown and skips `after`. Used by [Photos to WhatsApp](whatsapp-photos.md); t
 
 ### Voice messages — 2026-10-29
 
-`record_message()` runs inside a quick command's `after` step: it plays `local_speech.beep()` through the
-reply path, then collects post-activation frames into `_request_clip` while `_recording_message` keeps
-them out of the post-activation queue (a minute would overflow its 20 s and warn on every frame). It ends
-when no speech starts within `_MESSAGE_START_S`, after `_MESSAGE_SILENCE_S` of silence, or at
-`_MESSAGE_MAX_S`, and returns mono int16 trimmed to `_MESSAGE_MARGIN_S` around the speech. Tests:
+`record_message(touches)` runs inside a quick command's `after` step: it plays `local_speech.beep()` through
+the reply path, then collects post-activation frames into `_request_clip` while `_recording_message` keeps
+them out of the post-activation queue (a minute would overflow its 20 s). It ends when no speech starts
+within `_MESSAGE_START_S`, after `_MESSAGE_SILENCE_S` (5 s) of silence, at `_MESSAGE_MAX_S`, or when
+`touches()` (touches on his held-still head) grows after speech has started, and returns mono int16
+trimmed to `_MESSAGE_MARGIN_S` around the speech; ended by a touch it also drops `_MESSAGE_TOUCH_TRIM_S`
+from the end and returns None under `_MESSAGE_MIN_S`. Tests:
 `test_a_message_is_recorded_after_the_beep_until_the_speaker_stops`, `test_a_message_stops_at_its_length_cap`,
-`test_nothing_said_after_the_beep_records_nothing`, `test_a_message_is_recorded_only_during_a_quick_command`.
+`test_nothing_said_after_the_beep_records_nothing`, `test_a_message_is_recorded_only_during_a_quick_command`,
+`test_a_touch_on_his_head_ends_the_message_without_the_touch`,
+`test_a_touch_before_anyone_speaks_does_not_end_the_message`, `test_a_message_that_is_only_the_touch_sends_nothing`.
+
+A full post-activation queue drops its oldest frames with one warning each time it fills and logs the total
+when it is cleared (`_postactivation_drop_burst`): long local commands overflow it frame after frame, and
+the 90 s head test on 2026-10-29 had logged 6,912 warnings. Test:
+`test_a_full_postactivation_queue_warns_once_and_reports_the_total_when_cleared`.

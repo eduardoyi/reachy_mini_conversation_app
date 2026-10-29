@@ -1880,6 +1880,27 @@ async def test_postactivation_queue_survives_handshake_and_flushes_before_new_fr
 
 
 @pytest.mark.asyncio
+async def test_a_full_postactivation_queue_warns_once_and_reports_the_total_when_cleared(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A long local command overflows the queue frame after frame: one warning, then a total, not one per frame."""
+    runtime = HybridRuntime(lambda: FakeHandler())
+    caplog.set_level(logging.INFO)
+    frame = (16_000, np.zeros(16_000, dtype=np.int16))
+    for _ in range(25):
+        runtime._enqueue_postactivation(frame, None)
+
+    assert runtime.postactivation_frames_dropped == 5
+    assert caplog.text.count("Postactivation audio queue full") == 1
+    runtime._clear_postactivation_queue()
+    assert "dropped 5 frames while full" in caplog.text
+    for _ in range(21):
+        runtime._enqueue_postactivation(frame, None)
+    assert caplog.text.count("Postactivation audio queue full") == 2  # filled again after the clear
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_postactivation_queue_drops_oldest_at_bounded_handshake_capacity(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -4801,16 +4822,23 @@ def short_messages(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _record_during_a_command(
-    frames: list[np.ndarray], *, runtime_events: list[str] | None = None
+    frames: list[np.ndarray],
+    *,
+    runtime_events: list[str] | None = None,
+    touched_after: tuple[int, ...] = (),
 ) -> tuple[HybridRuntime, Any, FakeHandler]:
-    """Run a quick command whose follow-up records a message while ``frames`` (0.1 s each) arrive."""
+    """Run a quick command whose follow-up records a message while ``frames`` (0.1 s each) arrive.
+
+    His head is touched once after each frame index in ``touched_after``.
+    """
     events = runtime_events if runtime_events is not None else []
     handler = FakeHandler()
     recorded: list[Any] = []
+    touches = {"count": 0}
     runtime: HybridRuntime
 
     async def after() -> str | None:
-        recorded.append(await runtime.record_message())
+        recorded.append(await runtime.record_message(lambda: touches["count"]))
         return None
 
     async def quick(_text: str) -> _QuickReply:
@@ -4826,6 +4854,8 @@ async def _record_during_a_command(
         events.append("recording")
         for sequence, audio in enumerate(frames, start=1):
             await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+            if sequence - 1 in touched_after:
+                touches["count"] += 1
             await asyncio.sleep(0.1)
 
     runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
@@ -4857,6 +4887,51 @@ async def test_a_message_is_recorded_after_the_beep_until_the_speaker_stops(shor
         assert beeps, "the beep was played"
         assert not runtime._postactivation_frames and not runtime._recording_message
         assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.fixture
+def short_touches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Touch trimming in tenths of a second, as the other message limits."""
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_TOUCH_TRIM_S", 0.1)
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_MIN_S", 0.25)
+
+
+@pytest.mark.asyncio
+async def test_a_touch_on_his_head_ends_the_message_without_the_touch(
+    short_messages: None, short_touches: None
+) -> None:
+    """Touched mid-speech, the recording ends at once (no silence wait) and the last bit, the hand, is dropped."""
+    runtime, recorded, _ = await _record_during_a_command([_SPEECH] * 30, touched_after=(5,))
+    try:
+        assert recorded is not None
+        seconds = recorded[1].size / recorded[0]
+        assert 0.3 <= seconds <= 0.7  # about 0.6 s heard, less the 0.1 s trim; nowhere near the 1 s cap
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_touch_before_anyone_speaks_does_not_end_the_message(
+    short_messages: None, short_touches: None
+) -> None:
+    """A touch (or his beep shaking the head) before the speaker starts is ignored; silence ends it as usual."""
+    frames = [_SILENCE] * 2 + [_SPEECH] * 4 + [_SILENCE] * 6
+    runtime, recorded, _ = await _record_during_a_command(frames, touched_after=(0,))
+    try:
+        assert recorded is not None
+        assert np.count_nonzero(recorded[1]) == 4 * _SPEECH.size
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_message_that_is_only_the_touch_sends_nothing(short_messages: None, short_touches: None) -> None:
+    """The hand's noise starts the recording and the touch ends it: too short to be a message."""
+    runtime, recorded, _ = await _record_during_a_command([_SPEECH] * 2 + [_SILENCE] * 8, touched_after=(1,))
+    try:
+        assert recorded is None
     finally:
         await runtime.close()
 

@@ -761,10 +761,10 @@ PHOTO_NO_PICTURE: Final[dict[str, str]] = {
     "pt": "Desculpa, a câmara não me deu nenhuma foto.",
 }
 MESSAGE_PROMPT: Final[dict[str, str]] = {
-    "en": "Okay! Tell me your message for {name} after the beep.",
-    "es": "¡Vale! Dime tu mensaje para {name} después del pitido.",
-    "it": "Va bene! Dimmi il tuo messaggio per {name} dopo il bip.",
-    "pt": "Está bem! Diz a tua mensagem para {name} depois do bip.",
+    "en": "Okay! Tell me your message for {name} after the beep, and touch my head when you're done.",
+    "es": "¡Vale! Dime tu mensaje para {name} después del pitido, y tócame la cabeza cuando termines.",
+    "it": "Va bene! Dimmi il tuo messaggio per {name} dopo il bip, e toccami la testa quando hai finito.",
+    "pt": "Está bem! Diz a tua mensagem para {name} depois do bip, e toca-me na cabeça quando acabares.",
 }
 SENT_TO: Final[dict[str, str]] = {
     "en": "Sent to {name}!",
@@ -913,6 +913,22 @@ def say_date(now: datetime, language: str) -> str:
     if language == "it":
         return f"Oggi è {weekday} {now.day} {month}."
     return f"Hoje é {weekday}, {now.day} de {month}."
+
+
+def switch_wobble(robot: Any, *, on: bool) -> None:
+    """Turn the daemon's speech wobble on or off; it moves the head with his voice, out of the app's sight."""
+    try:
+        robot.enable_wobbling() if on else robot.disable_wobbling()
+    except Exception as error:
+        logger.warning("Could not switch speech wobble: %s", type(error).__name__)
+
+
+def restore_wobble(robot: Any) -> None:
+    """Turn the speech wobble back on, if it is configured on."""
+    from reachy_mini_conversation_app.config import config
+
+    if config.SPEECH_WOBBLE_ENABLED:
+        switch_wobble(robot, on=True)
 
 
 def _names(names: list[str], language: str) -> str:
@@ -1155,13 +1171,19 @@ class QuickCommands:
             return None
         whatsapp = self._deps.whatsapp
         movement = self._deps.movement_manager
+        robot = self._deps.reachy_mini
 
         async def record_and_send() -> str:
-            movement.set_listening(True)  # antennas perked and no idle breathing while he records
+            movement.set_listening(True)  # antennas perked while he records
+            # Held still, with his beep not wobbling it, a touch on his head ends the message.
+            movement.hold_still(True)
+            switch_wobble(robot, on=False)
             try:
-                recorded = await record()
+                recorded = await record(movement.head_touches)
             finally:
+                movement.hold_still(False)
                 movement.set_listening(False)
+                restore_wobble(robot)
             if recorded is None:
                 return MESSAGE_NOTHING[language]
             ogg = await asyncio.to_thread(encode_voice_note, *recorded)
@@ -1225,7 +1247,6 @@ class QuickCommands:
     def _head_test(self, language: str) -> QuickReply:
         """Cue taps, presses and pats on his head while the movement loop records it, then save it to a file."""
         from reachy_mini_conversation_app.moves import HEAD_RECORDING_COLUMNS
-        from reachy_mini_conversation_app.config import config
 
         movement = self._deps.movement_manager
         robot = self._deps.reachy_mini
@@ -1241,20 +1262,13 @@ class QuickCommands:
             movement.set_listening(False)
             movement.hold_still(False)
             rows: list[tuple[float, ...]] = movement.stop_head_recording()
-            if config.SPEECH_WOBBLE_ENABLED:
-                wobble(on=True)
+            restore_wobble(robot)
             return rows
-
-        def wobble(*, on: bool) -> None:
-            try:
-                robot.enable_wobbling() if on else robot.disable_wobbling()
-            except Exception as error:
-                logger.warning("Head test could not switch speech wobble: %s", type(error).__name__)
 
         def start() -> None:
             # The daemon wobbles the head with his speech, out of the app's sight; he is silent while recording
             # a message, so the cues must not move it either.
-            wobble(on=False)
+            switch_wobble(robot, on=False)
             movement.set_listening(True)  # as while he records a message: antennas perked
             # Breathing moves the head 5 mm up and down, which on 2026-10-29 hid light touches.
             movement.hold_still(True)
