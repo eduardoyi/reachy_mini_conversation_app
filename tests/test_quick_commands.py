@@ -951,8 +951,9 @@ def _family_runner(
     answers: list[Any] = []
     deps.expect_answer = answers.append
 
-    async def record() -> Any:
+    async def record(touches: Any = None) -> Any:
         steps.append("record")
+        deps.recorded_touches = touches
         return recorded
 
     deps.record_message = record
@@ -1011,6 +1012,13 @@ async def test_a_message_is_recorded_after_the_prompt_and_sent_as_a_voice_note(f
     assert deps.whatsapp.voice_notes[0][1].startswith(b"OggS")
     calls = [call.args for call in deps.movement_manager.set_listening.call_args_list]
     assert calls == [(True,), (False,)]
+    # Held still with the speech wobble off, so a touch on his head can end it.
+    assert [call.args for call in deps.movement_manager.hold_still.call_args_list] == [(True,), (False,)]
+    assert deps.recorded_touches == deps.movement_manager.head_touches
+    deps.reachy_mini.disable_wobbling.assert_called_once()
+    from reachy_mini_conversation_app.config import config
+
+    assert deps.reachy_mini.enable_wobbling.call_count == int(config.SPEECH_WOBBLE_ENABLED)
 
 
 @pytest.mark.asyncio

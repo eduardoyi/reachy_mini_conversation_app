@@ -257,6 +257,16 @@ HEAD_RECORDING_COLUMNS: Tuple[str, ...] = (
 HEAD_RECORDING_MAX_S = 180.0
 # Holding the head still (no breathing, no speaker turns) ends after this if nobody releases it.
 HEAD_HOLD_MAX_S = 180.0
+# A touch while the head is held still: the measured head moves this far within HEAD_TOUCH_WINDOW_S. A pushed
+# head stays where it was pushed, so distance from the command would read "touched" after the first touch.
+# Head tests on 2026-10-29: untouched it moved at most 0.38 mm / 0.19 deg in 0.2 s; taps, presses and pats
+# reached 3-4.6 mm and 2-3.9 deg.
+HEAD_TOUCH_MOVE_M = 0.001
+HEAD_TOUCH_TILT_RAD = math.radians(0.7)
+HEAD_TOUCH_WINDOW_S = 0.2
+# The command must stay put this long first: the head trails a stopped breath by about 0.5 s.
+HEAD_TOUCH_SETTLE_S = 1.5
+HEAD_TOUCH_COOLDOWN_S = 1.0
 
 
 class AntennaTouchDetector:
@@ -295,6 +305,54 @@ class AntennaTouchDetector:
         if now - self._last_touch < ANTENNA_TOUCH_COOLDOWN_S:
             return False
         self._last_touch = now
+        return True
+
+
+class HeadTouchDetector:
+    """Notice a hand on the head while it is held still: the measured head suddenly moves."""
+
+    def __init__(self) -> None:
+        """Start with no history."""
+        self._measured: deque[tuple[float, NDArray[np.float64]]] = deque()
+        self._command: NDArray[np.float64] | None = None
+        self._steady_since = math.inf
+        self._last_touch = -math.inf
+        self.touch_move_m = 0.0  # how far the head moved in the last touch, for the log
+        self.touch_tilt_rad = 0.0
+
+    def reset(self) -> None:
+        """Forget the history: the head is no longer held still."""
+        self._measured.clear()
+        self._command = None
+        self._steady_since = math.inf
+
+    def update(self, now: float, commanded: NDArray[np.float64], measured: NDArray[np.float64]) -> bool:
+        """Record this tick's commanded and measured head; return True once per touch."""
+        if self._command is None or not np.allclose(commanded, self._command, atol=1e-6):
+            self.reset()
+            self._command = np.array(commanded, dtype=np.float64)
+            self._steady_since = now
+        self._measured.append((now, np.array(measured, dtype=np.float64)))
+        while now - self._measured[0][0] > HEAD_TOUCH_WINDOW_S:
+            self._measured.popleft()
+        if now - self._steady_since < HEAD_TOUCH_SETTLE_S:
+            return False
+        before = self._measured[0][1]
+        move = float(np.linalg.norm(measured[:3, 3] - before[:3, 3]))
+        relative = before[:3, :3].T @ measured[:3, :3]
+        # From the rotation's skew part: the trace loses small angles in the measured matrix's rounding.
+        axis = np.array(
+            [relative[2, 1] - relative[1, 2], relative[0, 2] - relative[2, 0], relative[1, 0] - relative[0, 1]]
+        )
+        tilt = float(np.arcsin(np.clip(np.linalg.norm(axis) / 2.0, 0.0, 1.0)))
+        if move < HEAD_TOUCH_MOVE_M and tilt < HEAD_TOUCH_TILT_RAD:
+            return False
+        self._measured.clear()  # one push is one touch, not one per tick until it settles
+        self._measured.append((now, np.array(measured, dtype=np.float64)))
+        if now - self._last_touch < HEAD_TOUCH_COOLDOWN_S:
+            return False
+        self._last_touch = now
+        self.touch_move_m, self.touch_tilt_rad = move, tilt
         return True
 
 
@@ -447,6 +505,8 @@ class MovementManager:
         self._framing_until = -math.inf
         # Breathing and speaker turns wait until then: the head is held still to read touches on it.
         self._holding_still_until = -math.inf
+        self._head_touch = HeadTouchDetector()
+        self._head_touches = 0  # touches on the held-still head so far; guarded by _status_lock
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
@@ -603,6 +663,11 @@ class MovementManager:
         A touch then shows as the head leaving a fixed pose rather than one that drifts 5 mm up and down.
         """
         self._command_queue.put(("hold_still", active))
+
+    def head_touches(self) -> int:
+        """Return how many touches the held-still head has had since start (it only grows); thread-safe."""
+        with self._status_lock:
+            return self._head_touches
 
     def turn_toward_speaker(self) -> None:
         """Turn to face where recent speech came from, if it is clearly elsewhere; thread-safe."""
@@ -1168,6 +1233,32 @@ class MovementManager:
         except Exception as e:
             logger.warning("Antenna touch handler failed: %s", e)
 
+    def _check_head_touch(self, now: float) -> None:
+        """Count a touch when the held-still head suddenly moves (worker thread only)."""
+        if now >= self._holding_still_until:
+            self._head_touch.reset()
+            return
+        with self._status_lock:
+            commanded = self._last_commanded_pose[0]
+        try:
+            # Cached state from the robot's stream; no I/O here.
+            measured = np.asarray(self.current_robot.get_current_head_pose(), dtype=np.float64)
+        except Exception as e:
+            logger.debug("Head touch check skipped: %s", e)
+            return
+        if measured.shape != (4, 4) or not np.all(np.isfinite(measured)):
+            return
+        if not self._head_touch.update(now, np.asarray(commanded, dtype=np.float64), measured):
+            return
+        with self._status_lock:
+            self._head_touches += 1
+        logger.info(
+            "Head touched (%.1f mm, %.1f deg in %.1f s)",
+            self._head_touch.touch_move_m * 1000.0,
+            math.degrees(self._head_touch.touch_tilt_rad),
+            HEAD_TOUCH_WINDOW_S,
+        )
+
     def _record_head(self, now: float) -> None:
         """Add this tick's commanded and measured head to a running head-touch test (worker thread only)."""
         with self._status_lock:
@@ -1383,6 +1474,7 @@ class MovementManager:
             # 5) Single set_target call - the only control point
             self._issue_control_command(head, antennas_cmd, body_yaw)
             self._check_antenna_touch(loop_start)
+            self._check_head_touch(loop_start)
             self._record_head(loop_start)
 
             # 6) Adaptive sleep to align to next tick, then publish shared state

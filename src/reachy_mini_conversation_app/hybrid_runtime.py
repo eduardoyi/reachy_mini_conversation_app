@@ -406,10 +406,15 @@ class HybridRuntime:
     _REQUEST_CLIP_STT_TIMEOUT_S = 6.0
     # A voice message (record_message): wait this long for speech after the beep, end it after this much
     # silence (children pause mid-thought), never let it run longer than the cap; keep this much silence.
+    # A touch on his head ends it sooner, so the silence can be long enough for a child's pause.
     _MESSAGE_START_S = 8.0
-    _MESSAGE_SILENCE_S = 3.0
+    _MESSAGE_SILENCE_S = 5.0
     _MESSAGE_MAX_S = 60.0
     _MESSAGE_MARGIN_S = 0.5
+    # Ended by a touch: drop this much from the end (the hand on his head, near the microphones), and send
+    # nothing when less than _MESSAGE_MIN_S remains (only the touch was heard).
+    _MESSAGE_TOUCH_TRIM_S = 0.6
+    _MESSAGE_MIN_S = 0.8
     # After a question (expect_answer), Reachy waits this long for the answer to start, without his name.
     _ANSWER_START_S = 15.0
     # An awaited answer not started within this (Reachy still speaking or busy) is dropped.
@@ -655,6 +660,8 @@ class HybridRuntime:
         self._activation_text_task: asyncio.Task[None] | None = None
         self._pending_activation_text: tuple[int, str] | None = None
         self._postactivation_frames_dropped = 0
+        # Frames dropped since the queue was last cleared: one warning each time it fills, a total when cleared.
+        self._postactivation_drop_burst = 0
         self._playback_clearer: Callable[[], None] | None = None
         self._local_start_event = asyncio.Event()
         self._output_wakeup_event = asyncio.Event()
@@ -1946,10 +1953,11 @@ class HybridRuntime:
                 self._clear_postactivation_queue()
                 self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
 
-    async def record_message(self) -> tuple[int, NDArray[np.int16]] | None:
+    async def record_message(self, touches: Callable[[], int] | None = None) -> tuple[int, NDArray[np.int16]] | None:
         """During a quick command's follow-up: beep, then record until the speaker stops; None if nobody spoke.
 
-        The message stays in memory; it ends after ``_MESSAGE_SILENCE_S`` of silence or at ``_MESSAGE_MAX_S``.
+        The message stays in memory; it ends after ``_MESSAGE_SILENCE_S`` of silence, at ``_MESSAGE_MAX_S``,
+        or once ``touches`` (a count of touches on his head) grows after the speaker has started.
         """
         with self._lifecycle_lock:
             generation = self._generation
@@ -1972,6 +1980,8 @@ class HybridRuntime:
         heard_s = 0.0
         silence_s = 0.0
         index = 0
+        touched = False
+        touches_at_speech: int | None = None  # touches before anyone spoke do not end it
         try:
             while True:
                 await asyncio.sleep(0.05)
@@ -2000,6 +2010,13 @@ class HybridRuntime:
                         logger.info("Voice message: nothing said after the beep")
                         return None
                     continue
+                if touches is not None:
+                    count = self._read_touches(touches)
+                    if touches_at_speech is None:
+                        touches_at_speech = count
+                    elif count > touches_at_speech:
+                        touched = True
+                        break
                 if silence_s >= self._MESSAGE_SILENCE_S or now - speech_started_at > self._MESSAGE_MAX_S:
                     break
         finally:
@@ -2009,14 +2026,25 @@ class HybridRuntime:
         sample_rate = clip[0][0]
         audio = np.concatenate([audio_to_mono_int16(frame[1]) for frame in clip if frame[0] == sample_rate])
         first = max(0, int((speech_start_s - self._MESSAGE_MARGIN_S) * sample_rate))
-        last = audio.size - max(0, int((silence_s - self._MESSAGE_MARGIN_S) * sample_rate))
+        trailing_s = max(0.0, silence_s - self._MESSAGE_MARGIN_S)
+        if touched:
+            trailing_s = max(trailing_s, self._MESSAGE_TOUCH_TRIM_S)
+        last = audio.size - int(trailing_s * sample_rate)
         audio = audio[first:last]
-        logger.info(
-            "Voice message recorded seconds=%.1f ended=%s",
-            audio.size / sample_rate,
-            "silence" if silence_s >= self._MESSAGE_SILENCE_S else "length cap",
-        )
+        ended = "touch" if touched else "silence" if silence_s >= self._MESSAGE_SILENCE_S else "length cap"
+        if touched and audio.size < self._MESSAGE_MIN_S * sample_rate:
+            logger.info("Voice message: only the touch was heard; nothing to send")
+            return None
+        logger.info("Voice message recorded seconds=%.1f ended=%s", audio.size / sample_rate, ended)
         return sample_rate, audio
+
+    @staticmethod
+    def _read_touches(touches: Callable[[], int]) -> int:
+        try:
+            return int(touches())
+        except Exception as error:
+            logger.debug("Head touches unavailable: %s", type(error).__name__)
+            return 0
 
     def expect_answer(self, answer: QuickCommandHandler) -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
@@ -2527,15 +2555,21 @@ class HybridRuntime:
                 _, oldest = self._postactivation_frames.popleft()
                 self._postactivation_seconds -= self._frame_duration(oldest)
                 self._postactivation_frames_dropped += 1
-                logger.warning(
-                    "Postactivation audio queue full; dropped oldest frame count=%d",
-                    self._postactivation_frames_dropped,
-                )
+                self._postactivation_drop_burst += 1
+                # On 2026-10-29 a 90 s head test logged this 6,912 times; once per filling is enough.
+                if self._postactivation_drop_burst == 1:
+                    logger.warning(
+                        "Postactivation audio queue full; dropping the oldest frames count=%d",
+                        self._postactivation_frames_dropped,
+                    )
 
     def _clear_postactivation_queue(self) -> None:
         with self._lifecycle_lock:
             self._postactivation_frames.clear()
             self._postactivation_seconds = 0.0
+            dropped, self._postactivation_drop_burst = self._postactivation_drop_burst, 0
+        if dropped > 1:
+            logger.info("Postactivation audio queue dropped %d frames while full", dropped)
 
     @staticmethod
     def _frame_duration(frame: AudioFrame) -> float:

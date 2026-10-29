@@ -19,6 +19,7 @@ from reachy_mini_conversation_app.moves import (
     GazeTurnMove,
     BreathingMove,
     MovementManager,
+    HeadTouchDetector,
     AntennaTouchDetector,
     ActivationAcknowledgementMove,
     head_world_yaw,
@@ -787,6 +788,75 @@ def test_holding_still_skips_speaker_turns_and_ends_on_its_own() -> None:
     manager.turn_toward_speaker()
     manager._poll_signals(clock["now"])
     assert any(isinstance(move, GazeTurnMove) for move in manager.move_queue)
+
+
+def _head_at(x_mm: float = 0.0, z_mm: float = 0.0, roll_deg: float = 0.0) -> np.ndarray:
+    pose = np.eye(4)
+    roll = np.radians(roll_deg)
+    pose[1:3, 1:3] = [[np.cos(roll), -np.sin(roll)], [np.sin(roll), np.cos(roll)]]
+    pose[0, 3], pose[2, 3] = x_mm / 1000.0, z_mm / 1000.0
+    return pose
+
+
+def test_a_sudden_move_of_the_still_head_is_one_touch_and_staying_pushed_is_not_more() -> None:
+    """A push past 1 mm counts once; the head then resting where it was pushed counts nothing more."""
+    detector = HeadTouchDetector()
+    command = np.eye(4)
+    ticks = [100.0 + step * 0.02 for step in range(200)]
+    touches = [
+        now
+        for now in ticks
+        if detector.update(now, command, _head_at(x_mm=0.0 if now < 102.0 else 2.0, z_mm=0.03 * np.sin(now * 40)))
+    ]
+    assert touches == [pytest.approx(102.0, abs=0.03)]
+    assert detector.touch_move_m == pytest.approx(0.002, abs=0.0002)
+
+
+def test_a_small_tilt_is_a_touch_but_noise_is_not() -> None:
+    """A 1 degree tilt in 0.2 s counts; 0.4 mm and 0.2 degrees of jitter (the untouched maximum) does not."""
+    detector = HeadTouchDetector()
+    command = np.eye(4)
+    jitter = [
+        detector.update(100.0 + step * 0.02, command, _head_at(x_mm=0.4 * (step % 2), roll_deg=0.2 * (step % 2)))
+        for step in range(150)
+    ]
+    assert not any(jitter)
+    assert detector.update(103.1, command, _head_at(roll_deg=1.0))
+    assert 0.7 <= np.degrees(detector.touch_tilt_rad) <= 1.0  # from the oldest reading in the window
+
+
+def test_a_moving_command_or_a_fresh_hold_is_never_a_touch() -> None:
+    """While the command moves (breathing) or before it has been still for the settle time, nothing counts."""
+    detector = HeadTouchDetector()
+    for step in range(100):
+        now = 100.0 + step * 0.02
+        breath = _head_at(z_mm=5.0 * np.sin(now))
+        assert not detector.update(now, breath, _head_at(z_mm=5.0 * np.sin(now - 0.5)))
+    still = np.eye(4)
+    assert not detector.update(110.0, still, _head_at())
+    assert not detector.update(110.5, still, _head_at(x_mm=3.0))  # still settling after the hold began
+
+
+def test_touches_are_counted_only_while_the_head_is_held_still() -> None:
+    """The movement loop counts touches on the held head; outside a hold, the same push is not counted."""
+    robot = MagicMock()
+    manager = MovementManager(robot)
+    clock = {"now": 100.0}
+    manager._now = lambda: clock["now"]
+    manager._last_commanded_pose = (np.eye(4), (-0.17, 0.17), 0.0)
+
+    def push_at(at: float) -> None:
+        for step in range(150):
+            clock["now"] = at + step * 0.02
+            robot.get_current_head_pose.return_value = _head_at(x_mm=2.0 if step >= 100 else 0.0)
+            manager._check_head_touch(clock["now"])
+
+    push_at(100.0)
+    assert manager.head_touches() == 0
+    manager.hold_still(True)
+    manager._poll_signals(clock["now"])
+    push_at(clock["now"])
+    assert manager.head_touches() == 1
 
 
 def test_a_restart_in_the_sleep_pose_is_not_an_antenna_touch() -> None:

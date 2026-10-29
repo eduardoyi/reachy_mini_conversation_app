@@ -65,7 +65,8 @@ class ToolDependencies:
     maribel: Any = None  # MaribelLink from maribel.py, when Maribel (Grok Bot) is configured
     whatsapp: Any = None  # WhatsAppLink from whatsapp.py, when photos go to a WhatsApp group
     # Hybrid runtime only: beep, then record a voice message until the speaker stops (rate, mono int16) or None.
-    record_message: Callable[[], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
+    # Records a voice message; the argument counts touches on his head, which end it.
+    record_message: Callable[[Callable[[], int] | None], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
 
