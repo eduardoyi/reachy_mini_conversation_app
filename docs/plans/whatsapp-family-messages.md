@@ -147,3 +147,11 @@ messages, video.
   no speaker turn for either photo today: speaker following turns only for voices more than 25° off, and
   the earlier visible move was him rising from sleep. Photos now follow the face in view from the
   countdown to the shot (`QuickReply.before` → `MovementManager.frame_faces`), then ease back.
+- 2026-10-29: second live photo try. Nine wakes before it failed the name check (the wake-word work in
+  [missed-calls-spanish-richi.md](missed-calls-spanish-richi.md)). The request was heard as "puedes
+  poner una foto a Sergio" and went to Gemini, whose `take_photo` had no recipient: the photo went to
+  "Reachy group", not Sergio's. During the conversation speaker following turned him to -51°, -90° and
+  -150°, away from the speaker, so the photo had no face. Fixes: "pon / poner … a [x]" with a recipient;
+  `take_photo(to=...)` resolves contacts and takes nothing for an unknown name; while a photo is framed
+  speaker turns wait (30 s at most); the tool frames like the quick command. Not fixed here: why speaker
+  following turned the wrong way.
