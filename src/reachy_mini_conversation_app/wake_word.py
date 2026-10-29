@@ -97,7 +97,21 @@ class AcousticWakeWordDetector(Protocol):
 
 
 # Spellings local STT commonly produces for "Reachy" ("Richie" is accepted as a wake word by the household).
-REACHY_TRANSCRIPT_ALIASES: tuple[str, ...] = ("reachie", "reechy", "richie", "richy", "ritchie")
+# Spellings local STT gives the name; "richi", "ricci" and "ritzi" are how a Spanish "Ri-chi" comes out
+# (2026-10-29). Real names such as "Ricky" stay out.
+REACHY_TRANSCRIPT_ALIASES: tuple[str, ...] = (
+    "reachie",
+    "reachi",
+    "reechy",
+    "reechi",
+    "richie",
+    "richy",
+    "richi",
+    "ritchie",
+    "ritchy",
+    "ricci",
+    "ritzi",
+)
 
 
 class TranscriptWakeWordDetector:
@@ -276,6 +290,10 @@ class TranscriptWakeWordDetector:
     def _record_latency(self, latency_seconds: float) -> None:
         self._latency_sample_count += 1
         self._total_latency_seconds += latency_seconds
+
+    def mentions_wake_word(self, text: str) -> bool:
+        """Return whether ``text`` names the wake word or an alias, without cooldown or detection state."""
+        return self._wake_word_pattern.search(self._bounded_text(text)) is not None
 
     @staticmethod
     def _compile_wake_word(wake_word: str, aliases: tuple[str, ...] = ()) -> tuple[str, re.Pattern[str]]:

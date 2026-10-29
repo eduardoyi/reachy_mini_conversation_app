@@ -467,6 +467,7 @@ adversarial review found no remaining P0/P1 blocker.
 
 | Date | Change |
 |---|---|
+| 2026-10-29 | Open room segments are checked for the name every 1.5 s, so a call the wake model missed no longer waits for a pause (up to 20 s); Spanish spellings of the name added. |
 | 2026-10-29 | `LOCAL_STT_ENGINE=qwen` runs Qwen3-ASR (0.6B room, 1.7B requests) on MLX in place of Whisper, answering to the Whisper names, with the names hint and an echo guard; Whisper loads if Qwen cannot. Tests in `tests/test_whisper_server.py`. |
 | 2026-10-25 | A conversation that never connects (Gemini out of credits, no internet) no longer ends in silence: once the runtime is back to listening, Reachy says `quick_commands.CANNOT_CONNECT` in the request's language (`guess_language`, Spanish when unsure) through the quick-reply speaker, which falls back to the Mac's own voice when Gemini's voice is unreachable too. A conversation that drops after connecting closes as before. Tests: `test_a_conversation_that_cannot_connect_says_so_out_loud`, `test_a_conversation_that_drops_after_connecting_does_not_apologise`, `test_guess_language_picks_the_household_language`. |
 | 2026-10-25 | The follow-up window no longer closes while someone is speaking (Gemini voice activity, speech begun after Reachy's reply), capped at twice the window; a long sentence whose transcript had not arrived was cut off at 15 s. Three regression tests fail on the old rule and pass on the new one. |
@@ -877,6 +878,21 @@ It transcribes everything, kids talking to Reachy included, but bounds the work 
 Measured on the same machine: 8 s of noise 26 s → 0.3 s; English and Spanish commands unchanged
 (0.3–0.5 s); overlapped speech 1.6 s with the retry. Each clip logs one line
 (`Transcribed audio_s=… language=… tokens=… capped=… took_s=… waited_s=…`, no text).
+
+### Name check in open room segments — 2026-10-29
+
+A room segment ends only after `LOCAL_VAD_SILENCE_SECONDS` under the RMS threshold, which a noisy kitchen
+never reaches, so a call the wake model missed ("Hola Ritzi", official33 score 0.00) waited up to 20 s for
+the transcript wake. Now `AmbientContextProcessor` transcribes the newest 2.5 s of an open segment every
+1.5 s with the fast model (`name_probe_window_seconds`, `name_probe_interval_seconds`). When
+`TranscriptWakeWordDetector.mentions_wake_word` finds the name, the segment closes there and takes the
+usual transcript wake path. Probes run only while STT is idle and never during a request, and their text is
+not kept. The log says `Name heard N s into an open segment; transcribing it now`. Spanish spellings
+("richi", "ricci", "ritzi") joined the transcript aliases. Plan:
+[missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). Tests:
+`test_a_name_in_a_long_open_segment_closes_it_without_waiting_for_a_pause`,
+`test_open_segments_are_not_checked_without_a_probe_or_while_taking_a_request`,
+`test_mentions_wake_word_knows_the_spanish_spellings_but_not_real_names`.
 
 ### Qwen3-ASR in place of Whisper, behind a setting — 2026-10-29
 

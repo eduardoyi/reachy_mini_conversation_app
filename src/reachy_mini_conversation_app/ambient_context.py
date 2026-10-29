@@ -78,6 +78,10 @@ class AmbientContextConfig:
     vad_timeout_seconds: float = 1.0
     stt_timeout_seconds: float = 5.0
     max_pending_stt_tasks: int = 2
+    # While a segment is still open (a noisy room never goes quiet enough to end it), its newest audio is checked
+    # for the name every interval, so a call is not held until the pause or the 20 s cap.
+    name_probe_interval_seconds: float = 1.5
+    name_probe_window_seconds: float = 2.5
     # Drop transcripts mostly in non-Latin script: multilingual Whisper invents Chinese or Korean text for
     # short or noisy segments, which a Latin-script household never speaks.
     latin_script_only: bool = False
@@ -100,6 +104,10 @@ class AmbientContextConfig:
             raise ValueError("max_pending_stt_tasks must be a positive integer")
         if self.max_pending_stt_tasks <= 0:
             raise ValueError("max_pending_stt_tasks must be a positive integer")
+        for name in ("name_probe_interval_seconds", "name_probe_window_seconds"):
+            value = getattr(self, name)
+            if value <= 0 or not math.isfinite(value):
+                raise ValueError(f"{name} must be finite and positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +322,7 @@ class _SpeechAccumulator:
     speech_seconds: float
     silence_seconds: float
     sequence: int
+    probed_at: float | None = None
 
 
 class AmbientContextProcessor:
@@ -334,6 +343,8 @@ class AmbientContextProcessor:
         self._stt = stt
         self._clock = clock
         self._transcript_observer = transcript_observer
+        self._name_probe: Callable[[str], bool] | None = None
+        self._probe_task: asyncio.Task[None] | None = None
         self._transcript = RollingTranscript(
             max_seconds=self.config.transcript_window_seconds,
             max_chars=self.config.max_transcript_chars,
@@ -414,6 +425,7 @@ class AmbientContextProcessor:
         if is_speech:
             self._increment_metrics(speech_frames=self._metrics.speech_frames + 1)
             self._append_speech_frame(sample_rate, normalized_audio, frame_duration)
+            self._maybe_probe_name()
             return
 
         speech = self._speech
@@ -445,6 +457,59 @@ class AmbientContextProcessor:
                 return audio
         return None
 
+    def set_name_probe(self, probe: Callable[[str], bool] | None) -> None:
+        """Check long open segments for the name with ``probe`` (text -> named), or stop checking."""
+        self._name_probe = probe
+
+    def _maybe_probe_name(self) -> None:
+        """Transcribe the newest audio of a long open segment and close the segment early if it holds the name."""
+        speech, probe = self._speech, self._name_probe
+        if (
+            probe is None
+            or speech is None
+            or self._request_mode
+            or self.config.strategy is not AmbientContextStrategy.CONTINUOUS_TRANSCRIPT
+            or (self._probe_task is not None and not self._probe_task.done())
+            # Only when STT is idle: a probe must never cost a finished segment its transcription slot.
+            or self._stt_inflight > 0
+        ):
+            return
+        if speech.probed_at is None:
+            if speech.ended_at - speech.started_at < self.config.name_probe_window_seconds:
+                return
+        elif speech.ended_at - speech.probed_at < self.config.name_probe_interval_seconds:
+            return
+        speech.probed_at = speech.ended_at
+        window_samples = round(self.config.name_probe_window_seconds * speech.sample_rate)
+        parts: list[NDArray[np.int16]] = []
+        held = 0
+        for _, audio in reversed(speech.frames):
+            parts.append(audio)
+            held += audio.size
+            if held >= window_samples:
+                break
+        window = np.concatenate(parts[::-1])[-window_samples:]
+        backend_task = self._start_local_work(self._stt.transcribe, (speech.sample_rate, window), "stt")
+        if backend_task is not None:
+            self._probe_task = asyncio.create_task(self._run_name_probe(speech, backend_task, probe))
+
+    async def _run_name_probe(
+        self, speech: _SpeechAccumulator, backend_task: asyncio.Task[object], probe: Callable[[str], bool]
+    ) -> None:
+        """Close ``speech`` now if its probed tail names Reachy; the text itself is not kept."""
+        try:
+            text = await self._await_backend_text(backend_task)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.info("Name check in an open segment failed: %s", type(error).__name__)
+            return
+        if self._speech is speech and not self._closed and probe(text):
+            logger.info(
+                "Name heard %.1fs into an open segment; transcribing it now", speech.ended_at - speech.started_at
+            )
+            self.close_open_segment()
+
     def set_request_mode(self, active: bool) -> None:
         """Transcribe what follows with the accurate model while Reachy takes a request."""
         self._request_mode = active
@@ -472,6 +537,8 @@ class AmbientContextProcessor:
 
     async def drain(self) -> None:
         """Wait for currently scheduled local STT work to finish."""
+        if self._probe_task is not None:
+            await asyncio.gather(self._probe_task, return_exceptions=True)
         while self._transcription_tasks:
             await asyncio.gather(*tuple(self._transcription_tasks))
 
@@ -557,6 +624,9 @@ class AmbientContextProcessor:
             task.cancel()
         if transcription_tasks:
             await asyncio.gather(*transcription_tasks, return_exceptions=True)
+        if self._probe_task is not None and not self._probe_task.done():
+            self._probe_task.cancel()
+            await asyncio.gather(self._probe_task, return_exceptions=True)
         backend_tasks = tuple(self._local_backend_tasks)
         for backend_task in backend_tasks:
             backend_task.cancel()

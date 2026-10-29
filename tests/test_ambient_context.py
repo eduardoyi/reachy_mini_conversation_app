@@ -885,3 +885,77 @@ async def test_request_mode_transcribes_with_the_accurate_model() -> None:
 
     assert stt.calls == ["fast", "accurate"]
     await processor.close()
+
+
+class _ProbeSTT:
+    """Answer probes of the open segment (window-sized clips) and its final transcription differently."""
+
+    def __init__(self, probe_texts: list[str], final_text: str, window_samples: int) -> None:
+        self.probe_texts = probe_texts
+        self.final_text = final_text
+        self.window_samples = window_samples
+        self.sizes: list[int] = []
+
+    def transcribe(self, audio: AudioFrame) -> str:
+        self.sizes.append(audio[1].size)
+        if audio[1].size == self.window_samples and self.probe_texts:
+            return self.probe_texts.pop(0)
+        return self.final_text
+
+
+def _named(text: str) -> bool:
+    return "ricci" in text.casefold()
+
+
+@pytest.mark.asyncio
+async def test_a_name_in_a_long_open_segment_closes_it_without_waiting_for_a_pause() -> None:
+    """A noisy room never goes quiet; the newest audio is checked for the name and the segment ends there."""
+    stt = _ProbeSTT(["nada", "Ricci!"], "hola Ricci", window_samples=45)
+    processor = AmbientContextProcessor(
+        vad=SequenceVAD([True] * 10),
+        stt=stt,
+        config=processor_config(name_probe_window_seconds=0.45, name_probe_interval_seconds=0.25),
+        clock=lambda: 0.0,
+    )
+    processor.set_name_probe(_named)
+
+    for value in range(8):
+        await processor.observe_frame(frame(value))
+        await processor.drain()
+
+    # First check at 0.5 s heard nothing, the second 0.3 s later heard the name and closed the segment.
+    assert stt.sizes == [45, 45, 80]
+    assert processor.transcript.text() == "hola Ricci"
+    assert processor.metrics.continuous_stt_requests == 1
+    assert processor.has_open_segment is False
+    await processor.observe_frame(frame(8))
+    assert processor.has_open_segment is True  # what follows the name starts a new segment
+    await processor.close()
+
+
+@pytest.mark.asyncio
+async def test_open_segments_are_not_checked_without_a_probe_or_while_taking_a_request() -> None:
+    """No probe set, or Reachy already listening to a request: the segment waits for its pause as before."""
+    for request_mode, probe in ((False, None), (True, _named)):
+        stt = _ProbeSTT(["Ricci!"] * 3, "final", window_samples=45)
+        processor = AmbientContextProcessor(
+            vad=SequenceVAD([True] * 8 + [False] * 3),
+            stt=stt,
+            config=processor_config(name_probe_window_seconds=0.45, name_probe_interval_seconds=0.25),
+            clock=lambda: 0.0,
+        )
+        processor.set_name_probe(probe)
+        processor.set_request_mode(request_mode)
+        for value in range(11):
+            await processor.observe_frame(frame(value))
+            await processor.drain()
+        assert stt.sizes == [80]
+        await processor.close()
+
+
+def test_config_rejects_a_zero_name_check_interval() -> None:
+    """The open-segment check needs a positive interval and window."""
+    with pytest.raises(ValueError, match="name_probe_interval_seconds"):
+        AmbientContextConfig(name_probe_interval_seconds=0)
+    with pytest.raises(ValueError, match="name_probe_window_seconds"):
+        AmbientContextConfig(name_probe_window_seconds=float("nan"))

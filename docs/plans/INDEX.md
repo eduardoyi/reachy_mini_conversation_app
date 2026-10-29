@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Catch "Ri-chi" calls the wake model misses](missed-calls-spanish-richi.md) | `in-progress` | 2026-10-29 | official33 scores 0.00 on a Spanish "Ri-chi"; open room segments are checked for the name every 1.5 s instead of waiting up to 20 s for a pause, Spanish spellings added; a wake model retrained with her pronunciation is in progress |
 | [Qwen3-ASR as the local speech engine](qwen-speech-engine.md) | `in-progress` | 2026-10-29 | `LOCAL_STT_ENGINE=qwen` runs Qwen3-ASR 0.6B (room) and 1.7B (requests) on MLX in place of Whisper, with the names as a hint and an echo guard; Whisper loads if Qwen cannot; benchmarked on the mini, live switch pending |
 | [Hand voice requests to Maribel](maribel-handoff.md) | `in-progress` | 2026-10-28 | "Ask Maribel…" (quick command or `ask_maribel` tool) goes to her Grok Bot webhook; her replies come back through a Tailscale Funnel callback and Reachy speaks them; questions open a 15 s answer window; built and tested, live check pending |
 | [Bend an antenna to wake Reachy](antenna-touch-wake.md) | `in-progress` | 2026-10-28 | A held antenna bend (14° from every recent target, 0.2 s) wakes him like his name, even from sleep, no name check; Pollen's daemon version only works with no app running; robot check pending |

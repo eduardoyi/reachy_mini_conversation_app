@@ -3,7 +3,7 @@
 > Current experiment (2026-09-08): the user explicitly authorized local training on the 80 existing usable household recordings. Those sources are training-only now; fresh independent validation is required. Household-derived features/models stay private and outside cloud-training mounts. Earlier evaluation-only statements below describe the prior protocol.
 
 - Status: `in-progress`
-- Last updated: 2026-09-09
+- Last updated: 2026-10-29
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -440,6 +440,7 @@ latency remain unmeasured.
 | 2026-09-07 | Screened the reviewed Spanish sherpa checkpoint with 30 private, technically valid Mac-microphone positive fixtures. It detected 0/30 at documented settings and only 2/30 at an overly aggressive setting; individual spelling candidates did not rescue recall. Rejected this checkpoint before the negative set. The recordings remain outside the repository for reuse with the next candidate, and no production integration, false-positive, activation-latency, or Pi claim follows. |
 | 2026-09-07 | Screened the existing `andyjmorgan` Reachy openWakeWord model against the same private fixtures. It detected 6/30 at its documented 0.5 threshold; lower thresholds and three local gain treatments did not materially improve recall. Rejected the model before negative testing. The model and isolated dependencies remained under `/tmp`; nothing was bundled or integrated. |
 | 2026-09-07 | Marked the Spanish sherpa checkpoint as a historical rejected candidate and linked the custom multilingual openWakeWord training plan; no production acoustic model was selected. |
+| 2026-10-29 | Transcript aliases gain the Spanish spellings `reachi, reechi, richi, ritchy, ricci, ritzi` (official33 scores 0.00 on a Spanish "Ri-chi"); `mentions_wake_word` lets the ambient processor check open segments for the name. See [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
 
 ## Custom training preflight evidence
 

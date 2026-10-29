@@ -267,7 +267,7 @@ _LISTENING_WAKES = frozenset({"acoustic_wake", "antenna_touch", "awaited_answer"
 # Whisper spellings of the wake word; the acoustic wake keeps the word itself local.
 _WAKE_WORD_VARIANTS = (
     r"reachy|reachie|reachi|reechy|reechie|richie|richy|richi|ritchie|ritchy|ricky|rickie|ricci|riichi|"
-    r"rishi|ricchi|ritzy|richey|reechi"
+    r"rishi|ricchi|ritzy|ritzi|richey|reechi"
 )
 _WAKE_WORD_TRANSCRIPT_PATTERN = re.compile(rf"\b(?:{_WAKE_WORD_VARIANTS})\b", re.IGNORECASE)
 # How close (difflib ratio) a first word must be to "reachy" to count as a misspelled name: "reach",

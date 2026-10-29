@@ -261,3 +261,15 @@ def test_non_monotonic_transcript_timestamp_does_not_record_negative_latency() -
 
     assert detector.process_transcript("Reachy", speech_started_at=10, observed_at=9) is not None
     assert detector.metrics_snapshot().latency_sample_count == 0
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("Ricci! Ricci!", True), ("hola Ritzi", True), ("Richi, apaga la luz", True), ("Ricky came over", False)],
+)
+def test_mentions_wake_word_knows_the_spanish_spellings_but_not_real_names(text: str, expected: bool) -> None:
+    """How a Spanish "Ri-chi" comes out of local STT counts as the name; a real name such as Ricky does not."""
+    from reachy_mini_conversation_app.wake_word import REACHY_TRANSCRIPT_ALIASES
+
+    detector = TranscriptWakeWordDetector("Reachy", aliases=REACHY_TRANSCRIPT_ALIASES)
+    assert detector.mentions_wake_word(text) is expected

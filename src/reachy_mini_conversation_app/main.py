@@ -574,6 +574,7 @@ def run(
                     aliases=REACHY_TRANSCRIPT_ALIASES if config.LOCAL_WAKE_WORD.casefold() == "reachy" else (),
                     cooldown_seconds=config.LOCAL_WAKE_COOLDOWN_SECONDS,
                 )
+                context_processor.set_name_probe(wake_detector.mentions_wake_word)
                 intent_router = LocalIntentRouter(wake_word=config.LOCAL_WAKE_WORD)
                 action_executor = LocalActionExecutor(
                     deps,
