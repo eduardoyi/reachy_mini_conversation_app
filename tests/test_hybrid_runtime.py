@@ -3524,6 +3524,7 @@ class _QuickReply:
         whole_request: bool = False,
         beats: tuple[str, ...] = (),
         beat_s: float = 1.0,
+        before: Callable[[], None] | None = None,
     ) -> None:
         self.text = text
         self.language = "en"
@@ -3533,6 +3534,7 @@ class _QuickReply:
         self.whole_request = whole_request
         self.beats = beats
         self.beat_s = beat_s
+        self.before = before
 
 
 def _quick_runtime(
@@ -3636,6 +3638,32 @@ async def test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up() -
     assert spoken[3][1] - spoken[2][1] >= 0.55  # the last beat is waited out before the photo
     assert not handler.started.is_set()
     await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("cut_off", "prepared"), [(False, ["before", "say:Okay."]), (True, [])])
+async def test_a_reply_is_prepared_before_it_is_spoken_but_only_once_taken(cut_off: bool, prepared: list[str]) -> None:
+    """``before`` runs ahead of the reply's speech, and never for a cut-off request handed to the conversation."""
+    events: list[str] = []
+    handler = FakeHandler()
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply("Okay.", whole_request=True, before=lambda: events.append("before"))
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        events.append(f"say:{text}")
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    with runtime._lifecycle_lock:
+        runtime._mode = RuntimeMode.LOCAL_COMMAND
+        generation = runtime._generation
+    runtime._owner_loop = asyncio.get_running_loop()
+    try:
+        await runtime._try_quick_command("take a picture", generation, cut_off=cut_off)
+        assert events == prepared
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.asyncio

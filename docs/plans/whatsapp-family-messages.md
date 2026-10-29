@@ -139,3 +139,11 @@ messages, video.
 
 - 2026-10-29: plan written from the household's answers; "Reachy <> Sergio" group created
   (`120363413010779824@g.us`).
+- 2026-10-29: built and deployed on the Mac mini (branch `feat/family-messages`); contacts file
+  `~/.config/reachy-whatsapp/contacts.json` with Tío Sergio. Live: "Richie, vamos a mandar un mensaje a
+  Sergio" → 10.2 s recorded, ended by silence, 42 KB voice note sent in 1.1 s (22.4 s request to done);
+  "Richie, mándale una foto a Sergio" → photo (1 face) sent in 0.9 s, 8.1 s in all. Both arrived.
+- 2026-10-29: household feedback: for the photo his head did not turn to the person asking. The logs show
+  no speaker turn for either photo today: speaker following turns only for voices more than 25° off, and
+  the earlier visible move was him rising from sleep. Photos now follow the face in view from the
+  countdown to the shot (`QuickReply.before` → `MovementManager.frame_faces`), then ease back.

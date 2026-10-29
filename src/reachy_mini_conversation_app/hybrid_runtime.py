@@ -1886,6 +1886,12 @@ class HybridRuntime:
             self._pending_acoustic_ack_generation = None
         self._clear_postactivation_queue()
         self._local_output.append(AdditionalOutputs({"role": "user", "content": request}))
+        before = getattr(reply, "before", None)
+        if before is not None:
+            try:
+                before()
+            except Exception as error:
+                logger.warning("Quick command preparation failed: %s", type(error).__name__)
         await self._speak_locally(getattr(reply, "text", None), language, generation)
         # A countdown: beat k starts beat_s * k after the first (at once if the one before ran long).
         beat_s = float(getattr(reply, "beat_s", 1.0))

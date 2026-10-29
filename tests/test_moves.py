@@ -446,6 +446,51 @@ def test_conversation_end_keeps_tracking_the_user_turned_on() -> None:
     robot.stop_head_tracking.assert_not_called()
 
 
+def test_a_photo_frames_the_face_then_lets_go() -> None:
+    """Framing a photo turns tracking on for the countdown and off afterwards, easing back to the gaze."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+
+    manager.frame_faces(True)
+    manager._poll_signals(manager._now())
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+
+    manager.frame_faces(False)
+    manager._poll_signals(manager._now())
+    robot.stop_head_tracking.assert_called_once()
+    assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)] == [0.0]
+
+
+def test_a_photo_leaves_tracking_someone_turned_on() -> None:
+    """Tracking asked for before the photo keeps going after it."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+
+    manager.set_head_tracking(True)
+    manager.frame_faces(True)
+    manager.frame_faces(False)
+    manager._poll_signals(manager._now())
+
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+    robot.stop_head_tracking.assert_not_called()
+
+
+def test_a_conversation_started_during_a_photo_ends_its_tracking() -> None:
+    """A photo cut short by a conversation hands its tracking over; the conversation's end stops it."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+
+    manager.frame_faces(True)
+    manager.set_conversation_active(True)
+    manager.frame_faces(False)  # a late end of the photo no longer stops the conversation's tracking
+    manager._poll_signals(manager._now())
+    robot.stop_head_tracking.assert_not_called()
+
+    manager.set_conversation_active(False)
+    manager._poll_signals(manager._now())
+    robot.stop_head_tracking.assert_called_once()
+
+
 def test_turning_tracking_off_eases_back_to_the_gaze() -> None:
     """Stopping tracking hands the head back smoothly rather than snapping to the last command."""
     robot = _robot_facing(25.0)

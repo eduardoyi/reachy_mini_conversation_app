@@ -61,6 +61,8 @@ class QuickReply:
     # Spoken after ``text`` and before ``after``, one every ``beat_s`` (a countdown).
     beats: tuple[str, ...] = ()
     beat_s: float = 1.0
+    # Runs once the reply is taken, before anything is said (a reply handed to the conversation never runs it).
+    before: Callable[[], None] | None = None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1160,9 +1162,14 @@ class QuickCommands:
         if self._deps.whatsapp is None or not chat or not self._deps.camera_enabled:
             return None  # the conversation still has the camera and the screen
 
+        movement = self._deps.movement_manager
+
         async def take_and_send() -> str:
-            await asyncio.sleep(PHOTO_SETTLE_S)
-            result = await take_and_share(self._deps, chat, faces=self._faces, take=self._photographer)
+            try:
+                await asyncio.sleep(PHOTO_SETTLE_S)
+                result = await take_and_share(self._deps, chat, faces=self._faces, take=self._photographer)
+            finally:
+                movement.frame_faces(False)
             if result is None:
                 return PHOTO_NO_PICTURE[language]
             if result is SendResult.SENT:
@@ -1177,6 +1184,9 @@ class QuickCommands:
             after_timeout_s=PHOTO_STEP_TIMEOUT_S,
             whole_request=True,
             beats=COUNTDOWN[language],
+            # Face whoever is in view during the countdown, as speaker following only turns for voices far
+            # to the side (2026-10-29: "it didn't move his head to focus on me").
+            before=lambda: movement.frame_faces(True),
         )
 
     async def _weather_reply(self, command: QuickCommand) -> QuickReply | None:

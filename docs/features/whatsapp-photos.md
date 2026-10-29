@@ -27,6 +27,9 @@ video, replies, ending a message by touch, and messages from a Gemini conversati
   hazme una foto", "(puoi) fare / scattare una foto (a noi)", "facci / scattaci una foto", "(podes)
   tirar / bater uma foto(grafia) (de nós)" or "tira-nos uma foto". Anything more ("take a picture of me as
   a pirate") or a negation goes to the conversation.
+- **Framing.** From the countdown until the photo is taken, Reachy follows the face in view (daemon face
+  tracking through `MovementManager.frame_faces`), then eases back to his idle gaze. Tracking someone had
+  turned on stays on; a conversation that starts mid-photo takes the tracking over and ends it.
 - **Countdown.** Reachy says "Three!", "Two!", "One!" in the request's language, about one second apart
   (cached phrases play without Gemini's padding silence; before that, a beat ran about 1.8 s), waits 0.4 s for his head to settle, and takes up to five frames 0.12 s
   apart. The frame with the most faces wins, then the sharpest.
@@ -113,7 +116,7 @@ flowchart LR
 | Share | `photographer.take_and_share(deps, chat, *, faces, take) -> SendResult | None` | Shared by the quick command and the tool; `SHARE_TIMEOUT_S` bounds it from outside |
 | Tool | `tools/take_photo.py`: `take_photo` (no arguments) | `{status: sent / unsure / not_sent, instruction}` or `{error, instruction?}` |
 | Trigger | `quick_commands.parse` → `QuickCommand("photo", language)` | Checked after the negation check and weather, before `_NOT_A_COMMAND_START` |
-| Reply | `QuickReply.beats`, `QuickReply.beat_s` | Spoken after `text`, before `after`; phrases `COUNTDOWN`, `PHOTO_SENT`, `PHOTO_NOT_SENT`, `PHOTO_UNSURE`, `PHOTO_NO_PICTURE`; `PHOTO_PHRASES` lists them with their language |
+| Reply | `QuickReply.beats`, `QuickReply.beat_s`, `QuickReply.before` | `before` runs once the runtime takes the reply (never for a cut-off request handed to the conversation), before any speech; beats are spoken after `text`, before `after`; phrases `COUNTDOWN`, `PHOTO_SENT`, `PHOTO_NOT_SENT`, `PHOTO_UNSURE`, `PHOTO_NO_PICTURE`; `PHOTO_PHRASES` lists them with their language |
 | Wiring | `main._build_whatsapp`, `deps.whatsapp`, `_prepare_photos` | `deps.whatsapp` is None unless `whatsapp_photos_configured()` |
 | Contacts | `whatsapp_contacts.py`: `load_contacts(path, fold)`, `find_contact(phrase, contacts)` | `{"contacts": [{"name", "chat" (`@g.us` only), "say": [...]}]}` read on each request; unknown, empty or ambiguous → None |
 | Voice note | `voice_notes.encode_voice_note(rate, pcm) -> bytes | None`; `WhatsAppLink.send_audio(chat, ogg)` | GStreamer `opusenc ! oggmux`, 48 kHz mono 32 kbit/s; `/send/audio` with `ptt=true` and `message.ogg` (`audio/ogg`), same retry and deadline rules as photos |
@@ -193,6 +196,7 @@ flowchart LR
 | `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more |
 | `tests/test_quick_commands.py` | Messages: grammar with and without a name, Maribel's left alone; prompt, recording with antennas perked, voice note to the group; nothing said, not sent, unsure; a picture to his group; "who?" and its answers (known, unknown, cancel), nothing sent to an unknown name; no contacts or WhatsApp → conversation; outcome phrases cached. Photos: the grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
+| `tests/test_moves.py` | `test_a_photo_frames_the_face_then_lets_go`, `test_a_photo_leaves_tracking_someone_turned_on`, `test_a_conversation_started_during_a_photo_ends_its_tracking` |
 | `tests/tools/test_take_photo.py` | Waits the countdown, sends to the group, each outcome; no picture sends nothing; needs the link, the group and the camera; offered only with WhatsApp photos set up |
 | `tests/test_whatsapp_contacts.py` | Folded names; only named groups (a person's number, missing fields, junk skipped, not logged); missing or broken file; articles and accents; unknown and ambiguous names |
 | `tests/test_voice_notes.py` | A tone encodes to OGG Opus (skipped without GStreamer); empty → None |
@@ -201,8 +205,9 @@ flowchart LR
 
 ### Not yet validated
 
-- Messages and pictures to "Reachy <> Sergio" on the Mac mini: recording quality, the 3 s silence
-  ending with children, the voice note playing on phones.
+- Checked live 2026-10-29: "vamos a mandar un mensaje a Sergio" (10.2 s recorded, ended by silence,
+  42 KB voice note sent in 1.1 s) and "mándale una foto a Sergio" (sent in 0.9 s) both arrived. Not yet:
+  the 3 s silence ending with the children, and face framing during the countdown.
 - Gemini's `take_photo` in a live conversation.
 - Checked live on 2026-10-29: install, pairing by code, the group listing, the LaunchAgent restart
   keeping the link, and one "tomemos una foto": countdown and settle 6.7 s (beats about 1.8 s each),
@@ -222,6 +227,7 @@ pytest tests/test_hybrid_runtime.py -v -k "countdown or message or beep"
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Photos frame the face in view during the countdown (live: the head did not turn to the person asking). |
 | 2026-10-29 | Voice messages and pictures to family groups from a contacts file; "who?" when no name is known. |
 | 2026-10-29 | Tighter countdown: cached phrases play without their padding silence. |
 | 2026-10-29 | `take_photo` tool: Gemini sends photos too. |
