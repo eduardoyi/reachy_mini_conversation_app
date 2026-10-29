@@ -415,6 +415,8 @@ class MovementManager:
         self._gaze_yaw = 0.0
         # Tracking enabled for a conversation (not by the user), so it ends with the conversation.
         self._tracking_auto = False
+        # Tracking enabled to frame a photo, so it ends with the photo.
+        self._framing_faces = False
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
@@ -540,6 +542,10 @@ class MovementManager:
         """Start or stop following the user's face; thread-safe via the command queue."""
         self._command_queue.put(("set_head_tracking", enabled))
 
+    def frame_faces(self, active: bool) -> None:
+        """Follow the face in view while a photo is taken, then stop unless tracking was already on; thread-safe."""
+        self._command_queue.put(("frame_faces", active))
+
     def turn_toward_speaker(self) -> None:
         """Turn to face where recent speech came from, if it is clearly elsewhere; thread-safe."""
         self._command_queue.put(("turn_toward_speaker", None))
@@ -636,13 +642,24 @@ class MovementManager:
             self.state.update_activity()
         elif command == "set_head_tracking":
             self._tracking_auto = False
+            self._framing_faces = False
             self._set_head_tracking(bool(payload))
         elif command == "turn_toward_speaker":
             self._request_speaker_turn()
+        elif command == "frame_faces":
+            if payload and not self._head_tracking:
+                self._set_head_tracking(True)
+                self._framing_faces = True
+            elif not payload and self._framing_faces:
+                self._framing_faces = False
+                self._set_head_tracking(False)
         elif command == "set_conversation_active":
             if payload:
                 if not self._head_tracking:
                     self._set_head_tracking(True)
+                    self._tracking_auto = True
+                elif self._framing_faces:  # a conversation started during a photo: it ends the tracking now
+                    self._framing_faces = False
                     self._tracking_auto = True
             else:
                 self._attentive_until = None

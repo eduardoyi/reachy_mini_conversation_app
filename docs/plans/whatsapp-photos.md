@@ -343,3 +343,4 @@ external service (GOWA) is added; flag that `docs/scheme.mmd` needs the WhatsApp
   around the voice (1% of full scale, 50 ms kept on each side; the cached file is unchanged), so a beat
   is the voice plus the tail, about 1 s, and every fixed reply starts sooner. The first, uncached play
   is unchanged; the startup warm-up caches the photo phrases.
+- 2026-10-29: photos now frame the face in view during the countdown (see the family-messages plan's log).

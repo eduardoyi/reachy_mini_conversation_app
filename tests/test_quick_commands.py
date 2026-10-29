@@ -791,8 +791,12 @@ async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(photos:
     assert reply.text is None and reply.beats == COUNTDOWN["es"] and reply.beat_s == 1.0
     assert photos == [] and deps.whatsapp.sent == []  # nothing happens before the countdown
     assert reply.after is not None and reply.after_timeout_s == quick_commands.PHOTO_STEP_TIMEOUT_S
+    assert deps.movement_manager.frame_faces.call_args_list == []  # framing starts when the countdown does
+    assert reply.before is not None
+    reply.before()
     assert await reply.after() == PHOTO_SENT["es"]
     assert photos == ["photo"]
+    assert [call.args for call in deps.movement_manager.frame_faces.call_args_list] == [(True,), (False,)]
     assert display.shown == [photographer.PHOTO_ON_SCREEN_S]
     assert [chat for chat, _ in deps.whatsapp.sent] == [GROUP]
 
