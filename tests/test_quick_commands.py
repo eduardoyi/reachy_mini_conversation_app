@@ -10,10 +10,17 @@ import pytest
 from reachy_mini_conversation_app import quick_commands
 from reachy_mini_conversation_app.maribel import MaribelReply
 from reachy_mini_conversation_app.weather import Forecast, DayForecast
+from reachy_mini_conversation_app.whatsapp import SendResult
 from reachy_mini_conversation_app.android_tv import TVState
 from reachy_mini_conversation_app.home_devices import HubDevice
 from reachy_mini_conversation_app.quick_commands import (
+    COUNTDOWN,
+    PHOTO_SENT,
+    PHOTO_UNSURE,
+    FIXED_PHRASES,
     MARIBEL_ASKING,
+    PHOTO_NOT_SENT,
+    PHOTO_NO_PICTURE,
     MARIBEL_PASSED_ON,
     MARIBEL_UNREACHABLE,
     QuickCommands,
@@ -644,3 +651,231 @@ async def test_without_maribel_configured_her_name_is_an_ordinary_request() -> N
     """Without Maribel set up, the request goes to the conversation."""
     runner, _, _ = _runner()
     assert await runner.handle("Ask Maribel to book dinner") is None
+
+
+# Photos for the WhatsApp group ---------------------------------------------------------------
+
+GROUP = "120363416355796813@g.us"
+
+
+def _jpeg() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 48), (200, 120, 40)).save(buffer, "JPEG")
+    return buffer.getvalue()
+
+
+class _WhatsApp:
+    """A stand-in for WhatsAppLink that records what it was asked to send."""
+
+    def __init__(self, result: SendResult = SendResult.SENT) -> None:
+        self.result = result
+        self.sent: list[tuple[str, bytes]] = []
+
+    async def send_image(self, chat: str, jpeg: bytes) -> SendResult:
+        self.sent.append((chat, jpeg))
+        return self.result
+
+
+class _Display:
+    """Records the screens put up, or fails like a broken spool."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.shown: list[float | None] = []
+
+    def show(self, png: bytes, owner: str = "requested", *, expires_after_s: float | None = None) -> None:
+        if self.fail:
+            raise OSError("spool unwritable")
+        assert png.startswith(b"\x89PNG")
+        self.shown.append(expires_after_s)
+
+
+@pytest.fixture
+def photos(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Configure the photos group, skip the head settle, and record the order of the photo steps."""
+    from reachy_mini_conversation_app.config import config
+
+    monkeypatch.setattr(config, "WHATSAPP_PHOTOS_CHAT", GROUP)
+    monkeypatch.setattr(quick_commands, "PHOTO_SETTLE_S", 0.0)
+    return []
+
+
+def _photo_runner(
+    steps: list[str], jpeg: bytes | None = None, *, result: SendResult = SendResult.SENT, display: Any = None
+) -> tuple[QuickCommands, Any]:
+    picture = _jpeg() if jpeg is None else jpeg
+
+    def photographer(media: Any, faces: Any) -> bytes | None:
+        steps.append("photo")
+        return picture or None
+
+    runner, _, deps = _runner(photographer=photographer)
+    deps.camera_enabled = True
+    deps.whatsapp = _WhatsApp(result)
+    deps.display = display
+    return runner, deps
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        ("Take a picture", "en"),
+        ("Can you take a photo of us?", "en"),
+        ("take our picture please", "en"),
+        ("snap a pic of everyone", "en"),
+        ("Sácanos una foto", "es"),
+        ("¿Puedes sacarnos una foto?", "es"),
+        ("hazme una foto", "es"),
+        ("toma una foto de todos", "es"),
+        ("Toma una foto", "es"),
+        ("Tómanos una foto", "es"),
+        ("tómanos una foto a todos", "es"),
+        ("¿Nos tomas una foto?", "es"),
+        ("¿me sacas una foto?", "es"),
+        ("Facci una foto", "it"),
+        ("puoi farci una foto?", "it"),
+        ("scatta una foto a noi", "it"),
+        ("Tira-nos uma foto", "pt"),
+        ("podes tirar uma fotografia?", "pt"),
+        ("bate uma foto de nós", "pt"),
+    ],
+)
+def test_asking_for_a_picture_is_a_photo_command(text: str, language: str) -> None:
+    """Take a picture (of us) and its polite forms, in the household's four languages."""
+    assert parse(text) == quick_commands.QuickCommand("photo", language)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "take a picture of me as a pirate",
+        "don't take a picture",
+        "what's in this picture",
+        "no me hagas una foto",
+        "show me a picture of a tiger",
+    ],
+)
+def test_other_picture_requests_are_not_the_photo_command(text: str) -> None:
+    """Edits, negations and questions about pictures are left to the conversation."""
+    command = parse(text)
+    assert command is None or command.kind != "photo"
+
+
+@pytest.mark.asyncio
+async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(photos: list[str]) -> None:
+    """Three spoken beats, then the photo goes to the screen and to the WhatsApp group: "Sent!"."""
+    display = _Display()
+    runner, deps = _photo_runner(photos, display=display)
+
+    reply = await runner.handle("¿Puedes sacarnos una foto?")
+
+    assert reply is not None and reply.kind == "photo" and reply.whole_request
+    assert reply.text is None and reply.beats == COUNTDOWN["es"] and reply.beat_s == 1.0
+    assert photos == [] and deps.whatsapp.sent == []  # nothing happens before the countdown
+    assert reply.after is not None and reply.after_timeout_s == quick_commands.PHOTO_STEP_TIMEOUT_S
+    assert await reply.after() == PHOTO_SENT["es"]
+    assert photos == ["photo"]
+    assert display.shown == [quick_commands.PHOTO_ON_SCREEN_S]
+    assert [chat for chat, _ in deps.whatsapp.sent] == [GROUP]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "said"), [(SendResult.FAILED, PHOTO_NOT_SENT["en"]), (SendResult.UNSURE, PHOTO_UNSURE["en"])]
+)
+async def test_a_photo_that_is_not_sent_says_so(photos: list[str], result: SendResult, said: str) -> None:
+    """A refused send and one that may still arrive have their own lines."""
+    runner, _ = _photo_runner(photos, result=result)
+    reply = await runner.handle("take a picture")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == said
+
+
+@pytest.mark.asyncio
+async def test_no_picture_from_the_camera_sends_nothing(photos: list[str]) -> None:
+    """The camera gave nothing: Reachy says so and nothing goes to WhatsApp."""
+    runner, deps = _photo_runner(photos, jpeg=b"")
+    reply = await runner.handle("take a picture")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == PHOTO_NO_PICTURE["en"]
+    assert deps.whatsapp.sent == []
+
+
+@pytest.mark.asyncio
+async def test_a_photo_that_takes_too_long_is_not_sent(photos: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stuck camera ends the step with "no picture", not silence."""
+    import time
+
+    monkeypatch.setattr(quick_commands, "PHOTO_TAKE_S", 0.05)
+
+    def stuck(media: Any, faces: Any) -> bytes:
+        time.sleep(0.3)
+        return _jpeg()
+
+    runner, _, deps = _runner(photographer=stuck)
+    deps.camera_enabled = True
+    deps.whatsapp = _WhatsApp()
+    reply = await runner.handle("take a picture")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == PHOTO_NO_PICTURE["en"]
+    assert deps.whatsapp.sent == []
+
+
+@pytest.mark.asyncio
+async def test_a_broken_screen_does_not_stop_the_photo_being_sent(photos: list[str]) -> None:
+    """The e-ink preview is a bonus; the photo still reaches the group."""
+    runner, deps = _photo_runner(photos, display=_Display(fail=True))
+    reply = await runner.handle("take a photo of us")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == PHOTO_SENT["en"]
+    assert len(deps.whatsapp.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_without_whatsapp_or_the_camera_a_picture_goes_to_the_conversation(
+    photos: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not configured, or the camera off: today's path (Gemini and the e-ink screen)."""
+    from reachy_mini_conversation_app.config import config
+
+    runner, deps = _photo_runner(photos)
+    deps.camera_enabled = False
+    assert await runner.handle("take a picture") is None
+
+    deps.camera_enabled = True
+    monkeypatch.setattr(config, "WHATSAPP_PHOTOS_CHAT", None)
+    assert await runner.handle("take a picture") is None
+
+    deps.whatsapp = None
+    monkeypatch.setattr(config, "WHATSAPP_PHOTOS_CHAT", GROUP)
+    assert await runner.handle("take a picture") is None
+    assert photos == []
+
+
+@pytest.mark.asyncio
+async def test_other_commands_never_touch_the_camera_or_whatsapp(photos: list[str]) -> None:
+    """Privacy: only the photo command takes a picture, and it goes only to the configured group."""
+    runner, deps = _photo_runner(photos)
+    for text in ("turn off the lights", "what time is it", "pause"):
+        reply = await runner.handle(text)
+        if reply is not None and reply.after is not None:
+            await reply.after()
+    assert photos == [] and deps.whatsapp.sent == []
+
+
+def test_every_photo_phrase_is_cached_for_instant_playback() -> None:
+    """The countdown and the outcomes are fixed phrases, kept on disk after their first time."""
+    for language in quick_commands.LANGUAGES:
+        for text in (
+            *COUNTDOWN[language],
+            PHOTO_SENT[language],
+            PHOTO_NOT_SENT[language],
+            PHOTO_UNSURE[language],
+            PHOTO_NO_PICTURE[language],
+        ):
+            assert text in FIXED_PHRASES
+            assert (text, language) in quick_commands.PHOTO_PHRASES

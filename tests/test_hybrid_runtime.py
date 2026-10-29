@@ -1,5 +1,6 @@
 """Tests for the local/cloud hybrid runtime lifecycle."""
 
+import time
 import wave
 import asyncio
 import logging
@@ -3521,6 +3522,8 @@ class _QuickReply:
         sleep: bool = False,
         after: Callable[[], Any] | None = None,
         whole_request: bool = False,
+        beats: tuple[str, ...] = (),
+        beat_s: float = 1.0,
     ) -> None:
         self.text = text
         self.language = "en"
@@ -3528,6 +3531,8 @@ class _QuickReply:
         self.sleep = sleep
         self.after = after
         self.whole_request = whole_request
+        self.beats = beats
+        self.beat_s = beat_s
 
 
 def _quick_runtime(
@@ -3598,6 +3603,68 @@ async def test_quick_reply_follow_up_runs_after_speech_and_sleep_is_remembered()
     assert spoken == ["Good night!", "Sorry, that didn't work."]
     assert runtime._asleep is True
     assert not handler.started.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up() -> None:
+    """Three beats one beat_s apart, then the photo step; the conversation never opens."""
+    handler = FakeHandler()
+    spoken: list[tuple[str, float]] = []
+    events: list[str] = []
+
+    async def after() -> str | None:
+        events.append(f"after:{len(spoken)}")
+        return "Sent!"
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append((text, time.monotonic()))
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply(None, after=after, beats=("Three!", "Two!", "One!"), beat_s=0.6)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    started_at = time.monotonic()
+    assert await runtime.activate("acoustic_wake", addressed_text="Reachy, take a picture")
+
+    assert [text for text, _ in spoken] == ["Three!", "Two!", "One!", "Sent!"]
+    assert events == ["after:3"]
+    beat_times = [at - started_at for _, at in spoken[:3]]
+    assert beat_times[1] - beat_times[0] == pytest.approx(0.6, abs=0.15)
+    assert beat_times[2] - beat_times[1] == pytest.approx(0.6, abs=0.15)
+    assert spoken[3][1] - spoken[2][1] >= 0.55  # the last beat is waited out before the photo
+    assert not handler.started.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_countdown_stops_and_skips_the_follow_up() -> None:
+    """When the activation is replaced mid-countdown, the remaining beats and the photo step do not run."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    events: list[str] = []
+    runtime: HybridRuntime
+
+    async def after() -> str | None:
+        events.append("after")
+        return None
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        if text == "Two!":
+            with runtime._lifecycle_lock:
+                runtime._generation += 1
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply(None, after=after, beats=("Three!", "Two!", "One!"), beat_s=0.05)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    assert await runtime.activate("acoustic_wake", addressed_text="Reachy, take a picture")
+
+    assert spoken == ["Three!", "Two!"]
+    assert events == []
     await runtime.close()
 
 

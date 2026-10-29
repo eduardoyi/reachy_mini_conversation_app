@@ -86,6 +86,47 @@ def _build_maribel() -> Any:
     return link
 
 
+# GOWA connects to WhatsApp a few seconds after its HTTP server is up.
+WHATSAPP_STATUS_DELAY_S = 20.0
+
+
+def _build_whatsapp() -> Any:
+    """Return the link to Reachy's WhatsApp server, or None when photos to WhatsApp are not configured."""
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.whatsapp import WhatsAppLink
+    from reachy_mini_conversation_app.tools.core_tools import whatsapp_photos_configured
+
+    if not whatsapp_photos_configured():
+        return None
+    return WhatsAppLink(config.WHATSAPP_API_URL or "", config.WHATSAPP_API_AUTH or "")
+
+
+def _prepare_photos(link: Any, faces: Any, speech: Any) -> None:
+    """Load the face detector, put the photo phrases in the speech cache, then report WhatsApp's status."""
+    from reachy_mini_conversation_app.quick_commands import PHOTO_PHRASES
+
+    logger = logging.getLogger(__name__)
+    faces.warm_up()
+
+    async def cache_phrases() -> None:
+        for text, language in PHOTO_PHRASES:  # a phrase already cached is only read from disk
+            async for _ in speech.stream(text, language):
+                pass
+
+    try:
+        asyncio.run(cache_phrases())
+    except Exception as error:
+        logger.warning("Photo phrases not cached: %s", type(error).__name__)
+    time.sleep(WHATSAPP_STATUS_DELAY_S)
+    status = asyncio.run(link.status())
+    if status is None:
+        logger.warning("WhatsApp server not reachable; photos will not be sent")
+    elif not (status.connected and status.logged_in):
+        logger.warning("WhatsApp server not ready; photos will not be sent (%s)", status.message)
+    else:
+        logger.info("WhatsApp server ready for photos")
+
+
 def _build_display() -> Any:
     """Return the TRMNL e-ink display, or None when TRMNL_ENABLED is off."""
     from reachy_mini_conversation_app.config import config
@@ -151,6 +192,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         return None, None
     from reachy_mini_conversation_app.weather import Place, WeatherService
     from reachy_mini_conversation_app.local_speech import LocalSpeech
+    from reachy_mini_conversation_app.photographer import FaceFinder
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
 
     home = None
@@ -166,7 +208,12 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
     )
-    return QuickCommands(deps, weather=weather), speech.stream
+    faces = FaceFinder()
+    if deps.whatsapp is not None:
+        threading.Thread(
+            target=_prepare_photos, args=(deps.whatsapp, faces, speech), name="photo-setup", daemon=True
+        ).start()
+    return QuickCommands(deps, weather=weather, faces=faces), speech.stream
 
 
 def _start_inactivity_timeout_thread(
@@ -452,6 +499,7 @@ def run(
     deps.display = _build_display()
     deps.now_playing = _build_now_playing(deps.display)
     deps.maribel = _build_maribel()
+    deps.whatsapp = _build_whatsapp()
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the selected realtime handler for the current runtime config."""

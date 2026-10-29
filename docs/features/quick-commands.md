@@ -179,3 +179,12 @@ A request that starts with "ask / tell Maribel…" (or the Spanish, Italian or P
 The reply says "Asking Maribel"; its `after` step sends the request to her and returns her spoken reply
 (`after_timeout_s` 23 s). The reply sets `whole_request`, so a request clip cut off at its 8 s cap goes
 to the conversation rather than sending half a sentence. See [Maribel hand-off](maribel-handoff.md).
+
+## Photos for the WhatsApp group — 2026-10-29
+
+"Take a picture (of us)" and its Spanish, Italian and Portuguese forms, polite infinitives included, parse
+as kind `photo` (after the negation check, before `_NOT_A_COMMAND_START`). With WhatsApp photos configured
+and the camera on, the reply has no text, the countdown as `QuickReply.beats` ("Three!", "Two!", "One!"),
+`whole_request`, and an `after` step that takes, shows and sends the photo (`after_timeout_s` 22.4 s);
+otherwise it returns None and the conversation handles it as before. All its phrases are in
+`FIXED_PHRASES`. See [Photos to WhatsApp](whatsapp-photos.md).

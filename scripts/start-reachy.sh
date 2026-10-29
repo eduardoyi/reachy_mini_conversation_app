@@ -81,6 +81,47 @@ tune_camera() {
 }
 tune_camera
 
+# Reachy's WhatsApp server (GOWA, `whatsapp rest`), for photos to the family group. It keeps running when
+# the app stops, so a restart does not relink WhatsApp. Its data directory is owner-only (session keys,
+# chat text), and its log is rewritten each start because GOWA prints its settings, password included.
+WHATSAPP_SERVER_BIN="${WHATSAPP_SERVER_BIN:-$(env_file_value WHATSAPP_SERVER_BIN)}"
+WHATSAPP_SERVER_DIR="${WHATSAPP_SERVER_DIR:-$(env_file_value WHATSAPP_SERVER_DIR)}"
+WHATSAPP_SERVER_DIR="${WHATSAPP_SERVER_DIR:-$HOME/.local/share/reachy-whatsapp}"
+WHATSAPP_API_URL="${WHATSAPP_API_URL:-$(env_file_value WHATSAPP_API_URL)}"
+WHATSAPP_LOG="${TMPDIR:-/tmp}/reachy-whatsapp.log"
+
+start_whatsapp() {
+  [[ -n "$WHATSAPP_SERVER_BIN" && -n "$WHATSAPP_API_URL" ]] || return 0
+  WHATSAPP_SERVER_BIN="${WHATSAPP_SERVER_BIN/#\~/$HOME}"
+  WHATSAPP_SERVER_DIR="${WHATSAPP_SERVER_DIR/#\~/$HOME}"
+  local health="${WHATSAPP_API_URL%/}/health" waited=0
+  if curl -fsS -m 2 "$health" >/dev/null 2>&1; then
+    echo "WhatsApp server already running; reusing it"
+    return 0
+  fi
+  if [[ ! -x "$WHATSAPP_SERVER_BIN" ]]; then
+    echo "WhatsApp server $WHATSAPP_SERVER_BIN not found; photos will not be sent" >&2
+    return 0
+  fi
+  echo "Starting the WhatsApp server; log: $WHATSAPP_LOG"
+  rm -f "$WHATSAPP_LOG"
+  (
+    umask 077
+    chmod 700 "$WHATSAPP_SERVER_DIR" 2>/dev/null || echo "Could not make $WHATSAPP_SERVER_DIR private" >&2
+    cd "$WHATSAPP_SERVER_DIR" && nohup "$WHATSAPP_SERVER_BIN" rest >"$WHATSAPP_LOG" 2>&1 &
+  ) || echo "Could not start the WhatsApp server in $WHATSAPP_SERVER_DIR" >&2
+  until curl -fsS -m 2 "$health" >/dev/null 2>&1; do
+    if (( waited >= 10 )); then
+      echo "WhatsApp server not answering after 10s; see $WHATSAPP_LOG" >&2
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  echo "WhatsApp server ready after ${waited}s"
+}
+start_whatsapp
+
 whisper_pid=""
 cleanup() {
   if [[ -n "$whisper_pid" ]] && kill -0 "$whisper_pid" 2>/dev/null; then

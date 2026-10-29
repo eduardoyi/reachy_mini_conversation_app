@@ -135,6 +135,9 @@ and is shown like a drawing, in about 4–6 s. The prompt keeps each person's re
 photo and turns creatures into a costume with their face showing, so the result looks like them.
 "Draw me as…", "how would I look as…" and "dress me as…" always use the photo, never a plain drawing. Plan: [camera-photos-display.md](../plans/camera-photos-display.md).
 
+- **A second path:** with [Photos to WhatsApp](whatsapp-photos.md) set up, a woken "take a picture" is a
+  quick command: it shows the photo here the same way (`render_photo`, 10 minutes) and sends it to the
+  family group, without Gemini.
 - **Anyone may use it**, kids included, but only on request (household choice).
 - **Never saved:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the usage
   ledger records only an edit's tokens (`display_photo_edit`).
