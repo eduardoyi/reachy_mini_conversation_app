@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Photos to the family WhatsApp group](whatsapp-photos.md) | `in-progress` | 2026-10-29 | "Take a picture" counts three-two-one, keeps the best of a short burst, shows it on the e-ink screen and sends it to the "Reachy photos" group from Reachy's own WhatsApp (GOWA on the spare number); first step toward the kids messaging family; GOWA paired on the Mac mini, live photo check pending |
 | [Catch "Ri-chi" calls the wake model misses](missed-calls-spanish-richi.md) | `in-progress` | 2026-10-29 | official33 scores 0.00 on a Spanish "Ri-chi"; open room segments are checked for the name every 1.5 s instead of waiting up to 20 s for a pause, Spanish spellings added; a wake model retrained with her pronunciation is in progress |
 | [Qwen3-ASR as the local speech engine](qwen-speech-engine.md) | `in-progress` | 2026-10-29 | `LOCAL_STT_ENGINE=qwen` runs Qwen3-ASR 0.6B (room) and 1.7B (requests) on MLX in place of Whisper, with the names as a hint and an echo guard; Whisper loads if Qwen cannot; benchmarked on the mini, live switch pending |
 | [Hand voice requests to Maribel](maribel-handoff.md) | `in-progress` | 2026-10-28 | "Ask Maribel…" (quick command or `ask_maribel` tool) goes to her Grok Bot webhook; her replies come back through a Tailscale Funnel callback and Reachy speaks them; questions open a 15 s answer window; built and tested, live check pending |

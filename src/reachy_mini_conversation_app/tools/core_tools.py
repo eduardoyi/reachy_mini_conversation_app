@@ -60,6 +60,7 @@ class ToolDependencies:
     # Recognized person in front of the camera (household person ID), when face recognition is enabled.
     current_person_id: Callable[[], str | None] | None = None
     maribel: Any = None  # MaribelLink from maribel.py, when Maribel (Grok Bot) is configured
+    whatsapp: Any = None  # WhatsAppLink from whatsapp.py, when photos go to a WhatsApp group
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
 
@@ -347,6 +348,11 @@ DISPLAY_TOOLS = ("show_on_display",)
 
 # Enabled automatically once Maribel's webhook and Reachy's callback are configured, unless customized.
 MARIBEL_TOOLS = ("ask_maribel",)
+
+
+def whatsapp_photos_configured() -> bool:
+    """Return whether the local WhatsApp server and the photos group are configured."""
+    return bool(config.WHATSAPP_API_URL and config.WHATSAPP_API_AUTH and config.WHATSAPP_PHOTOS_CHAT)
 
 
 def maribel_configured() -> bool:

@@ -803,6 +803,11 @@ class Config:
     MARIBEL_CALLBACK_URL = (os.getenv("MARIBEL_CALLBACK_URL") or "").strip() or None
     REACHY_CALLBACK_SECRET = (os.getenv("REACHY_CALLBACK_SECRET") or "").strip() or None
     MARIBEL_CALLBACK_PORT = _bounded_int("MARIBEL_CALLBACK_PORT", 8791, 1024, 65535)
+    # Reachy's own WhatsApp (GOWA on this computer, linked to the spare number): "take a picture" sends the
+    # photo to WHATSAPP_PHOTOS_CHAT (a group id). All three are needed.
+    WHATSAPP_API_URL = (os.getenv("WHATSAPP_API_URL") or "").strip() or None
+    WHATSAPP_API_AUTH = (os.getenv("WHATSAPP_API_AUTH") or "").strip() or None
+    WHATSAPP_PHOTOS_CHAT = (os.getenv("WHATSAPP_PHOTOS_CHAT") or "").strip() or None
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -1009,6 +1014,9 @@ def refresh_runtime_config_from_env() -> None:
     config.MARIBEL_CALLBACK_URL = (os.getenv("MARIBEL_CALLBACK_URL") or "").strip() or None
     config.REACHY_CALLBACK_SECRET = (os.getenv("REACHY_CALLBACK_SECRET") or "").strip() or None
     config.MARIBEL_CALLBACK_PORT = _bounded_int("MARIBEL_CALLBACK_PORT", 8791, 1024, 65535)
+    config.WHATSAPP_API_URL = (os.getenv("WHATSAPP_API_URL") or "").strip() or None
+    config.WHATSAPP_API_AUTH = (os.getenv("WHATSAPP_API_AUTH") or "").strip() or None
+    config.WHATSAPP_PHOTOS_CHAT = (os.getenv("WHATSAPP_PHOTOS_CHAT") or "").strip() or None
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

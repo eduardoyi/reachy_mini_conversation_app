@@ -28,6 +28,7 @@ the implementation.
 | Quick commands (no cloud) | [quick-commands.md](quick-commands.md) | in-progress |
 | Music on a Bluetooth speaker | [music-speaker.md](music-speaker.md) | in-progress |
 | E-ink display (TRMNL) | [eink-display.md](eink-display.md) | in-progress |
+| Photos to WhatsApp | [whatsapp-photos.md](whatsapp-photos.md) | in-progress; GOWA paired on the Mac mini, live photo check pending |
 | Skill tools (progressive tool disclosure) | [skill-tools.md](skill-tools.md) | in-progress |
 | Maribel hand-off (Grok Bot) | [maribel-handoff.md](maribel-handoff.md) | in-progress |
 

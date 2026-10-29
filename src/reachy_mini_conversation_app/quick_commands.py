@@ -10,6 +10,7 @@ most of it opening the Gemini session and its thinking.
 """
 
 from __future__ import annotations
+import io
 import re
 import asyncio
 import logging
@@ -19,9 +20,15 @@ from datetime import datetime
 from dataclasses import field, replace, dataclass
 from collections.abc import Awaitable
 
+from PIL import Image
+
 from reachy_mini_conversation_app.maribel import RETRY_PAUSE_S, POST_TIMEOUT_S, FIRST_REPLY_WAIT_S
 from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
+from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
+from reachy_mini_conversation_app.eink_display import render_photo
+from reachy_mini_conversation_app.photographer import FaceFinder, take_photo
 from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
+from reachy_mini_conversation_app.tools.show_on_display import PHOTO_ON_SCREEN_S
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +61,9 @@ class QuickReply:
     after_timeout_s: float | None = None
     # Acts on the request word for word: a request clip cut off mid-sentence goes to the conversation instead.
     whole_request: bool = False
+    # Spoken after ``text`` and before ``after``, one every ``beat_s`` (a countdown).
+    beats: tuple[str, ...] = ()
+    beat_s: float = 1.0
 
 
 # ---------------------------------------------------------------------------------------------
@@ -309,6 +319,14 @@ _MUSIC_ONLY = frozenset(
     {"music", "some music", "the music", "musica", "la musica", "algo de musica", "un poco de musica",
      "un po di musica", "a musica", "uma musica", "something", "algo", "qualcosa", "alguma coisa"}
 )  # fmt: skip
+# "Take a picture (of us)": polite Spanish and Italian requests leave the infinitive ("puedes sacar una foto").
+_PHOTO = {
+    "en": r"(?:take|snap) (?:a |our |my )?(?:picture|photo|pic)(?: of (?:us|me|us all|all of us|everyone))?",
+    "es": r"(?:toma|tomar|tomanos|tomame|tomarnos|saca|sacar|sacanos|sacame|sacarnos|haz|hacer|haznos|hazme|"
+    r"hacernos|(?:me |nos )(?:tomas|sacas|haces)) una foto(?: (?:de|a) (?:nosotros|todos))?",
+    "it": r"(?:fai|fare|facci|farci|fammi|scatta|scattare|scattaci|scattarci|scattami) una foto(?: a (?:noi|tutti))?",
+    "pt": r"(?:tira|tirar|tira nos|tirar nos|tira me|tire|bate|bater) uma (?:foto|fotografia)(?: (?:de|a) (?:nos|todos))?",
+}
 _TV_WORDS = frozenset({"tv", "tele", "television", "televisor", "televisione", "televisore", "televisao"})
 
 
@@ -329,6 +347,7 @@ _NEXT_RE = {language: _full(pattern) for language, pattern in _NEXT.items()}
 _VOLUME_UP_RE = {language: _full(pattern) for language, pattern in _VOLUME_UP.items()}
 _VOLUME_DOWN_RE = {language: _full(pattern) for language, pattern in _VOLUME_DOWN.items()}
 _VOLUME_SET_RE = {language: _full(pattern) for language, pattern in _VOLUME_SET.items()}
+_PHOTO_RE = {language: _full(pattern) for language, pattern in _PHOTO.items()}
 _TOMORROW = frozenset({"tomorrow", "manana", "domani", "amanha"})
 
 
@@ -434,6 +453,9 @@ def parse(text: str) -> QuickCommand | None:
     if found:
         when = found[1].groupdict().get("when")
         return QuickCommand("weather", found[0], {"tomorrow": when in _TOMORROW, "place": None, "rain_only": True})
+    found = _first_match(_PHOTO_RE, command)
+    if found:
+        return QuickCommand("photo", found[0])
     if words[0] in _NOT_A_COMMAND_START:
         return None
     for table, kind in ((_PAUSE_RE, "pause"), (_NEXT_RE, "next"), (_RESUME_RE, "resume"), (_STOP_RE, "stop")):
@@ -625,6 +647,53 @@ def maribel_request(text: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------------------------
+# Photos for the WhatsApp group
+
+# After the last beat: speech wobble stops and head tracking re-anchors; let the head settle.
+PHOTO_SETTLE_S: Final[float] = 0.4
+PHOTO_TAKE_S: Final[float] = 4.0
+PHOTO_PREVIEW_S: Final[float] = 1.0
+# Long enough that the runtime never cuts the send short (silence instead of "not sure it went through").
+PHOTO_STEP_TIMEOUT_S: Final[float] = PHOTO_SETTLE_S + PHOTO_TAKE_S + PHOTO_PREVIEW_S + SEND_DEADLINE_S + 2.0
+COUNTDOWN: Final[dict[str, tuple[str, ...]]] = {
+    "en": ("Three!", "Two!", "One!"),
+    "es": ("¡Tres!", "¡Dos!", "¡Uno!"),
+    "it": ("Tre!", "Due!", "Uno!"),
+    "pt": ("Três!", "Dois!", "Um!"),
+}
+PHOTO_SENT: Final[dict[str, str]] = {"en": "Sent!", "es": "¡Enviada!", "it": "Inviata!", "pt": "Enviada!"}
+PHOTO_NOT_SENT: Final[dict[str, str]] = {
+    "en": "I couldn't send the photo.",
+    "es": "No he podido enviar la foto.",
+    "it": "Non sono riuscito a inviare la foto.",
+    "pt": "Não consegui enviar a foto.",
+}
+PHOTO_UNSURE: Final[dict[str, str]] = {
+    "en": "I'm not sure the photo went through.",
+    "es": "No sé si la foto ha llegado.",
+    "it": "Non so se la foto è arrivata.",
+    "pt": "Não sei se a foto chegou.",
+}
+PHOTO_NO_PICTURE: Final[dict[str, str]] = {
+    "en": "Sorry, the camera didn't give me a picture.",
+    "es": "Lo siento, la cámara no me ha dado ninguna foto.",
+    "it": "Scusa, la fotocamera non mi ha dato nessuna foto.",
+    "pt": "Desculpa, a câmara não me deu nenhuma foto.",
+}
+PHOTO_PHRASES: Final[tuple[tuple[str, str], ...]] = tuple(
+    (text, language)
+    for language in LANGUAGES
+    for text in (
+        *COUNTDOWN[language],
+        PHOTO_SENT[language],
+        PHOTO_NOT_SENT[language],
+        PHOTO_UNSURE[language],
+        PHOTO_NO_PICTURE[language],
+    )
+)
+
+
+# ---------------------------------------------------------------------------------------------
 # Replies
 
 _OK = {"en": "Okay.", "es": "Listo.", "it": "Fatto.", "pt": "Pronto."}
@@ -742,6 +811,8 @@ class QuickCommands:
         spotify: Any = None,
         tv: Any = None,
         spotify_configured: Callable[[], bool] | None = None,
+        faces: FaceFinder | None = None,
+        photographer: Callable[[Any, FaceFinder], bytes | None] = take_photo,
     ) -> None:
         """Use tool dependencies ``deps``; the tool instances can be replaced in tests."""
         from reachy_mini_conversation_app.tools.tv import TV
@@ -755,6 +826,8 @@ class QuickCommands:
         self._spotify = spotify or SpotifyControl()
         self._tv = tv or TV()
         self._spotify_configured = spotify_configured or _spotify_configured
+        self._faces = faces or FaceFinder()
+        self._photographer = photographer
         self._background: set[asyncio.Task[object]] = set()
         # The language of the last request to Maribel, for what Reachy says around her answers.
         self._maribel_language = "en"
@@ -907,7 +980,55 @@ class QuickCommands:
             return reply
         if kind == "play":
             return await self._play(command)
+        if kind == "photo":
+            return self._photo(command.language)
         return None
+
+    def _photo(self, language: str) -> QuickReply | None:
+        """Count down, take the photo, show it on the screen and send it to the WhatsApp photos group."""
+        from reachy_mini_conversation_app.config import config
+
+        link = getattr(self._deps, "whatsapp", None)
+        chat = config.WHATSAPP_PHOTOS_CHAT
+        if link is None or not chat or not self._deps.camera_enabled:
+            return None  # the conversation still has the camera and the screen
+
+        async def take_and_send() -> str:
+            await asyncio.sleep(PHOTO_SETTLE_S)
+            try:
+                jpeg = await asyncio.wait_for(
+                    asyncio.to_thread(self._photographer, self._deps.reachy_mini.media, self._faces), PHOTO_TAKE_S
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Photo took longer than %.0f s; not sent", PHOTO_TAKE_S)
+                jpeg = None
+            if jpeg is None:
+                return PHOTO_NO_PICTURE[language]
+            display = getattr(self._deps, "display", None)
+            if display is not None:
+
+                def show() -> None:
+                    with Image.open(io.BytesIO(jpeg)) as photo:
+                        display.show(render_photo(photo.convert("RGB")), expires_after_s=PHOTO_ON_SCREEN_S)
+
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(show), PHOTO_PREVIEW_S)
+                except Exception as error:  # the screen is a preview; the photo still goes to the group
+                    logger.warning("Photo preview failed: %s", type(error).__name__)
+            result = await link.send_image(chat, jpeg)
+            if result is SendResult.SENT:
+                return PHOTO_SENT[language]
+            return PHOTO_UNSURE[language] if result is SendResult.UNSURE else PHOTO_NOT_SENT[language]
+
+        return QuickReply(
+            None,
+            language,
+            "photo",
+            after=take_and_send,
+            after_timeout_s=PHOTO_STEP_TIMEOUT_S,
+            whole_request=True,
+            beats=COUNTDOWN[language],
+        )
 
     async def _weather_reply(self, command: QuickCommand) -> QuickReply | None:
         weather = self._weather
@@ -1223,5 +1344,6 @@ FIXED_PHRASES: Final[frozenset[str]] = frozenset(
         *MARIBEL_ASKING.values(),
         *MARIBEL_PASSED_ON.values(),
         *MARIBEL_UNREACHABLE.values(),
+        *(text for text, _ in PHOTO_PHRASES),
     }
 )

@@ -1007,6 +1007,11 @@ of the quick commands; silence returns to ambient listening without opening Gemi
 `request_announcement(text, language, answer=None)` queues an `announcement` turn: a short activation that
 speaks the text and then expects `answer`. Queued turns start only in `LOCAL_AMBIENT` with no activation
 running (`_run_pending_turns`); an awaited answer expires after 30 s, an announcement after 2 minutes.
+`QuickReply.beats` (with `beat_s`) are spoken after the reply's text and before `after`, beat k starting
+`k·beat_s` after the first (at once if the previous one ran long); a superseded activation stops the
+countdown and skips `after`. Used by [Photos to WhatsApp](whatsapp-photos.md); tests
+`test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up`,
+`test_a_superseded_countdown_stops_and_skips_the_follow_up`.
 `QuickReply.after_timeout_s` lets a reply's `after` step outlast `_QUICK_COMMAND_TIMEOUT_S`. Used by the
 [Maribel hand-off](maribel-handoff.md). Tests: `test_a_question_listens_once_for_the_answer_without_the_name`,
 `test_no_answer_after_a_question_goes_back_to_listening_for_the_name`,

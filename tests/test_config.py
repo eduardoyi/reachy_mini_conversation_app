@@ -625,3 +625,33 @@ def test_trmnl_display_settings_fall_back_to_defaults(
     assert (settings.TRMNL_PORT, settings.TRMNL_REFRESH_SECONDS) == expected
     monkeypatch.delenv("TRMNL_ENABLED")
     config.refresh_runtime_config_from_env()
+
+
+_WHATSAPP_SETTINGS = {
+    "WHATSAPP_API_URL": " http://127.0.0.1:8792 ",
+    "WHATSAPP_API_AUTH": "reachy:secret",
+    "WHATSAPP_PHOTOS_CHAT": "120363416355796813@g.us",
+}
+
+
+@pytest.mark.parametrize("missing", [None, *_WHATSAPP_SETTINGS])
+def test_whatsapp_photos_need_all_three_settings(monkeypatch: pytest.MonkeyPatch, missing: str | None) -> None:
+    """The server URL, its password and the group id are read trimmed; photos are on only with all three."""
+    from reachy_mini_conversation_app.main import _build_whatsapp
+    from reachy_mini_conversation_app.whatsapp import WhatsAppLink
+    from reachy_mini_conversation_app.tools.core_tools import whatsapp_photos_configured
+
+    for name, value in _WHATSAPP_SETTINGS.items():
+        monkeypatch.setenv(name, " " if name == missing else value)
+    config.refresh_runtime_config_from_env()
+
+    if missing is None:
+        assert config.config.WHATSAPP_API_URL == "http://127.0.0.1:8792"
+        assert whatsapp_photos_configured()
+        assert isinstance(_build_whatsapp(), WhatsAppLink)
+    else:
+        assert getattr(config.config, missing) is None
+        assert not whatsapp_photos_configured()
+        assert _build_whatsapp() is None
+    monkeypatch.undo()
+    config.refresh_runtime_config_from_env()
