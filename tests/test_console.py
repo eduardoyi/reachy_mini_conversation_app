@@ -223,6 +223,25 @@ def test_clear_audio_queue_prefers_clear_player() -> None:
     assert handler.output_queue.empty()
 
 
+def test_playback_until_follows_the_speech_handed_to_the_speaker() -> None:
+    """Speaker following asks when Reachy's voice ends: queued speech extends it, a barge-in flush ends it."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    audio = SimpleNamespace(clear_player=MagicMock())
+    robot = SimpleNamespace(
+        media=SimpleNamespace(audio=audio, backend=MediaBackend.WEBRTC, push_audio_sample=MagicMock())
+    )
+    stream = LocalStream(handler, robot)
+
+    before = time.monotonic()
+    stream._push_playback(np.zeros(24_000, dtype=np.float32), 24_000)
+    stream._push_playback(np.zeros(12_000, dtype=np.float32), 24_000)
+    assert stream.playback_until() >= before + 1.5
+
+    stream.clear_audio_queue()
+    assert stream.playback_until() <= time.monotonic()
+
+
 def test_clear_audio_queue_falls_back_to_output_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Older SDKs without clear_player() still flush via clear_output_buffer()."""
     handler = MagicMock()

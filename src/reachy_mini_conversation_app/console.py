@@ -387,6 +387,8 @@ class LocalStream:
         self._capture_worker: _AudioCaptureWorker | None = None
         self._paced_playback: deque[tuple[NDArray[np.float32], int]] = deque()
         self._paced_playback_until = 0.0
+        # When the speech handed to the speaker so far ends (monotonic), on either output path.
+        self._playback_until = 0.0
         self._speaker_output: SpeakerOutput | None = None
         self._speaker_output_factory = speaker_output_factory
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
@@ -1962,6 +1964,10 @@ class LocalStream:
             if not task.done():
                 loop.call_soon_threadsafe(task.cancel)
 
+    def playback_until(self) -> float:
+        """Return when the speech handed to the speaker so far finishes playing (``time.monotonic``)."""
+        return self._playback_until
+
     def clear_audio_queue(self) -> None:
         """Flush queued playback audio immediately on user barge-in.
 
@@ -1971,6 +1977,7 @@ class LocalStream:
         to ``clear_output_buffer()``.
         """
         logger.info("User intervention: flushing player queue")
+        self._playback_until = min(self._playback_until, time.monotonic())
         if self._hybrid_runtime is not None:
             self._hybrid_runtime.clear_provider_output()
         if self._speaker_output is not None:
@@ -2128,6 +2135,7 @@ class LocalStream:
         else:
             self._robot.media.push_audio_sample(audio_frame)
             self._paced_playback_until = max(self._paced_playback_until, playback_started) + duration_s
+        self._playback_until = max(self._playback_until, playback_started) + duration_s
         if self._audio_diagnostics is not None:
             self._audio_diagnostics.observe("playback_push", time.monotonic() - playback_started)
         if self._hybrid_runtime is not None:
