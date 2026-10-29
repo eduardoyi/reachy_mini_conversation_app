@@ -232,3 +232,12 @@ touch as 8.5 mm and 7 degrees. More than 2 mm sideways or 1.5 degrees caught eve
 the untouched stretches. The cues were spaced 8 s from the start of each, but each was synthesized first, so
 the touches came 3-4 s late and spilled into the next phase; hence the pause after each cue is heard and the
 still head for the second run.
+
+Second run, 2026-10-29 22:06 (3,962 readings, head held still, no speaker turns or antenna wakes; one cue fell
+back to the local voice after a Gemini timeout). Untouched, the held head sat within 0.06 mm and 0.05 degrees
+of the command. But a touch moves it and it stays there: after the taps it rested 1.75 mm sideways and 1.1 mm
+low, after the pats 2.2 mm and 2 degrees off, with no drift back. So distance from the command finds the first
+touch and then reads "touched" forever. What works is sudden movement: the measured head moving more than
+1 mm or 0.7 degrees within 0.2 s. Outside the 1.5 s after each "Stop", the untouched head never moved more than
+0.38 mm or 0.19 degrees in 0.2 s, and every touch phase crossed the threshold several times (taps peaked at
+3.3 mm, presses at 4.6 mm down and 3.9 degrees, pats at 4.2 mm).
