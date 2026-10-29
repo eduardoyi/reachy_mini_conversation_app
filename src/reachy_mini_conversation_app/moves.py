@@ -240,6 +240,22 @@ ANTENNA_TOUCH_LAG_S = 0.15
 ANTENNA_TOUCH_COOLDOWN_S = 2.0
 ANTENNA_TOUCH_CHECK_PERIOD_S = 0.05
 
+# Head-touch test: the Lite has no motion sensor in the head, so a touch can only show as the head being away
+# from where the motors put it. While a test runs, every control tick keeps the commanded and the measured head
+# (top three rows of each 4x4 pose, metres), the seven head joints and the antennas, for offline analysis.
+HEAD_RECORDING_COLUMNS: Tuple[str, ...] = (
+    "t",
+    *(f"cmd_{row}{col}" for row in range(3) for col in range(4)),
+    *(f"meas_{row}{col}" for row in range(3) for col in range(4)),
+    *(f"joint_{index}" for index in range(7)),
+    "cmd_antenna_left",
+    "cmd_antenna_right",
+    "antenna_left",
+    "antenna_right",
+)
+# A test whose end never comes stops recording after this.
+HEAD_RECORDING_MAX_S = 120.0
+
 
 class AntennaTouchDetector:
     """Notice a person bending an antenna: the measured antennas stay away from every recent target."""
@@ -412,6 +428,9 @@ class MovementManager:
         self._antenna_touch = AntennaTouchDetector()
         self._next_antenna_check = 0.0
         self._next_antenna_peak_log = 0.0
+        # Head-touch test rows (see HEAD_RECORDING_COLUMNS) while one runs; guarded by _status_lock.
+        self._head_recording: list[Tuple[float, ...]] | None = None
+        self._head_recording_until = -math.inf
         self._head_tracking = False
         self._speaker_direction = speaker_direction
         # World yaw the robot faces when idle: toward the last speaker, 0 when facing forward.
@@ -542,6 +561,21 @@ class MovementManager:
             if self._shared_is_listening == listening:
                 return
         self._command_queue.put(("set_listening", listening))
+
+    def start_head_recording(self) -> None:
+        """Keep the commanded and measured head on every tick until ``stop_head_recording``; thread-safe.
+
+        Antenna touches are logged but do not wake Reachy meanwhile, so a pat near them cannot end the test.
+        """
+        with self._status_lock:
+            self._head_recording = []
+            self._head_recording_until = self._now() + HEAD_RECORDING_MAX_S
+
+    def stop_head_recording(self) -> list[Tuple[float, ...]]:
+        """Stop the head-touch recording and return its rows (see ``HEAD_RECORDING_COLUMNS``); thread-safe."""
+        with self._status_lock:
+            rows, self._head_recording = self._head_recording, None
+        return rows or []
 
     def set_head_tracking(self, enabled: bool) -> None:
         """Start or stop following the user's face; thread-safe via the command queue."""
@@ -1070,6 +1104,8 @@ class MovementManager:
         with self._status_lock:
             target = self._last_commanded_pose[1]
         touched = self._antenna_touch.update(now, target, measured_pair)
+        with self._status_lock:
+            head_test = self._head_recording is not None
         if now >= self._next_antenna_peak_log:
             if self._next_antenna_peak_log:
                 logger.info(
@@ -1081,11 +1117,45 @@ class MovementManager:
             self._next_antenna_peak_log = now + 600.0
         if not touched:
             return
+        if head_test:
+            logger.info("Antenna touched during the head test; not waking")
+            return
         logger.info("Antenna touched")
         try:
             self._on_antenna_touch()
         except Exception as e:
             logger.warning("Antenna touch handler failed: %s", e)
+
+    def _record_head(self, now: float) -> None:
+        """Add this tick's commanded and measured head to a running head-touch test (worker thread only)."""
+        with self._status_lock:
+            if self._head_recording is None:
+                return
+            if now > self._head_recording_until:
+                logger.info("Head test recording stopped after %.0f s", HEAD_RECORDING_MAX_S)
+                self._head_recording = None
+                return
+            head, antennas, _ = self._last_commanded_pose
+        try:
+            # Cached state from the robot's stream; no I/O here.
+            measured = np.asarray(self.current_robot.get_current_head_pose(), dtype=np.float64)
+            joints, measured_antennas = self.current_robot.get_current_joint_positions()
+            row = (
+                now,
+                *(float(value) for value in np.asarray(head, dtype=np.float64)[:3].ravel()),
+                *(float(value) for value in measured[:3].ravel()),
+                *(float(value) for value in joints),
+                *(float(value) for value in antennas),
+                *(float(value) for value in measured_antennas),
+            )
+        except Exception as e:
+            logger.debug("Head test reading skipped: %s", e)
+            return
+        if len(row) != len(HEAD_RECORDING_COLUMNS):
+            return
+        with self._status_lock:
+            if self._head_recording is not None:
+                self._head_recording.append(row)
 
     def _update_frequency_stats(
         self,
@@ -1271,6 +1341,7 @@ class MovementManager:
             # 5) Single set_target call - the only control point
             self._issue_control_command(head, antennas_cmd, body_yaw)
             self._check_antenna_touch(loop_start)
+            self._record_head(loop_start)
 
             # 6) Adaptive sleep to align to next tick, then publish shared state
             sleep_time, freq_stats = self._schedule_next_tick(loop_start, freq_stats)

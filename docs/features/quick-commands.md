@@ -34,6 +34,7 @@ Whisper, then the action and the first reply audio in 0.4–0.6 s).
 | "what's the weather?", "va a llover mañana?", "che tempo fa a Roma?" | Open-Meteo | one or two sentences |
 | "go to sleep", "buenas noches" | standby | "Good night!", then the sleep pose |
 | "never mind", "nada", "lascia stare" | nothing | silent |
+| "head test", "haz la prueba de cabeza" | head-touch test (diagnostic) | seven cues, then "Done, thank you!" |
 
 Rooms, areas and device names match across languages ("comedor" → Dining, "salón" → Living room,
 "luces de la tele" → TV Lights). "Play with me" and other games are not music.
@@ -197,3 +198,23 @@ Spanish, Italian and Portuguese forms. With a name from the WhatsApp contacts fi
 message prompt (its `after` records with `deps.record_message`, encodes and sends a voice note) or the
 photo countdown for that group; without one it asks who and hands the answer to the same flow through
 `expect_answer`. See [Photos and messages to WhatsApp](whatsapp-photos.md).
+
+## Head-touch test — 2026-10-29
+
+"Head test" / "do the head test" / "haz la prueba de cabeza" (kind `head_test`, English and Spanish) is a
+diagnostic for ending a voice message with a touch. The Lite has no motion sensor in the head, so a touch can
+only show as the head being away from where the motors were told to put it, which only the app knows. The
+reply speaks seven cues 8 s apart (`HEAD_TEST_CUES`: rest, tap, rest, press, rest, pat, rest). From the
+first cue, as while a message records, the antennas perk and idle breathing stops (`set_listening(True)`),
+the daemon's speech wobble pauses (it moves the head out of the app's sight), and
+`MovementManager.start_head_recording` keeps every control tick: the commanded and measured head poses, the
+seven head joints, and the commanded and measured antennas (`HEAD_RECORDING_COLUMNS`). An antenna touch during
+the test is logged ("Antenna touched during the head test; not waking") instead of starting an activation
+that would end it. At the end the rows go to
+`~/.cache/reachy-mini-conversation-app/head-test/head-test-<time>.csv` with `t` counted from the first cue
+and a `phase` column, and Reachy says "Done, thank you!". A test cut short stops listening and recording after
+`HEAD_TEST_MAX_S` (86 s), and the recording itself after 120 s. The file holds only motor numbers. Code:
+`head_touch_test.py`, `QuickCommands._head_test`, `MovementManager._record_head`. Tests:
+`test_the_head_test_cues_touches_while_recording_then_saves_a_file`,
+`test_a_head_test_records_the_commanded_and_measured_head_on_every_tick`,
+`test_an_antenna_touch_during_a_head_test_does_not_wake`, `tests/test_head_touch_test.py`.

@@ -11,7 +11,9 @@ from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
     ATTENTIVE_HOLD_S,
     ATTENTIVE_ANTENNAS,
+    HEAD_RECORDING_MAX_S,
     PERK_MAX_SPEED_RAD_S,
+    HEAD_RECORDING_COLUMNS,
     ANTENNA_TOUCH_PRESS_RAD,
     GazeTurnMove,
     BreathingMove,
@@ -687,3 +689,56 @@ def test_the_worker_reports_a_touch_from_the_robots_measured_antennas() -> None:
 
     robot.get_current_joint_positions.side_effect = RuntimeError("no state yet")
     manager._check_antenna_touch(200.0)  # a missing reading is skipped, not raised
+
+
+def _recording_robot() -> MagicMock:
+    robot = MagicMock()
+    measured = np.eye(4)
+    measured[2, 3] = -0.002  # pushed 2 mm down
+    robot.get_current_head_pose.return_value = measured
+    robot.get_current_joint_positions.return_value = ([0.1] * 7, [-0.2, 0.2])
+    return robot
+
+
+def test_a_head_test_records_the_commanded_and_measured_head_on_every_tick() -> None:
+    """Each tick keeps where the head was told to be and where it is, until the recording stops."""
+    robot = _recording_robot()
+    manager = MovementManager(robot)
+    manager._now = lambda: 100.0
+    commanded = np.eye(4)
+    commanded[2, 3] = 0.001
+    manager._last_commanded_pose = (commanded, (-0.17, 0.17), 0.0)
+    manager._record_head(99.0)  # not recording yet
+    manager.start_head_recording()
+    manager._record_head(100.0)
+    manager._record_head(100.01)
+    rows = manager.stop_head_recording()
+    manager._record_head(100.02)
+
+    assert len(rows) == 2 and all(len(row) == len(HEAD_RECORDING_COLUMNS) for row in rows)
+    row = dict(zip(HEAD_RECORDING_COLUMNS, rows[0]))
+    assert row["t"] == 100.0 and row["cmd_23"] == 0.001 and row["meas_23"] == -0.002
+    assert row["joint_6"] == 0.1 and row["cmd_antenna_left"] == -0.17 and row["antenna_right"] == 0.2
+    assert manager.stop_head_recording() == []
+
+
+def test_a_head_test_that_never_ends_stops_recording() -> None:
+    """A test whose end never comes stops keeping rows after HEAD_RECORDING_MAX_S."""
+    manager = MovementManager(_recording_robot())
+    manager._now = lambda: 100.0
+    manager.start_head_recording()
+    manager._record_head(100.0 + HEAD_RECORDING_MAX_S + 1.0)
+    assert manager.stop_head_recording() == []
+
+
+def test_an_antenna_touch_during_a_head_test_does_not_wake() -> None:
+    """A pat near the antennas is logged during the test but cannot start an activation and end it."""
+    robot = MagicMock()
+    touches: list[bool] = []
+    manager = MovementManager(robot, on_antenna_touch=lambda: touches.append(True))
+    manager._last_commanded_pose = (np.eye(4), (-0.17, 0.17), 0.0)
+    robot.get_current_joint_positions.return_value = ([0.0] * 7, [0.3, 0.17])
+    manager.start_head_recording()
+    for step in range(10):
+        manager._check_antenna_touch(100.0 + step * 0.05)
+    assert touches == []

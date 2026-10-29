@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from reachy_mini_conversation_app import photographer, quick_commands
+from reachy_mini_conversation_app import moves, photographer, quick_commands
 from reachy_mini_conversation_app.maribel import MaribelReply
 from reachy_mini_conversation_app.weather import Forecast, DayForecast
 from reachy_mini_conversation_app.whatsapp import SendResult
@@ -38,6 +38,12 @@ from reachy_mini_conversation_app.quick_commands import (
     normalize,
     maribel_request,
     resolve_light_target,
+)
+from reachy_mini_conversation_app.head_touch_test import (
+    HEAD_TEST_CUES,
+    HEAD_TEST_DONE,
+    HEAD_TEST_BEAT_S,
+    HEAD_TEST_FAILED,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
@@ -1092,3 +1098,52 @@ def test_every_fixed_message_phrase_is_cached() -> None:
     for language in quick_commands.LANGUAGES:
         for text in (MESSAGE_NOTHING[language], MESSAGE_NOT_SENT[language], MESSAGE_UNSURE[language]):
             assert text in FIXED_PHRASES
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [("Head test", "en"), ("Let's do the head test", "en"), ("haz la prueba de cabeza", "es")],
+)
+def test_asking_for_the_head_test_is_its_own_command(text: str, language: str) -> None:
+    """Asking for the head test, in English or Spanish, runs the head-touch test."""
+    command = parse(text)
+    assert command is not None and command.kind == "head_test" and command.language == language
+
+
+@pytest.mark.asyncio
+async def test_the_head_test_cues_touches_while_recording_then_saves_a_file(tmp_path: Any) -> None:
+    """Cues are spaced one phase apart; recording runs from the first cue and lands in a CSV."""
+    runner, _, deps = _runner(head_test_dir=tmp_path)
+    movement = deps.movement_manager
+    row = (0.0,) * len(moves.HEAD_RECORDING_COLUMNS)
+    movement.stop_head_recording.return_value = [row, row]
+
+    reply = await runner.handle("head test")
+
+    assert reply is not None and reply.kind == "head_test" and reply.text is None
+    assert reply.beats == HEAD_TEST_CUES["en"] and reply.beat_s == HEAD_TEST_BEAT_S
+    assert reply.before is not None and reply.after is not None
+    movement.start_head_recording.assert_not_called()
+    reply.before()
+    movement.start_head_recording.assert_called_once()
+    movement.set_listening.assert_called_once_with(True)  # as while he records a message
+    deps.reachy_mini.disable_wobbling.assert_called_once()  # the cues must not move his head
+    assert await reply.after() == HEAD_TEST_DONE["en"]
+    assert movement.set_listening.call_args_list[-1].args == (False,)
+    from reachy_mini_conversation_app.config import config
+
+    assert deps.reachy_mini.enable_wobbling.call_count == int(config.SPEECH_WOBBLE_ENABLED)
+    saved = list(tmp_path.iterdir())
+    assert len(saved) == 1 and len(saved[0].read_text().splitlines()) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_head_test_with_no_readings_says_so(tmp_path: Any) -> None:
+    """No readings from the robot: nothing is saved and Reachy says the test failed."""
+    runner, _, deps = _runner(head_test_dir=tmp_path)
+    deps.movement_manager.stop_head_recording.return_value = []
+    reply = await runner.handle("prueba de cabeza")
+    assert reply is not None and reply.before is not None and reply.after is not None
+    reply.before()
+    assert await reply.after() == HEAD_TEST_FAILED["es"]
+    assert list(tmp_path.iterdir()) == []

@@ -11,10 +11,12 @@ most of it opening the Gemini session and its thinking.
 
 from __future__ import annotations
 import re
+import time
 import asyncio
 import logging
 import unicodedata
 from typing import Any, Final, Callable
+from pathlib import Path
 from datetime import datetime
 from dataclasses import field, replace, dataclass
 from collections.abc import Awaitable
@@ -24,6 +26,16 @@ from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherSer
 from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
 from reachy_mini_conversation_app.voice_notes import encode_voice_note
 from reachy_mini_conversation_app.photographer import FACES, SHARE_TIMEOUT_S, FaceFinder, take_photo, take_and_share
+from reachy_mini_conversation_app.head_touch_test import (
+    HEAD_TEST_DIR,
+    HEAD_TEST_CUES,
+    HEAD_TEST_DONE,
+    HEAD_TEST_MAX_S,
+    HEAD_TEST_BEAT_S,
+    HEAD_TEST_FAILED,
+    HEAD_TEST_STEP_TIMEOUT_S,
+    save_head_test,
+)
 from reachy_mini_conversation_app.whatsapp_contacts import Contact, find_contact, load_contacts
 from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 
@@ -371,6 +383,11 @@ _SEND_TO = {
     }
     for kind, objects in (("message", _MESSAGE_OBJECT), ("send_photo", _PICTURE_OBJECT))
 }
+# "Richie, head test": spoken cues to tap, press and pat his head while the movement loop records it.
+_HEAD_TEST = {
+    "en": r"(?:do |start |run |lets do )?(?:the |a )?head (?:touch )?test",
+    "es": r"(?:haz |hacer |empieza |vamos a hacer )?(?:la |una )?prueba de (?:la )?cabeza",
+}
 _TV_WORDS = frozenset({"tv", "tele", "television", "televisor", "televisione", "televisore", "televisao"})
 
 
@@ -392,6 +409,7 @@ _VOLUME_UP_RE = {language: _full(pattern) for language, pattern in _VOLUME_UP.it
 _VOLUME_DOWN_RE = {language: _full(pattern) for language, pattern in _VOLUME_DOWN.items()}
 _VOLUME_SET_RE = {language: _full(pattern) for language, pattern in _VOLUME_SET.items()}
 _PHOTO_RE = {language: _full(pattern) for language, pattern in _PHOTO.items()}
+_HEAD_TEST_RE = {language: _full(pattern) for language, pattern in _HEAD_TEST.items()}
 _SEND_TO_RE = {
     kind: {language: [_full(pattern) for pattern in patterns] for language, patterns in table.items()}
     for kind, table in _SEND_TO.items()
@@ -504,6 +522,9 @@ def parse(text: str) -> QuickCommand | None:
     found = _first_match(_PHOTO_RE, command)
     if found:
         return QuickCommand("photo", found[0])
+    found = _first_match(_HEAD_TEST_RE, command)
+    if found:
+        return QuickCommand("head_test", found[0])
     for kind, send_table in _SEND_TO_RE.items():
         for language, send_patterns in send_table.items():
             for pattern in send_patterns:
@@ -916,6 +937,7 @@ class QuickCommands:
         spotify_configured: Callable[[], bool] | None = None,
         faces: FaceFinder | None = None,
         photographer: Callable[[Any, FaceFinder], bytes | None] = take_photo,
+        head_test_dir: Path = HEAD_TEST_DIR,
     ) -> None:
         """Use tool dependencies ``deps``; the tool instances can be replaced in tests."""
         from reachy_mini_conversation_app.tools.tv import TV
@@ -931,6 +953,7 @@ class QuickCommands:
         self._spotify_configured = spotify_configured or _spotify_configured
         self._faces = faces or FACES
         self._photographer = photographer
+        self._head_test_dir = head_test_dir
         self._background: set[asyncio.Task[object]] = set()
         # The language of the last request to Maribel, for what Reachy says around her answers.
         self._maribel_language = "en"
@@ -1087,6 +1110,8 @@ class QuickCommands:
             return self._photo(command.language)
         if kind in ("message", "send_photo"):
             return self._send_to(kind, command.language, command.args.get("to"))
+        if kind == "head_test":
+            return self._head_test(command.language)
         return None
 
     def _send_to(self, kind: str, language: str, to: str | None) -> QuickReply | None:
@@ -1191,6 +1216,66 @@ class QuickCommands:
             # Face whoever is in view during the countdown, as speaker following only turns for voices far
             # to the side (2026-10-29: "it didn't move his head to focus on me").
             before=lambda: movement.frame_faces(True),
+        )
+
+    def _head_test(self, language: str) -> QuickReply:
+        """Cue taps, presses and pats on his head while the movement loop records it, then save it to a file."""
+        from reachy_mini_conversation_app.moves import HEAD_RECORDING_COLUMNS
+        from reachy_mini_conversation_app.config import config
+
+        movement = self._deps.movement_manager
+        robot = self._deps.reachy_mini
+        started: list[float] = []
+        finished: list[bool] = []
+
+        def end() -> list[tuple[float, ...]]:
+            if finished:
+                return []
+            finished.append(True)
+            movement.set_listening(False)
+            rows: list[tuple[float, ...]] = movement.stop_head_recording()
+            if config.SPEECH_WOBBLE_ENABLED:
+                wobble(on=True)
+            return rows
+
+        def wobble(*, on: bool) -> None:
+            try:
+                robot.enable_wobbling() if on else robot.disable_wobbling()
+            except Exception as error:
+                logger.warning("Head test could not switch speech wobble: %s", type(error).__name__)
+
+        def start() -> None:
+            # The daemon wobbles the head with his speech, out of the app's sight; he is silent while recording
+            # a message, so the cues must not move it either.
+            wobble(on=False)
+            movement.set_listening(True)  # as while he records a message: antennas perked, no idle breathing
+            movement.start_head_recording()
+            started.append(time.monotonic())
+            # A test cut short (a new activation) never reaches ``finish``: stop listening and recording anyway.
+            asyncio.get_running_loop().call_later(HEAD_TEST_MAX_S, end)
+
+        async def finish() -> str:
+            rows = end()
+            if not started:
+                return HEAD_TEST_FAILED[language]
+            path = await asyncio.to_thread(
+                save_head_test, rows, HEAD_RECORDING_COLUMNS, started[0], self._head_test_dir
+            )
+            if path is None:
+                logger.warning("Head test recorded nothing")
+                return HEAD_TEST_FAILED[language]
+            logger.info("Head test saved %d readings to %s", len(rows), path)
+            return HEAD_TEST_DONE[language]
+
+        return QuickReply(
+            None,
+            language,
+            "head_test",
+            after=finish,
+            after_timeout_s=HEAD_TEST_STEP_TIMEOUT_S,
+            beats=HEAD_TEST_CUES[language],
+            beat_s=HEAD_TEST_BEAT_S,
+            before=start,
         )
 
     async def _weather_reply(self, command: QuickCommand) -> QuickReply | None:
