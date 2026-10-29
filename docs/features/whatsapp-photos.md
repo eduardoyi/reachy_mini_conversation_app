@@ -1,6 +1,6 @@
 # Feature: Photos to WhatsApp
 
-- Status: `in-progress` (built and tested; GOWA installed and paired on the Mac mini 2026-10-29; live photo check pending)
+- Status: `in-progress` (live check of the quick command passed on the Mac mini 2026-10-29; `take_photo` from Gemini not yet tried live)
 - Last updated: 2026-10-29
 - Plan: [Photos to the family WhatsApp group](../plans/whatsapp-photos.md)
 
@@ -169,8 +169,10 @@ flowchart LR
 
 ### Not yet validated
 
-- A photo in the group from the Mac mini: its size and quality, timings. (Install, pairing by code,
-  the group listing and the LaunchAgent restart keeping the link were checked on 2026-10-29.)
+- Gemini's `take_photo` in a live conversation.
+- Checked live on 2026-10-29: install, pairing by code, the group listing, the LaunchAgent restart
+  keeping the link, and one "tomemos una foto": countdown and settle 6.7 s (beats about 1.8 s each),
+  burst 0.8 s, a 185 KB JPEG sent in 1.6 s on the first try, 9.7 s from request to "¡Enviada!".
 - The start-script block was checked with a fake server (start, owner-only data directory and log,
   reuse, missing binary), not with GOWA.
 
