@@ -42,8 +42,8 @@ from reachy_mini_conversation_app.quick_commands import (
 from reachy_mini_conversation_app.head_touch_test import (
     HEAD_TEST_CUES,
     HEAD_TEST_DONE,
-    HEAD_TEST_BEAT_S,
     HEAD_TEST_FAILED,
+    HEAD_TEST_PAUSE_S,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
@@ -1121,15 +1121,18 @@ async def test_the_head_test_cues_touches_while_recording_then_saves_a_file(tmp_
     reply = await runner.handle("head test")
 
     assert reply is not None and reply.kind == "head_test" and reply.text is None
-    assert reply.beats == HEAD_TEST_CUES["en"] and reply.beat_s == HEAD_TEST_BEAT_S
-    assert reply.before is not None and reply.after is not None
+    assert reply.beats == HEAD_TEST_CUES["en"] and reply.beat_pause_s == HEAD_TEST_PAUSE_S
+    assert reply.before is not None and reply.after is not None and reply.on_beat is not None
     movement.start_head_recording.assert_not_called()
     reply.before()
     movement.start_head_recording.assert_called_once()
     movement.set_listening.assert_called_once_with(True)  # as while he records a message
+    movement.hold_still.assert_called_once_with(True)  # no breathing under the touches
     deps.reachy_mini.disable_wobbling.assert_called_once()  # the cues must not move his head
+    reply.on_beat(0)  # the first cue was heard: the rows after it fall in its phase
     assert await reply.after() == HEAD_TEST_DONE["en"]
     assert movement.set_listening.call_args_list[-1].args == (False,)
+    assert movement.hold_still.call_args_list[-1].args == (False,)
     from reachy_mini_conversation_app.config import config
 
     assert deps.reachy_mini.enable_wobbling.call_count == int(config.SPEECH_WOBBLE_ENABLED)

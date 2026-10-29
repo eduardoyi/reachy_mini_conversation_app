@@ -1893,14 +1893,25 @@ class HybridRuntime:
             except Exception as error:
                 logger.warning("Quick command preparation failed: %s", type(error).__name__)
         await self._speak_locally(getattr(reply, "text", None), language, generation)
-        # A countdown: beat k starts beat_s * k after the first (at once if the one before ran long).
+        # A countdown: beat k starts beat_s * k after the first (at once if the one before ran long), or
+        # beat_pause_s after the one before was heard.
         beat_s = float(getattr(reply, "beat_s", 1.0))
+        beat_pause_s = getattr(reply, "beat_pause_s", None)
+        on_beat = getattr(reply, "on_beat", None)
         countdown_started_at = self._clock()
         for index, beat in enumerate(getattr(reply, "beats", ()), start=1):
             if not self._quick_generation_current(generation):
                 break
             await self._speak_locally(beat, language, generation)
-            await asyncio.sleep(max(0.0, countdown_started_at + index * beat_s - self._clock()))
+            if on_beat is not None:
+                try:
+                    on_beat(index - 1)
+                except Exception as error:
+                    logger.warning("Quick command beat hook failed: %s", type(error).__name__)
+            if beat_pause_s is not None:
+                await asyncio.sleep(float(beat_pause_s))
+            else:
+                await asyncio.sleep(max(0.0, countdown_started_at + index * beat_s - self._clock()))
         after = getattr(reply, "after", None)
         if after is not None and self._quick_generation_current(generation):
             after_timeout_s = getattr(reply, "after_timeout_s", None) or self._QUICK_COMMAND_TIMEOUT_S

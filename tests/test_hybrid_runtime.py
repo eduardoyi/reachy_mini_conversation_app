@@ -3524,6 +3524,8 @@ class _QuickReply:
         whole_request: bool = False,
         beats: tuple[str, ...] = (),
         beat_s: float = 1.0,
+        beat_pause_s: float | None = None,
+        on_beat: Callable[[int], None] | None = None,
         before: Callable[[], None] | None = None,
     ) -> None:
         self.text = text
@@ -3534,6 +3536,8 @@ class _QuickReply:
         self.whole_request = whole_request
         self.beats = beats
         self.beat_s = beat_s
+        self.beat_pause_s = beat_pause_s
+        self.on_beat = on_beat
         self.before = before
 
 
@@ -3637,6 +3641,39 @@ async def test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up() -
     assert beat_times[2] - beat_times[1] == pytest.approx(0.6, abs=0.15)
     assert spoken[3][1] - spoken[2][1] >= 0.55  # the last beat is waited out before the photo
     assert not handler.started.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_beats_with_a_pause_wait_after_each_is_heard_and_report_it() -> None:
+    """With beat_pause_s, a slow beat delays the next by its own length; on_beat hears each index once it played."""
+    handler = FakeHandler()
+    spoken: list[tuple[str, float]] = []
+    heard: list[tuple[int, float]] = []
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append((text, time.monotonic()))
+        if text == "Press.":
+            await asyncio.sleep(0.4)  # a long cue, still being synthesized
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply(
+            None,
+            beats=("Rest.", "Press.", "Stop."),
+            beat_s=0.05,
+            beat_pause_s=0.2,
+            on_beat=lambda index: heard.append((index, time.monotonic())),
+        )
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    assert await runtime.activate("acoustic_wake", addressed_text="Reachy, head test")
+
+    assert [text for text, _ in spoken] == ["Rest.", "Press.", "Stop."]
+    assert [index for index, _ in heard] == [0, 1, 2]
+    assert spoken[1][1] - heard[0][1] == pytest.approx(0.2, abs=0.1)
+    assert spoken[2][1] - heard[1][1] == pytest.approx(0.2, abs=0.1)  # counted from when "Press." was heard
+    assert heard[1][1] - spoken[1][1] >= 0.35
     await runtime.close()
 
 
