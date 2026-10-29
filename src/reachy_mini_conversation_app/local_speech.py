@@ -32,6 +32,10 @@ FIRST_AUDIO_TIMEOUT_S: Final[float] = 4.0
 # A stream that stops sending for this long is abandoned.
 CHUNK_TIMEOUT_S: Final[float] = 3.0
 CHUNK_SAMPLES: Final[int] = SAMPLE_RATE // 10
+# Gemini TTS pads short phrases with up to a second of silence ("¡Dos!": 0.3 s before, 1.05 s after,
+# measured 2026-10-29); cached phrases play without it, keeping a little around the voice.
+SILENCE_LEVEL: Final[int] = 328  # 1% of full scale
+SILENCE_MARGIN_SAMPLES: Final[int] = SAMPLE_RATE // 20
 _SAY_VOICES: Final[dict[str, str]] = {"en": "Samantha", "es": "Mónica", "it": "Alice", "pt": "Joana"}
 
 
@@ -43,6 +47,14 @@ def default_cache_dir() -> Path:
 def _pcm16(data: bytes) -> NDArray[np.int16]:
     usable = len(data) - len(data) % 2
     return np.frombuffer(data[:usable], dtype="<i2").astype(np.int16)
+
+
+def _trim_silence(audio: NDArray[np.int16]) -> NDArray[np.int16]:
+    voiced = np.flatnonzero(np.abs(audio.astype(np.int32)) > SILENCE_LEVEL)
+    if not voiced.size:
+        return audio
+    start = max(0, int(voiced[0]) - SILENCE_MARGIN_SAMPLES)
+    return audio[start : int(voiced[-1]) + 1 + SILENCE_MARGIN_SAMPLES]
 
 
 def _chunks(audio: NDArray[np.int16]) -> list[NDArray[np.int16]]:
@@ -93,7 +105,7 @@ class LocalSpeech:
             cacheable = len(text) <= CACHE_MAX_CHARS and not any(character.isdigit() for character in text)
         cache_path = self._cache_path(text)
         if cacheable and cache_path.is_file():
-            for frame in _chunks(_pcm16(cache_path.read_bytes())):
+            for frame in _chunks(_trim_silence(_pcm16(cache_path.read_bytes()))):
                 yield SAMPLE_RATE, frame
             return
         spoken = bytearray()

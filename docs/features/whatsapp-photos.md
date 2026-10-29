@@ -22,8 +22,8 @@ video, replies, and the kids' messages to family (later milestones of the same l
   hazme una foto", "(puoi) fare / scattare una foto (a noi)", "facci / scattaci una foto", "(podes)
   tirar / bater uma foto(grafia) (de nós)" or "tira-nos uma foto". Anything more ("take a picture of me as
   a pirate") or a negation goes to the conversation.
-- **Countdown.** Reachy says "Three!", "Two!", "One!" in the request's language, one second apart (a beat
-  can stretch to about 1.4 s), waits 0.4 s for his head to settle, and takes up to five frames 0.12 s
+- **Countdown.** Reachy says "Three!", "Two!", "One!" in the request's language, about one second apart
+  (cached phrases play without Gemini's padding silence; before that, a beat ran about 1.8 s), waits 0.4 s for his head to settle, and takes up to five frames 0.12 s
   apart. The frame with the most faces wins, then the sharpest.
 - **Preview.** With the TRMNL set up, the photo goes on the screen for 10 minutes (within about five
   minutes when the screen is asleep; the now-playing card may replace it while music plays).
@@ -187,5 +187,6 @@ pytest tests/test_hybrid_runtime.py -v -k countdown
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Tighter countdown: cached phrases play without their padding silence. |
 | 2026-10-29 | `take_photo` tool: Gemini sends photos too. |
 | 2026-10-29 | Initial implementation. GOWA installed on the Mac mini as a LaunchAgent and paired with the spare number; group "Reachy group". |

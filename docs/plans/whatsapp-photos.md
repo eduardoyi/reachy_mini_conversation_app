@@ -337,3 +337,9 @@ external service (GOWA) is added; flag that `docs/scheme.mmd` needs the WhatsApp
   the 0.4 s tail), burst 0.8 s (5 frames, best had 1 face), 185 KB JPEG sent on the first attempt in
   1.6 s, done 9.7 s after the request. The photo arrived in "Reachy group". The `take_photo` tool is
   registered; its live use is not checked yet.
+- 2026-10-29: tighter countdown, as the household asked. The cached countdown words carry Gemini's
+  padding: 0.12-0.31 s before the voice and up to 1.05 s after ("¡Dos!" is 1.72 s in all), and each beat
+  then waits a 0.4 s playback tail. `LocalSpeech` now plays every cached phrase without the silence
+  around the voice (1% of full scale, 50 ms kept on each side; the cached file is unchanged), so a beat
+  is the voice plus the tail, about 1 s, and every fixed reply starts sooner. The first, uncached play
+  is unchanged; the startup warm-up caches the photo phrases.
