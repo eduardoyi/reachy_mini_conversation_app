@@ -109,7 +109,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -302,7 +302,7 @@ def _build_tool_registry(
 
 def _tool_registry_signature(
     instance_path: str | Path | None,
-) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool]:
+) -> tuple[str, str, str | None, bool, str | None, bool, bool, bool, bool, bool, bool, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -316,6 +316,7 @@ def _tool_registry_signature(
         _tv_configured(),
         config.TRMNL_ENABLED,
         maribel_configured(),
+        whatsapp_photos_configured(),
     )
 
 
@@ -348,6 +349,7 @@ DISPLAY_TOOLS = ("show_on_display",)
 
 # Enabled automatically once Maribel's webhook and Reachy's callback are configured, unless customized.
 MARIBEL_TOOLS = ("ask_maribel",)
+WHATSAPP_TOOLS = ("take_photo",)
 
 
 def whatsapp_photos_configured() -> bool:
@@ -418,6 +420,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in MARIBEL_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in MARIBEL_TOOLS if name not in tool_names)
+
+    if not whatsapp_photos_configured():
+        tool_names = [name for name in tool_names if name not in WHATSAPP_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in WHATSAPP_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]

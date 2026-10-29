@@ -78,7 +78,7 @@ class ShowOnDisplay(Tool):
         "space, how a plane flies, how a seed grows, why it rains), with a short `title` and `steps`, each a short `caption` in their "
         "language and a `picture` subject in English that shows that step on its own. "
         "kind=camera: when someone asks for a photo of themselves or of what you see, take one with your camera "
-        "and show it; it is taken 3 seconds after the call, so count down '3, 2, 1' as you call it. With `edit` "
+        "and show it (when take_photo is offered, a plain photo uses take_photo instead); it is taken 3 seconds after the call, so count down '3, 2, 1' as you call it. With `edit` "
         "(in English, e.g. 'make him a pirate', 'show her as an astronaut', 'put a party hat on him') the photo "
         "is redrawn with that change. For a famous character, describe the costume instead of naming it (not "
         "'Spiderman' but 'a red and blue superhero suit with a spider-web pattern and mask'), since names are "
