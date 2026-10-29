@@ -16,8 +16,9 @@ video, replies, and the kids' messages to family (later milestones of the same l
 
 ## User-facing behavior
 
-- **Asking.** A woken request that is, after politeness, "take a picture / photo / pic (of us / me /
-  everyone)", "take our picture", "(puedes) sacar / tomar / hacer una foto (de nosotros)", "sácanos /
+- **Asking.** A woken request that is, after politeness, "(let's) take a picture / photo / pic (of us /
+  me / everyone)", "take our picture", "tomemos / saquemos / hagamos / vamos a sacar una foto",
+  "facciamo / scattiamo una foto", "vamos tirar / tiremos uma foto", "(puedes) sacar / tomar / hacer una foto (de nosotros)", "sácanos /
   hazme una foto", "(puoi) fare / scattare una foto (a noi)", "facci / scattaci una foto", "(podes)
   tirar / bater uma foto(grafia) (de nós)" or "tira-nos uma foto". Anything more ("take a picture of me as
   a pirate") or a negation goes to the conversation.

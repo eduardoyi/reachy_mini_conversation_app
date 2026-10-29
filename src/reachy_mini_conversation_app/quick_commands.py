@@ -319,13 +319,17 @@ _MUSIC_ONLY = frozenset(
     {"music", "some music", "the music", "musica", "la musica", "algo de musica", "un poco de musica",
      "un po di musica", "a musica", "uma musica", "something", "algo", "qualcosa", "alguma coisa"}
 )  # fmt: skip
-# "Take a picture (of us)": polite Spanish and Italian requests leave the infinitive ("puedes sacar una foto").
+# "Take a picture (of us)", "let's take a photo": polite Spanish and Italian requests leave the infinitive
+# ("puedes sacar una foto"). 2026-10-29: "Richie, tomemos una foto" went to the conversation.
 _PHOTO = {
-    "en": r"(?:take|snap) (?:a |our |my )?(?:picture|photo|pic)(?: of (?:us|me|us all|all of us|everyone))?",
-    "es": r"(?:toma|tomar|tomanos|tomame|tomarnos|saca|sacar|sacanos|sacame|sacarnos|haz|hacer|haznos|hazme|"
-    r"hacernos|(?:me |nos )(?:tomas|sacas|haces)) una foto(?: (?:de|a) (?:nosotros|todos))?",
-    "it": r"(?:fai|fare|facci|farci|fammi|scatta|scattare|scattaci|scattarci|scattami) una foto(?: a (?:noi|tutti))?",
-    "pt": r"(?:tira|tirar|tira nos|tirar nos|tira me|tire|bate|bater) uma (?:foto|fotografia)(?: (?:de|a) (?:nos|todos))?",
+    "en": r"(?:lets )?(?:take|snap) (?:a |our |my )?(?:picture|photo|pic)(?: of (?:us|me|us all|all of us|everyone))?",
+    "es": r"(?:toma|tomar|tomanos|tomame|tomarnos|tomemos|saca|sacar|sacanos|sacame|sacarnos|saquemos|haz|hacer|"
+    r"haznos|hazme|hacernos|hagamos|vamos a (?:tomar|sacar|hacer)|(?:me |nos )(?:tomas|sacas|haces)) una foto"
+    r"(?: (?:de|a) (?:nosotros|todos))?",
+    "it": r"(?:fai|fare|facci|farci|fammi|facciamo|scatta|scattare|scattaci|scattarci|scattami|scattiamo) una foto"
+    r"(?: a (?:noi|tutti))?",
+    "pt": r"(?:tira|tirar|tira nos|tirar nos|tira me|tire|tiremos|vamos tirar|bate|bater|vamos bater) uma "
+    r"(?:foto|fotografia)(?: (?:de|a) (?:nos|todos))?",
 }
 _TV_WORDS = frozenset({"tv", "tele", "television", "televisor", "televisione", "televisore", "televisao"})
 
