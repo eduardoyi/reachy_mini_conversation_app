@@ -461,6 +461,39 @@ def test_a_photo_frames_the_face_then_lets_go() -> None:
     assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)] == [0.0]
 
 
+def test_speaker_turns_wait_while_a_photo_is_framed() -> None:
+    """A voice from the side does not turn him away from the face he is framing; afterwards it does again."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(-90.0))
+
+    manager.frame_faces(True)
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    assert not [move for move in manager.move_queue if isinstance(move, GazeTurnMove) and move.target_yaw != 0.0]
+
+    manager.frame_faces(False)
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)][-1] == pytest.approx(
+        np.radians(-90.0)
+    )
+
+
+def test_a_photo_that_never_ends_stops_holding_speaker_turns() -> None:
+    """Framing whose end was lost (its activation replaced) holds turns for PHOTO_FRAMING_MAX_S at most."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(-90.0))
+    manager.frame_faces(True)
+    manager._poll_signals(manager._now())
+
+    manager._framing_until = manager._now() - 1.0  # PHOTO_FRAMING_MAX_S later
+    manager.turn_toward_speaker()
+    manager._poll_signals(manager._now())
+    assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)][-1] == pytest.approx(
+        np.radians(-90.0)
+    )
+
+
 def test_a_photo_leaves_tracking_someone_turned_on() -> None:
     """Tracking asked for before the photo keeps going after it."""
     robot = _robot_facing(0.0)

@@ -967,11 +967,20 @@ def _family_runner(
         ("send a picture to Sergio", "send_photo", "en", "sergio"),
         ("vamos a mandar una foto", "send_photo", "es", None),
         ("manda una foto a Sergio", "send_photo", "es", "sergio"),
+        ("puedes poner una foto a Sergio, por favor", "send_photo", "es", "sergio"),
+        ("ponle un mensaje al tío Sergio", "message", "es", "tio sergio"),
     ],
 )
 def test_asking_to_send_a_message_or_a_picture(text: str, kind: str, language: str, to: str | None) -> None:
     """Messages and pictures for someone, with or without the name, in the household's languages."""
     assert parse(text) == quick_commands.QuickCommand(kind, language, {"to": to})
+
+
+@pytest.mark.parametrize("text", ["pon una foto", "pon una foto de un tigre", "pon la tele"])
+def test_put_counts_as_send_only_with_a_recipient(text: str) -> None:
+    """Pon una foto alone is not a message for anyone."""
+    command = parse(text)
+    assert command is None or command.kind not in ("message", "send_photo")
 
 
 def test_messages_for_maribel_stay_hers() -> None:

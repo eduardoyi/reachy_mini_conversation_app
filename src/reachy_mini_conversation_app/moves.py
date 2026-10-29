@@ -51,6 +51,9 @@ logger = logging.getLogger(__name__)
 CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement control loop
 # Speech from a direction this close to where the head already looks does not trigger a turn.
 SPEAKER_TURN_MIN_RAD = np.deg2rad(25.0)
+# While a photo is framed, speaker turns wait (2026-10-29: a turn mid-conversation left him facing away for the
+# photo). A photo whose end never comes (its activation replaced) stops holding them after this.
+PHOTO_FRAMING_MAX_S = 30.0
 SPEAKER_TURN_MIN_DURATION_S = 0.5
 SPEAKER_TURN_MAX_DURATION_S = 1.4
 # Wake cue: on a wake the antennas spring out to an alert V (the pose of the "attentive" emotion) and hold
@@ -417,6 +420,8 @@ class MovementManager:
         self._tracking_auto = False
         # Tracking enabled to frame a photo, so it ends with the photo.
         self._framing_faces = False
+        # Speaker turns wait until then: a photo is being framed.
+        self._framing_until = -math.inf
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
@@ -543,7 +548,7 @@ class MovementManager:
         self._command_queue.put(("set_head_tracking", enabled))
 
     def frame_faces(self, active: bool) -> None:
-        """Follow the face in view while a photo is taken, then stop unless tracking was already on; thread-safe."""
+        """Follow the face in view and hold speaker turns while a photo is taken; thread-safe."""
         self._command_queue.put(("frame_faces", active))
 
     def turn_toward_speaker(self) -> None:
@@ -647,6 +652,7 @@ class MovementManager:
         elif command == "turn_toward_speaker":
             self._request_speaker_turn()
         elif command == "frame_faces":
+            self._framing_until = self._now() + PHOTO_FRAMING_MAX_S if payload else -math.inf
             if payload and not self._head_tracking:
                 self._set_head_tracking(True)
                 self._framing_faces = True
@@ -773,6 +779,9 @@ class MovementManager:
     def _request_speaker_turn(self) -> None:
         """Queue a turn toward recent speech when it came from clearly elsewhere (worker thread only)."""
         if self._speaker_direction is None:
+            return
+        if self._now() < self._framing_until:
+            logger.info("Speaker turn skipped: framing a photo")
             return
         try:
             yaw = self._speaker_direction()

@@ -357,11 +357,15 @@ _PICTURE_OBJECT = {
     "it": r"una foto",
     "pt": r"uma (?:foto|fotografia)",
 }
+# 2026-10-29: "puedes mandar una foto a Sergio" was heard as "puedes poner una foto a Sergio"; "poner" only
+# counts with a recipient, so "pon una foto" alone stays with the rest of the grammar.
+_PUT_VERB = r"(?:pon|ponle|ponles|poner|ponerle|ponerles)"
 _SEND_TO = {
     kind: {
         language: [
             rf"{_SEND_VERB[language]} {objects[language]}{_TO[language]}",
             *([rf"{_SEND_VERB[language]} (?P<to>.+?) {objects[language]}"] if language == "en" else []),
+            *([rf"{_PUT_VERB} {objects[language]} (?:a|al|para) (?P<to>.+)"] if language == "es" else []),
         ]
         for language in _SEND_VERB
     }

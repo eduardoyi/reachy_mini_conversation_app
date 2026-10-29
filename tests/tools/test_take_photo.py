@@ -11,6 +11,7 @@ from reachy_mini_conversation_app.tools.take_photo import TakePhoto
 
 
 GROUP = "120363429899172191@g.us"
+SERGIO = "120363413010779824@g.us"
 
 
 class _WhatsApp:
@@ -101,3 +102,31 @@ def test_the_tool_is_offered_only_with_whatsapp_photos_set_up(
     monkeypatch.setattr(core_tools, "read_profile_tool_override", lambda *_args: None)
 
     assert ("take_photo" in core_tools._read_profile_tool_names(None)) is configured
+
+
+@pytest.mark.asyncio
+async def test_a_photo_for_a_family_member_goes_to_their_group(
+    photo: list[float], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """`to` names a contact: the photo goes to that group, framed, with speaker turns held meanwhile."""
+    import json
+
+    contacts = tmp_path / "contacts.json"
+    contacts.write_text(json.dumps({"contacts": [{"name": "Tío Sergio", "chat": SERGIO, "say": ["sergio"]}]}))
+    monkeypatch.setattr(config, "WHATSAPP_CONTACTS_FILE", str(contacts))
+    chats: list[str] = []
+
+    async def share(deps: Any, chat: str) -> SendResult:
+        chats.append(chat)
+        return SendResult.SENT
+
+    monkeypatch.setattr(take_photo, "take_and_share", share)
+    deps = _deps(_WhatsApp(SendResult.SENT))
+
+    assert (await TakePhoto()(deps, to="el tío Sergio"))["status"] == "sent"
+    assert chats == [SERGIO]
+    assert [call.args for call in deps.movement_manager.frame_faces.call_args_list] == [(True,), (False,)]
+
+    unknown = await TakePhoto()(deps, to="Grandpa")
+    assert "error" in unknown and "Tío Sergio" in unknown["error"]
+    assert chats == [SERGIO] and photo == [take_photo.CAMERA_COUNTDOWN_S]  # nothing taken for an unknown name
