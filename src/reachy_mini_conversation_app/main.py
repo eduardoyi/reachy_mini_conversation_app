@@ -762,6 +762,10 @@ def run(
         background_tasks=[deps.now_playing.run] if deps.now_playing is not None else None,
     )
 
+    if speaker_direction is not None:
+        # Reachy's own voice through his speaker is not someone to turn toward.
+        speaker_direction.own_voice_until = stream_manager.playback_until
+
     # The page is served immediately, so the API must be live before the slow startup work below.
     if effective_settings_app is not None:
         stream_manager._init_settings_ui_if_needed()

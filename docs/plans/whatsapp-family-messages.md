@@ -155,3 +155,11 @@ messages, video.
   `take_photo(to=...)` resolves contacts and takes nothing for an unknown name; while a photo is framed
   speaker turns wait (30 s at most); the tool frames like the quick command. Not fixed here: why speaker
   following turned the wrong way.
+- 2026-10-29: the wrong turns. The face tracker recognized the household member at -64° to -71°, on
+  Reachy's right where he stood, so the first turn (-51°) and the left/right convention were right. The
+  -150° turn came from a few stray readings: a turn needed only 2 in 1.5 s, and a test on the mini showed
+  readings in a talking room spanning -89° to +13° within seconds, while Reachy's own voice through his
+  speaker was flagged as speech in 7 of 65 readings. A turn now needs 3 readings with 60% within 25° of
+  their median, and readings while his speech plays (plus 0.5 s) are dropped. See
+  [speaker following](../features/speaker-following.md). A front / left / right test with a person is
+  still to do.

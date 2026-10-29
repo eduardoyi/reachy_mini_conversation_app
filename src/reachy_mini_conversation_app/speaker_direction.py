@@ -26,7 +26,13 @@ DOA_REQUEST_TIMEOUT_S = 0.5
 DOA_ERROR_BACKOFF_S = 2.0
 # Speech that started this recently decides where to turn.
 SPEECH_WINDOW_S = 1.5
-MIN_SPEECH_SAMPLES = 2
+# Readings scatter: on 2026-10-29 a talking room gave -89 to +13 degrees within seconds, and two stray readings
+# turned Reachy to -150 degrees, away from the person in front of him. A turn needs several that mostly agree.
+MIN_SPEECH_SAMPLES = 3
+AGREEMENT_RAD = math.radians(25.0)
+MIN_AGREEMENT = 0.6
+# Reachy's own voice is not someone speaking: readings while it plays, and briefly after (room echo), are dropped.
+OWN_VOICE_TAIL_S = 0.5
 # Furthest the robot turns toward a voice (the body can rotate 160 degrees either way).
 MAX_SPEAKER_YAW = math.radians(150.0)
 
@@ -49,6 +55,9 @@ def room_yaw(head_yaw: float, relative_yaw: float) -> float:
 
 class SpeakerDirection:
     """Poll the daemon's sound direction in the background and report where speech recently came from."""
+
+    # When Reachy's queued speech ends (on ``clock``'s timeline); set once the audio output exists.
+    own_voice_until: Callable[[], float] | None = None
 
     def __init__(
         self,
@@ -91,13 +100,21 @@ class SpeakerDirection:
             self._thread = None
 
     def recent_speech_yaw(self, window_s: float = SPEECH_WINDOW_S) -> float | None:
-        """Return the median room yaw of speech heard in the last ``window_s`` seconds, or None."""
+        """Return the median room yaw of speech heard in the last ``window_s`` seconds, or None.
+
+        None also when the readings disagree: fewer than ``MIN_AGREEMENT`` of them within ``AGREEMENT_RAD``.
+        """
         cutoff = self._clock() - window_s
         with self._lock:
             yaws = [yaw for timestamp, yaw in self._speech if timestamp >= cutoff]
         if len(yaws) < MIN_SPEECH_SAMPLES:
             return None
-        return float(statistics.median(yaws))
+        median = float(statistics.median(yaws))
+        agreeing = sum(abs(yaw - median) <= AGREEMENT_RAD for yaw in yaws)
+        if agreeing < MIN_AGREEMENT * len(yaws):
+            logger.info("Speaker direction unclear: %d of %d readings agree; not turning", agreeing, len(yaws))
+            return None
+        return median
 
     def poll_once(self) -> bool:
         """Read the direction once and record it if speech was detected; return whether the read succeeded."""
@@ -113,7 +130,7 @@ class SpeakerDirection:
             self._failing = False
         now = self._clock()
         speech_yaw = None
-        if reading is not None and reading.get("speech_detected"):
+        if reading is not None and reading.get("speech_detected") and not self._own_voice_playing(now):
             speech_yaw = room_yaw(self._current_head_yaw(), doa_angle_to_yaw(float(reading["angle"])))
         with self._lock:
             if speech_yaw is not None:
@@ -121,6 +138,15 @@ class SpeakerDirection:
             while self._speech and now - self._speech[0][0] > DOA_HISTORY_S:
                 self._speech.popleft()
         return True
+
+    def _own_voice_playing(self, now: float) -> bool:
+        if self.own_voice_until is None:
+            return False
+        try:
+            return now < float(self.own_voice_until()) + OWN_VOICE_TAIL_S
+        except Exception as error:
+            logger.debug("Own voice timing unavailable: %s", type(error).__name__)
+            return False
 
     def _current_head_yaw(self) -> float:
         if self._head_yaw is None:
