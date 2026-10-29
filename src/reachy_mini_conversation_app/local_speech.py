@@ -57,6 +57,16 @@ def _trim_silence(audio: NDArray[np.int16]) -> NDArray[np.int16]:
     return audio[start : int(voiced[-1]) + 1 + SILENCE_MARGIN_SAMPLES]
 
 
+def beep() -> NDArray[np.int16]:
+    """Return a short rising two-note beep ("recording now") at ``SAMPLE_RATE``."""
+    notes = []
+    for frequency in (880.0, 1320.0):
+        time_s = np.arange(int(SAMPLE_RATE * 0.12)) / SAMPLE_RATE
+        fade = np.minimum(1.0, np.minimum(time_s, time_s[-1] - time_s) / 0.01)
+        notes.append(np.sin(2 * np.pi * frequency * time_s) * fade * 0.35 * 32767)
+    return np.concatenate(notes).astype(np.int16)
+
+
 def _chunks(audio: NDArray[np.int16]) -> list[NDArray[np.int16]]:
     return [audio[start : start + CHUNK_SAMPLES] for start in range(0, audio.size, CHUNK_SAMPLES)]
 

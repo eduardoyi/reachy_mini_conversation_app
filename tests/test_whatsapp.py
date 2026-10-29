@@ -185,3 +185,29 @@ def test_commands_need_the_server_settings(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(config, "WHATSAPP_API_URL", None)
     assert whatsapp.main(["status"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_voice_note_is_posted_as_ogg_with_ptt() -> None:
+    """A message goes to /send/audio as a voice note (ptt), the OGG file as is."""
+    sent: list[httpx.Request] = []
+    ogg = b"OggS-voice"
+    assert await _link([_ok(message_id="3EB1")], sent).send_audio(GROUP, ogg) is SendResult.SENT
+
+    (request,) = sent
+    assert request.url.path == "/send/audio"
+    body = request.content
+    assert f'name="phone"\r\n\r\n{GROUP}'.encode() in body
+    assert b'name="ptt"\r\n\r\ntrue' in body
+    assert b'name="audio"; filename="message.ogg"\r\nContent-Type: audio/ogg\r\n\r\n' + ogg in body
+
+
+@pytest.mark.asyncio
+async def test_a_voice_note_follows_the_same_retry_rules() -> None:
+    """Retried once when it never left; never repeated after a timeout."""
+    sent: list[httpx.Request] = []
+    assert await _link([httpx.ConnectError("refused"), _ok()], sent).send_audio(GROUP, b"OggS") is SendResult.SENT
+    assert len(sent) == 2
+    sent.clear()
+    assert await _link([httpx.ReadTimeout("slow")], sent).send_audio(GROUP, b"OggS") is SendResult.UNSURE
+    assert len(sent) == 1

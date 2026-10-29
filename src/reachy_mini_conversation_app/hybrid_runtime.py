@@ -27,6 +27,8 @@ from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
+from reachy_mini_conversation_app.local_speech import SAMPLE_RATE as SPEECH_SAMPLE_RATE
+from reachy_mini_conversation_app.local_speech import beep
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
@@ -402,6 +404,12 @@ class HybridRuntime:
     _REQUEST_CLIP_SILENCE_S = 0.8
     _REQUEST_CLIP_MAX_S = 8.0
     _REQUEST_CLIP_STT_TIMEOUT_S = 6.0
+    # A voice message (record_message): wait this long for speech after the beep, end it after this much
+    # silence (children pause mid-thought), never let it run longer than the cap; keep this much silence.
+    _MESSAGE_START_S = 8.0
+    _MESSAGE_SILENCE_S = 3.0
+    _MESSAGE_MAX_S = 60.0
+    _MESSAGE_MARGIN_S = 0.5
     # After a question (expect_answer), Reachy waits this long for the answer to start, without his name.
     _ANSWER_START_S = 15.0
     # An awaited answer not started within this (Reachy still speaking or busy) is dropped.
@@ -566,6 +574,8 @@ class HybridRuntime:
         self._request_clip_vad = RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD)
         # The last request clip stopped at its length cap while the speaker was still talking.
         self._request_clip_cut_off = False
+        # A voice message is being recorded into _request_clip: post-activation audio is not kept for Gemini.
+        self._recording_message = False
         # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
         # without a conversation; a conversation reports through cloud_session_observer instead.
         self._listening_observer = listening_observer
@@ -1919,6 +1929,78 @@ class HybridRuntime:
                 self._clear_postactivation_queue()
                 self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
 
+    async def record_message(self) -> tuple[int, NDArray[np.int16]] | None:
+        """During a quick command's follow-up: beep, then record until the speaker stops; None if nobody spoke.
+
+        The message stays in memory; it ends after ``_MESSAGE_SILENCE_S`` of silence or at ``_MESSAGE_MAX_S``.
+        """
+        with self._lifecycle_lock:
+            generation = self._generation
+        speaker_ready = self._reply_speaker is not None
+        if not speaker_ready or not self._quick_generation_current(generation):
+            return None
+
+        async def beep_audio() -> AsyncIterator[tuple[int, NDArray[np.int16]]]:
+            yield SPEECH_SAMPLE_RATE, beep()
+
+        await self._queue_reply_audio(beep_audio(), generation, self._clock())
+        with self._lifecycle_lock:
+            self._clear_postactivation_queue()
+            self._request_clip = []
+            self._recording_message = True
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        speech_started_at: float | None = None
+        speech_start_s = 0.0  # audio before the first speech
+        heard_s = 0.0
+        silence_s = 0.0
+        index = 0
+        try:
+            while True:
+                await asyncio.sleep(0.05)
+                if not self._quick_generation_current(generation):
+                    return None
+                with self._lifecycle_lock:
+                    clip = list(self._request_clip or ())
+                for frame in clip[index:]:
+                    try:
+                        speech = self._request_clip_vad.is_speech(frame)
+                    except (TypeError, ValueError):
+                        speech = False
+                    duration = self._frame_duration(frame)
+                    if speech:
+                        silence_s = 0.0
+                        if speech_started_at is None:
+                            speech_started_at = loop.time()
+                            speech_start_s = heard_s
+                    elif speech_started_at is not None:
+                        silence_s += duration
+                    heard_s += duration
+                index = len(clip)
+                now = loop.time()
+                if speech_started_at is None:
+                    if now - started_at > self._MESSAGE_START_S:
+                        logger.info("Voice message: nothing said after the beep")
+                        return None
+                    continue
+                if silence_s >= self._MESSAGE_SILENCE_S or now - speech_started_at > self._MESSAGE_MAX_S:
+                    break
+        finally:
+            with self._lifecycle_lock:
+                self._recording_message = False
+                self._request_clip = None
+        sample_rate = clip[0][0]
+        audio = np.concatenate([audio_to_mono_int16(frame[1]) for frame in clip if frame[0] == sample_rate])
+        first = max(0, int((speech_start_s - self._MESSAGE_MARGIN_S) * sample_rate))
+        last = audio.size - max(0, int((silence_s - self._MESSAGE_MARGIN_S) * sample_rate))
+        audio = audio[first:last]
+        logger.info(
+            "Voice message recorded seconds=%.1f ended=%s",
+            audio.size / sample_rate,
+            "silence" if silence_s >= self._MESSAGE_SILENCE_S else "length cap",
+        )
+        return sample_rate, audio
+
     def expect_answer(self, answer: QuickCommandHandler) -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
 
@@ -2419,6 +2501,8 @@ class HybridRuntime:
         with self._lifecycle_lock:
             if self._request_clip is not None:
                 self._request_clip.append(frame)
+            if self._recording_message:
+                return  # a minute of message would overflow the queue Gemini never reads here
             self._postactivation_frames.append((capture_sequence, frame))
             self._postactivation_seconds += duration
             self._session_queued_frames += 1

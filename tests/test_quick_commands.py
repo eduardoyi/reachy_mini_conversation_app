@@ -5,6 +5,7 @@ from typing import Any
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from reachy_mini_conversation_app import photographer, quick_commands
@@ -14,12 +15,19 @@ from reachy_mini_conversation_app.whatsapp import SendResult
 from reachy_mini_conversation_app.android_tv import TVState
 from reachy_mini_conversation_app.home_devices import HubDevice
 from reachy_mini_conversation_app.quick_commands import (
+    SENT_TO,
     COUNTDOWN,
     PHOTO_SENT,
+    SEND_TO_WHO,
     PHOTO_UNSURE,
+    SEND_TO_ONLY,
     FIXED_PHRASES,
     MARIBEL_ASKING,
+    MESSAGE_PROMPT,
+    MESSAGE_UNSURE,
     PHOTO_NOT_SENT,
+    MESSAGE_NOTHING,
+    MESSAGE_NOT_SENT,
     PHOTO_NO_PICTURE,
     MARIBEL_PASSED_ON,
     MARIBEL_UNREACHABLE,
@@ -885,3 +893,189 @@ def test_every_photo_phrase_is_cached_for_instant_playback() -> None:
         ):
             assert text in FIXED_PHRASES
             assert (text, language) in quick_commands.PHOTO_PHRASES
+
+
+# Messages and photos to family groups -------------------------------------------------------------
+
+SERGIO_GROUP = "120363413010779824@g.us"
+
+
+class _WhatsAppAudio(_WhatsApp):
+    """Records voice notes too."""
+
+    def __init__(self, result: SendResult = SendResult.SENT) -> None:
+        super().__init__(result)
+        self.voice_notes: list[tuple[str, bytes]] = []
+
+    async def send_audio(self, chat: str, ogg: bytes) -> SendResult:
+        self.voice_notes.append((chat, ogg))
+        return self.result
+
+
+@pytest.fixture
+def family(photos: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> list[str]:
+    """One family group (Tío Sergio) in the contacts file; voice notes encode to a marker."""
+    import json
+
+    from reachy_mini_conversation_app.config import config
+
+    contacts = tmp_path / "contacts.json"
+    contacts.write_text(
+        json.dumps(
+            {"contacts": [{"name": "Tío Sergio", "chat": SERGIO_GROUP, "say": ["tio sergio", "zio sergio", "sergio"]}]}
+        )
+    )
+    monkeypatch.setattr(config, "WHATSAPP_CONTACTS_FILE", str(contacts))
+    monkeypatch.setattr(quick_commands, "encode_voice_note", lambda rate, pcm: b"OggS" + pcm.tobytes()[:4])
+    return photos
+
+
+def _family_runner(
+    steps: list[str],
+    *,
+    recorded: Any = (16_000, np.ones(16_000, dtype=np.int16)),
+    result: SendResult = SendResult.SENT,
+) -> tuple[QuickCommands, Any, list[Any]]:
+    runner, deps = _photo_runner(steps)
+    deps.whatsapp = _WhatsAppAudio(result)
+    answers: list[Any] = []
+    deps.expect_answer = answers.append
+
+    async def record() -> Any:
+        steps.append("record")
+        return recorded
+
+    deps.record_message = record
+    return runner, deps, answers
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "language", "to"),
+    [
+        ("Send a message to Tío Sergio", "message", "en", "tio sergio"),
+        ("send Sergio a message", "message", "en", "sergio"),
+        ("send a message", "message", "en", None),
+        ("Vamos a mandar un mensaje a Sergio", "message", "es", "sergio"),
+        ("¿Puedes mandarle un audio al tío Sergio?", "message", "es", "tio sergio"),
+        ("mándale un mensaje de voz a Sergio", "message", "es", "sergio"),
+        ("manda un messaggio vocale allo zio Sergio", "message", "it", "zio sergio"),
+        ("envia uma mensagem para o Sergio", "message", "pt", "o sergio"),
+        ("send a picture to Sergio", "send_photo", "en", "sergio"),
+        ("vamos a mandar una foto", "send_photo", "es", None),
+        ("manda una foto a Sergio", "send_photo", "es", "sergio"),
+    ],
+)
+def test_asking_to_send_a_message_or_a_picture(text: str, kind: str, language: str, to: str | None) -> None:
+    """Messages and pictures for someone, with or without the name, in the household's languages."""
+    assert parse(text) == quick_commands.QuickCommand(kind, language, {"to": to})
+
+
+def test_messages_for_maribel_stay_hers() -> None:
+    """Her hand-off owns "message Maribel"; the family groups never see it."""
+    assert parse("send a message to Maribel") is None
+
+
+@pytest.mark.asyncio
+async def test_a_message_is_recorded_after_the_prompt_and_sent_as_a_voice_note(family: list[str]) -> None:
+    """The prompt names him, the recording runs with the antennas perked, and the voice note goes to his group."""
+    runner, deps, _ = _family_runner(family)
+
+    reply = await runner.handle("vamos a mandar un mensaje a Sergio")
+
+    assert reply is not None and reply.kind == "message" and reply.whole_request
+    assert reply.text == MESSAGE_PROMPT["es"].format(name="Tío Sergio")
+    assert family == []  # nothing is recorded before the prompt has been said
+    assert reply.after is not None and reply.after_timeout_s == quick_commands.MESSAGE_STEP_TIMEOUT_S
+    assert await reply.after() == SENT_TO["es"].format(name="Tío Sergio")
+    assert family == ["record"]
+    assert [chat for chat, _ in deps.whatsapp.voice_notes] == [SERGIO_GROUP]
+    assert deps.whatsapp.voice_notes[0][1].startswith(b"OggS")
+    calls = [call.args for call in deps.movement_manager.set_listening.call_args_list]
+    assert calls == [(True,), (False,)]
+
+
+@pytest.mark.asyncio
+async def test_nothing_said_sends_nothing(family: list[str]) -> None:
+    """No speech after the beep: Reachy says so and nothing reaches WhatsApp."""
+    runner, deps, _ = _family_runner(family, recorded=None)
+    reply = await runner.handle("send a message to Sergio")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == MESSAGE_NOTHING["en"]
+    assert deps.whatsapp.voice_notes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "said"), [(SendResult.FAILED, MESSAGE_NOT_SENT["en"]), (SendResult.UNSURE, MESSAGE_UNSURE["en"])]
+)
+async def test_a_message_that_is_not_sent_says_so(family: list[str], result: SendResult, said: str) -> None:
+    """A refused send and one that may still arrive have their own lines."""
+    runner, _, _ = _family_runner(family, result=result)
+    reply = await runner.handle("send a message to Sergio")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == said
+
+
+@pytest.mark.asyncio
+async def test_a_picture_for_sergio_goes_to_his_group(family: list[str]) -> None:
+    """The photo countdown, then the photo in his group, not the photos group."""
+    runner, deps, _ = _family_runner(family)
+    reply = await runner.handle("send a picture to Sergio")
+    assert reply is not None and reply.kind == "photo" and reply.beats == COUNTDOWN["en"]
+    assert reply.after is not None
+    assert await reply.after() == SENT_TO["en"].format(name="Tío Sergio")
+    assert [chat for chat, _ in deps.whatsapp.sent] == [SERGIO_GROUP]
+
+
+@pytest.mark.asyncio
+async def test_without_a_name_reachy_asks_who_and_goes_on_with_the_answer(family: list[str]) -> None:
+    """Send a message without a name asks who; "a Sergio" answers it and the message flow starts."""
+    runner, deps, answers = _family_runner(family)
+
+    reply = await runner.handle("manda un mensaje")
+
+    assert reply is not None and reply.text == SEND_TO_WHO["es"].format(names="Tío Sergio")
+    assert reply.after is not None and await reply.after() is None
+    (answer,) = answers
+    follow = await answer("a Sergio")
+    assert follow.text == MESSAGE_PROMPT["es"].format(name="Tío Sergio") and follow.after is not None
+    assert await follow.after() == SENT_TO["es"].format(name="Tío Sergio")
+    assert [chat for chat, _ in deps.whatsapp.voice_notes] == [SERGIO_GROUP]
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_name_is_asked_about_and_never_sent(family: list[str]) -> None:
+    """A name not in the contacts file gets the question; a second unknown name gets who he can send to."""
+    runner, deps, answers = _family_runner(family)
+
+    reply = await runner.handle("send a message to Grandpa")
+    assert reply is not None and reply.text == SEND_TO_WHO["en"].format(names="Tío Sergio")
+    assert reply.after is not None
+    await reply.after()
+    follow = await answers[0]("Mario")
+    assert follow.text == SEND_TO_ONLY["en"].format(names="Tío Sergio") and follow.after is None
+    cancelled = await answers[0]("never mind")
+    assert cancelled.text is None and cancelled.after is None
+    assert family == [] and deps.whatsapp.voice_notes == [] and deps.whatsapp.sent == []
+
+
+@pytest.mark.asyncio
+async def test_without_contacts_or_whatsapp_the_request_goes_to_the_conversation(
+    family: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """No family groups (or no WhatsApp): Reachy does not offer to send anything."""
+    from reachy_mini_conversation_app.config import config
+
+    runner, deps, _ = _family_runner(family)
+    monkeypatch.setattr(config, "WHATSAPP_CONTACTS_FILE", str(tmp_path / "none.json"))
+    assert await runner.handle("send a message to Sergio") is None
+    monkeypatch.undo()
+    deps.whatsapp = None
+    assert await runner.handle("send a picture to Sergio") is None
+
+
+def test_every_fixed_message_phrase_is_cached() -> None:
+    """The message outcomes are fixed phrases; the prompt and "sent to" carry a name and are not."""
+    for language in quick_commands.LANGUAGES:
+        for text in (MESSAGE_NOTHING[language], MESSAGE_NOT_SENT[language], MESSAGE_UNSURE[language]):
+            assert text in FIXED_PHRASES

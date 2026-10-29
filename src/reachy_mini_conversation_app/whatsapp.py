@@ -1,4 +1,4 @@
-"""Send photos from Reachy's own WhatsApp number through GOWA, a WhatsApp server on this computer.
+"""Send photos and voice notes from Reachy's own WhatsApp number through GOWA, a WhatsApp server on this computer.
 
 GOWA (go-whatsapp-web-multidevice, run as ``whatsapp rest``) is linked to the household's spare number as
 a WhatsApp linked device and listens on loopback. Reachy only posts to it; it never reads chats.
@@ -70,52 +70,77 @@ class WhatsAppLink:
 
     async def send_image(self, chat: str, jpeg: bytes) -> SendResult:
         """Send ``jpeg`` to ``chat`` (a WhatsApp id such as ``...@g.us``); retried only if it never left."""
+        # Without hd, GOWA shrinks every image to 600 px wide.
+        return await self._send(
+            "photo", "/send/image", chat, {"hd": "true"}, ("image", "photo.jpg", jpeg, "image/jpeg")
+        )
+
+    async def send_audio(self, chat: str, ogg: bytes) -> SendResult:
+        """Send ``ogg`` (OGG Opus) to ``chat`` as a voice note; retried only if it never left."""
+        # GOWA sends an OGG file as is with ptt; anything else would need ffmpeg.
+        return await self._send(
+            "voice note", "/send/audio", chat, {"ptt": "true"}, ("audio", "message.ogg", ogg, "audio/ogg")
+        )
+
+    async def _send(
+        self, what: str, path: str, chat: str, fields: dict[str, str], part: tuple[str, str, bytes, str]
+    ) -> SendResult:
         started_at = time.perf_counter()
         try:
             async with asyncio.timeout(self._deadline_s):
-                return await self._send_image(chat, jpeg, started_at)
+                return await self._send_once_or_twice(what, path, chat, fields, part, started_at)
         except TimeoutError:
             reason = "deadline"
         except httpx.TimeoutException as error:  # read or write: the request may have left
             reason = type(error).__name__
         logger.warning(
-            "WhatsApp photo send timed out after %.1f s (%s); it may still arrive",
+            "WhatsApp %s send timed out after %.1f s (%s); it may still arrive",
+            what,
             time.perf_counter() - started_at,
             reason,
         )
         return SendResult.UNSURE
 
-    async def _send_image(self, chat: str, jpeg: bytes, started_at: float) -> SendResult:
+    async def _send_once_or_twice(
+        self,
+        what: str,
+        path: str,
+        chat: str,
+        fields: dict[str, str],
+        part: tuple[str, str, bytes, str],
+        started_at: float,
+    ) -> SendResult:
+        name, filename, content, content_type = part
         for attempt in (1, 2):
             if attempt == 2:
                 await asyncio.sleep(self._retry_pause_s)
             try:
                 response = await self._request(
                     "POST",
-                    "/send/image",
+                    path,
                     self._deadline_s,
-                    # Without hd, GOWA shrinks every image to 600 px wide.
-                    data={"phone": chat, "hd": "true"},
-                    files={"image": ("photo.jpg", jpeg, "image/jpeg")},
+                    data={"phone": chat, **fields},
+                    files={name: (filename, content, content_type)},
                 )
             except (httpx.ConnectError, httpx.ConnectTimeout) as error:
-                logger.warning("WhatsApp photo attempt %d could not connect: %s", attempt, type(error).__name__)
+                logger.warning("WhatsApp %s attempt %d could not connect: %s", what, attempt, type(error).__name__)
                 continue
             except httpx.TimeoutException:
-                raise  # unsure, in send_image
+                raise  # unsure, in _send
             except httpx.HTTPError as error:
-                logger.warning("WhatsApp photo send failed: %s", type(error).__name__)
+                logger.warning("WhatsApp %s send failed: %s", what, type(error).__name__)
                 return SendResult.FAILED
             code = _result_code(response)
             if response.is_success and code == "SUCCESS":
                 logger.info(
-                    "WhatsApp photo sent bytes=%d attempt=%d ms=%.0f",
-                    len(jpeg),
+                    "WhatsApp %s sent bytes=%d attempt=%d ms=%.0f",
+                    what,
+                    len(content),
                     attempt,
                     (time.perf_counter() - started_at) * 1000,
                 )
                 return SendResult.SENT
-            logger.warning("WhatsApp photo refused: HTTP %d code=%s", response.status_code, code)
+            logger.warning("WhatsApp %s refused: HTTP %d code=%s", what, response.status_code, code)
             return SendResult.FAILED
         return SendResult.FAILED
 
