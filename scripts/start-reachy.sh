@@ -23,6 +23,17 @@ WHISPER_READY_TIMEOUT_S="${WHISPER_READY_TIMEOUT_S:-180}"
 # WHISPER_SERVER=transformers to use plain `transformers serve` instead.
 WHISPER_SERVER="${WHISPER_SERVER:-reachy}"
 WHISPER_PYTHON="${WHISPER_PYTHON:-$(uv tool dir 2>/dev/null)/transformers/bin/python}"
+
+# One key from .env, without sourcing the file (it holds secrets).
+env_file_value() {
+  [[ -f "$REPO_DIR/.env" ]] || return 0
+  sed -n "s/^$1=//p" "$REPO_DIR/.env" | tail -1 | cut -d'#' -f1 | tr -d "\"' "
+}
+# Speech engine of Reachy's server: whisper, or qwen (Qwen3-ASR on MLX in place of both Whisper models,
+# answering to their names; needs `uv pip install --python "$WHISPER_PYTHON" mlx-qwen3-asr==0.4.4`, and
+# Whisper loads if Qwen cannot). Read from .env when not set here.
+LOCAL_STT_ENGINE="${LOCAL_STT_ENGINE:-$(env_file_value LOCAL_STT_ENGINE)}"
+LOCAL_STT_ENGINE="${LOCAL_STT_ENGINE:-whisper}"
 # The camera's factory image is dark (brightness 0) and flat. A small brightness lift plus
 # higher gamma brightens mid-tones without washing out shadows; contrast and sharpness get a
 # nudge. Ranges: brightness -64..64, gamma 80..160, contrast 0..95, sharpness 0..7. Set one
@@ -86,13 +97,14 @@ elif ! command -v transformers >/dev/null 2>&1; then
   echo "Whisper not running and the 'transformers' CLI is not installed; starting without local STT context" >&2
   echo "Install it with: uv tool install --python 3.12 'transformers[serving]' --with librosa --with python-multipart" >&2
 else
-  echo "Starting Whisper ($WHISPER_MODEL) on port $WHISPER_PORT; log: $WHISPER_LOG"
   if [[ "$WHISPER_SERVER" != "transformers" && -x "$WHISPER_PYTHON" ]]; then
+    echo "Starting local speech ($LOCAL_STT_ENGINE, for $WHISPER_MODEL) on port $WHISPER_PORT; log: $WHISPER_LOG"
     request_args=()
     [[ -n "$WHISPER_REQUEST_MODEL" ]] && request_args=(--request-model "$WHISPER_REQUEST_MODEL")
     "$WHISPER_PYTHON" "$REPO_DIR/scripts/whisper_server.py" --host 127.0.0.1 --port "$WHISPER_PORT" \
-      "${request_args[@]}" "$WHISPER_MODEL" >>"$WHISPER_LOG" 2>&1 &
+      --engine "$LOCAL_STT_ENGINE" "${request_args[@]}" "$WHISPER_MODEL" >>"$WHISPER_LOG" 2>&1 &
   else
+    echo "Starting Whisper ($WHISPER_MODEL) on port $WHISPER_PORT; log: $WHISPER_LOG"
     transformers serve --host 127.0.0.1 --port "$WHISPER_PORT" "$WHISPER_MODEL" >>"$WHISPER_LOG" 2>&1 &
   fi
   whisper_pid=$!

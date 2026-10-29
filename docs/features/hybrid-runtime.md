@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-10-28
+- Last updated: 2026-10-29
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -467,6 +467,7 @@ adversarial review found no remaining P0/P1 blocker.
 
 | Date | Change |
 |---|---|
+| 2026-10-29 | `LOCAL_STT_ENGINE=qwen` runs Qwen3-ASR (0.6B room, 1.7B requests) on MLX in place of Whisper, answering to the Whisper names, with the names hint and an echo guard; Whisper loads if Qwen cannot. Tests in `tests/test_whisper_server.py`. |
 | 2026-10-25 | A conversation that never connects (Gemini out of credits, no internet) no longer ends in silence: once the runtime is back to listening, Reachy says `quick_commands.CANNOT_CONNECT` in the request's language (`guess_language`, Spanish when unsure) through the quick-reply speaker, which falls back to the Mac's own voice when Gemini's voice is unreachable too. A conversation that drops after connecting closes as before. Tests: `test_a_conversation_that_cannot_connect_says_so_out_loud`, `test_a_conversation_that_drops_after_connecting_does_not_apologise`, `test_guess_language_picks_the_household_language`. |
 | 2026-10-25 | The follow-up window no longer closes while someone is speaking (Gemini voice activity, speech begun after Reachy's reply), capped at twice the window; a long sentence whose transcript had not arrived was cut off at 15 s. Three regression tests fail on the old rule and pass on the new one. |
 | 2026-08-31 | Project `.env` loading now preserves explicit process/terminal values and fills only unset values; added regression coverage after the first direct Phase 1 benchmark command was unintentionally routed through hybrid mode. |
@@ -876,6 +877,27 @@ It transcribes everything, kids talking to Reachy included, but bounds the work 
 Measured on the same machine: 8 s of noise 26 s → 0.3 s; English and Spanish commands unchanged
 (0.3–0.5 s); overlapped speech 1.6 s with the retry. Each clip logs one line
 (`Transcribed audio_s=… language=… tokens=… capped=… took_s=… waited_s=…`, no text).
+
+### Qwen3-ASR in place of Whisper, behind a setting — 2026-10-29
+
+`LOCAL_STT_ENGINE=qwen` (in `.env` or the environment; default `whisper`) makes the launcher start
+`scripts/whisper_server.py --engine qwen`. Qwen3-ASR on MLX then stands in for both Whisper models and
+answers to their names, so the app and its `LOCAL_STT_*` settings do not change:
+- the room: `moona3k/mlx-qwen3-asr-0.6b-8bit` for `openai/whisper-small` (`--qwen-model`);
+- requests: `moona3k/mlx-qwen3-asr-1.7b-8bit` for `openai/whisper-large-v3-turbo` (`--qwen-request-model`);
+- both get `STT_NAME_HINT` (default `Reachy, Richie, Maribel`; empty for none) as context, and a run of two
+  or more different hint words in the text, which Qwen returns on some unclear audio, is removed
+  (`echo=True` in the log line);
+- clips under 0.1 s return no text; a request's `language` is forced by name, otherwise Qwen detects it
+  (it cannot be limited to `WHISPER_LANGUAGES`; `LOCAL_STT_LATIN_ONLY` still drops non-Latin text);
+- a Qwen model that cannot load (`mlx-qwen3-asr` missing from the `transformers` tool's Python, say) is
+  replaced by its Whisper model, with a warning in the Whisper log. There is no per-clip fallback.
+
+Install once on the machine: `uv pip install --python "$(uv tool dir)/transformers/bin/python" mlx-qwen3-asr==0.4.4`.
+Benchmark (M1 Mac mini, Reachy running): room clips 0.44 → 0.17 s and noisy-request word errors 17.2% →
+5.1%; requests 1.62 → 0.36 s at turbo's accuracy (3.3% noisy); 19 of 28 real calls heard by name, against
+12 for whisper-small. Plan: [qwen-speech-engine.md](../plans/qwen-speech-engine.md). Tests:
+`tests/test_whisper_server.py` (echo guard, hint, empty clips, language, fallback, routing by name).
 
 ### Quick commands before the cloud — 2026-10-18
 

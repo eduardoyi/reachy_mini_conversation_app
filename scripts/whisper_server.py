@@ -23,20 +23,31 @@ bounds the work per clip:
   whisper-large-v3-turbo got it right in 1.24 s. Those clips go ahead of waiting background clips, so a
   command never queues behind the room's chatter.
 
-Run it with the Python of the ``transformers`` uv tool (it has torch, librosa and FastAPI):
+With ``--engine qwen``, Qwen3-ASR on MLX stands in for both Whisper models and answers to their names, so
+the app is unchanged. Measured 2026-10-29 on the mini: the 0.6B model took 0.17 s per room clip
+(whisper-small 0.44 s) with a third of its errors on noisy requests; the 1.7B model matched turbo's
+accuracy in 0.36 s (turbo 1.62 s). Both get Reachy's and Maribel's names as a hint, which lets them hear
+"Richie" where Whisper heard "Reggie", but on unclear audio they sometimes return the hint itself; a run
+of two or more different hint words is removed. A Qwen model that cannot load (``mlx-qwen3-asr`` not
+installed, say) is replaced by its Whisper model.
+
+Run it with the Python of the ``transformers`` uv tool (it has torch, librosa and FastAPI; Qwen also needs
+``uv pip install --python <that python> mlx-qwen3-asr==0.4.4``):
 
     ~/.local/share/uv/tools/transformers/bin/python scripts/whisper_server.py --port 8766 openai/whisper-small
 """
 
 import io
 import os
+import re
 import math
 import time
 import asyncio
 import logging
 import argparse
 import contextlib
-from typing import Any
+import unicodedata
+from typing import Any, Protocol
 from collections.abc import AsyncIterator
 
 
@@ -51,6 +62,12 @@ TOKENS_PER_SECOND = 10.0
 BASE_TOKENS = 16
 DEFAULT_LANGUAGES = ("en", "es", "it", "pt")
 LOOP_RETRY_REPETITION_PENALTY = 1.3
+DEFAULT_QWEN_MODEL = "moona3k/mlx-qwen3-asr-0.6b-8bit"
+DEFAULT_QWEN_REQUEST_MODEL = "moona3k/mlx-qwen3-asr-1.7b-8bit"
+DEFAULT_NAME_HINT = "Reachy, Richie, Maribel"
+# Qwen raises on clips this short (0.01 s background clips happen).
+MIN_CLIP_S = 0.1
+QWEN_LANGUAGE_NAMES = {"en": "English", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "fr": "French"}
 
 
 def token_budget(duration_s: float) -> int:
@@ -69,11 +86,56 @@ def parse_languages(value: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(code.strip().lower() for code in value.split(",") if code.strip()))
 
 
+def _fold(word: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFKD", word.lower()) if not unicodedata.combining(ch))
+
+
+def strip_hint_echo(text: str, hint: str) -> tuple[str, bool]:
+    """Remove each run of two or more different hint words; return the text and whether anything was removed."""
+    hint_words = {_fold(word) for word in re.findall(r"\w+", hint)}
+    words = list(re.finditer(r"\w+", text))
+    spans: list[tuple[int, int]] = []
+    start = 0
+    while start < len(words):
+        end = start
+        while end < len(words) and _fold(words[end].group()) in hint_words:
+            end += 1
+        if len({_fold(word.group()) for word in words[start:end]}) >= 2:
+            spans.append((words[start].start(), words[end].start() if end < len(words) else len(text)))
+        start = max(end, start + 1)
+    if not spans:
+        return text, False
+    for begin, finish in reversed(spans):
+        text = text[:begin] + text[finish:]
+    return text.strip(" ,;:-"), True
+
+
+def load_audio(audio_bytes: bytes) -> tuple[Any, float]:
+    """Decode a clip to 16 kHz mono float32; return it and its length in seconds."""
+    import librosa
+
+    audio, _ = librosa.load(io.BytesIO(audio_bytes), sr=SAMPLE_RATE, mono=True)
+    return audio, audio.size / SAMPLE_RATE
+
+
+class Engine(Protocol):
+    """A loaded speech model the server can route clips to."""
+
+    name: str  # the model name the app asks for
+    model_id: str  # the model actually loaded
+    device: str
+
+    def transcribe(self, audio_bytes: bytes, language: str | None = None) -> tuple[str, dict[str, Any]]:
+        """Transcribe one clip; return the text and timing details for the log."""
+        ...
+
+
 class Transcriber:
     """One Whisper model; one clip at a time."""
 
     def __init__(self, model_id: str, languages: tuple[str, ...]) -> None:
         """Load ``model_id`` on the best available device."""
+        self.name = model_id
         import torch
         from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
@@ -102,10 +164,7 @@ class Transcriber:
         self._start_id = self.model.generation_config.decoder_start_token_id
 
     def _features(self, audio_bytes: bytes) -> tuple[Any, float]:
-        import librosa
-
-        audio, _ = librosa.load(io.BytesIO(audio_bytes), sr=SAMPLE_RATE, mono=True)
-        duration = audio.size / SAMPLE_RATE
+        audio, duration = load_audio(audio_bytes)
         features = self.processor(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt").input_features
         return features.to(self.device, self.dtype), duration
 
@@ -154,6 +213,56 @@ class Transcriber:
         }
 
 
+class QwenTranscriber:
+    """One Qwen3-ASR model on MLX, answering to the name of the Whisper model it replaces; one clip at a time."""
+
+    device = "mlx"
+
+    def __init__(self, model_id: str, name: str, hint: str) -> None:
+        """Load ``model_id`` and run it once, so the first real clip does not pay for the warm-up."""
+        import numpy as np
+        from mlx_qwen3_asr import Session
+
+        self.model_id = model_id
+        self.name = name
+        self.hint = hint
+        self.session = Session(model=model_id)
+        self.session.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32), context=hint)
+
+    def transcribe(self, audio_bytes: bytes, language: str | None = None) -> tuple[str, dict[str, Any]]:
+        """Transcribe one clip; returns the text and timing details for the log."""
+        started = time.perf_counter()
+        audio, duration = load_audio(audio_bytes)
+        details: dict[str, Any] = {"audio_s": round(duration, 1)}
+        if duration < MIN_CLIP_S:
+            return "", {**details, "language": "none", "took_s": round(time.perf_counter() - started, 2)}
+        # Qwen takes one forced language or none; it cannot choose among the household's.
+        forced = QWEN_LANGUAGE_NAMES.get(language or "")
+        result = self.session.transcribe(audio, context=self.hint, language=forced)
+        text, echoed = strip_hint_echo(result.text.strip(), self.hint) if self.hint else (result.text.strip(), False)
+        return text, {
+            **details,
+            "language": str(result.language or "auto").lower(),
+            "echo": echoed,
+            "took_s": round(time.perf_counter() - started, 2),
+        }
+
+
+def load_engine(engine: str, whisper_model: str, qwen_model: str, languages: tuple[str, ...], hint: str) -> Engine:
+    """Load Qwen in place of ``whisper_model`` when asked, else (or if Qwen cannot load) the Whisper model."""
+    if engine == "qwen":
+        try:
+            qwen = QwenTranscriber(qwen_model, whisper_model, hint)
+        except Exception as error:
+            logger.warning("Qwen %s could not load (%s: %s); using Whisper", qwen_model, type(error).__name__, error)
+        else:
+            logger.info("Qwen %s answers for %s; name hint: %s", qwen_model, whisper_model, hint or "none")
+            return qwen
+    transcriber = Transcriber(whisper_model, languages)
+    logger.info("Whisper %s on %s; languages: %s", whisper_model, transcriber.device, ", ".join(languages) or "any")
+    return transcriber
+
+
 class TurnLock:
     """Lets one clip use the model at a time; urgent clips go before every waiting background clip."""
 
@@ -184,7 +293,7 @@ class TurnLock:
                 self._changed.notify_all()
 
 
-def build_app(transcriber: Transcriber, request_transcriber: Transcriber | None = None) -> Any:
+def build_app(transcriber: Engine, request_transcriber: Engine | None = None) -> Any:
     """Return the FastAPI app; a request naming ``request_transcriber``'s model is transcribed with it."""
     from fastapi import FastAPI, Request, HTTPException
     from fastapi.responses import JSONResponse
@@ -195,7 +304,7 @@ def build_app(transcriber: Transcriber, request_transcriber: Transcriber | None 
     @app.get("/v1/models")
     async def models() -> JSONResponse:
         loaded = [transcriber, *([request_transcriber] if request_transcriber else [])]
-        return JSONResponse({"object": "list", "data": [{"id": t.model_id, "object": "model"} for t in loaded]})
+        return JSONResponse({"object": "list", "data": [{"id": t.name, "object": "model"} for t in loaded]})
 
     @app.post("/v1/audio/transcriptions")
     async def transcriptions(request: Request) -> JSONResponse:
@@ -208,7 +317,7 @@ def build_app(transcriber: Transcriber, request_transcriber: Transcriber | None 
             requested_model = str(form.get("model") or "").strip()
         chosen = (
             request_transcriber
-            if request_transcriber is not None and requested_model == request_transcriber.model_id
+            if request_transcriber is not None and requested_model == request_transcriber.name
             else transcriber
         )
         queued_at = time.perf_counter()
@@ -240,15 +349,24 @@ def main() -> None:
         default=None,
         help="also load this more accurate model, used when a request names it (Reachy's requests)",
     )
+    parser.add_argument("--engine", default="whisper", help="whisper, or qwen (Whisper loads if Qwen cannot)")
+    parser.add_argument("--qwen-model", default=DEFAULT_QWEN_MODEL, help="Qwen3-ASR model in place of MODEL")
+    parser.add_argument(
+        "--qwen-request-model", default=DEFAULT_QWEN_REQUEST_MODEL, help="Qwen3-ASR model in place of --request-model"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    engine = args.engine.strip().lower()
+    if engine not in ("whisper", "qwen"):
+        logger.warning("Unknown speech engine %r; using Whisper", args.engine)
+        engine = "whisper"
     languages = parse_languages(os.getenv("WHISPER_LANGUAGES"))
-    transcriber = Transcriber(args.model, languages)
-    logger.info("Whisper %s on %s; languages: %s", args.model, transcriber.device, ", ".join(languages) or "any")
+    hint = os.getenv("STT_NAME_HINT", DEFAULT_NAME_HINT).strip()
+    transcriber = load_engine(engine, args.model, args.qwen_model, languages, hint)
     request_transcriber = None
     if args.request_model and args.request_model != args.model:
-        request_transcriber = Transcriber(args.request_model, languages)
-        logger.info("Requests to Reachy use %s", args.request_model)
+        request_transcriber = load_engine(engine, args.request_model, args.qwen_request_model, languages, hint)
+        logger.info("Requests to Reachy use %s", request_transcriber.model_id)
     import uvicorn
 
     uvicorn.run(build_app(transcriber, request_transcriber), host=args.host, port=args.port, log_level="warning")

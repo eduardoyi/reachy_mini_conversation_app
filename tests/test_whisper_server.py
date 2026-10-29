@@ -135,3 +135,122 @@ async def test_a_request_that_gives_up_does_not_hold_back_background_clips() -> 
 
     assert await asyncio.wait_for(background, 1) == "done"
     await running
+
+
+@pytest.mark.parametrize(
+    ("text", "expected", "echoed"),
+    [
+        ("Maribel, Richie, Reachy.", "", True),
+        ("Maribel, Richie", "", True),
+        ("Turn off the lights. Reachy, Richie, Maribel.", "Turn off the lights.", True),
+        ("Richie.", "Richie.", False),
+        ("Richie, Richie!", "Richie, Richie!", False),
+        ("Reachy, pregúntale a Maribel qué hora es", "Reachy, pregúntale a Maribel qué hora es", False),
+        ("", "", False),
+    ],
+)
+def test_a_run_of_different_hint_words_is_removed_but_a_single_name_is_kept(
+    text: str, expected: str, echoed: bool
+) -> None:
+    """Qwen sometimes returns its hint on unclear audio; a real call says one name, with words around it."""
+    assert whisper_server.strip_hint_echo(text, "Reachy, Richie, Maribel") == (expected, echoed)
+
+
+class _FakeQwenSession:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[dict[str, Any]] = []
+
+    def transcribe(self, audio: Any, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return SimpleNamespace(text=self.text, language="Spanish")
+
+
+def _qwen(session: _FakeQwenSession, hint: str = "Reachy, Richie, Maribel") -> Any:
+    qwen = object.__new__(whisper_server.QwenTranscriber)
+    qwen.model_id, qwen.name, qwen.hint, qwen.session = "qwen-1.7b", "openai/whisper-large-v3-turbo", hint, session
+    return qwen
+
+
+def test_qwen_gets_the_names_as_a_hint_and_its_echo_is_removed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hint goes in as context; text that is only the hint comes back empty and is logged as an echo."""
+    monkeypatch.setattr(whisper_server, "load_audio", lambda _bytes: ("audio", 2.0))
+    session = _FakeQwenSession("Maribel, Richie, Reachy.")
+
+    text, details = _qwen(session).transcribe(b"wav", language="es")
+
+    assert text == "" and details["echo"] is True and details["language"] == "spanish"
+    assert session.calls == [{"context": "Reachy, Richie, Maribel", "language": "Spanish"}]
+    assert "Maribel" not in str(details)  # the log line never carries words
+
+
+def test_qwen_detects_the_language_when_none_is_given_and_skips_empty_clips(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No language means auto; a clip too short for Qwen returns no text without reaching it."""
+    session = _FakeQwenSession("Apaga las luces.")
+    monkeypatch.setattr(whisper_server, "load_audio", lambda _bytes: ("audio", 1.5))
+    assert _qwen(session).transcribe(b"wav")[0] == "Apaga las luces."
+    assert session.calls[-1]["language"] is None
+
+    monkeypatch.setattr(whisper_server, "load_audio", lambda _bytes: ("audio", 0.01))
+    assert _qwen(session).transcribe(b"wav")[0] == ""
+    assert len(session.calls) == 1
+
+
+def test_qwen_that_cannot_load_falls_back_to_whisper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without mlx-qwen3-asr (or with a broken model) the slot loads its Whisper model and keeps listening."""
+
+    class _Whisper:
+        device = "mps"
+
+        def __init__(self, model_id: str, languages: tuple[str, ...]) -> None:
+            self.name = self.model_id = model_id
+
+    def broken(*_args: Any) -> None:
+        raise ModuleNotFoundError("No module named 'mlx_qwen3_asr'")
+
+    monkeypatch.setattr(whisper_server, "Transcriber", _Whisper)
+    monkeypatch.setattr(whisper_server, "QwenTranscriber", broken)
+
+    engine = whisper_server.load_engine("qwen", "openai/whisper-small", "qwen-0.6b", ("en",), "Reachy")
+
+    assert isinstance(engine, _Whisper) and engine.model_id == "openai/whisper-small"
+
+
+def test_qwen_loads_in_place_of_whisper_and_answers_to_its_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine setting picks Qwen; the app keeps asking for the Whisper name."""
+
+    class _Qwen:
+        def __init__(self, model_id: str, name: str, hint: str) -> None:
+            self.model_id, self.name, self.hint = model_id, name, hint
+
+    monkeypatch.setattr(whisper_server, "QwenTranscriber", _Qwen)
+
+    engine = whisper_server.load_engine("qwen", "openai/whisper-small", "qwen-0.6b", ("en",), "Reachy")
+
+    assert (engine.model_id, engine.name, engine.hint) == ("qwen-0.6b", "openai/whisper-small", "Reachy")
+
+
+def test_a_request_naming_the_whisper_request_model_reaches_the_qwen_standing_in_for_it() -> None:
+    """Routing is by the name the app sends, whichever engine answers to it."""
+    from fastapi.testclient import TestClient
+
+    class _Engine:
+        def __init__(self, name: str, model_id: str) -> None:
+            self.name, self.model_id, self.device = name, model_id, "mlx"
+            self.clips = 0
+
+        def transcribe(self, audio_bytes: bytes, language: str | None = None) -> tuple[str, dict[str, Any]]:
+            self.clips += 1
+            return self.model_id, {"took_s": 0.0}
+
+    room = _Engine("openai/whisper-small", "qwen-0.6b")
+    request = _Engine("openai/whisper-large-v3-turbo", "qwen-1.7b")
+    client = TestClient(whisper_server.build_app(room, request))
+
+    def post(model: str) -> str:
+        response = client.post("/v1/audio/transcriptions", data={"model": model}, files={"file": ("a.wav", b"x")})
+        return str(response.json()["text"])
+
+    assert post("openai/whisper-large-v3-turbo") == "qwen-1.7b"
+    assert post("openai/whisper-small") == "qwen-0.6b"
+    assert [model["id"] for model in client.get("/v1/models").json()["data"]] == [room.name, request.name]

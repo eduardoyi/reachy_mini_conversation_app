@@ -349,7 +349,10 @@ that is already running and stops one it started when the app exits; set
 `WHISPER_MODEL` to change the model (default multilingual `openai/whisper-small`). It runs
 `scripts/whisper_server.py`, which keeps background chatter from jamming transcription, picks
 among `WHISPER_LANGUAGES` (default `en,es,it,pt`), encodes each clip once and transcribes requests
-to Reachy before waiting background clips. Its log (`WHISPER_LOG`) is appended to across restarts:
+to Reachy before waiting background clips. With `LOCAL_STT_ENGINE=qwen` in `.env` it runs Qwen3-ASR on
+MLX in place of both Whisper models (faster and more accurate on the M1 Mac mini; needs
+`mlx-qwen3-asr` in the same Python, and loads Whisper if Qwen cannot). Its log (`WHISPER_LOG`) is
+appended to across restarts:
 
 ```bash
 scripts/start-reachy.sh
