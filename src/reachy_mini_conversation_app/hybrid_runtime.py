@@ -1281,14 +1281,17 @@ class HybridRuntime:
                 if clip_request
                 else None
             )
+            # A sure wake model and a voice stood in for the name Whisper missed: Reachy stays still until the
+            # request shows it was for him. On 2026-10-29 a TV programme opened two conversations this way.
+            trusted_unnamed = False
             if wake_audio is not None:
-                if not await self._name_in_wake_audio(wake_audio, asleep=asleep) and not self._trusted_voice_wake(
-                    wake_audio, wake_score, asleep=asleep
-                ):
-                    return await self._drop_unconfirmed_wake(generation, asleep=asleep)
+                if not await self._name_in_wake_audio(wake_audio, asleep=asleep):
+                    if not self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep):
+                        return await self._drop_unconfirmed_wake(generation, asleep=asleep)
+                    trusted_unnamed = True
                 with self._lifecycle_lock:
                     self._asleep = False
-            if not confirm_wake:
+            if not confirm_wake and not trusted_unnamed:
                 self._notify_listening(True)
                 listening_notified = True
                 await self._invoke_acknowledgement(reason)
@@ -1337,6 +1340,7 @@ class HybridRuntime:
             # What quick commands may act on: only words addressed to Reachy, never an overheard sentence.
             quick_text = (request_after_wake(addressed_text) or addressed_text) if addressed_text else ""
             segment_quick_text = ""
+            name_in_request = False  # the name in the fast transcript or the request clip
             if reason in _LISTENING_WAKES and self._context_processor is not None:
                 quick_text = ""
                 await self._settle_local_transcript()
@@ -1394,6 +1398,9 @@ class HybridRuntime:
                 )
                 clip_text = await self._await_request_clip(clip_task)
                 clip_task = None
+                name_in_request = wake_word_found or bool(
+                    clip_text and _WAKE_WORD_TRANSCRIPT_PATTERN.search(clip_text)
+                )
                 if clip_text and wake_audio is not None:
                     # The clip opens with the audio the wake model fired on, so the name leads it; the request
                     # is what follows the name (or the whole text when the name was spelled past recognizing).
@@ -1458,6 +1465,13 @@ class HybridRuntime:
                 and config.QUICK_COMMANDS_LOG_TEXT
             ):
                 logger.info("Quick commands skipped (no name heard before the request): %r", addressed_text)
+            if trusted_unnamed:
+                if not name_in_request:
+                    logger.info("Sure wake without the name, and neither a name nor a command followed; dropped")
+                    return await self._drop_unconfirmed_wake(generation, asleep=False)
+                self._notify_listening(True)
+                listening_notified = True
+                await self._invoke_acknowledgement(reason)
 
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             hint = request_audio_hint(addressed_text) if request_in_audio and addressed_text else ""
