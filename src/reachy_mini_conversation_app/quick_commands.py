@@ -21,8 +21,10 @@ from collections.abc import Awaitable
 
 from reachy_mini_conversation_app.maribel import RETRY_PAUSE_S, POST_TIMEOUT_S, FIRST_REPLY_WAIT_S
 from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
-from reachy_mini_conversation_app.whatsapp import SendResult
+from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
+from reachy_mini_conversation_app.voice_notes import encode_voice_note
 from reachy_mini_conversation_app.photographer import FACES, SHARE_TIMEOUT_S, FaceFinder, take_photo, take_and_share
+from reachy_mini_conversation_app.whatsapp_contacts import Contact, find_contact, load_contacts
 from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 
 
@@ -326,6 +328,43 @@ _PHOTO = {
     "pt": r"(?:tira|tirar|tira nos|tirar nos|tira me|tire|tiremos|vamos tirar|bate|bater|vamos bater) uma "
     r"(?:foto|fotografia)(?: (?:de|a) (?:nos|todos))?",
 }
+# "Send a message / a picture (to x)", "vamos a mandar un mensaje a x": a voice message or a photo for a family
+# group in the WhatsApp contacts file; without x, Reachy asks who. Polite forms leave the infinitive.
+_TO = {
+    "en": r"(?: (?:to|for) (?P<to>.+))?",
+    "es": r"(?: (?:a|al|para) (?P<to>.+))?",
+    "it": r"(?: (?:a|al|ai|allo|alla|agli|alle|per) (?P<to>.+))?",
+    "pt": r"(?: (?:a|ao|aos|as|para) (?P<to>.+))?",
+}
+_SEND_VERB = {
+    "en": r"(?:lets |i want to |i wanna )?send",
+    "es": r"(?:manda|mandale|mandales|mandar|mandarle|mandarles|envia|enviale|enviales|enviar|enviarle|enviarles|"
+    r"(?:vamos a|quiero) (?:mandar|enviar)(?:le|les)?)",
+    "it": r"(?:manda|mandagli|mandiamo|mandare|invia|inviagli|inviamo|inviare)",
+    "pt": r"(?:manda|mandar|envia|enviar|vamos (?:mandar|enviar))",
+}
+_MESSAGE_OBJECT = {
+    "en": r"(?:a )?(?:voice )?message",
+    "es": r"(?:un (?:mensaje(?: de voz)?|audio)|una nota de voz)",
+    "it": r"un (?:messaggio(?: vocale)?|vocale|audio)",
+    "pt": r"(?:uma mensagem(?: de voz)?|um audio)",
+}
+_PICTURE_OBJECT = {
+    "en": r"(?:a )?(?:picture|photo|pic)",
+    "es": r"una (?:foto|fotografia)",
+    "it": r"una foto",
+    "pt": r"uma (?:foto|fotografia)",
+}
+_SEND_TO = {
+    kind: {
+        language: [
+            rf"{_SEND_VERB[language]} {objects[language]}{_TO[language]}",
+            *([rf"{_SEND_VERB[language]} (?P<to>.+?) {objects[language]}"] if language == "en" else []),
+        ]
+        for language in _SEND_VERB
+    }
+    for kind, objects in (("message", _MESSAGE_OBJECT), ("send_photo", _PICTURE_OBJECT))
+}
 _TV_WORDS = frozenset({"tv", "tele", "television", "televisor", "televisione", "televisore", "televisao"})
 
 
@@ -347,6 +386,10 @@ _VOLUME_UP_RE = {language: _full(pattern) for language, pattern in _VOLUME_UP.it
 _VOLUME_DOWN_RE = {language: _full(pattern) for language, pattern in _VOLUME_DOWN.items()}
 _VOLUME_SET_RE = {language: _full(pattern) for language, pattern in _VOLUME_SET.items()}
 _PHOTO_RE = {language: _full(pattern) for language, pattern in _PHOTO.items()}
+_SEND_TO_RE = {
+    kind: {language: [_full(pattern) for pattern in patterns] for language, patterns in table.items()}
+    for kind, table in _SEND_TO.items()
+}
 _TOMORROW = frozenset({"tomorrow", "manana", "domani", "amanha"})
 
 
@@ -455,6 +498,15 @@ def parse(text: str) -> QuickCommand | None:
     found = _first_match(_PHOTO_RE, command)
     if found:
         return QuickCommand("photo", found[0])
+    for kind, send_table in _SEND_TO_RE.items():
+        for language, send_patterns in send_table.items():
+            for pattern in send_patterns:
+                match = pattern.match(command)
+                if match:
+                    to = (match.groupdict().get("to") or "").strip() or None
+                    if to is not None and re.search(rf"\b{_MARIBEL}\b", to):
+                        return None  # her hand-off owns messages for Maribel
+                    return QuickCommand(kind, language, {"to": to})
     if words[0] in _NOT_A_COMMAND_START:
         return None
     for table, kind in ((_PAUSE_RE, "pause"), (_NEXT_RE, "next"), (_RESUME_RE, "resume"), (_STOP_RE, "stop")):
@@ -677,6 +729,51 @@ PHOTO_NO_PICTURE: Final[dict[str, str]] = {
     "it": "Scusa, la fotocamera non mi ha dato nessuna foto.",
     "pt": "Desculpa, a câmara não me deu nenhuma foto.",
 }
+MESSAGE_PROMPT: Final[dict[str, str]] = {
+    "en": "Okay! Tell me your message for {name} after the beep.",
+    "es": "¡Vale! Dime tu mensaje para {name} después del pitido.",
+    "it": "Va bene! Dimmi il tuo messaggio per {name} dopo il bip.",
+    "pt": "Está bem! Diz a tua mensagem para {name} depois do bip.",
+}
+SENT_TO: Final[dict[str, str]] = {
+    "en": "Sent to {name}!",
+    "es": "¡Ya se lo he mandado a {name}!",
+    "it": "Fatto, inviato a {name}!",
+    "pt": "Já enviei para {name}!",
+}
+SEND_TO_WHO: Final[dict[str, str]] = {
+    "en": "Who should I send it to? I can send to {names}.",
+    "es": "¿A quién se lo mando? Puedo mandárselo a {names}.",
+    "it": "A chi lo mando? Posso mandarlo a {names}.",
+    "pt": "Para quem envio? Posso enviar para {names}.",
+}
+SEND_TO_ONLY: Final[dict[str, str]] = {
+    "en": "Sorry, I can only send to {names}.",
+    "es": "Lo siento, solo puedo mandárselo a {names}.",
+    "it": "Scusa, posso mandarlo solo a {names}.",
+    "pt": "Desculpa, só posso enviar para {names}.",
+}
+MESSAGE_NOTHING: Final[dict[str, str]] = {
+    "en": "I didn't hear a message, so I didn't send anything.",
+    "es": "No he oído ningún mensaje, así que no he mandado nada.",
+    "it": "Non ho sentito nessun messaggio, quindi non ho mandato niente.",
+    "pt": "Não ouvi nenhuma mensagem, por isso não enviei nada.",
+}
+MESSAGE_NOT_SENT: Final[dict[str, str]] = {
+    "en": "I couldn't send the message.",
+    "es": "No he podido mandar el mensaje.",
+    "it": "Non sono riuscito a mandare il messaggio.",
+    "pt": "Não consegui enviar a mensagem.",
+}
+MESSAGE_UNSURE: Final[dict[str, str]] = {
+    "en": "I'm not sure the message went through.",
+    "es": "No sé si el mensaje ha llegado.",
+    "it": "Non so se il messaggio è arrivato.",
+    "pt": "Não sei se a mensagem chegou.",
+}
+# The beep, up to HybridRuntime._MESSAGE_START_S (8 s) of waiting and _MESSAGE_MAX_S (60 s) of message,
+# encoding, then the send's own deadline.
+MESSAGE_STEP_TIMEOUT_S: Final[float] = 75.0 + SEND_DEADLINE_S + 5.0
 PHOTO_PHRASES: Final[tuple[tuple[str, str], ...]] = tuple(
     (text, language)
     for language in LANGUAGES
@@ -686,6 +783,9 @@ PHOTO_PHRASES: Final[tuple[tuple[str, str], ...]] = tuple(
         PHOTO_NOT_SENT[language],
         PHOTO_UNSURE[language],
         PHOTO_NO_PICTURE[language],
+        MESSAGE_NOTHING[language],
+        MESSAGE_NOT_SENT[language],
+        MESSAGE_UNSURE[language],
     )
 )
 
@@ -979,13 +1079,84 @@ class QuickCommands:
             return await self._play(command)
         if kind == "photo":
             return self._photo(command.language)
+        if kind in ("message", "send_photo"):
+            return self._send_to(kind, command.language, command.args.get("to"))
         return None
 
-    def _photo(self, language: str) -> QuickReply | None:
-        """Count down, take the photo, show it on the screen and send it to the WhatsApp photos group."""
+    def _send_to(self, kind: str, language: str, to: str | None) -> QuickReply | None:
+        """Send a voice message or a photo to a family group; ask who when ``to`` names none of them."""
+        if self._deps.whatsapp is None or (kind == "send_photo" and not self._deps.camera_enabled):
+            return None
+        contacts = self._contacts()
+        if not contacts:
+            return None
+        contact = find_contact(normalize(to), contacts) if to else None
+        if contact is not None:
+            return self._send_reply(kind, language, contact)
+        expect_answer = self._deps.expect_answer
+        if expect_answer is None:
+            return None
+        names = _names([contact.name for contact in contacts], language)
+
+        async def answer(text: str) -> QuickReply:
+            command = parse(text)
+            if command is not None and command.kind == "cancel":
+                return QuickReply(None, language, kind)
+            named = find_contact(strip_politeness(normalize(text)), self._contacts())
+            reply = self._send_reply(kind, language, named) if named is not None else None
+            return reply or QuickReply(SEND_TO_ONLY[language].format(names=names), language, kind)
+
+        async def ask() -> str | None:
+            expect_answer(answer)
+            return None
+
+        return QuickReply(SEND_TO_WHO[language].format(names=names), language, kind, after=ask)
+
+    def _send_reply(self, kind: str, language: str, contact: Contact) -> QuickReply | None:
+        if kind == "send_photo":
+            return self._photo(language, contact)
+        record = self._deps.record_message
+        if record is None:
+            return None
+        whatsapp = self._deps.whatsapp
+        movement = self._deps.movement_manager
+
+        async def record_and_send() -> str:
+            movement.set_listening(True)  # antennas perked and no idle breathing while he records
+            try:
+                recorded = await record()
+            finally:
+                movement.set_listening(False)
+            if recorded is None:
+                return MESSAGE_NOTHING[language]
+            ogg = await asyncio.to_thread(encode_voice_note, *recorded)
+            if ogg is None:
+                return MESSAGE_NOT_SENT[language]
+            result = await whatsapp.send_audio(contact.chat, ogg)
+            if result is SendResult.SENT:
+                return SENT_TO[language].format(name=contact.name)
+            return MESSAGE_UNSURE[language] if result is SendResult.UNSURE else MESSAGE_NOT_SENT[language]
+
+        return QuickReply(
+            MESSAGE_PROMPT[language].format(name=contact.name),
+            language,
+            "message",
+            after=record_and_send,
+            after_timeout_s=MESSAGE_STEP_TIMEOUT_S,
+            whole_request=True,
+        )
+
+    def _contacts(self) -> list[Contact]:
         from reachy_mini_conversation_app.config import config
 
-        chat = config.WHATSAPP_PHOTOS_CHAT
+        return load_contacts(config.WHATSAPP_CONTACTS_FILE, normalize)
+
+    def _photo(self, language: str, contact: Contact | None = None) -> QuickReply | None:
+        """Count down, take the photo, show it on the screen and send it to the photos group or ``contact``."""
+        from reachy_mini_conversation_app.config import config
+
+        chat = contact.chat if contact is not None else config.WHATSAPP_PHOTOS_CHAT
+        sent = SENT_TO[language].format(name=contact.name) if contact is not None else PHOTO_SENT[language]
         if self._deps.whatsapp is None or not chat or not self._deps.camera_enabled:
             return None  # the conversation still has the camera and the screen
 
@@ -995,7 +1166,7 @@ class QuickCommands:
             if result is None:
                 return PHOTO_NO_PICTURE[language]
             if result is SendResult.SENT:
-                return PHOTO_SENT[language]
+                return sent
             return PHOTO_UNSURE[language] if result is SendResult.UNSURE else PHOTO_NOT_SENT[language]
 
         return QuickReply(

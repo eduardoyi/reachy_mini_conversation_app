@@ -9,6 +9,7 @@ acceptance criteria are met.
 
 | Plan | Status | Last updated | Scope |
 |------|--------|--------------|-------|
+| [Voice messages and photos to family groups](whatsapp-family-messages.md) | `in-progress` | 2026-10-29 | "Send a message / a picture to Sergio": a beep, a recording until 3 s of silence, a WhatsApp voice note (or the photo) to the "Reachy <> Sergio" group from a contacts file; "who?" when no name is known; built and tested, live check pending |
 | [Photos to the family WhatsApp group](whatsapp-photos.md) | `in-progress` | 2026-10-29 | "Take a picture" counts three-two-one, keeps the best of a short burst, shows it on the e-ink screen and sends it to the "Reachy photos" group from Reachy's own WhatsApp (GOWA on the spare number); first step toward the kids messaging family; checked live on the Mac mini (9.7 s request to sent); Gemini's `take_photo` not yet tried live |
 | [Catch "Ri-chi" calls the wake model misses](missed-calls-spanish-richi.md) | `in-progress` | 2026-10-29 | official33 scores 0.00 on a Spanish "Ri-chi"; open room segments are checked for the name every 1.5 s instead of waiting up to 20 s for a pause, Spanish spellings added; a wake model retrained with her pronunciation is in progress |
 | [Qwen3-ASR as the local speech engine](qwen-speech-engine.md) | `in-progress` | 2026-10-29 | `LOCAL_STT_ENGINE=qwen` runs Qwen3-ASR 0.6B (room) and 1.7B (requests) on MLX in place of Whisper, with the names as a hint and an echo guard; Whisper loads if Qwen cannot; benchmarked on the mini, live switch pending |

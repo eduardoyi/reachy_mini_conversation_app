@@ -808,6 +808,10 @@ class Config:
     WHATSAPP_API_URL = (os.getenv("WHATSAPP_API_URL") or "").strip() or None
     WHATSAPP_API_AUTH = (os.getenv("WHATSAPP_API_AUTH") or "").strip() or None
     WHATSAPP_PHOTOS_CHAT = (os.getenv("WHATSAPP_PHOTOS_CHAT") or "").strip() or None
+    # The family groups "send a message / a picture to ..." may reach (whatsapp_contacts.py); none without it.
+    WHATSAPP_CONTACTS_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CONTACTS_FILE") or "~/.config/reachy-whatsapp/contacts.json"
+    )
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -1017,6 +1021,9 @@ def refresh_runtime_config_from_env() -> None:
     config.WHATSAPP_API_URL = (os.getenv("WHATSAPP_API_URL") or "").strip() or None
     config.WHATSAPP_API_AUTH = (os.getenv("WHATSAPP_API_AUTH") or "").strip() or None
     config.WHATSAPP_PHOTOS_CHAT = (os.getenv("WHATSAPP_PHOTOS_CHAT") or "").strip() or None
+    config.WHATSAPP_CONTACTS_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CONTACTS_FILE") or "~/.config/reachy-whatsapp/contacts.json"
+    )
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

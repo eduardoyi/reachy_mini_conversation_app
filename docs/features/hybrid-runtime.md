@@ -1016,3 +1016,13 @@ countdown and skips `after`. Used by [Photos to WhatsApp](whatsapp-photos.md); t
 [Maribel hand-off](maribel-handoff.md). Tests: `test_a_question_listens_once_for_the_answer_without_the_name`,
 `test_no_answer_after_a_question_goes_back_to_listening_for_the_name`,
 `test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer`.
+
+### Voice messages — 2026-10-29
+
+`record_message()` runs inside a quick command's `after` step: it plays `local_speech.beep()` through the
+reply path, then collects post-activation frames into `_request_clip` while `_recording_message` keeps
+them out of the post-activation queue (a minute would overflow its 20 s and warn on every frame). It ends
+when no speech starts within `_MESSAGE_START_S`, after `_MESSAGE_SILENCE_S` of silence, or at
+`_MESSAGE_MAX_S`, and returns mono int16 trimmed to `_MESSAGE_MARGIN_S` around the speech. Tests:
+`test_a_message_is_recorded_after_the_beep_until_the_speaker_stops`, `test_a_message_stops_at_its_length_cap`,
+`test_nothing_said_after_the_beep_records_nothing`, `test_a_message_is_recorded_only_during_a_quick_command`.

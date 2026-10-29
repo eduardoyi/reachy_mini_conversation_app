@@ -691,6 +691,7 @@ def run(
         antenna_touch_handlers.append(lambda: hybrid_runtime.request_activation("antenna_touch"))
         runtime_for_tools = hybrid_runtime
         deps.expect_answer = hybrid_runtime.expect_answer
+        deps.record_message = hybrid_runtime.record_message
         if deps.maribel is not None:
             from reachy_mini_conversation_app.maribel import MaribelReply
             from reachy_mini_conversation_app.quick_commands import guess_language

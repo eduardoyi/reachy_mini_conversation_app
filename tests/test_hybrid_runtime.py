@@ -4720,3 +4720,109 @@ async def test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the
         assert acknowledged[-2:] == ["announcement", "awaited_answer"]
     finally:
         await runtime.close()
+
+
+# Voice messages (record_message) -----------------------------------------------------------------
+
+
+@pytest.fixture
+def short_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Message limits in tenths of a second instead of seconds."""
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_START_S", 0.5)
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_SILENCE_S", 0.3)
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_MAX_S", 1.0)
+    monkeypatch.setattr(HybridRuntime, "_MESSAGE_MARGIN_S", 0.0)
+    monkeypatch.setattr(HybridRuntime, "_QUICK_REPLY_TAIL_S", 0.0)
+
+
+async def _record_during_a_command(
+    frames: list[np.ndarray], *, runtime_events: list[str] | None = None
+) -> tuple[HybridRuntime, Any, FakeHandler]:
+    """Run a quick command whose follow-up records a message while ``frames`` (0.1 s each) arrive."""
+    events = runtime_events if runtime_events is not None else []
+    handler = FakeHandler()
+    recorded: list[Any] = []
+    runtime: HybridRuntime
+
+    async def after() -> str | None:
+        recorded.append(await runtime.record_message())
+        return None
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply("Tell me your message after the beep.", after=after)
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        events.append(f"say:{text}")
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def feed() -> None:
+        while not runtime._recording_message:  # the beep plays first, in real time
+            await asyncio.sleep(0.01)
+        events.append("recording")
+        for sequence, audio in enumerate(frames, start=1):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+            await asyncio.sleep(0.1)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    runtime.set_capture_barrier_provider(lambda: 0)
+    feeder = asyncio.create_task(feed())
+    assert await runtime.activate("acoustic_wake", addressed_text="Reachy, send a message to Sergio")
+    feeder.cancel()
+    return runtime, recorded[0], handler
+
+
+_SPEECH = np.full(1_600, 3_000, dtype=np.int16)
+_SILENCE = np.zeros(1_600, dtype=np.int16)
+
+
+@pytest.mark.asyncio
+async def test_a_message_is_recorded_after_the_beep_until_the_speaker_stops(short_messages: None) -> None:
+    """The beep plays, then speech is kept until the silence ends it; the conversation never opens."""
+    events: list[str] = []
+    runtime, recorded, handler = await _record_during_a_command([_SPEECH] * 5 + [_SILENCE] * 6, runtime_events=events)
+    try:
+        assert recorded is not None
+        sample_rate, audio = recorded
+        assert sample_rate == 16_000
+        assert np.count_nonzero(audio) == 5 * _SPEECH.size  # all the speech, the trailing silence trimmed
+        assert audio.size / sample_rate < 0.9
+        assert events[:2] == ["say:Tell me your message after the beep.", "recording"]
+        outputs = [await runtime.emit() for _ in range(4)]
+        beeps = [output for output in outputs if isinstance(output, tuple) and output[1].size > 1_000]
+        assert beeps, "the beep was played"
+        assert not runtime._postactivation_frames and not runtime._recording_message
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_message_stops_at_its_length_cap(short_messages: None) -> None:
+    """Someone (or a noisy room) talking on is cut at the cap."""
+    runtime, recorded, _ = await _record_during_a_command([_SPEECH] * 30)
+    try:
+        assert recorded is not None
+        assert recorded[1].size / recorded[0] <= 1.5
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_nothing_said_after_the_beep_records_nothing(short_messages: None) -> None:
+    """Silence after the beep ends the recording with no message."""
+    runtime, recorded, _ = await _record_during_a_command([_SILENCE] * 10)
+    try:
+        assert recorded is None
+        assert not runtime._recording_message and runtime._request_clip is None
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_message_is_recorded_only_during_a_quick_command() -> None:
+    """Outside a local command there is nothing to record into."""
+    runtime = HybridRuntime(lambda: FakeHandler(), reply_speaker=None)
+    try:
+        assert await runtime.record_message() is None
+    finally:
+        await runtime.close()

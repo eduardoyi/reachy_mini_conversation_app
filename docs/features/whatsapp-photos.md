@@ -1,8 +1,9 @@
-# Feature: Photos to WhatsApp
+# Feature: Photos and messages to WhatsApp
 
 - Status: `in-progress` (live check of the quick command passed on the Mac mini 2026-10-29; `take_photo` from Gemini not yet tried live)
 - Last updated: 2026-10-29
-- Plan: [Photos to the family WhatsApp group](../plans/whatsapp-photos.md)
+- Plans: [Photos to the family WhatsApp group](../plans/whatsapp-photos.md),
+  [Voice messages and photos to family groups](../plans/whatsapp-family-messages.md)
 
 ## Overview
 
@@ -11,8 +12,12 @@ keeps the best frame, shows it on the e-ink screen and sends it to the household
 WhatsApp group from Reachy's own WhatsApp number (the household's spare number, linked to GOWA, a
 WhatsApp server on this computer).
 
-Out of scope: sending to anyone but the photos group, sending photo edits, voice notes,
-video, replies, and the kids' messages to family (later milestones of the same link).
+"Richie, send a message to Tío Sergio" records a voice message after a beep and sends it to the
+"Reachy <> Sergio" group as a WhatsApp voice note; "send a picture to Sergio" sends the photo there. Each
+family group holds that relative, the spare number and both parents.
+
+Out of scope: sending anywhere but the photos group and the groups in the contacts file, photo edits,
+video, replies, ending a message by touch, and messages from a Gemini conversation.
 
 ## User-facing behavior
 
@@ -42,6 +47,26 @@ video, replies, and the kids' messages to family (later milestones of the same l
   calls the tool, which waits `CAMERA_COUNTDOWN_S` (3 s) and then takes, shows and sends the photo the
   same way, returning `sent`, `unsure`, `not_sent` or an error for Gemini to put in its own words.
   Photo edits ("make me a pirate") stay with `show_on_display kind=camera` and are not sent.
+
+### Messages and photos to family groups
+
+- **Asking.** "Send a message / a voice message to [x]", "send [x] a message", "vamos a mandar un mensaje
+  a [x]", "mándale un audio al tío Sergio", "manda un messaggio vocale allo zio Sergio", "envia uma
+  mensagem para o Sergio", and "send a picture to [x]", "manda una foto a [x]" (polite forms too). [x] is
+  any name in the contacts file ("sergio", "tío sergio", "zio sergio"…), with articles and "a / al / to /
+  para" ignored. A message for Maribel stays with her hand-off.
+- **No name, or one he does not know** (or two groups at once): "Who should I send it to? I can send to
+  Tío Sergio." He listens once without his name (as after Maribel's questions); a known name goes on, an
+  unknown one gets "Sorry, I can only send to Tío Sergio.", "never mind" ends it. Nothing is guessed.
+- **A message.** "Okay! Tell me your message for Tío Sergio after the beep." The antennas perk and idle
+  breathing stops; a rising two-note beep; then he records until 3 s of silence after the speech, or 60 s.
+  Nothing said within 8 s of the beep: "I didn't hear a message, so I didn't send anything." The
+  recording (with 0.5 s kept around the speech) is encoded to OGG Opus and sent as a voice note:
+  "Sent to Tío Sergio!", or "I couldn't send the message." / "I'm not sure the message went through.".
+  It stays in memory only.
+- **A picture** is the photo countdown and burst, sent to that group: "Sent to Tío Sergio!".
+- **Not set up** (no WhatsApp, no contacts file, or the camera off for pictures): the request goes to the
+  conversation.
 
 ## Current architecture
 
@@ -90,6 +115,10 @@ flowchart LR
 | Trigger | `quick_commands.parse` → `QuickCommand("photo", language)` | Checked after the negation check and weather, before `_NOT_A_COMMAND_START` |
 | Reply | `QuickReply.beats`, `QuickReply.beat_s` | Spoken after `text`, before `after`; phrases `COUNTDOWN`, `PHOTO_SENT`, `PHOTO_NOT_SENT`, `PHOTO_UNSURE`, `PHOTO_NO_PICTURE`; `PHOTO_PHRASES` lists them with their language |
 | Wiring | `main._build_whatsapp`, `deps.whatsapp`, `_prepare_photos` | `deps.whatsapp` is None unless `whatsapp_photos_configured()` |
+| Contacts | `whatsapp_contacts.py`: `load_contacts(path, fold)`, `find_contact(phrase, contacts)` | `{"contacts": [{"name", "chat" (`@g.us` only), "say": [...]}]}` read on each request; unknown, empty or ambiguous → None |
+| Voice note | `voice_notes.encode_voice_note(rate, pcm) -> bytes | None`; `WhatsAppLink.send_audio(chat, ogg)` | GStreamer `opusenc ! oggmux`, 48 kHz mono 32 kbit/s; `/send/audio` with `ptt=true` and `message.ogg` (`audio/ogg`), same retry and deadline rules as photos |
+| Recording | `HybridRuntime.record_message() -> (rate, mono int16) | None`, `deps.record_message` | Only during the current quick command; beep (`local_speech.beep`), then `_request_clip` with the post-activation queue paused; `_MESSAGE_START_S` 8, `_MESSAGE_SILENCE_S` 3, `_MESSAGE_MAX_S` 60, `_MESSAGE_MARGIN_S` 0.5 |
+| Messages | `quick_commands`: kinds `message` / `send_photo` with `{"to": phrase or None}`; `MESSAGE_PROMPT`, `SENT_TO`, `SEND_TO_WHO`, `SEND_TO_ONLY`, `MESSAGE_NOTHING`, `MESSAGE_NOT_SENT`, `MESSAGE_UNSURE`; `MESSAGE_STEP_TIMEOUT_S` | The three outcome sets are in `FIXED_PHRASES` |
 | Config | `WHATSAPP_API_URL`, `WHATSAPP_API_AUTH` (`user:password`, GOWA's `APP_BASIC_AUTH`), `WHATSAPP_PHOTOS_CHAT` (group id, `...@g.us`) | All three needed; `WHATSAPP_SERVER_BIN` and `WHATSAPP_SERVER_DIR` are for the start script only |
 
 ## Operations (Mac mini)
@@ -162,13 +191,18 @@ flowchart LR
 |------|-----------|
 | `tests/test_whatsapp.py` | `phone`, `hd=true`, the `image` part's name and type, basic auth; refused (400, `code` not SUCCESS, 500) not retried; one retry on `ConnectError` and `ConnectTimeout`; read timeout and deadline are `UNSURE`, sent once; logs hold neither the group nor the password; status logged in / no device / unreachable; groups; pairing creates the device slot; the `groups` command and missing settings |
 | `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more |
-| `tests/test_quick_commands.py` | The grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
+| `tests/test_quick_commands.py` | Messages: grammar with and without a name, Maribel's left alone; prompt, recording with antennas perked, voice note to the group; nothing said, not sent, unsure; a picture to his group; "who?" and its answers (known, unknown, cancel), nothing sent to an unknown name; no contacts or WhatsApp → conversation; outcome phrases cached. Photos: the grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
 | `tests/tools/test_take_photo.py` | Waits the countdown, sends to the group, each outcome; no picture sends nothing; needs the link, the group and the camera; offered only with WhatsApp photos set up |
+| `tests/test_whatsapp_contacts.py` | Folded names; only named groups (a person's number, missing fields, junk skipped, not logged); missing or broken file; articles and accents; unknown and ambiguous names |
+| `tests/test_voice_notes.py` | A tone encodes to OGG Opus (skipped without GStreamer); empty → None |
+| `tests/test_hybrid_runtime.py` (messages) | Beep then recording until silence, trailing silence trimmed, post-activation queue left empty, no conversation; the length cap; nothing said → None; outside a command → None |
 | `tests/test_config.py` | `test_whatsapp_photos_need_all_three_settings` (trimmed values; `_build_whatsapp` None unless all three) |
 
 ### Not yet validated
 
+- Messages and pictures to "Reachy <> Sergio" on the Mac mini: recording quality, the 3 s silence
+  ending with children, the voice note playing on phones.
 - Gemini's `take_photo` in a live conversation.
 - Checked live on 2026-10-29: install, pairing by code, the group listing, the LaunchAgent restart
   keeping the link, and one "tomemos una foto": countdown and settle 6.7 s (beats about 1.8 s each),
@@ -180,13 +214,15 @@ flowchart LR
 
 ```bash
 pytest tests/test_whatsapp.py tests/test_photographer.py tests/test_quick_commands.py tests/test_config.py -v
-pytest tests/test_hybrid_runtime.py -v -k countdown
+pytest tests/test_whatsapp_contacts.py tests/test_voice_notes.py -v
+pytest tests/test_hybrid_runtime.py -v -k "countdown or message or beep"
 ```
 
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Voice messages and pictures to family groups from a contacts file; "who?" when no name is known. |
 | 2026-10-29 | Tighter countdown: cached phrases play without their padding silence. |
 | 2026-10-29 | `take_photo` tool: Gemini sends photos too. |
 | 2026-10-29 | Initial implementation. GOWA installed on the Mac mini as a LaunchAgent and paired with the spare number; group "Reachy group". |

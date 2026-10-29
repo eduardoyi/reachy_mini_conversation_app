@@ -189,3 +189,11 @@ and the camera on, the reply has no text, the countdown as `QuickReply.beats` ("
 `whole_request`, and an `after` step that takes, shows and sends the photo (`after_timeout_s` 22.4 s);
 otherwise it returns None and the conversation handles it as before. All its phrases are in
 `FIXED_PHRASES`. See [Photos to WhatsApp](whatsapp-photos.md).
+
+## Messages and photos to family groups — 2026-10-29
+
+Kinds `message` and `send_photo` (`{"to": phrase or None}`): "send a message / a picture to [x]" and the
+Spanish, Italian and Portuguese forms. With a name from the WhatsApp contacts file the reply is the
+message prompt (its `after` records with `deps.record_message`, encodes and sends a voice note) or the
+photo countdown for that group; without one it asks who and hands the answer to the same flow through
+`expect_answer`. See [Photos and messages to WhatsApp](whatsapp-photos.md).

@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Callable, ClassVar, 
 from pathlib import Path
 from dataclasses import dataclass
 
+import numpy as np
+from numpy.typing import NDArray
+
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.tools import skills
 from reachy_mini_conversation_app.config import config, list_tool_module_names
@@ -61,6 +64,8 @@ class ToolDependencies:
     current_person_id: Callable[[], str | None] | None = None
     maribel: Any = None  # MaribelLink from maribel.py, when Maribel (Grok Bot) is configured
     whatsapp: Any = None  # WhatsAppLink from whatsapp.py, when photos go to a WhatsApp group
+    # Hybrid runtime only: beep, then record a voice message until the speaker stops (rate, mono int16) or None.
+    record_message: Callable[[], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
 
