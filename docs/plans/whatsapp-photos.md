@@ -322,3 +322,7 @@ external service (GOWA) is added; flag that `docs/scheme.mmd` needs the WhatsApp
   restarted if it exits) instead of from the start script, because Reachy there starts from its own
   LaunchAgent and `start-reachy.command`; the link survived the switch. Reachy's `.env` backup:
   `~/Coding/.env.bak-2026-10-29-whatsapp`.
+- 2026-10-29: first live try on the Mac mini: the request clip read "Richie, tomemos una foto." ("let's
+  take a photo"), which the grammar did not know, so it went to Gemini (`show_on_display kind=camera`:
+  on the screen, not sent). Added "let's take…" in all four languages ("tomemos / saquemos / hagamos /
+  vamos a … una foto", "facciamo / scattiamo una foto", "vamos tirar / tiremos uma foto").
