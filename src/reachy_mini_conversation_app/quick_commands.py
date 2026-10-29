@@ -31,8 +31,8 @@ from reachy_mini_conversation_app.head_touch_test import (
     HEAD_TEST_CUES,
     HEAD_TEST_DONE,
     HEAD_TEST_MAX_S,
-    HEAD_TEST_BEAT_S,
     HEAD_TEST_FAILED,
+    HEAD_TEST_PAUSE_S,
     HEAD_TEST_STEP_TIMEOUT_S,
     save_head_test,
 )
@@ -73,6 +73,10 @@ class QuickReply:
     # Spoken after ``text`` and before ``after``, one every ``beat_s`` (a countdown).
     beats: tuple[str, ...] = ()
     beat_s: float = 1.0
+    # When set, each beat waits this long after the one before has been heard, instead of keeping ``beat_s``.
+    beat_pause_s: float | None = None
+    # Told each beat's index once it has been heard (when a test phase starts).
+    on_beat: Callable[[int], None] | None = None
     # Runs once the reply is taken, before anything is said (a reply handed to the conversation never runs it).
     before: Callable[[], None] | None = None
 
@@ -1228,11 +1232,14 @@ class QuickCommands:
         started: list[float] = []
         finished: list[bool] = []
 
+        cues_heard_at: list[float] = []
+
         def end() -> list[tuple[float, ...]]:
             if finished:
                 return []
             finished.append(True)
             movement.set_listening(False)
+            movement.hold_still(False)
             rows: list[tuple[float, ...]] = movement.stop_head_recording()
             if config.SPEECH_WOBBLE_ENABLED:
                 wobble(on=True)
@@ -1248,7 +1255,9 @@ class QuickCommands:
             # The daemon wobbles the head with his speech, out of the app's sight; he is silent while recording
             # a message, so the cues must not move it either.
             wobble(on=False)
-            movement.set_listening(True)  # as while he records a message: antennas perked, no idle breathing
+            movement.set_listening(True)  # as while he records a message: antennas perked
+            # Breathing moves the head 5 mm up and down, which on 2026-10-29 hid light touches.
+            movement.hold_still(True)
             movement.start_head_recording()
             started.append(time.monotonic())
             # A test cut short (a new activation) never reaches ``finish``: stop listening and recording anyway.
@@ -1259,7 +1268,7 @@ class QuickCommands:
             if not started:
                 return HEAD_TEST_FAILED[language]
             path = await asyncio.to_thread(
-                save_head_test, rows, HEAD_RECORDING_COLUMNS, started[0], self._head_test_dir
+                save_head_test, rows, HEAD_RECORDING_COLUMNS, started[0], cues_heard_at, self._head_test_dir
             )
             if path is None:
                 logger.warning("Head test recorded nothing")
@@ -1274,7 +1283,8 @@ class QuickCommands:
             after=finish,
             after_timeout_s=HEAD_TEST_STEP_TIMEOUT_S,
             beats=HEAD_TEST_CUES[language],
-            beat_s=HEAD_TEST_BEAT_S,
+            beat_pause_s=HEAD_TEST_PAUSE_S,
+            on_beat=lambda _index: cues_heard_at.append(time.monotonic()),
             before=start,
         )
 

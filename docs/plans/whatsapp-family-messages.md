@@ -168,3 +168,7 @@ messages, video.
   stopped the daemon. "Richie, head test" / "haz la prueba de cabeza" now runs the test inside the app
   (see [quick commands](../features/quick-commands.md#head-touch-test--2026-10-29)); its CSV decides
   tap, press or neither.
+- 2026-10-29: first head test. Touches show (taps 2-3 mm / 1.5 degrees, presses about 3 mm / 2 degrees,
+  the firmest 8.5 mm / 7 degrees) against at most 1.4 mm / 1.1 degrees untouched, but breathing still moved
+  the head and the cues ran 3-4 s late. The test now holds the head still and starts each phase after its
+  cue is heard; a second run sets the touch threshold.

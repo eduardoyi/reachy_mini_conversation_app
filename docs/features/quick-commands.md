@@ -204,17 +204,31 @@ photo countdown for that group; without one it asks who and hands the answer to 
 "Head test" / "do the head test" / "haz la prueba de cabeza" (kind `head_test`, English and Spanish) is a
 diagnostic for ending a voice message with a touch. The Lite has no motion sensor in the head, so a touch can
 only show as the head being away from where the motors were told to put it, which only the app knows. The
-reply speaks seven cues 8 s apart (`HEAD_TEST_CUES`: rest, tap, rest, press, rest, pat, rest). From the
-first cue, as while a message records, the antennas perk and idle breathing stops (`set_listening(True)`),
-the daemon's speech wobble pauses (it moves the head out of the app's sight), and
-`MovementManager.start_head_recording` keeps every control tick: the commanded and measured head poses, the
-seven head joints, and the commanded and measured antennas (`HEAD_RECORDING_COLUMNS`). An antenna touch during
-the test is logged ("Antenna touched during the head test; not waking") instead of starting an activation
-that would end it. At the end the rows go to
-`~/.cache/reachy-mini-conversation-app/head-test/head-test-<time>.csv` with `t` counted from the first cue
-and a `phase` column, and Reachy says "Done, thank you!". A test cut short stops listening and recording after
-`HEAD_TEST_MAX_S` (86 s), and the recording itself after 120 s. The file holds only motor numbers. Code:
+reply speaks seven cues (`HEAD_TEST_CUES`: rest, tap, rest, press, rest, pat, rest), each phase lasting
+`HEAD_TEST_PAUSE_S` (8 s) after its cue has been heard (`QuickReply.beat_pause_s`; `on_beat` records when).
+From the start, as while a message records, the antennas perk (`set_listening(True)`), the head holds still
+(`MovementManager.hold_still`: breathing ends where it is and speaker turns are skipped), the daemon's speech
+wobble pauses (it moves the head out of the app's sight), and `MovementManager.start_head_recording` keeps
+every control tick: the commanded and measured head poses, the seven head joints, and the commanded and
+measured antennas (`HEAD_RECORDING_COLUMNS`). An antenna touch during the test is logged ("Antenna touched
+during the head test; not waking") instead of starting an activation that would end it. At the end the rows
+go to `~/.cache/reachy-mini-conversation-app/head-test/head-test-<time>.csv` with `t` counted from the start
+and a `phase` column naming the last cue heard (`intro` before the first), and Reachy says "Done, thank
+you!". A test cut short stops listening, holding and recording after `HEAD_TEST_MAX_S` (155 s); the hold and
+the recording each lapse after 180 s on their own. The file holds only motor numbers. Code:
 `head_touch_test.py`, `QuickCommands._head_test`, `MovementManager._record_head`. Tests:
 `test_the_head_test_cues_touches_while_recording_then_saves_a_file`,
 `test_a_head_test_records_the_commanded_and_measured_head_on_every_tick`,
-`test_an_antenna_touch_during_a_head_test_does_not_wake`, `tests/test_head_touch_test.py`.
+`test_an_antenna_touch_during_a_head_test_does_not_wake`,
+`test_holding_still_stops_breathing_where_the_head_is_and_keeps_it_from_restarting`,
+`test_holding_still_skips_speaker_turns_and_ends_on_its_own`,
+`test_beats_with_a_pause_wait_after_each_is_heard_and_report_it`, `tests/test_head_touch_test.py`.
+
+First run, 2026-10-29 21:44 (2,572 readings at about 46 Hz). Breathing was still running: the commanded head
+rose and fell 5 mm every 10 s and the measured head trailed it by about 0.55 s, sticking in steps. Untouched,
+the head sat up to 1.4 mm sideways and 1.1 degrees of tilt from the command (lag removed). Taps showed as
+2-3 mm sideways and about 1.5 degrees, presses as about 3 mm down, 2.5 mm sideways and 2 degrees, the firmest
+touch as 8.5 mm and 7 degrees. More than 2 mm sideways or 1.5 degrees caught every touch burst and nothing in
+the untouched stretches. The cues were spaced 8 s from the start of each, but each was synthesized first, so
+the touches came 3-4 s late and spilled into the next phase; hence the pause after each cue is heard and the
+still head for the second run.

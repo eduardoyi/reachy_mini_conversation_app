@@ -9,6 +9,7 @@ import pytest
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
+    HEAD_HOLD_MAX_S,
     ATTENTIVE_HOLD_S,
     ATTENTIVE_ANTENNAS,
     HEAD_RECORDING_MAX_S,
@@ -742,6 +743,50 @@ def test_an_antenna_touch_during_a_head_test_does_not_wake() -> None:
     for step in range(10):
         manager._check_antenna_touch(100.0 + step * 0.05)
     assert touches == []
+
+
+def test_holding_still_stops_breathing_where_the_head_is_and_keeps_it_from_restarting() -> None:
+    """Held still, breathing ends without moving the head and does not start again until released."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.state.last_activity_time = manager._now() - 10.0
+    manager._manage_breathing(manager._now())
+    now = manager._now()
+    _start_next_move(manager, now)
+    assert isinstance(manager.state.current_move, BreathingMove)
+    held = manager._get_primary_pose(now + 3.0)[0].copy()
+
+    manager.hold_still(True)
+    manager._poll_signals(now + 3.0)
+    assert manager.state.current_move is None and not manager.move_queue
+    assert np.allclose(manager._get_primary_pose(now + 10.0)[0], held)
+    manager.state.last_activity_time = now - 100.0
+    manager._manage_breathing(now + 10.0)
+    assert not manager.move_queue
+
+    manager.hold_still(False)
+    manager._poll_signals(now + 10.0)
+    manager.state.last_activity_time = now - 100.0
+    manager._manage_breathing(now + 10.0)
+    assert isinstance(manager.move_queue[-1], BreathingMove)
+
+
+def test_holding_still_skips_speaker_turns_and_ends_on_its_own() -> None:
+    """No turn toward a voice while held still; a hold nobody releases lapses after HEAD_HOLD_MAX_S."""
+    robot = _robot_facing(0.0)
+    clock = {"now": 100.0}
+    manager = MovementManager(robot, speaker_direction=lambda: np.radians(60.0))
+    manager._now = lambda: clock["now"]
+    manager.hold_still(True)
+    manager._poll_signals(clock["now"])
+    manager.turn_toward_speaker()
+    manager._poll_signals(clock["now"])
+    assert not any(isinstance(move, GazeTurnMove) for move in manager.move_queue)
+
+    clock["now"] += HEAD_HOLD_MAX_S + 1.0
+    manager.turn_toward_speaker()
+    manager._poll_signals(clock["now"])
+    assert any(isinstance(move, GazeTurnMove) for move in manager.move_queue)
 
 
 def test_a_restart_in_the_sleep_pose_is_not_an_antenna_touch() -> None:

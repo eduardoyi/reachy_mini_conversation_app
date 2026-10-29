@@ -254,7 +254,9 @@ HEAD_RECORDING_COLUMNS: Tuple[str, ...] = (
     "antenna_right",
 )
 # A test whose end never comes stops recording after this.
-HEAD_RECORDING_MAX_S = 120.0
+HEAD_RECORDING_MAX_S = 180.0
+# Holding the head still (no breathing, no speaker turns) ends after this if nobody releases it.
+HEAD_HOLD_MAX_S = 180.0
 
 
 class AntennaTouchDetector:
@@ -443,6 +445,8 @@ class MovementManager:
         self._framing_faces = False
         # Speaker turns wait until then: a photo is being framed.
         self._framing_until = -math.inf
+        # Breathing and speaker turns wait until then: the head is held still to read touches on it.
+        self._holding_still_until = -math.inf
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
@@ -593,6 +597,13 @@ class MovementManager:
         """Follow the face in view and hold speaker turns while a photo is taken; thread-safe."""
         self._command_queue.put(("frame_faces", active))
 
+    def hold_still(self, active: bool) -> None:
+        """Stop breathing and speaker turns so the head stays where it is, or let them resume; thread-safe.
+
+        A touch then shows as the head leaving a fixed pose rather than one that drifts 5 mm up and down.
+        """
+        self._command_queue.put(("hold_still", active))
+
     def turn_toward_speaker(self) -> None:
         """Turn to face where recent speech came from, if it is clearly elsewhere; thread-safe."""
         self._command_queue.put(("turn_toward_speaker", None))
@@ -701,6 +712,15 @@ class MovementManager:
             elif not payload and self._framing_faces:
                 self._framing_faces = False
                 self._set_head_tracking(False)
+        elif command == "hold_still":
+            self._holding_still_until = self._now() + HEAD_HOLD_MAX_S if payload else -math.inf
+            if payload and isinstance(self.state.current_move, BreathingMove):
+                # The last breathing pose stays commanded, so stopping here does not move the head.
+                self._end_move(self.state.current_move)
+                self.state.current_move = None
+                self.state.move_start_time = None
+                self._breathing_active = False
+            self.state.update_activity()
         elif command == "set_conversation_active":
             if payload:
                 if not self._head_tracking:
@@ -825,6 +845,9 @@ class MovementManager:
         if self._now() < self._framing_until:
             logger.info("Speaker turn skipped: framing a photo")
             return
+        if self._now() < self._holding_still_until:
+            logger.info("Speaker turn skipped: holding the head still")
+            return
         try:
             yaw = self._speaker_direction()
         except Exception as e:
@@ -922,6 +945,7 @@ class MovementManager:
             and not self.move_queue
             and not self._is_listening
             and not self._breathing_active
+            and current_time >= self._holding_still_until
         ):
             idle_for = current_time - self.state.last_activity_time
             if idle_for >= self.idle_inactivity_delay:

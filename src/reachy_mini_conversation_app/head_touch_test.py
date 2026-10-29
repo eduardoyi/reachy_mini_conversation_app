@@ -7,13 +7,15 @@ recording goes to a CSV file for offline analysis and decides whether a touch ca
 
 import csv
 import time
+import bisect
 from typing import Final, Sequence
 from pathlib import Path
 
 
 HEAD_TEST_DIR: Final[Path] = Path.home() / ".cache" / "reachy-mini-conversation-app" / "head-test"
-# Each cue starts a phase this long; the recording's ``phase`` column follows them.
-HEAD_TEST_BEAT_S: Final[float] = 8.0
+# Each phase lasts this long after its cue has been heard. On 2026-10-29 cues 8 s apart from the start of
+# each, but each was synthesized first, so the touches landed 3-4 s late and spilled into the next phase.
+HEAD_TEST_PAUSE_S: Final[float] = 8.0
 HEAD_TEST_PHASES: Final[tuple[str, ...]] = ("rest", "tap", "rest", "press", "rest", "pat", "rest")
 HEAD_TEST_CUES: Final[dict[str, tuple[str, ...]]] = {
     "en": (
@@ -42,16 +44,27 @@ HEAD_TEST_FAILED: Final[dict[str, str]] = {
 }
 # Writing the file, once the last phase is over.
 HEAD_TEST_STEP_TIMEOUT_S: Final[float] = 15.0
-# Longest a test can run from its first cue to its end, with room for cues that speak past their beat.
-HEAD_TEST_MAX_S: Final[float] = len(HEAD_TEST_PHASES) * HEAD_TEST_BEAT_S + HEAD_TEST_STEP_TIMEOUT_S + 15.0
+# Longest a cue takes to synthesize and speak.
+HEAD_TEST_CUE_MAX_S: Final[float] = 12.0
+# Longest a test can run from its first cue to its end.
+HEAD_TEST_MAX_S: Final[float] = (
+    len(HEAD_TEST_PHASES) * (HEAD_TEST_CUE_MAX_S + HEAD_TEST_PAUSE_S) + HEAD_TEST_STEP_TIMEOUT_S
+)
+# Rows from before the first cue was heard.
+HEAD_TEST_INTRO: Final[str] = "intro"
 
 
 def save_head_test(
-    rows: Sequence[Sequence[float]], columns: Sequence[str], started_at: float, directory: Path
+    rows: Sequence[Sequence[float]],
+    columns: Sequence[str],
+    started_at: float,
+    cues_heard_at: Sequence[float],
+    directory: Path,
 ) -> Path | None:
     """Write ``rows`` (``t`` first, on the clock of ``started_at``) to a new CSV in ``directory``; None if empty.
 
-    ``t`` becomes seconds since the first cue, and a ``phase`` column names the cue it falls under.
+    ``t`` becomes seconds since the test started, and a ``phase`` column names the last cue heard by then
+    (``cues_heard_at``, in ``HEAD_TEST_PHASES`` order, on the same clock).
     """
     if not rows:
         return None
@@ -60,8 +73,10 @@ def save_head_test(
     with path.open("w", newline="") as out:
         writer = csv.writer(out)
         writer.writerow(["phase", *columns])
+        heard = list(cues_heard_at)[: len(HEAD_TEST_PHASES)]
         for row in rows:
+            index = bisect.bisect_right(heard, float(row[0])) - 1
+            phase = HEAD_TEST_PHASES[index] if index >= 0 else HEAD_TEST_INTRO
             t = float(row[0]) - started_at
-            index = min(len(HEAD_TEST_PHASES) - 1, max(0, int(t // HEAD_TEST_BEAT_S)))
-            writer.writerow([HEAD_TEST_PHASES[index], f"{t:.3f}", *(f"{float(value):.6f}" for value in row[1:])])
+            writer.writerow([phase, f"{t:.3f}", *(f"{float(value):.6f}" for value in row[1:])])
     return path
