@@ -172,3 +172,7 @@ messages, video.
   the firmest 8.5 mm / 7 degrees) against at most 1.4 mm / 1.1 degrees untouched, but breathing still moved
   the head and the cues ran 3-4 s late. The test now holds the head still and starts each phase after its
   cue is heard; a second run sets the touch threshold.
+- 2026-10-29: second head test, head held still. A pushed head stays where it was pushed, so a touch is read
+  as sudden movement (more than 1 mm or 0.7 degrees within 0.2 s), not distance from the command. That never
+  fired untouched (at most 0.38 mm / 0.19 degrees) and fired during taps, presses and pats alike. Touch-to-send
+  can use it while the head is held still.
