@@ -192,7 +192,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         return None, None
     from reachy_mini_conversation_app.weather import Place, WeatherService
     from reachy_mini_conversation_app.local_speech import LocalSpeech
-    from reachy_mini_conversation_app.photographer import FaceFinder
+    from reachy_mini_conversation_app.photographer import FACES
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
 
     home = None
@@ -208,12 +208,11 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
     )
-    faces = FaceFinder()
     if deps.whatsapp is not None:
         threading.Thread(
-            target=_prepare_photos, args=(deps.whatsapp, faces, speech), name="photo-setup", daemon=True
+            target=_prepare_photos, args=(deps.whatsapp, FACES, speech), name="photo-setup", daemon=True
         ).start()
-    return QuickCommands(deps, weather=weather, faces=faces), speech.stream
+    return QuickCommands(deps, weather=weather), speech.stream
 
 
 def _start_inactivity_timeout_thread(

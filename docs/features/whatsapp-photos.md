@@ -11,7 +11,7 @@ keeps the best frame, shows it on the e-ink screen and sends it to the household
 WhatsApp group from Reachy's own WhatsApp number (the household's spare number, linked to GOWA, a
 WhatsApp server on this computer).
 
-Out of scope: sending from a Gemini conversation, sending to anyone but the photos group, voice notes,
+Out of scope: sending to anyone but the photos group, sending photo edits, voice notes,
 video, replies, and the kids' messages to family (later milestones of the same link).
 
 ## User-facing behavior
@@ -37,8 +37,11 @@ video, replies, and the kids' messages to family (later milestones of the same l
   starts. No cooldown or limit (household choice).
 - **Not configured, or the camera off** (`--no-camera`): "take a picture" goes to the conversation as
   before, where `show_on_display kind=camera` shows it on the screen without sending it.
-- **In an open Gemini conversation** the request reaches Gemini, not the quick commands: the photo is
-  shown, not sent.
+- **In a Gemini conversation** (one already open, or a request the grammar did not catch), Gemini
+  has the `take_photo` tool, offered only when WhatsApp photos are configured: it says "3, 2, 1" as it
+  calls the tool, which waits `CAMERA_COUNTDOWN_S` (3 s) and then takes, shows and sends the photo the
+  same way, returning `sent`, `unsure`, `not_sent` or an error for Gemini to put in its own words.
+  Photo edits ("make me a pirate") stay with `show_on_display kind=camera` and are not sent.
 
 ## Current architecture
 
@@ -53,14 +56,19 @@ flowchart LR
   GOWA -- linked device of the spare number --> WhatsApp[(Reachy photos group)]
 ```
 
+- `photographer.take_and_share(deps, chat)` is the one path for both: takes the photo in a thread
+  (bounded by `PHOTO_TAKE_S`), shows it (bounded by `PHOTO_PREVIEW_S`, errors logged) and sends it;
+  None when there was no picture, otherwise the `SendResult`.
 - `QuickCommands._photo` returns a `QuickReply` with no text, the countdown as `beats`, and an `after`
-  step that settles, takes the photo in a thread (bounded by `PHOTO_TAKE_S`), shows it (bounded by
-  `PHOTO_PREVIEW_S`, errors logged) and sends it. `after_timeout_s` (`PHOTO_STEP_TIMEOUT_S`, 22.4 s) is
+  step that settles and calls `take_and_share`. `after_timeout_s` (`PHOTO_STEP_TIMEOUT_S`, 22.4 s) is
   longer than all of these, so the runtime never cuts the send short.
 - `HybridRuntime._try_quick_command` speaks `beats` after the reply's text: beat k starts `k·beat_s`
   after the first (at once if the previous one ran long), the last one is waited out, and a superseded
   activation stops the countdown before `after`.
-- `photographer.FaceFinder` owns the SDK YuNet `FaceDetector`. `main.py` warms it up in the
+- `tools/take_photo.py` (`TakePhoto`) waits the 3 s countdown and calls `take_and_share`; it is in
+  `WHATSAPP_TOOLS`, added when `whatsapp_photos_configured()` and removed otherwise, and a direct tool
+  (not behind a skill: the countdown needs it at once).
+- `photographer.FaceFinder` owns the SDK YuNet `FaceDetector`; `photographer.FACES` is the one instance. `main.py` warms it up in the
   `photo-setup` thread at startup; a photo never waits for that (non-blocking lock), and a failed
   creation is remembered: photos are then chosen by sharpness only.
 - The same thread speaks every photo phrase once through `LocalSpeech` so they are in the on-disk cache
@@ -77,6 +85,8 @@ flowchart LR
 | Server status | `WhatsAppLink.status() -> ServerStatus | None` | `connected`, `logged_in` from `GET /app/status`, GOWA's code and message; None when unreachable |
 | CLI | `python -m reachy_mini_conversation_app.whatsapp status / groups / pair PHONE` | `groups` prints `name<TAB>id` for `WHATSAPP_PHOTOS_CHAT`; `pair` creates the `reachy` device slot on a fresh server and prints the pairing code |
 | Photo | `photographer.take_photo(media, faces) -> bytes | None` | Up to `BURST_FRAMES` (5) frames `BURST_INTERVAL_S` (0.12 s) apart within `BURST_WINDOW_S` (1.5 s), missed frames retried every 30 ms; score `(faces, sharpness)`; JPEG quality 92, one retry of the encode |
+| Share | `photographer.take_and_share(deps, chat, *, faces, take) -> SendResult | None` | Shared by the quick command and the tool; `SHARE_TIMEOUT_S` bounds it from outside |
+| Tool | `tools/take_photo.py`: `take_photo` (no arguments) | `{status: sent / unsure / not_sent, instruction}` or `{error, instruction?}` |
 | Trigger | `quick_commands.parse` → `QuickCommand("photo", language)` | Checked after the negation check and weather, before `_NOT_A_COMMAND_START` |
 | Reply | `QuickReply.beats`, `QuickReply.beat_s` | Spoken after `text`, before `after`; phrases `COUNTDOWN`, `PHOTO_SENT`, `PHOTO_NOT_SENT`, `PHOTO_UNSURE`, `PHOTO_NO_PICTURE`; `PHOTO_PHRASES` lists them with their language |
 | Wiring | `main._build_whatsapp`, `deps.whatsapp`, `_prepare_photos` | `deps.whatsapp` is None unless `whatsapp_photos_configured()` |
@@ -154,6 +164,7 @@ flowchart LR
 | `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more |
 | `tests/test_quick_commands.py` | The grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
+| `tests/tools/test_take_photo.py` | Waits the countdown, sends to the group, each outcome; no picture sends nothing; needs the link, the group and the camera; offered only with WhatsApp photos set up |
 | `tests/test_config.py` | `test_whatsapp_photos_need_all_three_settings` (trimmed values; `_build_whatsapp` None unless all three) |
 
 ### Not yet validated
@@ -174,4 +185,5 @@ pytest tests/test_hybrid_runtime.py -v -k countdown
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | `take_photo` tool: Gemini sends photos too. |
 | 2026-10-29 | Initial implementation. GOWA installed on the Mac mini as a LaunchAgent and paired with the spare number; group "Reachy group". |

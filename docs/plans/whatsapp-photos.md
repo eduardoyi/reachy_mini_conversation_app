@@ -271,12 +271,12 @@ spare phone.
 | No way to cancel once the countdown starts (Reachy does not listen during a local command) | Accepted: the trigger is an explicit full-sentence match after his name; the household allows spam. |
 | Reachy is busy (not listening) for the countdown plus the send, up to about 23 s when GOWA is slow | Usually about 5 s; the send deadline bounds it. |
 | GOWA down: Reachy still counts down, then says "I couldn't send the photo" (connection refused is immediate) | Accepted rather than polling GOWA's health; the startup check logs it. |
-| In an open Gemini conversation, "take a picture" goes to `show_on_display` and is not sent | Documented in the feature and quick-commands docs; sending from the conversation is a follow-up. |
+| In an open Gemini conversation, "take a picture" goes to Gemini | Gemini has `take_photo` (added 2026-10-29), which sends the same way; only edits stay unsent. |
 
 ## Out of scope
 
 - Kids' voice notes and photos to family members, contacts, approvals, replies (next milestones).
-- Sending from a Gemini conversation (the `show_on_display` camera photo is not sent to WhatsApp).
+- Sending photo edits (`show_on_display kind=camera` with `edit`) to WhatsApp.
 - Framing (turning toward all faces) beyond what speaker following already does.
 - Video.
 
@@ -326,3 +326,8 @@ external service (GOWA) is added; flag that `docs/scheme.mmd` needs the WhatsApp
   take a photo"), which the grammar did not know, so it went to Gemini (`show_on_display kind=camera`:
   on the screen, not sent). Added "let's take…" in all four languages ("tomemos / saquemos / hagamos /
   vamos a … una foto", "facciamo / scattiamo una foto", "vamos tirar / tiremos uma foto").
+- 2026-10-29: the household asked for Gemini to send photos too (decision 3 extended). `take_photo` tool
+  (`WHATSAPP_TOOLS`, offered only when configured): Gemini counts "3, 2, 1" as it calls it, the tool waits
+  3 s and runs `photographer.take_and_share`, now the one take-show-send path for the quick command and
+  the tool. `show_on_display kind=camera` keeps edits and points plain photos to `take_photo`. This
+  replaces the "conversation path is not sent" accepted risk and the out-of-scope item.

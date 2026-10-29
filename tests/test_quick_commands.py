@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from reachy_mini_conversation_app import quick_commands
+from reachy_mini_conversation_app import photographer, quick_commands
 from reachy_mini_conversation_app.maribel import MaribelReply
 from reachy_mini_conversation_app.weather import Forecast, DayForecast
 from reachy_mini_conversation_app.whatsapp import SendResult
@@ -785,7 +785,7 @@ async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(photos:
     assert reply.after is not None and reply.after_timeout_s == quick_commands.PHOTO_STEP_TIMEOUT_S
     assert await reply.after() == PHOTO_SENT["es"]
     assert photos == ["photo"]
-    assert display.shown == [quick_commands.PHOTO_ON_SCREEN_S]
+    assert display.shown == [photographer.PHOTO_ON_SCREEN_S]
     assert [chat for chat, _ in deps.whatsapp.sent] == [GROUP]
 
 
@@ -816,7 +816,7 @@ async def test_a_photo_that_takes_too_long_is_not_sent(photos: list[str], monkey
     """A stuck camera ends the step with "no picture", not silence."""
     import time
 
-    monkeypatch.setattr(quick_commands, "PHOTO_TAKE_S", 0.05)
+    monkeypatch.setattr(photographer, "PHOTO_TAKE_S", 0.05)
 
     def stuck(media: Any, faces: Any) -> bytes:
         time.sleep(0.3)

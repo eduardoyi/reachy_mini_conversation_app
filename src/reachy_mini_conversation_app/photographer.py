@@ -1,18 +1,25 @@
-"""Take a photo for people: a short burst, keeping the frame with the most faces, then the sharpest.
+"""Take a photo for people and share it: a short burst, keeping the frame with the most faces, then the sharpest.
 
 Children rarely hold still for a countdown; of a few frames a tenth of a second apart, one usually has
-everyone in it and less blur. Nothing is written to disk.
+everyone in it and less blur. The photo goes on the e-ink screen and to the WhatsApp photos group, from
+the "take a picture" quick command or Gemini's ``take_photo`` tool. Nothing is written to disk.
 """
 
+import io
 import time
+import asyncio
 import logging
 import threading
 from typing import Any, Final, Callable
 
 import numpy as np
+from PIL import Image
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
+from reachy_mini_conversation_app.eink_display import render_photo
 from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
+from reachy_mini_conversation_app.tools.show_on_display import PHOTO_ON_SCREEN_S
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +33,10 @@ PHOTO_JPEG_QUALITY: Final[int] = 92
 # Faces are looked for at half size, as face recognition does; sharpness at a quarter.
 DETECT_DOWNSCALE: Final[int] = 2
 SHARPNESS_DOWNSCALE: Final[int] = 4
+PHOTO_TAKE_S: Final[float] = 4.0
+PHOTO_PREVIEW_S: Final[float] = 1.0
+# Taking, showing and sending: longer than the send's own deadline, so a caller never cuts it short.
+SHARE_TIMEOUT_S: Final[float] = PHOTO_TAKE_S + PHOTO_PREVIEW_S + SEND_DEADLINE_S + 2.0
 
 
 def _sdk_detector() -> Any:
@@ -122,3 +133,37 @@ def take_photo(
         (time.perf_counter() - started_at) * 1000,
     )
     return jpeg
+
+
+# One detector for the process, warmed up at startup (main.py).
+FACES = FaceFinder()
+
+
+async def take_and_share(
+    deps: Any,
+    chat: str,
+    *,
+    faces: FaceFinder = FACES,
+    take: Callable[[Any, FaceFinder], bytes | None] = take_photo,
+) -> SendResult | None:
+    """Take the photo, show it on the screen and send it to ``chat``; None when there was no picture."""
+    try:
+        jpeg = await asyncio.wait_for(asyncio.to_thread(take, deps.reachy_mini.media, faces), PHOTO_TAKE_S)
+    except asyncio.TimeoutError:
+        logger.warning("Photo took longer than %.0f s; not sent", PHOTO_TAKE_S)
+        jpeg = None
+    if jpeg is None:
+        return None
+    display = deps.display
+    if display is not None:
+
+        def show() -> None:
+            with Image.open(io.BytesIO(jpeg)) as photo:
+                display.show(render_photo(photo.convert("RGB")), expires_after_s=PHOTO_ON_SCREEN_S)
+
+        try:
+            await asyncio.wait_for(asyncio.to_thread(show), PHOTO_PREVIEW_S)
+        except Exception as error:  # the screen is a preview; the photo still goes to the group
+            logger.warning("Photo preview failed: %s", type(error).__name__)
+    result: SendResult = await deps.whatsapp.send_image(chat, jpeg)
+    return result

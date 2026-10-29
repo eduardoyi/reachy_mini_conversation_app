@@ -10,7 +10,6 @@ most of it opening the Gemini session and its thinking.
 """
 
 from __future__ import annotations
-import io
 import re
 import asyncio
 import logging
@@ -20,15 +19,11 @@ from datetime import datetime
 from dataclasses import field, replace, dataclass
 from collections.abc import Awaitable
 
-from PIL import Image
-
 from reachy_mini_conversation_app.maribel import RETRY_PAUSE_S, POST_TIMEOUT_S, FIRST_REPLY_WAIT_S
 from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
-from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
-from reachy_mini_conversation_app.eink_display import render_photo
-from reachy_mini_conversation_app.photographer import FaceFinder, take_photo
+from reachy_mini_conversation_app.whatsapp import SendResult
+from reachy_mini_conversation_app.photographer import FACES, SHARE_TIMEOUT_S, FaceFinder, take_photo, take_and_share
 from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
-from reachy_mini_conversation_app.tools.show_on_display import PHOTO_ON_SCREEN_S
 
 
 logger = logging.getLogger(__name__)
@@ -655,10 +650,8 @@ def maribel_request(text: str) -> str | None:
 
 # After the last beat: speech wobble stops and head tracking re-anchors; let the head settle.
 PHOTO_SETTLE_S: Final[float] = 0.4
-PHOTO_TAKE_S: Final[float] = 4.0
-PHOTO_PREVIEW_S: Final[float] = 1.0
 # Long enough that the runtime never cuts the send short (silence instead of "not sure it went through").
-PHOTO_STEP_TIMEOUT_S: Final[float] = PHOTO_SETTLE_S + PHOTO_TAKE_S + PHOTO_PREVIEW_S + SEND_DEADLINE_S + 2.0
+PHOTO_STEP_TIMEOUT_S: Final[float] = PHOTO_SETTLE_S + SHARE_TIMEOUT_S
 COUNTDOWN: Final[dict[str, tuple[str, ...]]] = {
     "en": ("Three!", "Two!", "One!"),
     "es": ("¡Tres!", "¡Dos!", "¡Uno!"),
@@ -830,7 +823,7 @@ class QuickCommands:
         self._spotify = spotify or SpotifyControl()
         self._tv = tv or TV()
         self._spotify_configured = spotify_configured or _spotify_configured
-        self._faces = faces or FaceFinder()
+        self._faces = faces or FACES
         self._photographer = photographer
         self._background: set[asyncio.Task[object]] = set()
         # The language of the last request to Maribel, for what Reachy says around her answers.
@@ -992,34 +985,15 @@ class QuickCommands:
         """Count down, take the photo, show it on the screen and send it to the WhatsApp photos group."""
         from reachy_mini_conversation_app.config import config
 
-        link = getattr(self._deps, "whatsapp", None)
         chat = config.WHATSAPP_PHOTOS_CHAT
-        if link is None or not chat or not self._deps.camera_enabled:
+        if self._deps.whatsapp is None or not chat or not self._deps.camera_enabled:
             return None  # the conversation still has the camera and the screen
 
         async def take_and_send() -> str:
             await asyncio.sleep(PHOTO_SETTLE_S)
-            try:
-                jpeg = await asyncio.wait_for(
-                    asyncio.to_thread(self._photographer, self._deps.reachy_mini.media, self._faces), PHOTO_TAKE_S
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Photo took longer than %.0f s; not sent", PHOTO_TAKE_S)
-                jpeg = None
-            if jpeg is None:
+            result = await take_and_share(self._deps, chat, faces=self._faces, take=self._photographer)
+            if result is None:
                 return PHOTO_NO_PICTURE[language]
-            display = getattr(self._deps, "display", None)
-            if display is not None:
-
-                def show() -> None:
-                    with Image.open(io.BytesIO(jpeg)) as photo:
-                        display.show(render_photo(photo.convert("RGB")), expires_after_s=PHOTO_ON_SCREEN_S)
-
-                try:
-                    await asyncio.wait_for(asyncio.to_thread(show), PHOTO_PREVIEW_S)
-                except Exception as error:  # the screen is a preview; the photo still goes to the group
-                    logger.warning("Photo preview failed: %s", type(error).__name__)
-            result = await link.send_image(chat, jpeg)
             if result is SendResult.SENT:
                 return PHOTO_SENT[language]
             return PHOTO_UNSURE[language] if result is SendResult.UNSURE else PHOTO_NOT_SENT[language]
