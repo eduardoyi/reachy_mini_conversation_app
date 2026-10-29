@@ -1,6 +1,6 @@
 # Plan: Qwen3-ASR as the local speech engine, Whisper as fallback
 
-- Status: `in-progress` (built and checked on the Mac mini; not yet switched on for Reachy)
+- Status: `in-progress` (live on the Mac mini since 2026-10-29 08:44; a day of logs pending)
 - Last updated: 2026-10-29
 - Feature doc: [Hybrid runtime](../features/hybrid-runtime.md) (local STT server)
 
@@ -90,3 +90,4 @@ on another port against saved synthetic requests, then the live switch.
 |------|--------|
 | 2026-10-29 | Benchmarked Whisper, Parakeet and Qwen3-ASR on the mini; chose Qwen with a Whisper fallback. |
 | 2026-10-29 | Built the engine setting, echo guard and load-time fallback; gate 2046 passed, 4 skipped. Installed `mlx-qwen3-asr` 0.4.4 (adds only `mlx`, `mlx-metal`) into the mini's `transformers` tool Python; test server checks above. Per-clip times match the benchmark (1.7B 0.84-1.14 s on 2-3.5 s requests, 0.6B 0.36-0.42 s; librosa's first decode adds 0.3 s once). Reachy still runs Whisper. |
+| 2026-10-29 | Switched on: `c658577` deployed, `LOCAL_STT_ENGINE=qwen` in the mini's `.env`, restarted at 08:44. The server logs Qwen for both slots, 3.3 GB resident, 63% memory free. First live clips: room 0.24-0.58 s, an 8.9 s Spanish request 1.39 s; one `echo=True` on a 0.5 s clip in the first minute. |
