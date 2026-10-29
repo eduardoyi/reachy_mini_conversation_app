@@ -104,7 +104,8 @@ wake:
 - `local_speech.py`: `LocalSpeech.stream()` streams Gemini TTS (`LOCAL_SPEECH_MODEL`, default
   `gemini-3.8-flash-lite-tts`) in `GEMINI_VOICE`; first audio in 0.4–0.6 s (measured). Short fixed
   phrases (`FIXED_PHRASES`: "Okay.", "Listo.", "Good night!"…) are cached in
-  `~/.cache/reachy-mini-conversation-app/speech`. Without the
+  `~/.cache/reachy-mini-conversation-app/speech` and played from there without the silence Gemini pads
+  them with (2026-10-29; `test_a_cached_phrase_plays_without_the_silence_around_it`). Without the
   network it speaks with macOS `say`. Calls are recorded in the usage ledger
   (`quick_reply_speech`, about $0.0003 a reply).
 - `weather.py`: Open-Meteo forecast and geocoding (free, no key, about 0.25 s), spoken summaries in

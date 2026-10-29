@@ -94,3 +94,19 @@ async def test_only_listed_phrases_are_cached(tmp_path: Path) -> None:
         await _collect(speech, "Playing Bluey.")
         await _collect(speech, "Okay.")
     assert client.calls == ["Playing Bluey.", "Okay.", "Playing Bluey."]
+
+
+@pytest.mark.asyncio
+async def test_a_cached_phrase_plays_without_the_silence_around_it(tmp_path: Path) -> None:
+    """Gemini's padding before and after a short phrase is cut from the cached copy, with a small margin."""
+    margin = local_speech.SILENCE_MARGIN_SAMPLES
+    voice = np.full(4800, 8000, dtype="<i2")
+    padded = np.concatenate([np.zeros(7200, dtype="<i2"), voice, np.zeros(24000, dtype="<i2")])
+    speech = LocalSpeech(None, "Puck", cache_dir=tmp_path, client=_Client([padded.tobytes()]))
+
+    first = await _collect(speech, "Two!")
+    second = await _collect(speech, "Two!")
+
+    assert first.size == padded.size  # the first time plays as it streams
+    assert second.size == voice.size + 2 * margin
+    assert np.count_nonzero(second) == voice.size
