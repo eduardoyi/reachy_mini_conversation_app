@@ -742,3 +742,32 @@ def test_an_antenna_touch_during_a_head_test_does_not_wake() -> None:
     for step in range(10):
         manager._check_antenna_touch(100.0 + step * 0.05)
     assert touches == []
+
+
+def test_a_restart_in_the_sleep_pose_is_not_an_antenna_touch() -> None:
+    """Restarted asleep, the antennas are folded: the sleep pose starts there instead of upright, so no touch."""
+    robot = MagicMock()
+    folded = [-3.05, 3.05]
+    robot.get_current_joint_positions.return_value = ([0.0] * 7, folded)
+    robot.get_current_head_pose.return_value = np.eye(4)
+    touches: list[bool] = []
+    manager = MovementManager(robot, on_antenna_touch=lambda: touches.append(True))
+    assert manager._last_commanded_pose[1] == (-3.05, 3.05)
+
+    clock = {"now": 100.0}
+    manager._now = lambda: clock["now"]
+    manager._fall_asleep()
+    for step in range(40):  # 2 s of control ticks; the folded antennas never move
+        clock["now"] = 100.0 + step * 0.05
+        manager._update_primary_motion(clock["now"])
+        head, antennas, body_yaw = manager._get_primary_pose(clock["now"])
+        manager._issue_control_command(head, manager._calculate_blended_antennas(antennas), body_yaw)
+        manager._check_antenna_touch(clock["now"])
+    assert touches == []
+
+
+def test_without_a_reading_the_antennas_start_from_neutral() -> None:
+    """A robot that has not reported its joints yet leaves the usual neutral start."""
+    robot = MagicMock()
+    robot.get_current_joint_positions.side_effect = AssertionError("No joint positions received yet.")
+    assert MovementManager(robot)._last_commanded_pose[1] == (0.0, 0.0)

@@ -986,6 +986,19 @@ without a touch. Plan: [antenna-touch-wake.md](../plans/antenna-touch-wake.md). 
 `test_a_touch_from_the_movement_thread_starts_listening_on_the_runtime_loop` and the antenna touch
 tests in `tests/test_moves.py`.
 
+**False wakes on restart — 2026-10-29.** Four restarts in the sleep pose (2026-10-28 18:10, 2026-10-29
+08:44, 15:55 and 18:28) logged "Antenna touched" 0.2 s after "Going to sleep until someone says my name"
+and opened a conversation nobody asked for. Until its first command the movement manager took the
+antennas to be upright, so the sleep pose eased them from there: its first command swung the folded
+antennas toward upright, about 3 rad from where they were, which read as a held bend. The manager now
+starts from the measured antennas when the robot has reported them (`MovementManager._measured_antennas`).
+The touch log line now gives the deviation ("Antenna touched (23 deg from its targets)"), to tell real
+touches from motor lag: three touches during a conversation that day came as he turned toward a voice
+and his antennas perked, and untouched deviations of 11–14 deg (the threshold is 14) show up in the
+10-minute log. Those are not changed yet; the head test's recording measures how far the antennas lag a
+perk. Tests: `test_a_restart_in_the_sleep_pose_is_not_an_antenna_touch`,
+`test_without_a_reading_the_antennas_start_from_neutral`.
+
 ### A sure wake with a voice counts when Whisper mishears the name — 2026-10-28
 
 Three real "Richie, lights off" calls (wake scores 0.87, 0.95, 0.83) were dropped because Whisper heard
