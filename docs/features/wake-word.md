@@ -441,6 +441,7 @@ latency remain unmeasured.
 | 2026-09-07 | Screened the existing `andyjmorgan` Reachy openWakeWord model against the same private fixtures. It detected 6/30 at its documented 0.5 threshold; lower thresholds and three local gain treatments did not materially improve recall. Rejected the model before negative testing. The model and isolated dependencies remained under `/tmp`; nothing was bundled or integrated. |
 | 2026-09-07 | Marked the Spanish sherpa checkpoint as a historical rejected candidate and linked the custom multilingual openWakeWord training plan; no production acoustic model was selected. |
 | 2026-10-29 | Transcript aliases gain the Spanish spellings `reachi, reechi, richi, ritchy, ricci, ritzi` (official33 scores 0.00 on a Spanish "Ri-chi"); `mentions_wake_word` lets the ambient processor check open segments for the name. See [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
+| 2026-10-29 | `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD` adds a second head on official33's features (a private "Ri-chi" head trained on household clips and macOS voices), scaled onto official33's threshold by `LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD`; the wake log names the head. Results in [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
 
 ## Custom training preflight evidence
 

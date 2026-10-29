@@ -364,6 +364,21 @@ def _bounded_int(env_name: str, default: int, low: int, high: int) -> int:
     return value
 
 
+def _bounded_float(env_name: str, default: float, low: float, high: float) -> float:
+    """Parse a number setting within [low, high]; empty or invalid is the default."""
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or not low <= value <= high:
+        logger.warning("Ignoring invalid %s=%r; using default.", env_name, raw_value)
+        return default
+    return value
+
+
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured transcription language; "auto" returns "" (no hint, detect per utterance)."""
     candidate = (value or "").strip()
@@ -728,6 +743,9 @@ class Config:
     LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
     LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
+    # A second wake head on the same features (trained for the Spanish "Ri-chi"), and its own threshold.
+    LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD = (os.getenv("LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD") or "").strip()
+    LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD = _bounded_float("LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD", 0.8, 0.05, 1.0)
     # Save short local clips around wake events to retrain the wake word; deleted after the keep period.
     WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
     WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)
@@ -943,6 +961,8 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_STT_LATIN_ONLY = _env_flag(LOCAL_STT_LATIN_ONLY_ENV, default=False)
     config.LOCAL_ACOUSTIC_WAKE_ENABLED = _env_flag(LOCAL_ACOUSTIC_WAKE_ENABLED_ENV, default=False)
     config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR = (os.getenv(LOCAL_ACOUSTIC_WAKE_MODEL_DIR_ENV) or "").strip()
+    config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD = (os.getenv("LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD") or "").strip()
+    config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD = _bounded_float("LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD", 0.8, 0.05, 1.0)
     config.LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
     config.WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
     config.WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)

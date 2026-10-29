@@ -335,6 +335,10 @@ def run(
             Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser(),
             threshold=config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
             event_observer=wake_clips.save_wake_event if wake_clips is not None else None,
+            extra_head=Path(config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD).expanduser()
+            if config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD
+            else None,
+            extra_threshold=config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD,
         )
         logger.info(
             "Supervised official33 acoustic wake enabled; threshold=%.2f cooldown=3s",

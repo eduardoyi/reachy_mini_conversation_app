@@ -342,3 +342,64 @@ def test_event_observer_gets_each_detection_at_once_and_each_near_miss_when_it_e
         detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0)
 
     assert events == [(0.45, False), (0.8, True)]
+
+
+class TwoHeadWakeModel:
+    """Two heads on one feature stream, as openWakeWord returns them."""
+
+    def __init__(self, scores: list[tuple[float, float]]) -> None:
+        """Script one (main, extra) score pair per frame."""
+        self._scores = list(scores)
+
+    def predict(self, audio: NDArray[np.int16]) -> dict[str, float]:
+        """Return both heads' scores for one frame."""
+        main, extra = self._scores.pop(0) if self._scores else (0.0, 0.0)
+        return {"reachy-official33": main, "reachy-richi": extra}
+
+    def reset(self) -> None:
+        """Nothing to clear."""
+
+
+@pytest.mark.parametrize(
+    ("scores", "detected", "head"),
+    [
+        ((0.0, 0.79), False, None),  # the extra head under its own threshold
+        ((0.0, 0.8), True, "reachy-richi"),  # at its threshold it counts as the main threshold
+        ((0.35, 0.0), True, "reachy-official33"),
+    ],
+)
+def test_an_extra_head_wakes_at_its_own_threshold(
+    scores: tuple[float, float], detected: bool, head: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The strongest head, on the main head's scale, decides; the log names it."""
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        TwoHeadWakeModel([scores]), threshold=0.3, head_scales={"reachy-richi": 0.3 / 0.8}
+    )
+    with caplog.at_level(logging.INFO, logger=acoustic_wake_word.__name__):
+        detection = detector.process_audio(_pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16)), SAMPLE_RATE)
+    assert (detection is not None) is detected
+    if head is not None:
+        assert f"head={head}" in caplog.text
+
+
+def test_a_second_output_without_a_configured_head_is_rejected() -> None:
+    """One head unless an extra one was configured."""
+    detector = acoustic_wake_word.OpenWakeWordDetector(TwoHeadWakeModel([(0.1, 0.1)]))
+    with pytest.raises(ValueError, match="one wake-word score per head"):
+        detector.process_audio(_pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16)), SAMPLE_RATE)
+
+
+def test_a_missing_extra_head_fails_before_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured extra head that is not there stops startup with a clear error, before any import."""
+    for name in acoustic_wake_word.OFFICIAL33_ASSETS:
+        (tmp_path / name).write_bytes(b"x")
+    monkeypatch.setattr(acoustic_wake_word, "OFFICIAL33_ASSETS", {"reachy-official33.onnx": "same"})
+    monkeypatch.setattr(
+        acoustic_wake_word.hashlib, "sha256", lambda payload: SimpleNamespace(hexdigest=lambda: "same")
+    )
+    imported: list[str] = []
+    monkeypatch.setattr(acoustic_wake_word.importlib, "import_module", lambda name: imported.append(name))
+
+    with pytest.raises(ValueError, match="Missing extra wake head"):
+        acoustic_wake_word.OpenWakeWordDetector.from_directory(tmp_path, extra_head=tmp_path / "reachy-richi.onnx")
+    assert imported == []

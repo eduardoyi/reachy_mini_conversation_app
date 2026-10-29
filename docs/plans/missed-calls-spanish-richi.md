@@ -1,6 +1,6 @@
 # Plan: Catch "Ri-chi" calls the wake model misses
 
-- Status: `in-progress` (open-segment name check built; wake model retraining in progress)
+- Status: `in-progress` (both parts live on the Mac mini since 2026-10-29; a week of live results pending)
 - Last updated: 2026-10-29
 - Feature docs: [Hybrid runtime](../features/hybrid-runtime.md), [Wake word](../features/wake-word.md)
 - Related: [Wake clip capture](wake-clip-capture.md), [Custom openWakeWord training](custom-reachy-openwakeword-training.md)
@@ -35,34 +35,69 @@ The household reported many missed calls, especially from Adriana.
   "ritzi".
 - Config: `AmbientContextConfig.name_probe_interval_seconds` (1.5) and `name_probe_window_seconds` (2.5).
 
-## Part 2: retrain the wake model with her pronunciation (in progress)
+## Part 2: a second wake head for "Ri-chi" (built)
 
-The old training pipeline and corpus are archived on an external drive that is not connected, so this is a
-fresh, local, CPU-only head training on the same frozen openWakeWord front end (melspectrogram and
-embedding models from the official33 bundle).
+The old training pipeline and corpus are archived on an external drive that is not connected. This is a fresh,
+local, CPU-only training of one small head on the same frozen openWakeWord front end (the melspectrogram and
+embedding models of the official33 bundle). It runs next to official33, not in its place, so the English
+"Reachy" calls official33 already catches cannot regress.
 
-- Positives:
-  - the household's real calls from saved wake clips (log-confirmed wakes with a request, `name_heard` clips);
-  - synthetic "Richi / Ricci / Reachy / Richie" from macOS voices (es, it, pt, en), with speed and pitch
-    variations, mixed over real room clips.
-- Negatives: every unconfirmed wake, near-miss and background clip, plus synthetic household speech
-  without the name.
-- Held out by day: train on 2026-10-27 and 2026-10-28, test on 2026-10-29. The 30 holdout recordings stay
-  evaluation-only, as before.
-- Acceptance before swapping it in:
-  - no fewer of today's real calls than official33, and clearly more of the `name_heard` ones;
-  - no more false wakes on today's negatives;
-  - recall on holdout-30 within 2 of official33.
-  The Whisper/Qwen name check stays in front of every wake either way.
-- Licensing: macOS voices are used only to train a private household model that is never distributed.
+### Data (private, `~/wake-retrain` on the mini, `0700`)
+
+- **Labels from the app log:**
+  - a call is a wake whose name check passed and was followed by a request;
+  - a non-call is an unconfirmed wake that was not trusted.
+- **Second labeller:** Qwen3-ASR 1.7B with the names hint checks every clip (yes/no and times only, no
+  text). A non-call in which Qwen hears the name is left out, and `name_heard` clips are located with 1.5 s
+  windows of the 0.6B.
+- **Train days** (2026-10-27/28):
+  - 14 calls, 10 `name_heard` calls;
+  - 783 real non-calls (unconfirmed wakes, near misses without a name, room clips);
+  - 1,032 synthetic calls ("Richi", "Ricci", "Hola Richi", "Richie", "Reachy"…) and 432 synthetic non-calls
+    ("Qué rico", "Ricardo", "Ricky", "ricetta"…). The synthetic clips use macOS voices (es, it, pt, en) at 4
+    speeds and 5 pitches, with reverb, over the train days' room clips.
+- **Test day** (2026-10-29, never used for training or for choosing settings): 7 calls, 4 `name_heard` calls,
+  109 non-calls.
+- 138 clips were left out as uncertain.
+
+### Model and choice
+
+- An MLP (16×96 → 96 → 64 → 1, dropout 0.3) trained 60 epochs with positives oversampled 1:10, exported to
+  ONNX (`reachy-richi.onnx`, sha256 `d2e30fbbfba3f6e7…`).
+- Four settings were compared on the train days' validation clips. The one with the fewest false fires there
+  was kept, at threshold 0.9.
+
+### Results (clip level, before the name check)
+
+| Set | official33 @0.3 | new head @0.9 | Either |
+|-----|-----------------|---------------|--------|
+| Test calls caught by the wake model (7) | 7 | 2 | 7 |
+| Test calls only the transcript caught (4) | 0 | 2 | 2 |
+| Test room clips (58) | 0 | 1 | 1 |
+| Test near misses (17) | 0 | 0 | 0 |
+| Holdout-30 recordings (30) | 30 | 13 | 30 |
+
+The test room clip it fired on has no name according to Qwen, so the name check would reject it. A scaled
+score of the new head never reaches the "trusted without the name" bar, so every wake it causes goes through
+the name check.
+
+### Runtime
+
+- `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD` (path) and `LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD` (default 0.8; 0.9 on the
+  mini). The detector runs both heads on one feature stream. The extra head's score is scaled onto
+  official33's threshold (`threshold / extra_threshold`), the strongest head wins, and the wake log names it
+  (`head=reachy-richi`).
+- Licensing: macOS voices are used only to train this private household model, which is never distributed.
 
 ## Acceptance criteria
 
 - [x] Part 1 unit tests: a name in a long open segment closes it at the next check; no checks without a
       probe or in request mode; config bounds; Spanish spellings counted, "Ricky" not.
-- [ ] Full gate, deploy, and on the mini a `Name heard … into an open segment` line ahead of a wake.
-- [ ] Part 2 model trained, compared with official33 on held-out days and holdout-30, and swapped in only if
-      it meets the bar above.
+- [x] Full gate and deploy (`df39d7d`, live 09:44).
+- [ ] On the mini, a `Name heard … into an open segment` line ahead of a wake.
+- [x] Part 2 head trained and compared on the held-out day and holdout-30: 2 of 4 transcript-only calls
+      now caught acoustically; no call lost; one extra room-clip fire, which the name check rejects.
+- [ ] A week live: `head=reachy-richi` wakes that turn into requests; no rise in confirmed false wakes.
 
 ## Risks
 
@@ -78,3 +113,4 @@ embedding models from the official33 bundle).
 | Date | Update |
 |------|--------|
 | 2026-10-29 | Diagnosed this morning's misses; built the open-segment name check and the new aliases. |
+| 2026-10-29 | Trained and evaluated the "Ri-chi" head; added extra-head support to the detector. |
