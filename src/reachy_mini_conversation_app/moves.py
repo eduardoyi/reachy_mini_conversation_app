@@ -267,6 +267,7 @@ class AntennaTouchDetector:
         self._pressed = False
         self._last_touch = -math.inf
         self.peak_deviation = 0.0  # largest deviation seen while released, for tuning from the logs
+        self.touch_deviation = 0.0  # the deviation that made the last touch, for the log
 
     def update(self, now: float, target: Tuple[float, float], measured: Tuple[float, float]) -> bool:
         """Record this tick's target and measurement; return True once per touch."""
@@ -288,6 +289,7 @@ class AntennaTouchDetector:
             return False
         self._pressed = True
         self._out_since = None
+        self.touch_deviation = deviation
         if now - self._last_touch < ANTENNA_TOUCH_COOLDOWN_S:
             return False
         self._last_touch = now
@@ -472,6 +474,12 @@ class MovementManager:
         self._track_anchor: NDArray[np.float64] | None = None
         self._track_anchor_body_yaw = 0.0
         self._last_commanded_pose: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
+        # Until the first command, the antennas were last put where they are. Restarted asleep they are folded
+        # (about 3 rad from upright); the sleep pose eased from upright instead, which read as a 3 rad bend and
+        # woke him 0.2 s after four restarts (2026-10-28 18:10, 2026-10-29 08:44, 15:55 and 18:28).
+        measured_antennas = self._measured_antennas()
+        if measured_antennas is not None:
+            self._last_commanded_pose = (self._last_commanded_pose[0], measured_antennas, self._last_commanded_pose[2])
         self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
         self._antenna_unfreeze_blend = 1.0
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
@@ -1089,6 +1097,16 @@ class MovementManager:
             with self._status_lock:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
+    def _measured_antennas(self) -> Tuple[float, float] | None:
+        """Return the antennas' measured positions (radians), or None before the robot has reported any."""
+        try:
+            _, antennas = self.current_robot.get_current_joint_positions()
+            left, right = (float(value) for value in antennas)
+        except Exception as e:
+            logger.debug("Measured antennas unavailable: %s", e)
+            return None
+        return (left, right) if math.isfinite(left) and math.isfinite(right) else None
+
     def _check_antenna_touch(self, now: float) -> None:
         """Compare the measured antennas with recent targets and report a touch (worker thread only)."""
         if self._on_antenna_touch is None or now < self._next_antenna_check:
@@ -1120,7 +1138,7 @@ class MovementManager:
         if head_test:
             logger.info("Antenna touched during the head test; not waking")
             return
-        logger.info("Antenna touched")
+        logger.info("Antenna touched (%.0f deg from its targets)", math.degrees(self._antenna_touch.touch_deviation))
         try:
             self._on_antenna_touch()
         except Exception as e:
