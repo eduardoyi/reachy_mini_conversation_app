@@ -331,3 +331,9 @@ external service (GOWA) is added; flag that `docs/scheme.mmd` needs the WhatsApp
   3 s and runs `photographer.take_and_share`, now the one take-show-send path for the quick command and
   the tool. `show_on_display kind=camera` keeps edits and points plain photos to `take_photo`. This
   replaces the "conversation path is not sent" accepted risk and the out-of-scope item.
+- 2026-10-29: live check on the Mac mini passed (household: "it worked, really fast"). "Tomemos una foto"
+  handled locally (kind=photo, es): request recognized → photo taken 6.7 s (three beats plus the 0.4 s
+  settle: each beat ran about 1.8 s, longer than the 1 s target, since a beat waits for its audio and
+  the 0.4 s tail), burst 0.8 s (5 frames, best had 1 face), 185 KB JPEG sent on the first attempt in
+  1.6 s, done 9.7 s after the request. The photo arrived in "Reachy group". The `take_photo` tool is
+  registered; its live use is not checked yet.
