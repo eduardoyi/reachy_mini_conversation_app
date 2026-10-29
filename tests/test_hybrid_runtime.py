@@ -4469,6 +4469,79 @@ async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(he
         await runtime.close()
 
 
+@pytest.mark.parametrize(
+    ("clip", "outcome"),
+    [
+        ("and the walls are going to be concrete.", "dropped"),  # the TV, 2026-10-29
+        ("lights off.", "command"),  # a real call whose name Whisper misheard
+        ("Richie, what is a comet?", "conversation"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_sure_wake_without_the_name_counts_only_for_a_command_or_a_named_request(
+    clip: str, outcome: str
+) -> None:
+    """A sure wake model and a voice stand in for a missed name only if what follows is a command or names him.
+
+    Until then Reachy does not react, so a TV programme that sets off the wake model gets no cue either.
+    """
+    voice = np.concatenate([np.full(8_000, 20, dtype=np.int16), np.full(8_000, 3_000, dtype=np.int16)])
+    wake_audio = (16_000, voice)
+    seen: list[str] = []
+    acknowledged: list[str] = []
+    listening: list[bool] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None) if "lights" in text else None
+
+    async def fast(audio: AudioFrame) -> str:
+        return "so" if audio is wake_audio else ""
+
+    async def accurate(audio: AudioFrame) -> str:
+        return "I" if audio is wake_audio else clip
+
+    async def on_listening(active: bool) -> None:
+        listening.append(active)
+
+    processor = _processor_with_open_wake_segment("people are over there")
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        quick_commands=quick,
+        acknowledgement_callback=acknowledged.append,
+        listening_observer=on_listening,
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_followup_timeout_s=0.2,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    runtime._wake_name_audio = wake_audio
+    runtime._wake_score = 0.96
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        opened = await asyncio.wait_for(activation, timeout=5.0)
+        if outcome == "dropped":
+            assert not opened and runtime.mode is RuntimeMode.LOCAL_AMBIENT
+            assert acknowledged == [] and listening == []
+            assert not handler.started.is_set()
+        elif outcome == "command":
+            assert opened and seen == ["lights off."]
+            assert not handler.started.is_set()
+        else:
+            assert opened and acknowledged == ["acoustic_wake"] and listening[0] is True
+            await asyncio.wait_for(handler.started.wait(), timeout=3.0)
+    finally:
+        await runtime.close()
+
+
 @pytest.mark.asyncio
 async def test_the_request_clip_starts_with_the_wake_audio_so_a_first_word_said_early_is_kept() -> None:
     """2026-10-28: "Richie, lights out" fired after "lights"; the clip alone heard "off". The wake audio leads it now."""
@@ -4659,9 +4732,14 @@ def test_a_word_length_sound_is_a_voice_and_clinks_are_not() -> None:
 )
 @pytest.mark.asyncio
 async def test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name(
-    window: tuple[int, Any], score: float, asleep: bool, wakes: bool
+    window: tuple[int, Any], score: float, asleep: bool, wakes: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """2026-10-28: three "Richie, lights off" heard as "Reggie.", "Preciso." and "What did she do?" were dropped."""
+    """2026-10-28: three "Richie, lights off" heard as "Reggie.", "Preciso." and "What did she do?" were dropped.
+
+    A sure wake with a voice passes the name check; with nothing after it (no command, no name), it is then
+    dropped without a cue (see test_a_sure_wake_without_the_name_counts_only_for_a_command_or_a_named_request).
+    """
+    caplog.set_level(logging.INFO)
     runtime, handler, acknowledged, _listening, asked = _runtime_with_wake_audio("Reggie.", "Reggie.", asleep=asleep)
     runtime._wake_name_audio = window
     runtime._wake_score = score
@@ -4674,7 +4752,9 @@ async def test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name(
     runtime._request_transcriber = hears
     try:
         result = await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
-        assert bool(acknowledged) is wakes and result is wakes
+        assert ("Wake trusted without the name: True" in caplog.text) is wakes
+        assert ("neither a name nor a command followed" in caplog.text) is wakes
+        assert not result and acknowledged == []
     finally:
         await runtime.close()
 

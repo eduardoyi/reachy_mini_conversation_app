@@ -1011,6 +1011,15 @@ Logged as `Wake trusted without the name: True|False score=… loud_run=…`. Te
 `test_a_word_length_sound_is_a_voice_and_clinks_are_not`,
 `test_a_sure_wake_with_a_voice_counts_when_whisper_mishears_the_name`.
 
+**Only for a command or a named request — 2026-10-29.** A TV programme about home renovation set the wake
+models off 185 times in 40 minutes (22:20-23:00); a voice is always in the window then, so two sure hits
+(0.96, 0.98) opened conversations. A wake trusted this way now gives no cue (antennas, head turn, music
+lowering) until the request is in: it runs if the request is a quick command, opens the conversation
+(with the cue then) if the fast transcript or the request clip holds the name, and is otherwise dropped
+like an unconfirmed wake, logged as "Sure wake without the name, and neither a name nor a command
+followed; dropped". A misheard real call that is an open question, not a command, is lost. Test:
+`test_a_sure_wake_without_the_name_counts_only_for_a_command_or_a_named_request`.
+
 ### Awaited answers and announcements — 2026-10-28
 
 Two thread-safe entry points for work that is not a wake. `expect_answer(handler)` queues an
