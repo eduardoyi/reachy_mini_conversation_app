@@ -169,12 +169,18 @@ class AndroidTV:
 
     async def watch(self) -> None:
         """Stay connected so ``reported_on`` follows the TV, reconnecting while it is unreachable."""
+        unreachable_logged = False
         while True:
             if self._remote is None:
                 try:
-                    await self._connected()
+                    remote = await self._connected()
                 except TVError as error:
-                    logger.debug("TV not watched yet: %s", error)
+                    if not unreachable_logged:
+                        logger.info("TV not watched yet, retrying every %.0f s: %s", WATCH_RETRY_S, error)
+                        unreachable_logged = True
+                else:
+                    logger.info("TV watched; it is %s", "on" if remote.is_on else "off")
+                    unreachable_logged = False
             await asyncio.sleep(WATCH_RETRY_S)
 
     def _available_updated(self, available: bool) -> None:
