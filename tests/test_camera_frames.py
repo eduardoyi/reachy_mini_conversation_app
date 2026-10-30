@@ -1,11 +1,17 @@
 """Tests for camera frame downscaling before cloud upload."""
 
+import numpy as np
 import pytest
 
 from reachy_mini_conversation_app.camera_frames import (
+    DIM_FRAME_MEAN,
     MODEL_FRAME_MAX_SIDE,
     fit_size,
     jpeg_size,
+    encode_jpeg,
+    decode_image,
+    boost_dim_jpeg,
+    boost_dim_frame,
     fit_jpeg_for_model,
 )
 
@@ -112,3 +118,58 @@ def test_decode_image_reads_png_and_rejects_garbage() -> None:
 
     assert decoded is not None and decoded.shape == (48, 64, 3)
     assert decode_image(b"not an image") is None
+
+
+def _night_frame() -> np.ndarray:
+    """Return a frame with the camera's night levels (2026-10-30): black floor 28, room ~50, lit wall ~180."""
+    frame = np.full((200, 200, 3), 50, dtype=np.uint8)
+    frame[:20] = 28  # the camera never goes darker than its grey black level
+    frame[20:50] = 180  # the wall under the ceiling spots
+    frame[80:120, 80:120] = 34  # the backlit face...
+    frame[90:110, 90:110] = 38  # ...and the little detail it still has
+    frame[0, :20] = 250  # a lamp
+    return frame
+
+
+def test_a_dim_frame_gets_brighter_with_more_contrast() -> None:
+    """At night the frame is lifted and the detail in a dark face is pulled apart."""
+    frame = _night_frame()
+    boosted = boost_dim_frame(frame)
+    assert boosted.mean() > frame.mean() + 10
+    assert int(boosted[100, 100, 0]) - int(boosted[82, 82, 0]) > 2 * (38 - 34)
+    assert boosted[10, 10, 0] == 0  # the grey black level becomes black
+
+
+def test_a_well_lit_frame_is_left_alone() -> None:
+    """Daytime frames reach the face recognizer and the model as the camera took them."""
+    frame = np.full((120, 160, 3), int(DIM_FRAME_MEAN) + 30, dtype=np.uint8)
+    frame[:60] = 20
+    frame[60:] = 220
+    assert boost_dim_frame(frame) is frame
+
+
+def test_a_dark_room_is_not_stretched_into_noise() -> None:
+    """With the lights off there is nothing to stretch: the frame stays dark."""
+    rng = np.random.default_rng(0)
+    frame = rng.integers(0, 12, size=(120, 160, 3), dtype=np.uint8)
+    assert boost_dim_frame(frame) is frame
+    assert boost_dim_frame(None) is None
+
+
+def test_boosting_a_jpeg_keeps_anything_unreadable_or_bright_as_is() -> None:
+    """Bytes that are not a JPEG pass through untouched."""
+    assert boost_dim_jpeg(b"not a jpeg") == b"not a jpeg"
+
+
+def test_a_dim_jpeg_comes_back_brighter() -> None:
+    """The model's view of a dim room is re-encoded brighter; a bright JPEG is returned as the same bytes."""
+    pytest.importorskip("gi")
+    dim = encode_jpeg(_night_frame())
+    if dim is None:
+        pytest.skip("GStreamer JPEG encoder unavailable")
+    brighter = decode_image(boost_dim_jpeg(dim))
+    assert brighter is not None
+    assert brighter.mean() > decode_image(dim).mean() + 10
+    bright = encode_jpeg(np.full((120, 160, 3), 200, dtype=np.uint8))
+    assert bright is not None
+    assert boost_dim_jpeg(bright) is bright

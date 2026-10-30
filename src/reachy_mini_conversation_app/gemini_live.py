@@ -34,7 +34,7 @@ from reachy_mini_conversation_app.prompts import (
 from reachy_mini_conversation_app.streaming import Pcm16ChunkBuffer, AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.usage_costs import add_tokens, get_ledger, gemini_turn_tokens
 from reachy_mini_conversation_app.spoken_turns import SpokenTurnAssembler
-from reachy_mini_conversation_app.camera_frames import capture_jpeg, fit_jpeg_for_model
+from reachy_mini_conversation_app.camera_frames import capture_jpeg, boost_dim_jpeg, fit_jpeg_for_model
 from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, TrafficKind, ConversationHandler
@@ -1145,7 +1145,7 @@ class GeminiLiveHandler(ConversationHandler):
                 jpeg = await asyncio.to_thread(capture_jpeg, media)
                 if jpeg is None:
                     continue
-                jpeg = await asyncio.to_thread(fit_jpeg_for_model, jpeg)
+                jpeg = await asyncio.to_thread(lambda raw: boost_dim_jpeg(fit_jpeg_for_model(raw)), jpeg)
                 await self._send_realtime_input(
                     session, generation, video=types.Blob(data=jpeg, mime_type="image/jpeg")
                 )
