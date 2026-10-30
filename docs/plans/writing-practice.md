@@ -68,3 +68,4 @@ music card hold, the tool kind and the screens in their existing test files. The
 |------|--------|
 | 2026-10-30 | Designed with the household (capitals, plain paper, name and sound, pats and "ya", cheap: no long Gemini session). Built and tested. |
 | 2026-10-30 | Full gate on the MacBook: ruff, format and mypy clean; 2,277 passed, 4 skipped. The Mac mini runs `continuous_transcript` room transcription with quick commands on, which writing words without the name need. Not deployed yet; nothing tried with the robot. |
+| 2026-10-30 | Deployed to the Mac mini (`9747756`), restarted 13:27 with no errors; `show_on_display` offers `kind=writing`. Not yet tried by voice or with pats. |

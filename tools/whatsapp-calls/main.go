@@ -7,6 +7,8 @@
 //	                                                 Call an approved person, play a file, record them.
 //	reachy-calls wait <play.wav> <record.wav> [max-s]
 //	                                                 Answer the next call from an approved person.
+//	reachy-calls serve [addr]                        Run calls for the app over a local WebSocket
+//	                                                 (default 127.0.0.1:8793; see serve.go).
 //
 // The session lives in REACHY_CALLS_DIR (default ~/.local/share/reachy-whatsapp-calls) and the
 // approved list in REACHY_CALLS_APPROVED (default ~/.config/reachy-whatsapp/calls.json):
@@ -77,8 +79,14 @@ func main() {
 		err = call(ctx, args[1], args[2], args[3], maxSeconds(args, 4))
 	case (len(args) == 3 || len(args) == 4) && args[0] == "wait":
 		err = wait(ctx, args[1], args[2], maxSeconds(args, 3))
+	case (len(args) == 1 || len(args) == 2) && args[0] == "serve":
+		addr := defaultServeAddr
+		if len(args) == 2 {
+			addr = args[1]
+		}
+		err = serve(ctx, addr)
 	default:
-		fmt.Fprintln(os.Stderr, "usage: reachy-calls pair <spare-number> | call <name> <play.wav> <record.wav> [max-s] | wait <play.wav> <record.wav> [max-s]")
+		fmt.Fprintln(os.Stderr, "usage: reachy-calls pair <spare-number> | call <name> <play.wav> <record.wav> [max-s] | wait <play.wav> <record.wav> [max-s] | serve [addr]")
 		os.Exit(2)
 	}
 	if diagRecorder != nil {
