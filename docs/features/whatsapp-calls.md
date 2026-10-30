@@ -37,13 +37,14 @@ and recording are out of scope.
 - **Ending:** either side hangs up (on Reachy: bend an antenna), or 60 min pass. Then "Call ended."
   Unanswered: "Eduardo didn't answer." Service down or refused: "I couldn't call Eduardo."
 - **Being called:** an approved person calling the spare number rings for up to 60 s. The TRMNL shows a
-  caller card ("Llamada de / Eduardo / Di sí, o dobla una antena") while it rings. Awake, Reachy says
-  "¡Te llama Eduardo!" (`WHATSAPP_CALLS_LANGUAGE`, default Spanish) and listens once without the name:
-  "sí / yes / dale…" answers, "no" declines ("Vale, no contesto."), anything else leaves it ringing.
-  Anyone may answer, kids included; "contesta / answer / atiende / rispondi / atende" also answer while it
-  rings, and so does an antenna bend. A conversation open when it rings closes so he can announce it.
-  Asleep (night, naps): no voice, only the caller card and a small repeating antenna wiggle; a bend still
-  answers. Not approved, another call on, or the app not listening: declined by the service.
+  caller card ("Llamada de / Eduardo / Di sí, o tócame la cabeza") while it rings, and his head is held
+  still (speech wobble off) so **a pat on his head answers**, as it ends a voice message. Awake, Reachy
+  says "¡Te llama Eduardo!" (`WHATSAPP_CALLS_LANGUAGE`, default Spanish) at 0, 15 and 30 s
+  (`CALL_ANNOUNCE_AT_S`) and listens once after each: "sí / yes / dale…" answers, "no" declines ("Vale, no
+  contesto."), anything else leaves it ringing. Anyone may answer, kids included; "contesta / answer /
+  atiende / rispondi / atende" and an antenna bend also answer while it rings. A conversation open when it
+  rings closes so he can announce it. Asleep (night, naps): no voice, only the caller card and a slow
+  antenna wiggle; a pat or a bend answers. A pat while he is still talking keeps trying for 10 s. Not approved, another call on, or the app not listening: declined by the service.
 - **Disabled:** without the service's token file (`WHATSAPP_CALLS_TOKEN_FILE`) or without the approved
   list, "call x" is not a call.
 
@@ -81,9 +82,10 @@ flowchart LR
 - Audio on the wire: 16 kHz mono 16-bit PCM both ways; meowcaller sends 960-sample (60 ms) frames.
 - Incoming: the service holds an approved caller ringing and reports it on `/events` (kept open by
   `whatsapp_calls.CallManager` from its own thread, reconnecting every 5 s); the app answers with
-  `{"op": "answer", "call_id"}` on `/call` or declines on `/events`. `main._start_calls` shows the caller card,
-  announces through `HybridRuntime.request_announcement` with `QuickCommands.answer_incoming`, or wiggles
-  the antennas (`set_listening`) while asleep. The antenna-touch handler asks `CallManager.antenna_touched()`
+  `{"op": "answer", "call_id"}` on `/call` or declines on `/events`. `main._start_calls` shows the caller card
+  and starts `incoming_calls.IncomingRinger`, which holds the head still, announces through
+  `HybridRuntime.request_announcement` with `QuickCommands.answer_incoming` (or wiggles the antennas with
+  `set_listening` while asleep), and answers on a head touch (`MovementManager.head_touches`). The antenna-touch handler asks `CallManager.antenna_touched()`
   first: during a call it hangs up; while one rings it activates with `CALL_ANSWER_REQUEST`; otherwise the
   usual wake.
 
@@ -118,6 +120,8 @@ flowchart LR
 - `tests/test_quick_commands.py`: "call x" in four languages, a parent calling, a kid or nobody refused,
   a name not approved left to the conversation, no answer and failure replies, no token no call.
 - `tools/whatsapp-calls/main_test.go`: the approved list, the mic source's silence and drop-oldest.
+- `tests/test_incoming_calls.py`: announced three times and a pat answers (retried while he talks), a
+  silent wiggle asleep, the head released when nobody answers.
 - Incoming (`tests/test_whatsapp_calls.py`): a ringing call answered on its call id without a ringback, a
   decline sent back and an abandoned call cleared, an antenna bend hanging a call up;
   (`tests/test_quick_commands.py`): "answer" in four languages, answering only while it rings, "sí" answers
@@ -125,6 +129,9 @@ flowchart LR
 
 ## Changelog
 
+- 2026-10-30: A pat on the head answers a ringing call, and the announcement repeats at 15 and 30 s: on the
+  first incoming call his "sí" was not heard (the answer window transcribed nothing); "Sí, Richie, atiende"
+  then answered it.
 - 2026-10-30: Stage 3: incoming calls from approved people, announced with a caller card on the TRMNL,
   answered by voice or an antenna bend, a silent ring while asleep; an antenna bend hangs up any call.
 - 2026-10-30: A ringback tone while it rings (the household could not tell ringing from answered).

@@ -219,6 +219,10 @@ not on the approved list, recording calls.
   and reports them on `/events`; `CallManager` keeps that socket and answers or declines; caller card on
   the TRMNL, "¡Te llama Eduardo!" with yes/no, "contesta / answer" while it rings, a silent ring with an
   antenna wiggle while asleep, an antenna bend answering a ringing call and hanging up any call.
+- 2026-10-30: **First call to Reachy** (15:32): rang, card and announcement worked; Eduardo's "yes" in the
+  5 s answer window was not transcribed (empty), so it rang on; "Sí, Richie, atiende" answered it and it
+  connected (14 s). His asks: a pat on the head should answer (better than the antenna). Now the head is
+  held still while it rings so a pat answers, and the announcement repeats at 15 and 30 s.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
