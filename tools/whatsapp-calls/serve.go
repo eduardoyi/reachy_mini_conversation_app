@@ -36,17 +36,31 @@ const (
 // service keeps the linked device online and runs one call at a time for the app, which talks to it
 // over a WebSocket on the loopback interface:
 //
-//	app -> service, text:   {"op": "call", "name": "Eduardo"}, then {"op": "hangup"}
+//	app -> service, text:   {"op": "call", "name": "Eduardo"} or {"op": "answer", "call_id": "..."},
+//	                        then {"op": "hangup"}
 //	service -> app, text:   {"event": "ringing" | "connected" | "ended", "reason": "...", "error": "..."}
 //	both ways, binary:      16 kHz mono s16le PCM (the mic out, the other person in)
 //
 // Closing the socket hangs up. Only people on the approved list can be called.
+//
+// The app also keeps /events open: an approved person calling is held ringing and reported as
+// {"event": "incoming", "call_id": "...", "name": "..."} (then {"event": "incoming_ended", ...} if it stops
+// ringing unanswered); the app answers it on /call or sends {"op": "decline", "call_id": "..."} here.
+// Anyone not approved, a call while another is on, or a call nobody is listening for is declined.
 type service struct {
 	wa     *whatsmeow.Client
 	client *meowcaller.Client
 	token  []byte
 	mu     sync.Mutex
 	busy   bool
+	// The app's /events socket, and incoming calls held ringing for it (by call id).
+	listener *websocket.Conn
+	ringing  map[string]*ringingCall
+}
+
+type ringingCall struct {
+	call *meowcaller.Call
+	name string
 }
 
 func serve(ctx context.Context, addr string) error {
@@ -67,21 +81,12 @@ func serve(ctx context.Context, addr string) error {
 		return err
 	}
 	defer wa.Disconnect()
-	svc := &service{wa: wa, client: client, token: token}
-	client.OnIncomingCall(func(c *meowcaller.Call) {
-		// Stage 3 announces and answers approved callers; until then every incoming call is declined.
-		name := "someone not approved"
-		if approved, err := loadApproved(); err == nil {
-			if found := approvedName(ctx, wa, approved, c.Peer()); found != "" {
-				name = found
-			}
-		}
-		log.Info().Str("from", name).Msg("incoming call declined (not answered yet)")
-		_ = c.Reject()
-	})
+	svc := &service{wa: wa, client: client, token: token, ringing: map[string]*ringingCall{}}
+	client.OnIncomingCall(func(c *meowcaller.Call) { svc.onIncoming(ctx, c) })
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/call", func(w http.ResponseWriter, r *http.Request) { svc.handleCall(ctx, w, r) })
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) { svc.handleEvents(ctx, w, r) })
 	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -119,6 +124,122 @@ func loadToken() ([]byte, error) {
 	return []byte(token), nil
 }
 
+func (s *service) authorized(r *http.Request) bool {
+	given := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return subtle.ConstantTimeCompare([]byte(given), s.token) == 1
+}
+
+// notify sends one event to the app's /events socket, if it is open.
+func (s *service) notify(ctx context.Context, event map[string]string) bool {
+	s.mu.Lock()
+	listener := s.listener
+	s.mu.Unlock()
+	if listener == nil {
+		return false
+	}
+	payload, _ := json.Marshal(event)
+	write, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return listener.Write(write, websocket.MessageText, payload) == nil
+}
+
+// onIncoming holds an approved person's call ringing for the app, and declines every other.
+func (s *service) onIncoming(ctx context.Context, c *meowcaller.Call) {
+	log := zerolog.Ctx(ctx)
+	name := ""
+	if approved, err := loadApproved(); err == nil {
+		name = approvedName(ctx, s.wa, approved, c.Peer())
+	}
+	if name == "" {
+		log.Info().Msg("incoming call from someone not approved; declined")
+		_ = c.Reject()
+		return
+	}
+	s.mu.Lock()
+	busy, listening := s.busy || len(s.ringing) > 0, s.listener != nil
+	if !busy && listening {
+		s.ringing[c.ID()] = &ringingCall{call: c, name: name}
+	}
+	s.mu.Unlock()
+	if busy || !listening {
+		log.Info().Str("from", name).Bool("busy", busy).Bool("app_listening", listening).Msg("incoming call declined")
+		_ = c.Reject()
+		return
+	}
+	stopRinging := func(reason string) {
+		if s.takeRinging(c.ID()) != nil {
+			log.Info().Str("from", name).Str("reason", reason).Msg("incoming call stopped ringing")
+			s.notify(ctx, map[string]string{"event": "incoming_ended", "call_id": c.ID(), "reason": reason})
+		}
+	}
+	c.OnEnd(func(string) { stopRinging("caller_hung_up") })
+	time.AfterFunc(unansweredLimit, func() {
+		if s.takeRinging(c.ID()) != nil {
+			_ = c.Reject()
+			log.Info().Str("from", name).Msg("incoming call not answered; declined")
+			s.notify(ctx, map[string]string{"event": "incoming_ended", "call_id": c.ID(), "reason": "not_answered"})
+		}
+	})
+	log.Info().Str("from", name).Msg("incoming call ringing")
+	if !s.notify(ctx, map[string]string{"event": "incoming", "call_id": c.ID(), "name": name}) {
+		stopRinging("app_unreachable")
+		_ = c.Reject()
+	}
+}
+
+// takeRinging removes and returns an incoming call held ringing, or nil.
+func (s *service) takeRinging(callID string) *ringingCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.ringing[callID]
+	delete(s.ringing, callID)
+	return held
+}
+
+// handleEvents keeps the app's event socket: incoming calls go out on it, declines come back.
+func (s *service) handleEvents(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	s.mu.Lock()
+	previous := s.listener
+	s.listener = conn
+	s.mu.Unlock()
+	if previous != nil {
+		_ = previous.Close(websocket.StatusGoingAway, "replaced")
+	}
+	defer func() {
+		s.mu.Lock()
+		if s.listener == conn {
+			s.listener = nil
+		}
+		s.mu.Unlock()
+	}()
+	for {
+		kind, data, err := conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		var op struct {
+			Op     string `json:"op"`
+			CallID string `json:"call_id"`
+		}
+		if kind != websocket.MessageText || json.Unmarshal(data, &op) != nil || op.Op != "decline" {
+			continue
+		}
+		if held := s.takeRinging(op.CallID); held != nil {
+			_ = held.call.Reject()
+			zerolog.Ctx(ctx).Info().Str("from", held.name).Msg("incoming call declined by the app")
+		}
+	}
+}
+
 func (s *service) claim() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,8 +258,7 @@ func (s *service) release() {
 
 func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(ctx)
-	given := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if subtle.ConstantTimeCompare([]byte(given), s.token) != 1 {
+	if !s.authorized(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -162,10 +282,24 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 
 	kind, first, err := conn.Read(ctx)
 	var request struct {
-		Op   string `json:"op"`
-		Name string `json:"name"`
+		Op     string `json:"op"`
+		Name   string `json:"name"`
+		CallID string `json:"call_id"`
 	}
-	if err != nil || kind != websocket.MessageText || json.Unmarshal(first, &request) != nil || request.Op != "call" {
+	if err != nil || kind != websocket.MessageText || json.Unmarshal(first, &request) != nil {
+		send(map[string]string{"event": "ended", "reason": "failed", "error": "expected a call request"})
+		return
+	}
+	if request.Op == "answer" {
+		held := s.takeRinging(request.CallID)
+		if held == nil {
+			send(map[string]string{"event": "ended", "reason": "failed", "error": "that call is no longer ringing"})
+			return
+		}
+		s.runMedia(ctx, conn, send, held.call, held.name, false)
+		return
+	}
+	if request.Op != "call" {
 		send(map[string]string{"event": "ended", "reason": "failed", "error": "expected a call request"})
 		return
 	}
@@ -193,7 +327,15 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 	}
 	log.Info().Str("to", target.Name).Msg("ringing")
 	send(map[string]string{"event": "ringing"})
+	s.runMedia(ctx, conn, send, call, target.Name, true)
+}
 
+// runMedia carries one call's audio between the app and WhatsApp until it ends. An incoming call is
+// answered here, once its handlers are attached.
+func (s *service) runMedia(
+	ctx context.Context, conn *websocket.Conn, send func(map[string]string), call *meowcaller.Call, name string, outgoing bool,
+) {
+	log := zerolog.Ctx(ctx)
 	mic := &pcmSource{}
 	// REACHY_CALLS_RECORD_DIR=<dir> keeps both directions of each call as WAV files, for checking the audio
 	// by hand: delete them after.
@@ -236,7 +378,7 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 		limit = time.AfterFunc(callLimit, hangUp)
 		mu.Unlock()
 		call.Play(mic)
-		log.Info().Str("with", target.Name).Msg("connected")
+		log.Info().Str("with", name).Msg("connected")
 		send(map[string]string{"event": "connected"})
 	})
 	call.OnEnd(func(reason string) {
@@ -245,6 +387,14 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 		default:
 		}
 	})
+	if !outgoing {
+		if err := call.Answer(); err != nil {
+			log.Warn().Err(err).Str("from", name).Msg("answer failed")
+			send(map[string]string{"event": "ended", "reason": "failed", "error": "answer failed"})
+			return
+		}
+		log.Info().Str("from", name).Msg("answered")
+	}
 
 	// The app's audio and requests; a closed socket hangs up.
 	go func() {
@@ -286,7 +436,7 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 		limit.Stop()
 	}
 	mu.Unlock()
-	log.Info().Str("with", target.Name).Str("reason", reason).Msg("call ended")
+	log.Info().Str("with", name).Str("reason", reason).Msg("call ended")
 	send(map[string]string{"event": "ended", "reason": reason})
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 }

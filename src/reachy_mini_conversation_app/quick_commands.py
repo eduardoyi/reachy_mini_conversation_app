@@ -43,14 +43,6 @@ from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
 logger = logging.getLogger(__name__)
 
 
-def _read_secret(path: str) -> str | None:
-    """Return the first line of a private file, or None when it is missing or empty."""
-    try:
-        return open(path).read().strip() or None
-    except OSError:
-        return None
-
-
 LANGUAGES: Final[tuple[str, ...]] = ("en", "es", "it", "pt")
 # A request longer than this is a conversation, not a command.
 MAX_COMMAND_WORDS: Final[int] = 14
@@ -407,6 +399,21 @@ _CALL = {
     "it": r"(?:chiama|chiamiamo|chiamare|fai una chiamata)(?: a| al)? (?P<to>.+)",
     "pt": r"(?:liga|ligar|vamos ligar|faz uma chamada)(?: para| pro| pra| a| ao)? (?P<to>.+)",
 }
+# "Answer", "contesta": pick up the call ringing now (only while one rings; anything else is the conversation's).
+# An antenna bend while it rings asks for the English one (CALL_ANSWER_REQUEST).
+_ANSWER_CALL = {
+    "en": r"(?:answer|pick up|take)(?: it| the call| the phone| that)?",
+    "es": r"(?:contesta|contestale|contestar|atiende|atiendela|atender|coge(?:la)?|agarra)(?: la llamada| el telefono)?",
+    "it": r"(?:rispondi|rispondere)(?: alla chiamata| al telefono)?",
+    "pt": r"(?:atende|atender)(?: a chamada| o telefone)?",
+}
+_YES_WORDS = frozenset(
+    {"yes", "yeah", "yep", "sure", "ok", "okay", "yes please", "si", "si si", "claro", "dale", "vale", "bueno",
+     "sim", "pode", "certo", "va bene", "certo che si"}
+)  # fmt: skip
+_NO_WORDS = frozenset(
+    {"no", "nope", "not now", "no thanks", "ahora no", "no gracias", "nao", "agora nao", "non", "adesso no"}
+)
 # "Richie, head test": spoken cues to tap, press and pat his head while the movement loop records it.
 _HEAD_TEST = {
     "en": r"(?:do |start |run |lets do )?(?:the |a )?head (?:touch )?test",
@@ -435,6 +442,7 @@ _VOLUME_SET_RE = {language: _full(pattern) for language, pattern in _VOLUME_SET.
 _PHOTO_RE = {language: _full(pattern) for language, pattern in _PHOTO.items()}
 _HEAD_TEST_RE = {language: _full(pattern) for language, pattern in _HEAD_TEST.items()}
 _CALL_RE = {language: _full(pattern) for language, pattern in _CALL.items()}
+_ANSWER_CALL_RE = {language: _full(pattern) for language, pattern in _ANSWER_CALL.items()}
 _SEND_TO_RE = {
     kind: {language: [_full(pattern) for pattern in patterns] for language, patterns in table.items()}
     for kind, table in _SEND_TO.items()
@@ -595,6 +603,9 @@ def _parse(text: str) -> QuickCommand | None:
     found = _first_match(_HEAD_TEST_RE, command)
     if found:
         return QuickCommand("head_test", found[0])
+    found = _first_match(_ANSWER_CALL_RE, command)
+    if found:
+        return QuickCommand("answer_call", found[0])
     found = _first_match(_CALL_RE, command)
     if found:
         return QuickCommand("call", found[0], {"to": found[1].group("to").strip()})
@@ -897,6 +908,37 @@ CALL_FAILED: Final[dict[str, str]] = {
     "es": "No pude llamar a {name}.",
     "it": "Non sono riuscito a chiamare {name}.",
     "pt": "Não consegui ligar a {name}.",
+}
+CALL_ANSWER_REQUEST: Final[str] = "Reachy, answer"
+INCOMING_CALL: Final[dict[str, str]] = {
+    "en": "{name} is calling!",
+    "es": "¡Te llama {name}!",
+    "it": "Ti chiama {name}!",
+    "pt": "{name} está a ligar!",
+}
+INCOMING_CALL_HEADER: Final[dict[str, str]] = {
+    "en": "Calling",
+    "es": "Llamada de",
+    "it": "Chiamata da",
+    "pt": "Chamada de",
+}
+INCOMING_CALL_HINT: Final[dict[str, str]] = {
+    "en": "Say yes, or bend an antenna",
+    "es": "Di sí, o dobla una antena",
+    "it": "Di sì, o piega un'antenna",
+    "pt": "Diz sim, ou dobra uma antena",
+}
+CALL_DECLINED: Final[dict[str, str]] = {
+    "en": "Okay, I won't answer.",
+    "es": "Vale, no contesto.",
+    "it": "Va bene, non rispondo.",
+    "pt": "Está bem, não atendo.",
+}
+CALL_ANSWER_FAILED: Final[dict[str, str]] = {
+    "en": "I couldn't answer the call.",
+    "es": "No pude contestar la llamada.",
+    "it": "Non sono riuscito a rispondere.",
+    "pt": "Não consegui atender a chamada.",
 }
 CALL_PARENTS_ONLY: Final[dict[str, str]] = {
     "en": "Only Mom or Dad can start a call.",
@@ -1243,6 +1285,8 @@ class QuickCommands:
             return self._head_test(command.language)
         if kind == "call":
             return await self._call(command.language, command.args["to"])
+        if kind == "answer_call":
+            return self._answer_call(command.language)
         if kind == "write":
             writing = getattr(self._deps, "writing", None)
             if writing is None or writing.start(command.args["text"]) is not None:
@@ -1322,12 +1366,12 @@ class QuickCommands:
     async def _call(self, language: str, to: str) -> QuickReply | None:
         """Call ``to`` on WhatsApp through Reachy, when a parent is in front of him and ``to`` is approved."""
         from reachy_mini_conversation_app.config import config
-        from reachy_mini_conversation_app.whatsapp_calls import CallLink, load_callees
+        from reachy_mini_conversation_app.whatsapp_calls import load_callees
 
+        calls = self._deps.calls
         stream = self._deps.stream_call
-        token = _read_secret(config.WHATSAPP_CALLS_TOKEN_FILE)
         contact = find_contact(to, load_callees(config.WHATSAPP_CALLS_APPROVED_FILE, normalize))
-        if stream is None or token is None or contact is None:
+        if calls is None or stream is None or contact is None:
             return None  # not set up, or not someone he may call: the conversation answers
         if not await self._parent_in_front(config.WHATSAPP_CALLERS):
             logger.info("Call refused: no allowed caller in front of the camera")
@@ -1336,15 +1380,11 @@ class QuickCommands:
 
         async def place_call() -> str:
             try:
-                link = await CallLink.open(config.WHATSAPP_CALLS_URL, token, name)
+                link = await calls.place(name)
             except OSError as error:
                 logger.warning("Call not placed: %s", error)
                 return CALL_FAILED[language].format(name=name)
-            try:
-                await stream(link)
-            finally:
-                await link.close()
-            logger.info("Call finished connected=%s reason=%s", link.connected, link.reason)
+            await self._stream_call(link)
             if link.connected:
                 return CALL_ENDED[language]
             if link.reason in ("no_answer", "declined"):
@@ -1359,6 +1399,57 @@ class QuickCommands:
             after_timeout_s=CALL_STEP_TIMEOUT_S,
             whole_request=True,
         )
+
+    def _answer_call(self, language: str) -> QuickReply | None:
+        """Answer the call ringing now through Reachy; None when nothing rings (the conversation answers)."""
+        calls = self._deps.calls
+        if calls is None or self._deps.stream_call is None or calls.ringing is None:
+            return None
+
+        async def take_call() -> str:
+            try:
+                link = await calls.answer()
+            except OSError as error:
+                logger.warning("Call not answered: %s", error)
+                return CALL_ANSWER_FAILED[language]
+            if link is None:
+                return CALL_ANSWER_FAILED[language]  # it stopped ringing meanwhile
+            await self._stream_call(link)
+            return CALL_ENDED[language] if link.connected else CALL_ANSWER_FAILED[language]
+
+        return QuickReply(
+            None, language, "answer_call", after=take_call, after_timeout_s=CALL_STEP_TIMEOUT_S, whole_request=True
+        )
+
+    async def answer_incoming(self, text: str) -> QuickReply | None:
+        """Handle the reply to "Eduardo is calling!": yes answers, no declines, anything else leaves it ringing."""
+        from reachy_mini_conversation_app.config import config
+
+        calls = self._deps.calls
+        if calls is None or calls.ringing is None:
+            return None
+        # Replies go in the announcement's language: a bare "no" or "sí" says little about the speaker's.
+        language = config.WHATSAPP_CALLS_LANGUAGE if config.WHATSAPP_CALLS_LANGUAGE in CALL_DECLINED else "es"
+        words = strip_politeness(normalize(text))
+        command = parse(text)
+        if words in _YES_WORDS or (command is not None and command.kind == "answer_call"):
+            return self._answer_call(language)
+        if words in _NO_WORDS or (command is not None and command.kind in ("cancel", "stop")):
+            calls.decline()
+            return QuickReply(CALL_DECLINED[language], language, "answer_call")
+        return None
+
+    async def _stream_call(self, link: Any) -> None:
+        """Carry ``link`` through Reachy until it ends, then close it."""
+        calls, stream = self._deps.calls, self._deps.stream_call
+        try:
+            if stream is not None:
+                await stream(link)
+        finally:
+            await link.close()
+            if calls is not None:
+                calls.finished(link)
+        logger.info("Call finished connected=%s reason=%s", link.connected, link.reason)
 
     async def _parent_in_front(self, allowed: frozenset[str]) -> bool:
         """Return whether face recognition sees one of ``allowed`` within ``CALLER_CHECK_S``."""

@@ -1,6 +1,6 @@
 # Feature: WhatsApp calls through Reachy
 
-- Status: `in-progress` (stage 2: outgoing calls through Reachy's speaker and mic; incoming calls are declined)
+- Status: `in-progress` (stage 3: calls both ways through Reachy's speaker and mic; live check of incoming pending)
 - Last updated: 2026-10-30
 - Plan: [WhatsApp voice calls through Reachy](../plans/whatsapp-calls.md)
 
@@ -8,8 +8,9 @@
 
 "Richie, call Eduardo" rings that person's WhatsApp from Reachy's spare number. When they answer, their
 voice comes out of Reachy, his head moving with it as when he speaks, and his microphone carries the room
-back. Calls go only to people on an approved list, and only Eduardo or Adriana can start one. Incoming
-calls are not answered yet (stage 3); video, group calls and recording are out of scope.
+back. Approved people can call Reachy too: he announces them and the TRMNL shows who is calling. Calls go
+only to and from people on an approved list, and only Eduardo or Adriana can start one. Video, group calls
+and recording are out of scope.
 
 ## User-facing behavior
 
@@ -33,9 +34,16 @@ calls are not answered yet (stage 3); video, group calls and recording are out o
 - **Sound:** while the room is quiet, what Reachy sends is turned down to a tenth (a noise gate: the idle
   room's hiss was heard as rustling), opening at once when someone speaks. The other side plays at most
   about a third of full scale (a limiter: shouting on the phone cut Reachy's speaker out).
-- **Ending:** the other person hangs up, or 60 min pass. Then "Call ended." Unanswered: "Eduardo didn't
-  answer." Service down or refused: "I couldn't call Eduardo." (Hanging up from Reachy's side, by an
-  antenna bend, is stage 3.)
+- **Ending:** either side hangs up (on Reachy: bend an antenna), or 60 min pass. Then "Call ended."
+  Unanswered: "Eduardo didn't answer." Service down or refused: "I couldn't call Eduardo."
+- **Being called:** an approved person calling the spare number rings for up to 60 s. The TRMNL shows a
+  caller card ("Llamada de / Eduardo / Di sí, o dobla una antena") while it rings. Awake, Reachy says
+  "¡Te llama Eduardo!" (`WHATSAPP_CALLS_LANGUAGE`, default Spanish) and listens once without the name:
+  "sí / yes / dale…" answers, "no" declines ("Vale, no contesto."), anything else leaves it ringing.
+  Anyone may answer, kids included; "contesta / answer / atiende / rispondi / atende" also answer while it
+  rings, and so does an antenna bend. A conversation open when it rings closes so he can announce it.
+  Asleep (night, naps): no voice, only the caller card and a small repeating antenna wiggle; a bend still
+  answers. Not approved, another call on, or the app not listening: declined by the service.
 - **Disabled:** without the service's token file (`WHATSAPP_CALLS_TOKEN_FILE`) or without the approved
   list, "call x" is not a call.
 
@@ -71,6 +79,13 @@ flowchart LR
   (`identify_now`), the replies (`CALLING`, `CALL_ENDED`, `CALL_NO_ANSWER`, `CALL_FAILED`,
   `CALL_PARENTS_ONLY`), and a step timeout of ringing plus 60 min.
 - Audio on the wire: 16 kHz mono 16-bit PCM both ways; meowcaller sends 960-sample (60 ms) frames.
+- Incoming: the service holds an approved caller ringing and reports it on `/events` (kept open by
+  `whatsapp_calls.CallManager` from its own thread, reconnecting every 5 s); the app answers with
+  `{"op": "answer", "call_id"}` on `/call` or declines on `/events`. `main._start_calls` shows the caller card,
+  announces through `HybridRuntime.request_announcement` with `QuickCommands.answer_incoming`, or wiggles
+  the antennas (`set_listening`) while asleep. The antenna-touch handler asks `CallManager.antenna_touched()`
+  first: during a call it hangs up; while one rings it activates with `CALL_ANSWER_REQUEST`; otherwise the
+  usual wake.
 
 ## Configuration
 
@@ -80,6 +95,7 @@ flowchart LR
 | `WHATSAPP_CALLS_TOKEN_FILE` | `~/.local/share/reachy-whatsapp-calls/token` | Its token; no calls without it |
 | `WHATSAPP_CALLS_APPROVED_FILE` | `~/.config/reachy-whatsapp/calls.json` | `{"approved": [{"name": "…", "phone": "+…", "say": ["…"]}]}`; shared with the service |
 | `WHATSAPP_CALLERS` | `eduardo,adriana` | Face ids that may start a call |
+| `WHATSAPP_CALLS_LANGUAGE` | `es` | The language incoming calls are announced (and answered) in |
 
 ## Privacy and safety
 
@@ -102,9 +118,15 @@ flowchart LR
 - `tests/test_quick_commands.py`: "call x" in four languages, a parent calling, a kid or nobody refused,
   a name not approved left to the conversation, no answer and failure replies, no token no call.
 - `tools/whatsapp-calls/main_test.go`: the approved list, the mic source's silence and drop-oldest.
+- Incoming (`tests/test_whatsapp_calls.py`): a ringing call answered on its call id without a ringback, a
+  decline sent back and an abandoned call cleared, an antenna bend hanging a call up;
+  (`tests/test_quick_commands.py`): "answer" in four languages, answering only while it rings, "sí" answers
+  and "no" declines after the announcement.
 
 ## Changelog
 
+- 2026-10-30: Stage 3: incoming calls from approved people, announced with a caller card on the TRMNL,
+  answered by voice or an antenna bend, a silent ring while asleep; an antenna bend hangs up any call.
 - 2026-10-30: A ringback tone while it rings (the household could not tell ringing from answered).
 - 2026-10-30: A noise gate on what Reachy sends, a limiter on what he plays, and `call_person` for Gemini.
   The recorded call (both directions, deleted after) showed no echo of the caller's voice in what Reachy

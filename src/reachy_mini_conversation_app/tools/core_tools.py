@@ -71,6 +71,8 @@ class ToolDependencies:
     stream_call: Callable[[Any], Awaitable[bool]] | None = None
     # Close the conversation after Reachy's reply, then handle this request locally (HybridRuntime.request_after_close).
     request_after_close: Callable[[str], bool] | None = None
+    # The local WhatsApp call service (whatsapp_calls.CallManager), when its token is on this computer.
+    calls: Any = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).

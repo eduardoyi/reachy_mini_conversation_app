@@ -195,3 +195,113 @@ async def test_it_rings_until_answered_then_plays_the_other_side() -> None:
     tones = [chunk for chunk in chunks if chunk.size == 3_200]
     assert 2 <= len(tones) <= 6  # about 0.5 s of ringing, plus the lead
     assert chunks[-1].size == 960 and chunks[: len(tones)] == tones
+
+
+@pytest.mark.asyncio
+async def test_an_incoming_call_rings_then_is_answered_without_a_ringback() -> None:
+    """The events socket reports the caller; answering opens /call for that call id and plays no ringback."""
+    import threading
+
+    from reachy_mini_conversation_app.whatsapp_calls import Incoming, CallManager
+
+    requests: list[Any] = []
+    rang = threading.Event()
+    seen: list[Incoming] = []
+
+    async def service(socket: Any) -> None:
+        if socket.request.path == "/events":
+            await socket.send(json.dumps({"event": "incoming", "call_id": "C1", "name": "Test Person"}))
+            await socket.wait_closed()
+            return
+        requests.append(json.loads(await socket.recv()))
+        await socket.send(json.dumps({"event": "connected"}))
+        await socket.send(np.full(960, 500, dtype="<i2").tobytes())
+        await socket.send(json.dumps({"event": "ended", "reason": "ended"}))
+
+    server, url = await _with_service(service)
+    calls = CallManager(url, "secret")
+    calls.on_incoming = lambda incoming: (seen.append(incoming), rang.set())
+    try:
+        calls.start()
+        assert await asyncio.to_thread(rang.wait, 3)
+        assert calls.ringing == Incoming("C1", "Test Person") and seen == [calls.ringing]
+        assert calls.antenna_touched() == "answer"  # ringing: the caller answers it
+        link = await calls.answer()
+        assert link is not None and calls.ringing is None and calls.on_a_call
+        chunks = [chunk async for chunk in link.received()]
+        await link.close()
+        calls.finished(link)
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert requests == [{"op": "answer", "call_id": "C1"}]
+    assert [chunk.size for chunk in chunks] == [960]  # the caller's audio only, no ringback
+    assert not calls.on_a_call and calls.antenna_touched() is None
+
+
+@pytest.mark.asyncio
+async def test_a_declined_or_abandoned_incoming_call_stops_ringing() -> None:
+    """Declining sends the call id back on the events socket; the caller hanging up clears the ringing too."""
+    import threading
+
+    from reachy_mini_conversation_app.whatsapp_calls import CallManager
+
+    declines: list[Any] = []
+    first, second, ended = threading.Event(), threading.Event(), threading.Event()
+
+    async def service(socket: Any) -> None:
+        await socket.send(json.dumps({"event": "incoming", "call_id": "C1", "name": "Test Person"}))
+        declines.append(json.loads(await socket.recv()))
+        await socket.send(json.dumps({"event": "incoming", "call_id": "C2", "name": "Test Person"}))
+        await asyncio.sleep(0.1)
+        await socket.send(json.dumps({"event": "incoming_ended", "call_id": "C2", "reason": "caller_hung_up"}))
+        await socket.wait_closed()
+
+    server, url = await _with_service(service)
+    calls = CallManager(url, "secret")
+    calls.on_incoming = lambda incoming: (first if incoming.call_id == "C1" else second).set()
+    calls.on_ringing_ended = lambda incoming: ended.set() if incoming.call_id == "C2" else None
+    try:
+        calls.start()
+        assert await asyncio.to_thread(first.wait, 3)
+        assert calls.decline() is not None and calls.ringing is None
+        assert await asyncio.to_thread(second.wait, 3)
+        assert await asyncio.to_thread(ended.wait, 3)
+        assert calls.ringing is None and calls.decline() is None
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert declines == [{"op": "decline", "call_id": "C1"}]
+
+
+@pytest.mark.asyncio
+async def test_an_antenna_bend_during_a_call_hangs_it_up() -> None:
+    """With a call on, the bend sends the hang-up and is not a wake."""
+    from reachy_mini_conversation_app.whatsapp_calls import CallManager
+
+    got: list[Any] = []
+
+    async def service(socket: Any) -> None:
+        if socket.request.path == "/events":
+            await socket.wait_closed()
+            return
+        await socket.recv()
+        await socket.send(json.dumps({"event": "connected"}))
+        got.append(json.loads(await asyncio.wait_for(socket.recv(), 2)))
+
+    server, url = await _with_service(service)
+    calls = CallManager(url, "secret")
+    try:
+        link = await calls.place("Test Person")
+        while not link.connected:
+            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(calls.antenna_touched) == "hang_up"
+        for _ in range(100):
+            if got:
+                break
+            await asyncio.sleep(0.02)
+        await link.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert got == [{"op": "hangup"}]
