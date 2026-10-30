@@ -910,6 +910,11 @@ CALL_FAILED: Final[dict[str, str]] = {
     "pt": "Não consegui ligar a {name}.",
 }
 CALL_ANSWER_REQUEST: Final[str] = "Reachy, answer"
+# While a call rings: when Reachy announces it (again, in case the first "sí" was not heard, as on
+# 2026-10-30), how long it may ring, and how long a pat keeps trying to answer while he finishes talking.
+CALL_ANNOUNCE_AT_S: Final[tuple[float, ...]] = (0.0, 15.0, 30.0)
+CALL_RING_MAX_S: Final[float] = 75.0
+CALL_ANSWER_RETRY_S: Final[float] = 10.0
 INCOMING_CALL: Final[dict[str, str]] = {
     "en": "{name} is calling!",
     "es": "¡Te llama {name}!",
@@ -923,10 +928,10 @@ INCOMING_CALL_HEADER: Final[dict[str, str]] = {
     "pt": "Chamada de",
 }
 INCOMING_CALL_HINT: Final[dict[str, str]] = {
-    "en": "Say yes, or bend an antenna",
-    "es": "Di sí, o dobla una antena",
-    "it": "Di sì, o piega un'antenna",
-    "pt": "Diz sim, ou dobra uma antena",
+    "en": "Say yes, or pat my head",
+    "es": "Di sí, o tócame la cabeza",
+    "it": "Di sì, o toccami la testa",
+    "pt": "Diz sim, ou toca-me na cabeça",
 }
 CALL_DECLINED: Final[dict[str, str]] = {
     "en": "Okay, I won't answer.",

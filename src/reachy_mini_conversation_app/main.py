@@ -187,10 +187,12 @@ def _build_now_playing(display: Any) -> Any:
 def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
     """Start the WhatsApp call manager when the call service is set up; announce incoming calls.
 
-    Awake: "Te llama Eduardo" and a yes (or an antenna bend) answers. Asleep: no voice, only the caller id
-    on the screen and a small antenna wiggle; a bend answers. A conversation open when a call comes in closes.
+    Awake: "Te llama Eduardo" (again after 15 and 30 s) and a yes answers. Asleep: no voice, only the caller id
+    on the screen and a small antenna wiggle. A pat on his head (held still while it rings) or an antenna bend
+    answers either way. A conversation open when a call comes in closes.
     """
     from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.incoming_calls import IncomingRinger
     from reachy_mini_conversation_app.whatsapp_calls import Incoming, CallManager
 
     logger = logging.getLogger(__name__)
@@ -206,15 +208,7 @@ def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
     calls = CallManager(config.WHATSAPP_CALLS_URL, token)
     deps.calls = calls
     language = config.WHATSAPP_CALLS_LANGUAGE if config.WHATSAPP_CALLS_LANGUAGE in words.INCOMING_CALL else "es"
-    wiggling = threading.Event()
-
-    def wiggle() -> None:
-        """Perk and release the antennas while it rings silently."""
-        while wiggling.is_set():
-            movement.set_listening(True)
-            time.sleep(0.8)
-            movement.set_listening(False)
-            time.sleep(1.6)
+    ringer = IncomingRinger(calls, runtime, movement, deps.reachy_mini, quick, language)
 
     def on_incoming(incoming: Incoming) -> None:
         display = deps.display
@@ -225,16 +219,12 @@ def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
                 incoming.name, header=words.INCOMING_CALL_HEADER[language], meaning=words.INCOMING_CALL_HINT[language]
             )
             display.show(card, owner="call", expires_after_s=75.0)
-        if runtime.asleep:
-            wiggling.set()
-            threading.Thread(target=wiggle, daemon=True, name="call-ring").start()
-            return
-        runtime.request_close("incoming_call")
-        answer = quick.answer_incoming if quick is not None else None
-        runtime.request_announcement(words.INCOMING_CALL[language].format(name=incoming.name), language, answer=answer)
+        if not runtime.asleep:
+            runtime.request_close("incoming_call")
+        ringer.start(incoming)
 
     def on_ringing_ended(_incoming: Incoming) -> None:
-        wiggling.clear()
+        ringer.stop()
         display = deps.display
         if display is not None and display.owner() == "call":
             display.show_home()
