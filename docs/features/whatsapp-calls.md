@@ -19,8 +19,8 @@ calls are not answered yet (stage 3); video, group calls and recording are out o
   the first try). It is a call only when the name is on the approved list (its name or a `say`
   name); anything else ("call grandma", "llama la atención") goes to the conversation, which has no way to
   place a call.
-- **Who may ask:** face recognition must see Eduardo or Adriana (`WHATSAPP_CALLERS`) in front of the camera
-  at that moment. Anyone else, or nobody recognized, hears "Only Mom or Dad can start a call." and nothing
+- **Who may ask:** face recognition must see Eduardo or Adriana (`WHATSAPP_CALLERS`) in front of the camera,
+  looking for up to 3 s (`CALLER_CHECK_S`; one frame just after waking was too unsure on 2026-10-30). Anyone else, or nobody recognized, hears "Only Mom or Dad can start a call." and nothing
   is dialed.
 - **The call:** "Calling Eduardo!", then it rings (silently on Reachy's side) for up to 60 s. Once
   answered, the other side plays from Reachy's speaker and his head wobbles with it; his mic goes to the
@@ -87,6 +87,10 @@ flowchart LR
 
 ## Changelog
 
+- 2026-10-30: First call through Reachy (78 s, Eduardo): the other side clear through Reachy, no delay,
+  the head moving with the voice; Reachy's side to the phone "rustling"; very loud speech on the phone
+  side cut the audio from Reachy's speaker. The face check now looks for 3 s; `REACHY_CALLS_RECORD_DIR`
+  records both directions of a call for checking these by hand.
 - 2026-10-30: "calla" and "col" accepted for "call" (the first live try was heard as both).
 - 2026-10-30: Stage 2: outgoing calls through Reachy (service mode, `CallLink`, `stream_call`, "call x"
   with the face check).

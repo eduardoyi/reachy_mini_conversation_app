@@ -195,6 +195,20 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 	send(map[string]string{"event": "ringing"})
 
 	mic := &pcmSource{}
+	// REACHY_CALLS_RECORD_DIR=<dir> keeps both directions of each call as WAV files, for checking the audio
+	// by hand: delete them after.
+	var heard meowcaller.AudioSink
+	if dir := strings.TrimSpace(os.Getenv("REACHY_CALLS_RECORD_DIR")); dir != "" {
+		stamp := time.Now().Format("150405")
+		if sink, err := meowcaller.WAVRecorder(filepath.Join(dir, stamp+"-in.wav")); err == nil {
+			heard = sink
+			defer sink.Close()
+		}
+		if sink, err := meowcaller.WAVRecorder(filepath.Join(dir, stamp+"-out.wav")); err == nil {
+			mic.record = sink
+			defer sink.Close()
+		}
+	}
 	ended := make(chan string, 1)
 	var mu sync.Mutex
 	connected, hungUp := false, false
@@ -208,6 +222,9 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 	defer unanswered.Stop()
 	var limit *time.Timer
 	call.Receive(meowcaller.SinkFunc(func(frame []float32) {
+		if heard != nil {
+			_ = heard.WriteFrame(frame)
+		}
 		write, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		_ = conn.Write(write, websocket.MessageBinary, pcm16(frame))
@@ -276,8 +293,9 @@ func (s *service) handleCall(ctx context.Context, w http.ResponseWriter, r *http
 
 // pcmSource plays the app's mic audio into the call, or silence while none has arrived.
 type pcmSource struct {
-	mu  sync.Mutex
-	buf []float32
+	mu     sync.Mutex
+	buf    []float32
+	record meowcaller.AudioSink // what goes out, when the call is recorded for a check
 }
 
 func (s *pcmSource) push(data []byte) {
@@ -300,7 +318,11 @@ func (s *pcmSource) ReadFrame() ([]float32, error) {
 		copy(frame, s.buf)
 		s.buf = s.buf[len(frame):]
 	}
+	record := s.record
 	s.mu.Unlock()
+	if record != nil {
+		_ = record.WriteFrame(frame)
+	}
 	return frame, nil
 }
 
