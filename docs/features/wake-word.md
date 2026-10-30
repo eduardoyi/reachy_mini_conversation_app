@@ -442,6 +442,7 @@ latency remain unmeasured.
 | 2026-09-07 | Marked the Spanish sherpa checkpoint as a historical rejected candidate and linked the custom multilingual openWakeWord training plan; no production acoustic model was selected. |
 | 2026-10-29 | Transcript aliases gain the Spanish spellings `reachi, reechi, richi, ritchy, ricci, ritzi` (official33 scores 0.00 on a Spanish "Ri-chi"); `mentions_wake_word` lets the ambient processor check open segments for the name. See [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
 | 2026-10-29 | `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD` adds a second head on official33's features (a private "Ri-chi" head trained on household clips and macOS voices), scaled onto official33's threshold by `LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD`; the wake log names the head. Results in [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
+| 2026-10-30 | Stricter waking while the TV is on (`HybridRuntime.set_strict_wake`, fed by `AndroidTV.reported_on`): the extra "Richie" head is muted (`OpenWakeWordDetector.set_extra_heads_muted`) and a name in the room transcript is ignored ("TV on; ignoring the name in the room transcript"), so only official33 or an antenna touch wakes him. During *The Silence of the Lambs* the Richie head fired about 80 times in an hour, mostly rejected by the name check, but it and the transcript path woke him about ten times in 35 minutes (on lines like "Clarice…", and "reach" heard in dialogue); official33 never fired on the film. |
 
 ## Custom training preflight evidence
 

@@ -382,6 +382,26 @@ def test_an_extra_head_wakes_at_its_own_threshold(
         assert f"head={head}" in caplog.text
 
 
+def test_muted_extra_heads_do_not_wake_but_the_main_head_still_does() -> None:
+    """With the TV on only the main head counts; unmuted, the extra head wakes again."""
+    muted = True
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        TwoHeadWakeModel([(0.0, 0.9), (0.35, 0.0)]), threshold=0.3, head_scales={"reachy-richi": 0.3 / 0.8}
+    )
+    detector.set_extra_heads_muted(lambda: muted)
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) is None
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=2.0) is not None
+
+    muted = False
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        TwoHeadWakeModel([(0.0, 0.9)]), threshold=0.3, head_scales={"reachy-richi": 0.3 / 0.8}
+    )
+    detector.set_extra_heads_muted(lambda: muted)
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) is not None
+
+
 def test_a_second_output_without_a_configured_head_is_rejected() -> None:
     """One head unless an extra one was configured."""
     detector = acoustic_wake_word.OpenWakeWordDetector(TwoHeadWakeModel([(0.1, 0.1)]))
