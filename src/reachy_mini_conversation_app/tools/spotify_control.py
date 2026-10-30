@@ -238,8 +238,8 @@ class SpotifyDucker:
             return False
         credentials_path, device_id = configuration
         async with self._lock:
-            if not require_playing and not self._session_active:
-                return False  # the conversation ended before music it started could be lowered
+            if not self._session_active:
+                return False  # the conversation ended before the music could be lowered
             try:
                 async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
                     headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}
@@ -294,10 +294,13 @@ class SpotifyDucker:
 
     async def _restore(self) -> None:
         configuration = self._configuration()
-        if configuration is None or (self._restore_to is None and self._paused_episode is None):
+        if configuration is None:
             return
         credentials_path, device_id = configuration
+        # Checked under the lock: a lowering still under way when the conversation ends is restored too.
         async with self._lock:
+            if self._restore_to is None and self._paused_episode is None:
+                return
             for attempt in range(1, self._RESTORE_ATTEMPTS + 1):
                 try:
                     async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:

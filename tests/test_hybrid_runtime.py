@@ -3577,6 +3577,38 @@ def _quick_runtime(
 
 
 @pytest.mark.asyncio
+async def test_a_plain_stop_goes_to_the_quick_command_that_pauses_music() -> None:
+    """With quick commands, "stop" is theirs (it pauses music); the local stop only stops moving."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    seen: list[str] = []
+    movement = MagicMock()
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(
+        lambda: handler,
+        quick_commands=quick,
+        reply_speaker=speak,
+        intent_router=LocalIntentRouter(),
+        action_executor=LocalActionExecutor(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement)),
+    )
+
+    assert await runtime.activate("wake_word", addressed_text="stop")  # the name heard in a sentence
+
+    assert seen == ["stop"]
+    movement.clear_move_queue.assert_not_called()
+    assert not handler.started.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_quick_command_answers_locally_without_opening_the_cloud() -> None:
     """A recognized command runs, its reply is queued for playback, and Gemini never starts."""
     handler = FakeHandler()

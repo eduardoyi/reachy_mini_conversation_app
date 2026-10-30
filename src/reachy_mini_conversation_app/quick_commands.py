@@ -494,8 +494,27 @@ _NOT_A_COMMAND_START = frozenset(
 )  # fmt: skip
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
 def parse(text: str) -> QuickCommand | None:
     """Recognize one everyday command in ``text`` (the request after the wake word), or return None."""
+    found = _parse(text)
+    if found is not None:
+        return found
+    # "Stop. Oké, graag.": music heard as words after a stop (2026-10-30). Only stopping counts on its
+    # first sentence alone, and not when the rest takes it back ("stop. no, keep playing").
+    parts = _SENTENCE_END.split(text.strip(), maxsplit=1)
+    if len(parts) < 2:
+        return None
+    rest = normalize(parts[1]).split()
+    if not rest or rest[0] == "no" or any(word in _NEGATIONS for word in rest):
+        return None
+    head = _parse(parts[0])
+    return head if head is not None and head.kind in ("pause", "stop") else None
+
+
+def _parse(text: str) -> QuickCommand | None:
     command = strip_politeness(normalize(text))
     if not command or len(command.split()) > MAX_COMMAND_WORDS:
         return None

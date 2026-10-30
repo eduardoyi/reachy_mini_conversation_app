@@ -305,6 +305,12 @@ nothing to restore, and the lowering landed afterwards with no restore to follow
 music started in the conversation is skipped once the conversation has ended. Test:
 `test_ducker_leaves_music_from_a_quick_command_at_its_level` (fails on the old code).
 
+Same day, a second gap: a conversation that ended while its lowering at the wake was still waiting
+on Spotify (a local "stop" ends in milliseconds) left the music lowered too. The restore now checks
+for a saved level under the ducker's lock, so it waits for that lowering and undoes it, and no
+lowering starts once the conversation has ended. Test:
+`test_ducker_restores_music_lowered_while_the_conversation_was_ending`.
+
 The music wind-down after Reachy's reply is also shorter: 3 s of quiet instead of 5 s
 (10 s after a question is unchanged), so the music comes back up sooner.
 
