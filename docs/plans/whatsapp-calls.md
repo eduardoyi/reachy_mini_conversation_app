@@ -1,6 +1,6 @@
 # Plan: WhatsApp voice calls through Reachy
 
-- Status: `draft`
+- Status: `in-progress`
 - Owner: household
 - Created: 2026-10-30
 - Last updated: 2026-10-30
@@ -118,15 +118,20 @@ answers when told. Nobody outside the approved list is ever called or answered.
   messages keep working; Reachy says "I can't make calls right now."
 - **Echo:** the chip's echo cancelling may not cover call audio. Stage 2 checks it; fallbacks are a
   lower call volume or half-duplex while the caller speaks.
-- **Audio format:** meowcaller hands over float32 PCM; its sample rate is not documented. Stage 1
-  measures it.
+- **Audio format:** meowcaller sends and receives 16 kHz mono float32 frames of 960 samples (60 ms)
+  (`meowcaller.SampleRate`, `FrameSamples`); the app resamples to and from its own rates.
 - **The spare phone rings too** on every call (linked devices do): keep it muted.
 - **MLow** is WhatsApp's own codec, reimplemented by meowcaller; noted with the dependency review below.
 
 ## Dependencies (review before adding)
 
-- meowcaller (MIT, Go, about 280 stars, no tagged releases, group calls experimental) and its whatsmeow.
-  Network: WhatsApp's servers only. Built from a pinned commit; read its `DISCLAIMER.md` before stage 1.
+- meowcaller (MIT, Go, about 280 stars, no tagged releases, group calls experimental), pinned at
+  `27a3c6b` (2026-08-10), the last commit on upstream whatsmeow (`go.mau.fi/whatsmeow`, MPL-2.0, the
+  library GOWA is built on). Its next commit (2026-09-07) moved to `polymorfa/hypermeow`, a company's
+  fork of whatsmeow for business deployments; not adopted, to keep to the widely used library. Its own
+  CLI example does not build at the newer commit. Network: WhatsApp's servers only. Its `DISCLAIMER.md`
+  (read 2026-10-30) asks for research with one's own accounts and devices, or with the other party's
+  consent in test calls: stage 1 calls only Eduardo's own phone.
 - Go toolchain to build it (on the laptop, cross-compiled for the mini).
 
 ## Tests
@@ -153,6 +158,19 @@ not on the approved list, recording calls.
 - 2026-10-30: Options compared (Twilio phone calls, official WhatsApp Business calling, a call link,
   Telegram, unofficial WhatsApp calls); the household chose a ringing WhatsApp call on the one spare
   number. GOWA's call auto-reject checked off on the mini. Plan drafted; nothing built.
+- 2026-10-30: Stage 1 tool written: `tools/whatsapp-calls/` (Go module, `reachy-calls pair | call |
+  wait`), cross-compiled for the mini (pure Go, no cgo), installed in
+  `~/.local/share/reachy-whatsapp-calls/` (mode 700) with the approved list in
+  `~/.config/reachy-whatsapp/calls.json` (mode 600, Eduardo only) and a `say` test sound. It refuses
+  anyone not on the list, declines unknown callers, logs names never numbers, hangs up after 60 s
+  connected or 60 s unanswered, and prints how much of the other side it heard. Linking to the spare
+  number waits on the spare phone.
+- 2026-10-30: Linked to the spare number with a pairing code (shows as "Google Chrome (Mac OS)"); GOWA
+  stayed connected and logged in. **First call worked:** 12:47 to Eduardo's phone, connected 5 s after
+  ringing, 16.8 s connected, the test sound heard clearly on the phone, 11.1 s of his side received
+  (voice 3.2 s, peak RMS 0.35; the first 3 s of the recording silent). The local transcript of the
+  recording read as his reply that he heard it perfectly; the recording was deleted after the check.
+  Warnings at hang-up only (an SRTCP packet after the end). Calls so far: 1 outgoing, 0 incoming.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
