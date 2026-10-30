@@ -3535,6 +3535,32 @@ async def test_asleep_a_transcript_mention_mid_sentence_does_not_wake_him() -> N
         await runtime.close()
 
 
+@pytest.mark.asyncio
+async def test_with_the_tv_on_a_name_in_the_room_transcript_does_not_wake_him() -> None:
+    """While the TV is on only the wake model wakes him; once it is off the transcript does again."""
+    handler = FakeHandler()
+    detector = OpenWakeWordDetector(AcousticScoreModel())
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector("Reachy", cooldown_seconds=0),
+        acoustic_wake_detector=detector,
+        wake_followup_timeout_s=0.1,
+    )
+    tv_on = True
+    runtime.set_strict_wake(lambda: tv_on)
+    try:
+        assert detector._extra_heads_muted is not None and detector._extra_heads_muted()
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, wake up", 1, 2, 1))
+        await asyncio.sleep(0.05)
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+
+        tv_on = False
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, wake up", 3, 4, 2))
+        await wait_until(lambda: runtime.mode is not RuntimeMode.LOCAL_AMBIENT)
+    finally:
+        await runtime.close()
+
+
 class _QuickReply:
     def __init__(
         self,

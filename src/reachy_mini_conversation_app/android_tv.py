@@ -36,6 +36,9 @@ FIRST_STATE_WAIT_S: Final[float] = 1.5
 # An app that opens shows up as the current app within a few seconds; one that is not installed
 # never does (the TV only logs an error).
 APP_CONFIRM_S: Final[float] = 4.0
+# While the TV is on Reachy is stricter about waking, so ``watch`` keeps a connection open to follow it;
+# while the TV is unreachable it retries this often.
+WATCH_RETRY_S: Final[float] = 60.0
 # Spoken app names -> Android TV package names (also used to name the current app).
 APPS: Final[dict[str, str]] = {
     "youtube": "com.google.android.youtube.tv",
@@ -156,6 +159,32 @@ class AndroidTV:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock: asyncio.Lock | None = None
         self._watch_tasks: set[asyncio.Task[None]] = set()
+        self._available = False
+
+    @property
+    def reported_on(self) -> bool:
+        """Whether the TV says it is on over a live connection; False when unknown or unreachable. Never blocks."""
+        remote = self._remote
+        return remote is not None and self._available and remote.is_on is True
+
+    async def watch(self) -> None:
+        """Stay connected so ``reported_on`` follows the TV, reconnecting while it is unreachable."""
+        while True:
+            if self._remote is None:
+                try:
+                    await self._connected()
+                except TVError as error:
+                    logger.debug("TV not watched yet: %s", error)
+            await asyncio.sleep(WATCH_RETRY_S)
+
+    def _available_updated(self, available: bool) -> None:
+        # A dropped connection keeps the last power state it heard; until it is back the TV counts as off.
+        self._available = available
+        logger.info("TV connection %s", "back" if available else "lost")
+
+    @staticmethod
+    def _is_on_updated(is_on: bool) -> None:
+        logger.info("TV reported %s", "on" if is_on else "off")
 
     async def _connected(self) -> Any:
         loop = asyncio.get_running_loop()
@@ -181,8 +210,11 @@ class AndroidTV:
                 raise TVError("the TV is not paired with Reachy; run the pairing command again") from error
             except (CannotConnect, ConnectionClosed, asyncio.TimeoutError, OSError) as error:
                 raise TVError("the TV is not reachable on the network (is it unplugged?)") from error
+            remote.add_is_available_updated_callback(self._available_updated)
+            remote.add_is_on_updated_callback(self._is_on_updated)
             remote.keep_reconnecting()
             self._remote = remote
+            self._available = True
             await self._wait_for(
                 lambda: remote.is_on is not None and remote.current_app is not None, FIRST_STATE_WAIT_S
             )
@@ -205,6 +237,7 @@ class AndroidTV:
             except Exception:
                 pass
         self._remote = None
+        self._available = False
 
     async def close(self) -> None:
         """Disconnect."""

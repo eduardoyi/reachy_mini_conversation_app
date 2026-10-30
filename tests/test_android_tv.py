@@ -1,5 +1,6 @@
 """Tests for the Android TV client (androidtvremote2 replaced by a fake remote)."""
 
+import asyncio
 from typing import Any
 from pathlib import Path
 
@@ -27,6 +28,13 @@ class _FakeRemote:
         self.connects = 0
         self.disconnected = False
         self.fail_next_send = False
+        self.available_callbacks: list[Any] = []
+
+    def add_is_available_updated_callback(self, callback: Any) -> None:
+        self.available_callbacks.append(callback)
+
+    def add_is_on_updated_callback(self, callback: Any) -> None:
+        pass
 
     async def async_connect(self) -> None:
         self.connects += 1
@@ -219,3 +227,43 @@ async def test_connection_failures_become_tv_errors(error: Exception, message: s
     """Pairing problems and an unreachable TV are told apart."""
     with pytest.raises(TVError, match=message):
         await _tv(_FakeRemote(connect_error=error)).state()
+
+
+@pytest.mark.asyncio
+async def test_reported_on_follows_the_live_connection() -> None:
+    """On only while connected and the TV says so; a lost connection counts as off until it is back."""
+    remote = _FakeRemote()
+    tv = _tv(remote)
+    assert not tv.reported_on  # never connected
+
+    await tv.state()
+    assert tv.reported_on
+    remote.available_callbacks[0](False)
+    assert not tv.reported_on
+    remote.available_callbacks[0](True)
+    assert tv.reported_on
+    remote.is_on = False
+    assert not tv.reported_on
+    await tv.close()
+    remote.is_on = True
+    assert not tv.reported_on
+
+
+@pytest.mark.asyncio
+async def test_watch_keeps_retrying_an_unreachable_tv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unplugged TV at start-up is connected once it comes back."""
+    monkeypatch.setattr("reachy_mini_conversation_app.android_tv.WATCH_RETRY_S", 0.01)
+    remote = _FakeRemote(connect_error=CannotConnect("off"))
+    tv = _tv(remote)
+    task = asyncio.create_task(tv.watch())
+    try:
+        await asyncio.sleep(0.05)
+        assert remote.connects >= 2 and not tv.reported_on
+        remote.connect_error = None
+        for _ in range(100):
+            if tv.reported_on:
+                break
+            await asyncio.sleep(0.01)
+        assert tv.reported_on
+    finally:
+        task.cancel()

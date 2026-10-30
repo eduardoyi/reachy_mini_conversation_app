@@ -749,6 +749,9 @@ def run(
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )
         runtime_for_tools = hybrid_runtime
+        if deps.tv is not None:
+            tv = deps.tv
+            hybrid_runtime.set_strict_wake(lambda: bool(tv.reported_on))
         deps.expect_answer = hybrid_runtime.expect_answer
         deps.record_message = hybrid_runtime.record_message
         deps.stream_call = hybrid_runtime.stream_call
@@ -849,7 +852,14 @@ def run(
         startup_voice=startup_settings.voice,
         hybrid_runtime=hybrid_runtime,
         face_recognition=face_service,
-        background_tasks=[deps.now_playing.run] if deps.now_playing is not None else None,
+        background_tasks=[
+            task
+            for task in (
+                deps.now_playing.run if deps.now_playing is not None else None,
+                deps.tv.watch if deps.tv is not None and hybrid_runtime is not None else None,
+            )
+            if task is not None
+        ],
     )
 
     if speaker_direction is not None:

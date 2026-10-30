@@ -71,6 +71,15 @@ class OpenWakeWordDetector:
         self._detections = 0
         self._suppressed = 0
         self._sample_rate: int | None = None
+        self._extra_heads_muted: Callable[[], bool] | None = None
+
+    def set_extra_heads_muted(self, muted: Callable[[], bool] | None) -> None:
+        """Count only the main head while ``muted()`` is true (checked once per audio chunk).
+
+        With the TV on, the "Richie" head fired about 80 times in an hour of film (2026-10-30, on lines like
+        "Clarice"); the main head did not.
+        """
+        self._extra_heads_muted = muted
 
     @classmethod
     def from_directory(
@@ -136,6 +145,7 @@ class OpenWakeWordDetector:
         self._sample_rate = sample_rate
         self._pending += audio
         detection = None
+        muted = self._extra_heads_muted is not None and self._extra_heads_muted()
         source_block_bytes = sample_rate * 4 // 25
         while len(self._pending) >= source_block_bytes:
             chunk, self._pending = self._pending[:source_block_bytes], self._pending[source_block_bytes:]
@@ -149,6 +159,8 @@ class OpenWakeWordDetector:
             for name, raw in prediction.items():
                 if not math.isfinite(raw) or not 0 <= raw <= 1:
                     raise ValueError("Invalid wake-word model score")
+                if muted and name in self._head_scales:
+                    continue
                 scaled = min(1.0, raw * self._head_scales.get(name, 1.0))
                 if scaled > score:
                     score, head = scaled, name

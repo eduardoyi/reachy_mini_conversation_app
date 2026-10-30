@@ -21,6 +21,9 @@ protocol and could be paired the same way.
   picks with the remote or asks Reachy to move (down, right, select).
 - "Is the TV on?", "what's on?": on/off, the open app and the volume.
 - An app that does not open within 4 s is reported as probably not installed, not as done.
+- While the TV is on, Reachy wakes only to "Reachy" (the main wake model) or an antenna touch,
+  not to the "Richie" model or his name picked out of the room transcript: films kept waking him
+  (2026-10-30). See [wake-word.md](wake-word.md).
 
 ## Setup
 
@@ -39,6 +42,9 @@ after pairing.
   reconnects); it is recreated if the event loop changes. A command on a closed connection
   reconnects once. Volume is reported as a percentage of the TV's maximum and set by pressing
   volume keys (at most 60 per call). Discovery uses `dns-sd` for `_androidtvremote2._tcp`.
+- `AndroidTV.watch` (a background task of the stream) connects at start-up and retries every
+  60 s while the TV is unreachable; `reported_on` is the TV's last reported power over a live
+  connection, False while it is lost, read without blocking by the wake code.
 - `tools/tv.py`: actions status, power, volume, mute, media, navigate, open, youtube. Opening an
   app or a search on a TV in standby turns it on first. Errors tell Gemini not to retry.
 
@@ -64,4 +70,4 @@ after pairing.
 ## Tests
 
 `tests/test_android_tv.py` (fake remote: power toggling and confirmation, volume steps, mute,
-app confirmation and link order, reconnect, connection errors) and `tests/tools/test_tv.py`.
+app confirmation and link order, reconnect, connection errors, `reported_on` and `watch`) and `tests/tools/test_tv.py`.

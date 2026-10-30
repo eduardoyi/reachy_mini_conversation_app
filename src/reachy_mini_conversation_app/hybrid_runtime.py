@@ -639,6 +639,7 @@ class HybridRuntime:
         # Sees each final room transcript before wake detection while Reachy waits for his name; returns True
         # when it acted on it (writing practice's "¡ya!", said without the name).
         self._room_listener: Callable[[str], bool] | None = None
+        self._strict_wake: Callable[[], bool] | None = None
         self._inactivity_timeout_s = float(inactivity_timeout_s)
         self._wake_followup_timeout_s = float(wake_followup_timeout_s)
         self._clock = clock
@@ -996,6 +997,17 @@ class HybridRuntime:
         """Offer each final room transcript to ``listener`` first while waiting for the name; True consumes it."""
         self._room_listener = listener
 
+    def set_strict_wake(self, strict: Callable[[], bool] | None) -> None:
+        """While ``strict()`` (the TV is on), only the main wake model or a touch wakes Reachy.
+
+        The extra "Richie" head and the name picked out of the room transcript are ignored: on 2026-10-30 a
+        film woke him about ten times in 35 minutes through those two, and never through the main head.
+        """
+        self._strict_wake = strict
+        mute = getattr(self._acoustic_wake_detector, "set_extra_heads_muted", None)
+        if mute is not None:
+            mute(strict)
+
     def record_provider_traffic(self, kind: TrafficKind, byte_count: int) -> None:
         """Record media only after a provider confirms a successful send."""
         if byte_count <= 0:
@@ -1146,6 +1158,10 @@ class HybridRuntime:
         if self._wake_clips is not None and self._acoustic_wake_detector is not None:
             # Still listening locally, so the wake model missed a name that local STT heard.
             self._wake_clips.save_name_heard(segment.ended_at - segment.started_at)
+        strict = self._strict_wake
+        if strict is not None and self._acoustic_wake_detector is not None and strict():
+            logger.info("TV on; ignoring the name in the room transcript")
+            return
         with self._lifecycle_lock:
             asleep = self._asleep
         if asleep and not (detection.wake_word_is_first_word or _name_leads(segment.text)):
