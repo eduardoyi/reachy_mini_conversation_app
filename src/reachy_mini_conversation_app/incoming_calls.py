@@ -21,12 +21,11 @@ from reachy_mini_conversation_app.whatsapp_calls import Incoming
 logger = logging.getLogger(__name__)
 
 _TICK_S = 0.1
-_WIGGLE_S = 1.2
 _ANSWER_RETRY_STEP_S = 0.5
 
 
 class IncomingRinger:
-    """Ring for an incoming call: a pat on his (still) head answers; announced again, or wiggled if asleep.
+    """Ring for an incoming call: the antennas flutter, a pat on his (still) head answers; announced if awake.
 
     One ring at a time, on a thread of its own.
     """
@@ -69,6 +68,7 @@ class IncomingRinger:
         movement = self._movement
         movement.hold_still(True)  # a pat reads as a touch only on a still head
         switch_wobble(self._robot, on=False)  # his own voice would move it
+        movement.ring_antennas(True)  # the same ring awake or asleep
         touches = movement.head_touches()
         started = self._clock()
         announcements = 0
@@ -86,16 +86,13 @@ class IncomingRinger:
                         self._language,
                         answer=self._quick.answer_incoming if self._quick is not None else None,
                     )
-                if asleep:
-                    movement.set_listening(int(elapsed / _WIGGLE_S) % 2 == 0)  # perk, release: a silent ring
                 if movement.head_touches() > touches:
                     logger.info("Head touched: answering the call")
                     self._answer()
                     return
                 self._sleep(_TICK_S)
         finally:
-            if asleep:
-                movement.set_listening(False)
+            movement.ring_antennas(False)
             movement.hold_still(False)
             restore_wobble(self._robot)
 

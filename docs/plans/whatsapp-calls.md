@@ -53,8 +53,9 @@ answers when told. Nobody outside the approved list is ever called or answered.
 - `HybridRuntime` modes: `LOCAL_AMBIENT`, `LOCAL_COMMAND`, `CLOUD_CONVERSATION`, `STOPPING`. Mic frames
   feed the wake models and ambient STT in `LOCAL_AMBIENT`.
 - `HeadTouchDetector` (`moves.py`) needs the head held still (`hold_still`) and wobbling off, so it
-  cannot end a call while the head moves with the caller's voice. `AntennaTouchDetector` (a held antenna
-  bend, 14°) works while the head moves.
+  cannot feel a pat while the head moves with the caller's voice; during a call it counts only once they
+  have been quiet 2 s (since 2026-10-30). `AntennaTouchDetector` (a held antenna bend, 14°) works while
+  the head moves, but a bend failed to answer once and antennas no longer do anything in calls.
 - Face recognition (`face_identity.FaceRecognitionService`): `identify_now()` matches the faces in front
   of the camera now; `person_in_front(max_age_s)` returns the last person seen recently. Eduardo and
   Adriana are enrolled.
@@ -84,12 +85,14 @@ answers when told. Nobody outside the approved list is ever called or answered.
    as for messages). Reachy first runs `identify_now()`: only if Eduardo or Adriana is in front of him does
    he say "Calling Abuela…" and ring; anyone else (or nobody recognized) hears "Only Mom or Dad can start
    a call." In a conversation Gemini's `call_person` hands the request to this command (since 2026-10-30). "Hang up / cuelga" cannot be heard (no wake in a call),
-   so a call ends by an **antenna bend**, by the other side hanging up, or at a 60 min cap.
+   so a call ends by **a pat on his head** while the other side is quiet (an antenna bend until
+   2026-10-30), by the other side hanging up, or at a 60 min cap.
 5. **Incoming:** an approved contact calls → the TRMNL shows a caller id card (their name, "is
    calling") for as long as it rings, and Reachy says "Abuela is calling" and listens once without the
-   name (`expect_answer`): yes / sí / answer or an antenna bend answers, anyone may answer (kids too);
-   no declines; silence lets it ring out. Asleep (night, naps) or in quiet mode: no voice, only a small
-   repeating antenna wiggle and the caller id; an antenna bend still answers. In a conversation: the
+   name (`expect_answer`): yes / sí / answer or a pat on the head answers, anyone may answer (kids too);
+   no declines; silence lets it ring out. The antennas ring (two flutters, then a rest) awake or asleep.
+   Asleep (night, naps) or in quiet mode: no voice, only the antenna ring and the caller id; a pat still
+   answers. In a conversation: the
    conversation ends and the call is announced. When the call ends or rings out, the TRMNL goes back to
    what it showed.
 6. **Privacy:** no call audio is stored or sent anywhere but the call; logs carry the contact's name
@@ -223,6 +226,11 @@ not on the approved list, recording calls.
   5 s answer window was not transcribed (empty), so it rang on; "Sí, Richie, atiende" answered it and it
   connected (14 s). His asks: a pat on the head should answer (better than the antenna). Now the head is
   held still while it rings so a pat answers, and the announcement repeats at 15 and 30 s.
+- 2026-10-30: Eduardo: hanging up should be another pat on the head, not the antennas (a bend had failed to
+  answer before), and a ringing call needs its own antenna movement, the one quiet hours will use. Now a
+  pat hangs up once the other side has been quiet 2 s (their voice moves his head through the speech
+  wobble, which would read as pats), antennas do nothing during calls, and ringing flutters the antennas
+  twice then rests, awake or asleep. Live check pending.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.

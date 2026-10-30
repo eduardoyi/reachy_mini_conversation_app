@@ -1468,6 +1468,65 @@ async def test_answer_picks_up_the_ringing_call_through_reachy() -> None:
     assert streamed == [calls.link] and calls.link.closed
 
 
+class _PattedLink:
+    """A call on until hung up; the other side quiet for ``quiet`` seconds."""
+
+    def __init__(self, quiet: float) -> None:
+        self.reason: str | None = None
+        self.quiet = quiet
+
+    def quiet_for(self) -> float:
+        return self.quiet
+
+    async def hang_up(self) -> None:
+        self.reason = "hung_up"
+
+
+class _PattedHead:
+    """A head that has been patted ``touches`` times."""
+
+    def __init__(self) -> None:
+        self.touches = 0
+        self.holds: list[bool] = []
+
+    def head_touches(self) -> int:
+        return self.touches
+
+    def hold_still(self, active: bool) -> None:
+        self.holds.append(active)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("quiet", "hung_up"), [(5.0, True), (0.5, False)])
+async def test_a_pat_hangs_up_once_the_other_side_is_quiet(
+    monkeypatch: pytest.MonkeyPatch, quiet: float, hung_up: bool
+) -> None:
+    """A pat hangs up while the other side is quiet; while they talk their voice moves his head, so no."""
+    monkeypatch.setattr(quick_commands, "CALL_PAT_TICK_S", 0.01)
+    runner, _, deps = _runner()
+    head, link = _PattedHead(), _PattedLink(quiet)
+    deps.movement_manager = head
+    watching = asyncio.ensure_future(runner._hang_up_on_pat(link))
+    await asyncio.sleep(0.05)
+    head.touches += 1
+    await asyncio.sleep(0.05)
+    assert (link.reason == "hung_up") is hung_up
+    watching.cancel()
+    await asyncio.gather(watching, return_exceptions=True)
+    assert head.holds[0] is True and head.holds[-1] is False
+
+
+@pytest.mark.asyncio
+async def test_an_outgoing_call_hung_up_by_a_pat_before_an_answer_just_ends(
+    callees: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelled while it rings: "Call ended.", not "I couldn't call"."""
+    runner, _, _ = _call_runner(monkeypatch, "eduardo", link=_Link(False, "hung_up"))
+    reply = await runner.handle("call Eduardo")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == "Call ended."
+
+
 @pytest.mark.asyncio
 async def test_answer_is_not_a_command_when_nothing_rings() -> None:
     """With no call ringing, "answer" is left to the conversation."""

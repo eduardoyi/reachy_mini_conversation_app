@@ -956,6 +956,14 @@ CALLER_CHECK_S: Final[float] = 3.0
 CALLER_CHECK_INTERVAL_S: Final[float] = 0.3
 # Ringing (up to 60 s at the service) plus the longest call (60 min) and some margin.
 CALL_STEP_TIMEOUT_S: Final[float] = 60.0 + 3600.0 + 30.0
+# A pat on his head hangs a call up (ringing or on), but only once the other side has been quiet this long:
+# their voice moves his head through the daemon's speech wobble, which would read as pats, and that settles
+# about 0.5 s after the sound stops.
+CALL_PAT_QUIET_S: Final[float] = 2.0
+CALL_PAT_TICK_S: Final[float] = 0.1
+# The head stays held still for the call, renewed this often: the ringer lets go of it just as a call is
+# answered, and a hold lapses after HEAD_HOLD_MAX_S.
+CALL_HOLD_RENEW_S: Final[float] = 2.0
 PHOTO_PHRASES: Final[tuple[tuple[str, str], ...]] = tuple(
     (text, language)
     for language in LANGUAGES
@@ -1390,7 +1398,7 @@ class QuickCommands:
                 logger.warning("Call not placed: %s", error)
                 return CALL_FAILED[language].format(name=name)
             await self._stream_call(link)
-            if link.connected:
+            if link.connected or link.reason == "hung_up":  # hung up by a pat, even before an answer
                 return CALL_ENDED[language]
             if link.reason in ("no_answer", "declined"):
                 return CALL_NO_ANSWER[language].format(name=name)
@@ -1445,16 +1453,42 @@ class QuickCommands:
         return None
 
     async def _stream_call(self, link: Any) -> None:
-        """Carry ``link`` through Reachy until it ends, then close it."""
+        """Carry ``link`` through Reachy until it ends (a pat on his head hangs up), then close it."""
         calls, stream = self._deps.calls, self._deps.stream_call
+        pats = asyncio.ensure_future(self._hang_up_on_pat(link))
         try:
             if stream is not None:
                 await stream(link)
         finally:
+            pats.cancel()
+            await asyncio.gather(pats, return_exceptions=True)
             await link.close()
             if calls is not None:
                 calls.finished(link)
         logger.info("Call finished connected=%s reason=%s", link.connected, link.reason)
+
+    async def _hang_up_on_pat(self, link: Any) -> None:
+        """Hold his head still during the call and hang up on a pat while the other side is quiet."""
+        movement = self._deps.movement_manager
+        if movement is None:
+            return
+        held_at = -CALL_HOLD_RENEW_S
+        touches = movement.head_touches()
+        try:
+            while link.reason is None:
+                now = time.monotonic()
+                if now - held_at >= CALL_HOLD_RENEW_S:
+                    movement.hold_still(True)  # no breathing or speaker turns: a pat reads as a touch
+                    held_at = now
+                if link.quiet_for() < CALL_PAT_QUIET_S:
+                    touches = movement.head_touches()  # the wobble moving his head is not a pat
+                elif movement.head_touches() > touches:
+                    logger.info("Head touched: hanging up the call")
+                    await link.hang_up()
+                    return
+                await asyncio.sleep(CALL_PAT_TICK_S)
+        finally:
+            movement.hold_still(False)
 
     async def _parent_in_front(self, allowed: frozenset[str]) -> bool:
         """Return whether face recognition sees one of ``allowed`` within ``CALLER_CHECK_S``."""

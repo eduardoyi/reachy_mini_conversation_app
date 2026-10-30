@@ -225,7 +225,7 @@ async def test_an_incoming_call_rings_then_is_answered_without_a_ringback() -> N
         calls.start()
         assert await asyncio.to_thread(rang.wait, 3)
         assert calls.ringing == Incoming("C1", "Test Person") and seen == [calls.ringing]
-        assert calls.antenna_touched() == "answer"  # ringing: the caller answers it
+        assert calls.busy  # ringing: antenna touches do nothing
         link = await calls.answer()
         assert link is not None and calls.ringing is None and calls.on_a_call
         chunks = [chunk async for chunk in link.received()]
@@ -236,7 +236,7 @@ async def test_an_incoming_call_rings_then_is_answered_without_a_ringback() -> N
         await server.wait_closed()
     assert requests == [{"op": "answer", "call_id": "C1"}]
     assert [chunk.size for chunk in chunks] == [960]  # the caller's audio only, no ringback
-    assert not calls.on_a_call and calls.antenna_touched() is None
+    assert not calls.on_a_call and not calls.busy
 
 
 @pytest.mark.asyncio
@@ -275,8 +275,8 @@ async def test_a_declined_or_abandoned_incoming_call_stops_ringing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_antenna_bend_during_a_call_hangs_it_up() -> None:
-    """With a call on, the bend sends the hang-up and is not a wake."""
+async def test_hanging_up_from_reachy_sends_the_hang_up_and_ends_as_hung_up() -> None:
+    """A pat's hang-up reaches the service, ends the other side's audio, and is not a failure."""
     from reachy_mini_conversation_app.whatsapp_calls import CallManager
 
     got: list[Any] = []
@@ -295,13 +295,42 @@ async def test_an_antenna_bend_during_a_call_hangs_it_up() -> None:
         link = await calls.place("Test Person")
         while not link.connected:
             await asyncio.sleep(0.01)
-        assert await asyncio.to_thread(calls.antenna_touched) == "hang_up"
+        assert calls.busy
+        await link.hang_up()
+        assert [chunk async for chunk in link.received()] == []
         for _ in range(100):
             if got:
                 break
             await asyncio.sleep(0.02)
-        await link.close()
     finally:
         server.close()
         await server.wait_closed()
-    assert got == [{"op": "hangup"}]
+    assert got == [{"op": "hangup"}] and link.reason == "hung_up"
+
+
+@pytest.mark.asyncio
+async def test_quiet_counts_from_the_last_audible_chunk_played() -> None:
+    """The ringback tone and the other side's voice reset it; their near-silence does not."""
+    from reachy_mini_conversation_app.whatsapp_calls import CALL_VOICE_RMS, CallLink
+
+    class Socket:
+        def __aiter__(self) -> Any:
+            return self
+
+        async def __anext__(self) -> Any:
+            await asyncio.sleep(3600)
+
+        async def send(self, _data: Any) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
+    link = CallLink(Socket(), ringback=False)
+    link._sound_at -= 10.0
+    assert link.quiet_for() >= 10.0
+    hush = np.full(960, int(CALL_VOICE_RMS * 32768 * 0.5), dtype=np.int16)
+    assert link._played(hush) is hush and link.quiet_for() >= 10.0
+    link._played(np.full(960, 2000, dtype=np.int16))
+    assert link.quiet_for() < 1.0
+    await link.close()

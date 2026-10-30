@@ -9,8 +9,11 @@ import pytest
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
+    RING_MAX_S,
+    RING_CYCLE_S,
     HEAD_HOLD_MAX_S,
     ATTENTIVE_HOLD_S,
+    RING_FLUTTER_RAD,
     ATTENTIVE_ANTENNAS,
     HEAD_RECORDING_MAX_S,
     PERK_MAX_SPEED_RAD_S,
@@ -743,6 +746,38 @@ def test_an_antenna_touch_during_a_head_test_does_not_wake() -> None:
     manager.start_head_recording()
     for step in range(10):
         manager._check_antenna_touch(100.0 + step * 0.05)
+    assert touches == []
+
+
+def test_a_ring_flutters_the_antennas_twice_then_rests() -> None:
+    """Two flutters toward each other, from where they would be, then a rest; it lapses on its own."""
+    from reachy_mini_conversation_app.moves import ring_offset
+
+    swings = [ring_offset(i * 0.01) for i in range(int(RING_CYCLE_S * 100))]
+    assert max(swings) == pytest.approx(RING_FLUTTER_RAD, abs=1e-3) and min(swings) >= 0.0
+    assert swings[0] == 0.0 and max(swings[300:]) == 0.0  # resting after the two flutters
+    manager = MovementManager(MagicMock())
+    manager.ring_antennas(True)
+    manager._poll_signals(manager._now())
+    start = manager._ringing_since
+    assert start is not None
+    left, right = manager._ring((-3.05, 3.05), start + 1.0 / 6.0)  # a flutter's peak, in the sleep pose
+    assert left == pytest.approx(-3.05 + RING_FLUTTER_RAD) and right == pytest.approx(3.05 - RING_FLUTTER_RAD)
+    assert manager._ring((-0.17, 0.17), start + RING_MAX_S) == (-0.17, 0.17)
+    assert manager._ringing_since is None
+
+
+def test_an_antenna_touch_while_a_call_rings_is_not_reported() -> None:
+    """The flutter outruns the touch detector, and a bend means nothing during a call."""
+    robot = MagicMock()
+    touches: list[bool] = []
+    manager = MovementManager(robot, on_antenna_touch=lambda: touches.append(True))
+    manager._last_commanded_pose = (np.eye(4), (-0.17, 0.17), 0.0)
+    robot.get_current_joint_positions.return_value = ([0.0] * 7, [0.3, 0.17])
+    manager.ring_antennas(True)
+    manager._poll_signals(manager._now())
+    for step in range(10):
+        manager._check_antenna_touch(manager._now() + step * 0.05)
     assert touches == []
 
 
