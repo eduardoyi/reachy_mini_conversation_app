@@ -596,6 +596,8 @@ class HybridRuntime:
         self._recording_message = False
         # During a WhatsApp call, every captured frame goes here instead of the post-activation queue.
         self._call_tap: Callable[[AudioFrame], None] | None = None
+        # A request to run locally once the conversation has closed (Gemini handing a call to the call command).
+        self._after_close_request: str | None = None
         # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
         # without a conversation; a conversation reports through cloud_session_observer instead.
         self._listening_observer = listening_observer
@@ -3015,7 +3017,19 @@ class HybridRuntime:
             self._last_conversation_activity = self._clock()
         logger.info("Music paused; conversation uses the normal inactivity timeout again")
 
-    def request_activation(self, reason: str) -> None:
+    def request_after_close(self, addressed_text: str) -> bool:
+        """Close the conversation after Reachy's reply, then handle ``addressed_text`` as a request; thread-safe.
+
+        Gemini uses it to hand a call to the call command, which needs Reachy's speaker and mic to itself.
+        Returns whether a conversation was open to close.
+        """
+        with self._lifecycle_lock:
+            if self._mode is not RuntimeMode.CLOUD_CONVERSATION or self._active_handler is None:
+                return False
+            self._after_close_request = addressed_text
+        return self.request_close("handoff")
+
+    def request_activation(self, reason: str, addressed_text: str = "") -> None:
         """Start an activation from another thread (an antenna touch); ignored before the runtime has started."""
         with self._lifecycle_lock:
             loop = self._owner_loop
@@ -3024,7 +3038,9 @@ class HybridRuntime:
             return
 
         def start() -> None:
-            task = asyncio.create_task(self.activate(reason), name=f"hybrid-{reason}-activation")
+            task = asyncio.create_task(
+                self.activate(reason, addressed_text=addressed_text), name=f"hybrid-{reason}-activation"
+            )
             self._local_event_tasks.add(task)
             task.add_done_callback(self._local_event_tasks.discard)
 
@@ -3528,8 +3544,11 @@ class HybridRuntime:
                 self._shutdown_error = None
                 self._transition(RuntimeMode.LOCAL_AMBIENT, "shutdown_complete")
                 ended = True
+            after_close, self._after_close_request = self._after_close_request, None
         if ended:
             self._notify_cloud_session(False)
+            if after_close is not None:
+                self.request_activation("acoustic_wake", addressed_text=after_close)
         if event is not None:
             self._notify_state_observer(*event)
 

@@ -5140,3 +5140,31 @@ async def test_a_call_sends_the_room_to_the_other_side_and_plays_their_voice() -
     finally:
         feeder.cancel()
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes() -> None:
+    """request_after_close ends the conversation after the reply, then the request goes to the quick commands."""
+    clock = FakeClock()
+    handler = FakeHandler()
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def speak(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(
+        lambda: handler, inactivity_timeout_s=60, clock=clock, quick_commands=quick, reply_speaker=speak
+    )
+    assert await runtime.activate()
+    handler.set_connected(True)
+    assert runtime.request_after_close("Reachy, llama a Eduardo")
+    runtime.note_playback_queued(1.0)
+    clock.advance(5)
+    assert await runtime.check_inactivity()
+    await wait_until(lambda: seen == ["llama a Eduardo"], attempts=500)
+    assert not runtime.request_after_close("Reachy, llama a Eduardo")  # no conversation is open now
+    await runtime.close()

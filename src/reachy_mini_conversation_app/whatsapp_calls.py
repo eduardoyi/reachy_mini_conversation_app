@@ -30,6 +30,18 @@ _RECEIVE_QUEUE_FRAMES = 50
 ENDED_NO_ANSWER = "no_answer"
 ENDED_DECLINED = "declined"
 ENDED_FAILED = "failed"
+# Outgoing: while the room is quiet, Reachy's mic carries a faint hiss (his motors, or the mic's own noise) that
+# the other phone heard as rustling (2026-10-30, about 0.01 RMS). Below GATE_OPEN_RMS it is turned down to
+# GATE_FLOOR; it opens at once for anything louder and stays open GATE_HOLD_S after.
+GATE_OPEN_RMS = 0.02
+GATE_FLOOR = 0.1
+GATE_HOLD_S = 0.4
+# Incoming: shouting on the phone cut Reachy's speaker out (2026-10-30) though the audio arrived whole, so the
+# other side plays at most LIMIT_PEAK; the level comes back up by LIMIT_RELEASE per chunk.
+LIMIT_PEAK = 0.35
+LIMIT_RELEASE = 0.05
+# The request a call becomes when it is handed to the call command, in the conversation's language.
+_CALL_REQUEST = {"en": "call {name}", "es": "llama a {name}", "it": "chiama {name}", "pt": "liga para {name}"}
 
 
 def load_callees(path: str | Path, fold: Callable[[str], str]) -> list[Contact]:
@@ -57,14 +69,88 @@ def load_callees(path: str | Path, fold: Callable[[str], str]) -> list[Contact]:
     return callees
 
 
-def call_pcm(frame: tuple[int, Any]) -> bytes:
-    """Return one captured mic frame as 16 kHz mono 16-bit PCM bytes."""
+def call_request(language: str, name: str) -> str:
+    """Return the "call x" request (after his name) that the call command handles, in ``language``."""
+    return "Reachy, " + _CALL_REQUEST.get(language, _CALL_REQUEST["en"]).format(name=name)
+
+
+async def parent_in_front(service: Any, allowed: frozenset[str], look_s: float, interval_s: float) -> bool:
+    """Return whether face recognition sees one of ``allowed`` (household person ids) within ``look_s``.
+
+    One frame is not enough: just after waking his head is still rising, and a first look can be unsure
+    (2026-10-30: 0.41, below the bar, then 0.51 a few seconds later).
+    """
+    if service is None or not allowed:
+        return False
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + look_s
+    while True:
+        try:
+            matches = await asyncio.to_thread(service.identify_now)
+        except RuntimeError:
+            matches = []
+        if any(match is not None and match.person_id in allowed for match in matches):
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(interval_s)
+
+
+class NoiseGate:
+    """Turn the mic down while the room is quiet, so the hiss of an idle room is not sent."""
+
+    def __init__(self) -> None:
+        """Start closed."""
+        self._gain = GATE_FLOOR
+        self._open_for_s = 0.0
+
+    def process(self, samples: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Return ``samples`` (16 kHz) with the gate applied, ramping the level across the chunk."""
+        if samples.size == 0:
+            return samples
+        rms = float(np.sqrt(np.mean(samples**2)))
+        if rms >= GATE_OPEN_RMS:
+            self._open_for_s = GATE_HOLD_S
+        else:
+            self._open_for_s = max(0.0, self._open_for_s - samples.size / CALL_SAMPLE_RATE)
+        target = 1.0 if self._open_for_s > 0 else GATE_FLOOR
+        ramp = np.linspace(self._gain, target, samples.size, dtype=np.float32)
+        self._gain = target
+        return samples * ramp
+
+
+class Limiter:
+    """Keep the other side below LIMIT_PEAK, easing back up after a loud moment."""
+
+    def __init__(self) -> None:
+        """Start at full level."""
+        self._gain = 1.0
+
+    def process(self, chunk: NDArray[np.int16]) -> NDArray[np.int16]:
+        """Return ``chunk`` turned down as needed."""
+        if chunk.size == 0:
+            return chunk
+        peak = float(np.abs(chunk.astype(np.float32)).max()) / 32768.0
+        wanted = min(1.0, LIMIT_PEAK / peak) if peak > 0 else 1.0
+        gain = min(wanted, self._gain + LIMIT_RELEASE)
+        ramp = np.linspace(self._gain, gain, chunk.size, dtype=np.float32)
+        self._gain = gain
+        if gain >= 1.0 and float(ramp.min()) >= 1.0:
+            return chunk
+        limited: NDArray[np.int16] = np.clip(chunk.astype(np.float32) * ramp, -32768, 32767).astype(np.int16)
+        return limited
+
+
+def call_pcm(frame: tuple[int, Any], gate: NoiseGate | None = None) -> bytes:
+    """Return one captured mic frame as 16 kHz mono 16-bit PCM bytes (through ``gate`` when given)."""
     sample_rate, audio = frame
     audio = np.asarray(audio)
     if audio.ndim == 2 and audio.shape[0] >= audio.shape[1] > 1:
         audio = audio[:, 0]  # the first channel, as Gemini Live hears the room while Reachy talks
     mono = audio_to_mono_int16(audio).astype(np.float32) / 32768.0
     resampled = resample_audio(mono, int(sample_rate), CALL_SAMPLE_RATE)
+    if gate is not None:
+        resampled = gate.process(resampled)
     return (np.clip(resampled, -1.0, 1.0) * 32767).astype("<i2").tobytes()
 
 
@@ -78,6 +164,8 @@ class CallLink:
         self._incoming: asyncio.Queue[NDArray[np.int16] | None] = asyncio.Queue(maxsize=_RECEIVE_QUEUE_FRAMES)
         self.connected = False
         self.reason: str | None = None
+        self._gate = NoiseGate()
+        self._limiter = Limiter()
         self._tasks = [
             asyncio.ensure_future(self._receive_loop()),
             asyncio.ensure_future(self._send_loop()),
@@ -102,7 +190,7 @@ class CallLink:
         if not self.connected or self.reason is not None:
             return
         try:
-            data = call_pcm(frame)
+            data = call_pcm(frame, self._gate)
         except (TypeError, ValueError):
             return
         if self._outgoing.full():
@@ -152,7 +240,7 @@ class CallLink:
                 if isinstance(message, bytes):
                     if not self.connected:
                         continue
-                    chunk = np.frombuffer(message, dtype="<i2").astype(np.int16)
+                    chunk = self._limiter.process(np.frombuffer(message, dtype="<i2").astype(np.int16))
                     if self._incoming.full():
                         self._incoming.get_nowait()  # playback fell behind: drop the oldest
                     self._incoming.put_nowait(chunk)

@@ -1361,26 +1361,10 @@ class QuickCommands:
         )
 
     async def _parent_in_front(self, allowed: frozenset[str]) -> bool:
-        """Return whether face recognition sees one of ``allowed`` (household person ids) within a few seconds.
+        """Return whether face recognition sees one of ``allowed`` within ``CALLER_CHECK_S``."""
+        from reachy_mini_conversation_app.whatsapp_calls import parent_in_front
 
-        One frame is not enough: just after waking his head is still rising, and a first look can be unsure
-        (2026-10-30: 0.41, below the bar, then 0.51 a few seconds later).
-        """
-        service = self._deps.face_recognition
-        if service is None or not allowed:
-            return False
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + CALLER_CHECK_S
-        while True:
-            try:
-                matches = await asyncio.to_thread(service.identify_now)
-            except RuntimeError:
-                matches = []
-            if any(match is not None and match.person_id in allowed for match in matches):
-                return True
-            if loop.time() >= deadline:
-                return False
-            await asyncio.sleep(CALLER_CHECK_INTERVAL_S)
+        return await parent_in_front(self._deps.face_recognition, allowed, CALLER_CHECK_S, CALLER_CHECK_INTERVAL_S)
 
     def _contacts(self) -> list[Contact]:
         from reachy_mini_conversation_app.config import config

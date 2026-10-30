@@ -748,6 +748,7 @@ def run(
 
         deps.standby = go_to_standby
         deps.end_conversation = end_conversation
+        deps.request_after_close = runtime_for_tools.request_after_close
         if context_processor is not None:
             # Also needed with acoustic wake: the runtime takes the request after the wake from local STT.
             context_processor.set_transcript_observer(hybrid_runtime.observe_local_transcript)
