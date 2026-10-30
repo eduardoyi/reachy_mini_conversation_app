@@ -40,6 +40,15 @@ GATE_HOLD_S = 0.4
 # other side plays at most LIMIT_PEAK; the level comes back up by LIMIT_RELEASE per chunk.
 LIMIT_PEAK = 0.35
 LIMIT_RELEASE = 0.05
+# While it rings, Reachy plays a ringback tone (Portugal's: 425 Hz, 1 s on, 4 s off) so the room knows it is
+# ringing and hears when it is answered (the tone stops). Made in RINGBACK_CHUNK_S pieces, played in real time.
+RINGBACK_HZ = 425.0
+RINGBACK_ON_S = 1.0
+RINGBACK_PERIOD_S = 5.0
+RINGBACK_LEVEL = 0.12
+RINGBACK_CHUNK_S = 0.2
+_RINGBACK_LEAD_CHUNKS = 2
+_RINGBACK_EDGE_S = 0.01
 # The request a call becomes when it is handed to the call command, in the conversation's language.
 _CALL_REQUEST = {"en": "call {name}", "es": "llama a {name}", "it": "chiama {name}", "pt": "liga para {name}"}
 
@@ -94,6 +103,17 @@ async def parent_in_front(service: Any, allowed: frozenset[str], look_s: float, 
         if loop.time() >= deadline:
             return False
         await asyncio.sleep(interval_s)
+
+
+def ringback(index: int) -> NDArray[np.int16]:
+    """Return the ``index``-th RINGBACK_CHUNK_S piece of the ringback tone (16 kHz), soft at its edges."""
+    size = round(RINGBACK_CHUNK_S * CALL_SAMPLE_RATE)
+    t = (index * size + np.arange(size)) / CALL_SAMPLE_RATE
+    phase = t % RINGBACK_PERIOD_S
+    envelope = np.clip(np.minimum(phase, RINGBACK_ON_S - phase) / _RINGBACK_EDGE_S, 0.0, 1.0)
+    tone = np.sin(2 * np.pi * RINGBACK_HZ * t) * envelope * RINGBACK_LEVEL
+    chunk: NDArray[np.int16] = (tone * 32767).astype(np.int16)
+    return chunk
 
 
 class NoiseGate:
@@ -165,6 +185,7 @@ class CallLink:
         self.connected = False
         self.reason: str | None = None
         self._gate = NoiseGate()
+        self._answered = asyncio.Event()  # answered, or ended before that: the ringback stops
         self._limiter = Limiter()
         self._tasks = [
             asyncio.ensure_future(self._receive_loop()),
@@ -198,7 +219,17 @@ class CallLink:
         self._outgoing.put_nowait(data)
 
     async def received(self) -> AsyncIterator[NDArray[np.int16]]:
-        """Yield the other side's audio until the call ends."""
+        """Yield a ringback tone until the other side answers, then their audio until the call ends."""
+        index = 0
+        while not self.connected and self.reason is None:
+            yield ringback(index)
+            index += 1
+            if index < _RINGBACK_LEAD_CHUNKS:
+                continue  # a little queued ahead, so the tone has no gaps
+            try:
+                await asyncio.wait_for(self._answered.wait(), RINGBACK_CHUNK_S)
+            except asyncio.TimeoutError:
+                pass
         while True:
             chunk = await self._incoming.get()
             if chunk is None:
@@ -227,6 +258,7 @@ class CallLink:
     def _finish(self, reason: str) -> None:
         if self.reason is None:
             self.reason = reason
+        self._answered.set()
         while True:
             try:
                 self._incoming.put_nowait(None)
@@ -252,6 +284,7 @@ class CallLink:
                 kind = event.get("event") if isinstance(event, dict) else None
                 if kind == "connected":
                     self.connected = True
+                    self._answered.set()
                 elif kind == "ended":
                     self._finish(str(event.get("reason") or ENDED_FAILED))
                     return

@@ -105,7 +105,8 @@ async def test_an_unanswered_call_reports_why() -> None:
     finally:
         server.close()
         await server.wait_closed()
-    assert chunks == [] and not link.connected and link.reason == "no_answer"
+    assert chunks and all(chunk.size == 3_200 for chunk in chunks)  # only the ringback, while it rang
+    assert not link.connected and link.reason == "no_answer"
 
 
 @pytest.mark.asyncio
@@ -158,3 +159,39 @@ def test_a_handed_off_call_is_asked_for_in_the_conversation_language() -> None:
         assert text.startswith("Reachy, ")
         command = parse(text.removeprefix("Reachy, "))
         assert command is not None and command.kind == "call" and command.args["to"] == "eduardo"
+
+
+def test_the_ringback_rings_one_second_in_five() -> None:
+    """425 Hz for the first second of each five, silence otherwise, with soft edges."""
+    from reachy_mini_conversation_app.whatsapp_calls import ringback
+
+    on, off, next_ring = ringback(2), ringback(10), ringback(25)
+    assert on.size == 3_200 and 2_000 < int(np.abs(on).max()) < 5_000
+    assert not off.any()
+    assert np.array_equal(next_ring, ringback(0))
+    assert abs(int(ringback(0)[0])) < 50  # starts from silence, no click
+
+
+@pytest.mark.asyncio
+async def test_it_rings_until_answered_then_plays_the_other_side() -> None:
+    """The ringback plays while it rings and stops when the other side answers."""
+
+    async def service(socket: Any) -> None:
+        await socket.recv()
+        await socket.send(json.dumps({"event": "ringing"}))
+        await asyncio.sleep(0.5)
+        await socket.send(json.dumps({"event": "connected"}))
+        await socket.send(np.full(960, 500, dtype="<i2").tobytes())
+        await socket.send(json.dumps({"event": "ended", "reason": "ended"}))
+
+    server, url = await _with_service(service)
+    try:
+        link = await CallLink.open(url, "secret", "Test Person")
+        chunks = [chunk async for chunk in link.received()]
+        await link.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+    tones = [chunk for chunk in chunks if chunk.size == 3_200]
+    assert 2 <= len(tones) <= 6  # about 0.5 s of ringing, plus the lead
+    assert chunks[-1].size == 960 and chunks[: len(tones)] == tones

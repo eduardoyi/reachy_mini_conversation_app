@@ -213,6 +213,8 @@ not on the approved list, recording calls.
   Changes: a noise gate on outgoing audio, a limiter on incoming, and a `call_person` tool so Gemini can
   hand a call to the call command (two tries had been misheard into Gemini, which said it couldn't call).
   The decision "Gemini gets no calling tool" is replaced: it gets a hand-off that keeps both checks.
+- 2026-10-30: Ringback tone while a call rings, asked for by the household (silence left them unsure
+  whether it rang or had been answered).
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
