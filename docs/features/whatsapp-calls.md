@@ -25,7 +25,9 @@ calls are not answered yet (stage 3); video, group calls and recording are out o
 - **Who may ask:** face recognition must see Eduardo or Adriana (`WHATSAPP_CALLERS`) in front of the camera,
   looking for up to 3 s (`CALLER_CHECK_S`; one frame just after waking was too unsure on 2026-10-30). Anyone else, or nobody recognized, hears "Only Mom or Dad can start a call." and nothing
   is dialed.
-- **The call:** "Calling Eduardo!", then it rings (silently on Reachy's side) for up to 60 s. Once
+- **The call:** "Calling Eduardo!", then it rings for up to 60 s, and Reachy plays a ringback tone meanwhile
+  (`ringback`: 425 Hz, 1 s on, 4 s off, as in Portugal) so the room hears it ringing and hears it stop when
+  the other side answers. Once
   answered, the other side plays from Reachy's speaker and his head wobbles with it; his mic goes to the
   call. Name detection, the room transcript and Gemini hear nothing during the call; music stays lowered.
 - **Sound:** while the room is quiet, what Reachy sends is turned down to a tenth (a noise gate: the idle
@@ -103,6 +105,7 @@ flowchart LR
 
 ## Changelog
 
+- 2026-10-30: A ringback tone while it rings (the household could not tell ringing from answered).
 - 2026-10-30: A noise gate on what Reachy sends, a limiter on what he plays, and `call_person` for Gemini.
   The recorded call (both directions, deleted after) showed no echo of the caller's voice in what Reachy
   sent, about 0.01 RMS of high-pitched hiss whenever the room was quiet, and the caller's shouts arriving
