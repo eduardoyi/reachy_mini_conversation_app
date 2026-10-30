@@ -66,6 +66,26 @@ PERK_DECAY_S = 0.1
 PERK_FREQUENCY_HZ = 3.0
 # Caps the perk's swing, e.g. out of the folded sleep pose; recorded emotions peak near 8 rad/s.
 PERK_MAX_SPEED_RAD_S = 6.0
+# A WhatsApp call ringing, awake or asleep: two quick flutters of the antennas toward each other, then a rest,
+# like a phone's ring-ring. Toward each other, as the sleep pose has them folded near their limits.
+RING_FLUTTER_RAD = float(np.deg2rad(20.0))
+RING_FLUTTER_HZ = 3.0
+RING_FLUTTER_S = 1.0
+RING_GAP_S = 0.3
+RING_CYCLE_S = 4.0
+# Ringing stops after this if nobody stops it (a call rings 75 s at most).
+RING_MAX_S = 90.0
+
+
+def ring_offset(t: float) -> float:
+    """Return how far (radians) the antennas swing toward each other ``t`` seconds into a ring."""
+    t %= RING_CYCLE_S
+    for start in (0.0, RING_FLUTTER_S + RING_GAP_S):
+        u = t - start
+        if 0.0 <= u < RING_FLUTTER_S:
+            return float(RING_FLUTTER_RAD * (1.0 - np.cos(2.0 * np.pi * RING_FLUTTER_HZ * u)) / 2.0)
+    return 0.0
+
 
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
@@ -507,6 +527,8 @@ class MovementManager:
         self._holding_still_until = -math.inf
         self._head_touch = HeadTouchDetector()
         self._head_touches = 0  # touches on the held-still head so far; guarded by _status_lock
+        # Ringing for a call since then (``ring_antennas``), until RING_MAX_S has passed.
+        self._ringing_since: float | None = None
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
@@ -664,6 +686,13 @@ class MovementManager:
         """
         self._command_queue.put(("hold_still", active))
 
+    def ring_antennas(self, active: bool) -> None:
+        """Flutter the antennas as a call rings (``ring_offset``), or stop; thread-safe.
+
+        Antenna touches are not reported meanwhile: the flutter outruns the touch detector's lag.
+        """
+        self._command_queue.put(("ring_antennas", active))
+
     def head_touches(self) -> int:
         """Return how many touches the held-still head has had since start (it only grows); thread-safe."""
         with self._status_lock:
@@ -777,6 +806,8 @@ class MovementManager:
             elif not payload and self._framing_faces:
                 self._framing_faces = False
                 self._set_head_tracking(False)
+        elif command == "ring_antennas":
+            self._ringing_since = self._now() if payload else None
         elif command == "hold_still":
             self._holding_still_until = self._now() + HEAD_HOLD_MAX_S if payload else -math.inf
             if payload and isinstance(self.state.current_move, BreathingMove):
@@ -1149,6 +1180,15 @@ class MovementManager:
 
         return antennas_cmd
 
+    def _ring(self, antennas: Tuple[float, float], now: float) -> Tuple[float, float]:
+        """Add the ring's flutter to ``antennas`` while a call rings (worker thread only)."""
+        if self._ringing_since is not None and now - self._ringing_since >= RING_MAX_S:
+            self._ringing_since = None
+        if self._ringing_since is None:
+            return antennas
+        swing = ring_offset(now - self._ringing_since)
+        return antennas[0] + swing, antennas[1] - swing
+
     def _perk_antennas(self, now: float, dt: float) -> Tuple[float, float]:
         """Spring from where the antennas were toward the alert pose, speed-capped (worker thread only)."""
         with self._status_lock:
@@ -1199,6 +1239,9 @@ class MovementManager:
     def _check_antenna_touch(self, now: float) -> None:
         """Compare the measured antennas with recent targets and report a touch (worker thread only)."""
         if self._on_antenna_touch is None or now < self._next_antenna_check:
+            return
+        if self._ringing_since is not None:
+            self._antenna_touch = AntennaTouchDetector()  # its target history would hold the flutter
             return
         self._next_antenna_check = now + ANTENNA_TOUCH_CHECK_PERIOD_S
         try:
@@ -1469,7 +1512,7 @@ class MovementManager:
             head, antennas, body_yaw = self._get_primary_pose(loop_start)
 
             # 4) Apply listening antenna freeze or blend-back
-            antennas_cmd = self._calculate_blended_antennas(antennas)
+            antennas_cmd = self._ring(self._calculate_blended_antennas(antennas), loop_start)
 
             # 5) Single set_target call - the only control point
             self._issue_control_command(head, antennas_cmd, body_yaw)

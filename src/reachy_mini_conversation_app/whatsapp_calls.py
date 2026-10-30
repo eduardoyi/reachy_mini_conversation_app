@@ -8,6 +8,7 @@ both as 16 kHz mono 16-bit PCM. The service refuses anyone not on its approved l
 
 from __future__ import annotations
 import json
+import time
 import asyncio
 import logging
 import threading
@@ -32,6 +33,7 @@ _RECEIVE_QUEUE_FRAMES = 50
 ENDED_NO_ANSWER = "no_answer"
 ENDED_DECLINED = "declined"
 ENDED_FAILED = "failed"
+ENDED_HUNG_UP = "hung_up"
 # Outgoing: while the room is quiet, Reachy's mic carries a faint hiss (his motors, or the mic's own noise) that
 # the other phone heard as rustling (2026-10-30, about 0.01 RMS). Below GATE_OPEN_RMS it is turned down to
 # GATE_FLOOR; it opens at once for anything louder and stays open GATE_HOLD_S after.
@@ -42,6 +44,9 @@ GATE_HOLD_S = 0.4
 # other side plays at most LIMIT_PEAK; the level comes back up by LIMIT_RELEASE per chunk.
 LIMIT_PEAK = 0.35
 LIMIT_RELEASE = 0.05
+# Played audio quieter than this (RMS, of full scale; -50 dBFS) leaves the daemon's speech wobble at rest, so
+# the head stays still enough to feel a pat.
+CALL_VOICE_RMS = 0.003
 # While it rings, Reachy plays a ringback tone (Portugal's: 425 Hz, 1 s on, 4 s off) so the room knows it is
 # ringing and hears when it is answered (the tone stops). Made in RINGBACK_CHUNK_S pieces, played in real time.
 RINGBACK_HZ = 425.0
@@ -202,6 +207,7 @@ class CallLink:
         self._gate = NoiseGate()
         self._answered = asyncio.Event()  # answered, or ended before that: the ringback stops
         self._limiter = Limiter()
+        self._sound_at = time.monotonic()  # when the last audible chunk went to the speaker
         self._tasks = [
             asyncio.ensure_future(self._receive_loop()),
             asyncio.ensure_future(self._send_loop()),
@@ -233,11 +239,20 @@ class CallLink:
             self._outgoing.get_nowait()  # the network fell behind: drop the oldest
         self._outgoing.put_nowait(data)
 
+    def quiet_for(self) -> float:
+        """Return the seconds since the last audible chunk of the other side (or the ringback) was yielded."""
+        return time.monotonic() - self._sound_at
+
+    def _played(self, chunk: NDArray[np.int16]) -> NDArray[np.int16]:
+        if chunk.size and float(np.sqrt(np.mean(np.square(chunk / 32768.0)))) >= CALL_VOICE_RMS:
+            self._sound_at = time.monotonic()
+        return chunk
+
     async def received(self) -> AsyncIterator[NDArray[np.int16]]:
         """Yield a ringback tone until the other side answers, then their audio until the call ends."""
         index = 0
         while self._ringback and not self.connected and self.reason is None:
-            yield ringback(index)
+            yield self._played(ringback(index))
             index += 1
             if index < _RINGBACK_LEAD_CHUNKS:
                 continue  # a little queued ahead, so the tone has no gaps
@@ -249,10 +264,11 @@ class CallLink:
             chunk = await self._incoming.get()
             if chunk is None:
                 return
-            yield chunk
+            yield self._played(chunk)
 
     async def hang_up(self) -> None:
-        """End the call and close the socket."""
+        """End the call from Reachy's side (ringing or on) and close the socket."""
+        self._finish(ENDED_HUNG_UP)
         try:
             await self._socket.send(json.dumps({"op": "hangup"}))
         except Exception:
@@ -398,18 +414,11 @@ class CallManager:
             if self._active is not None and self._active[0] is link:
                 self._active = None
 
-    def antenna_touched(self) -> str | None:
-        """Return what a bend of his antenna does now (thread-safe): "hang_up", "answer" or None.
-
-        During a call it hangs up here; while a call rings, the caller should answer it.
-        """
+    @property
+    def busy(self) -> bool:
+        """Whether a call rings or is on now (thread-safe); antenna touches do nothing meanwhile."""
         with self._lock:
-            active, ringing = self._active, self._ringing
-        if active is not None:
-            link, loop = active
-            asyncio.run_coroutine_threadsafe(link.hang_up(), loop)
-            return "hang_up"
-        return "answer" if ringing is not None else None
+            return self._ringing is not None or self._active is not None
 
     def _track(self, link: CallLink) -> None:
         with self._lock:

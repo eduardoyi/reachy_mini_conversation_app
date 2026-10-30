@@ -187,9 +187,9 @@ def _build_now_playing(display: Any) -> Any:
 def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
     """Start the WhatsApp call manager when the call service is set up; announce incoming calls.
 
-    Awake: "Te llama Eduardo" (again after 15 and 30 s) and a yes answers. Asleep: no voice, only the caller id
-    on the screen and a small antenna wiggle. A pat on his head (held still while it rings) or an antenna bend
-    answers either way. A conversation open when a call comes in closes.
+    The antennas flutter and the screen shows who is calling. Awake: "Te llama Eduardo" (again after 15 and
+    30 s) and a yes answers. Asleep: no voice. A pat on his head (held still while it rings) answers either
+    way. A conversation open when a call comes in closes.
     """
     from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.incoming_calls import IncomingRinger
@@ -750,14 +750,11 @@ def run(
         calls = _start_calls(deps, hybrid_runtime, movement_manager, quick)
 
         def antenna_touched() -> None:
-            """Hang up a call, answer one that rings, or otherwise wake him."""
-            from reachy_mini_conversation_app.quick_commands import CALL_ANSWER_REQUEST
-
-            action = calls.antenna_touched() if calls is not None else None
-            if action == "answer":
-                hybrid_runtime.request_activation("acoustic_wake", addressed_text=CALL_ANSWER_REQUEST)
-            elif action is None:
-                hybrid_runtime.request_activation("antenna_touch")
+            """Wake him, unless a call rings or is on (a pat on his head answers and hangs up)."""
+            if calls is not None and calls.busy:
+                logging.getLogger(__name__).info("Antenna touched during a call; ignored")
+                return
+            hybrid_runtime.request_activation("antenna_touch")
 
         antenna_touch_handlers.append(antenna_touched)
         if deps.display is not None:

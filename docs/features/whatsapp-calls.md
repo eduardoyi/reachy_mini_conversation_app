@@ -34,17 +34,22 @@ and recording are out of scope.
 - **Sound:** while the room is quiet, what Reachy sends is turned down to a tenth (a noise gate: the idle
   room's hiss was heard as rustling), opening at once when someone speaks. The other side plays at most
   about a third of full scale (a limiter: shouting on the phone cut Reachy's speaker out).
-- **Ending:** either side hangs up (on Reachy: bend an antenna), or 60 min pass. Then "Call ended."
-  Unanswered: "Eduardo didn't answer." Service down or refused: "I couldn't call Eduardo."
+- **Ending:** either side hangs up, or 60 min pass. Then "Call ended." On Reachy, **a pat on his head hangs
+  up**, ringing or answered, once the other side has been quiet for 2 s (`CALL_PAT_QUIET_S`): his head is held
+  still for the call (no breathing or speaker turns), but the daemon's speech wobble moves it with their voice,
+  which would read as pats, and it settles about 0.5 s after they stop (it rests below about -50 dBFS,
+  `CALL_VOICE_RMS`). Unanswered: "Eduardo didn't answer." Service down or refused: "I couldn't call Eduardo."
+  Antennas do nothing during a call or while one rings (a bend once failed to answer).
 - **Being called:** an approved person calling the spare number rings for up to 60 s. The TRMNL shows a
-  caller card ("Llamada de / Eduardo / Di sí, o tócame la cabeza") while it rings, and his head is held
-  still (speech wobble off) so **a pat on his head answers**, as it ends a voice message. Awake, Reachy
+  caller card ("Llamada de / Eduardo / Di sí, o tócame la cabeza") while it rings, the antennas ring (two
+  quick flutters toward each other, then a rest, every 4 s: `MovementManager.ring_antennas`, the same awake
+  or asleep, and the ring meant for quiet hours), and his head is held still (speech wobble off) so **a pat
+  on his head answers**, as it ends a voice message. Awake, Reachy
   says "¡Te llama Eduardo!" (`WHATSAPP_CALLS_LANGUAGE`, default Spanish) at 0, 15 and 30 s
   (`CALL_ANNOUNCE_AT_S`) and listens once after each: "sí / yes / dale…" answers, "no" declines ("Vale, no
   contesto."), anything else leaves it ringing. Anyone may answer, kids included; "contesta / answer /
-  atiende / rispondi / atende" and an antenna bend also answer while it rings. A conversation open when it
-  rings closes so he can announce it. Asleep (night, naps): no voice, only the caller card and a slow
-  antenna wiggle; a pat or a bend answers. A pat while he is still talking keeps trying for 10 s. Not approved, another call on, or the app not listening: declined by the service.
+  atiende / rispondi / atende" also answer while it rings. A conversation open when it rings closes so he
+  can announce it. Asleep (night, naps): no voice, only the caller card and the antenna ring; a pat answers. A pat while he is still talking keeps trying for 10 s. Not approved, another call on, or the app not listening: declined by the service.
 - **Disabled:** without the service's token file (`WHATSAPP_CALLS_TOKEN_FILE`) or without the approved
   list, "call x" is not a call.
 
@@ -84,10 +89,12 @@ flowchart LR
   `whatsapp_calls.CallManager` from its own thread, reconnecting every 5 s); the app answers with
   `{"op": "answer", "call_id"}` on `/call` or declines on `/events`. `main._start_calls` shows the caller card
   and starts `incoming_calls.IncomingRinger`, which holds the head still, announces through
-  `HybridRuntime.request_announcement` with `QuickCommands.answer_incoming` (or wiggles the antennas with
-  `set_listening` while asleep), and answers on a head touch (`MovementManager.head_touches`). The antenna-touch handler asks `CallManager.antenna_touched()`
-  first: during a call it hangs up; while one rings it activates with `CALL_ANSWER_REQUEST`; otherwise the
-  usual wake.
+  `HybridRuntime.request_announcement` with `QuickCommands.answer_incoming` (awake only), rings the antennas
+  (`ring_antennas`, which also skips antenna-touch checks), and answers on a head touch
+  (`MovementManager.head_touches`). During any call `QuickCommands._hang_up_on_pat` holds the head still
+  (renewed every 2 s, as the ringer lets go just as the call is answered) and hangs up
+  (`CallLink.hang_up`, reason `hung_up`) on a touch while `CallLink.quiet_for()` is at least
+  `CALL_PAT_QUIET_S`. The antenna-touch handler does nothing while `CallManager.busy`.
 
 ## Configuration
 
@@ -120,14 +127,21 @@ flowchart LR
 - `tests/test_quick_commands.py`: "call x" in four languages, a parent calling, a kid or nobody refused,
   a name not approved left to the conversation, no answer and failure replies, no token no call.
 - `tools/whatsapp-calls/main_test.go`: the approved list, the mic source's silence and drop-oldest.
-- `tests/test_incoming_calls.py`: announced three times and a pat answers (retried while he talks), a
-  silent wiggle asleep, the head released when nobody answers.
+- `tests/test_incoming_calls.py`: announced three times and a pat answers (retried while he talks), the
+  same antenna ring asleep, the head released when nobody answers.
+- `tests/test_quick_commands.py`: a pat hangs up only while the other side is quiet; an outgoing call
+  cancelled by a pat says "Call ended.". `tests/test_moves.py`: the ring's two flutters and rest, no antenna
+  touches while it rings.
 - Incoming (`tests/test_whatsapp_calls.py`): a ringing call answered on its call id without a ringback, a
-  decline sent back and an abandoned call cleared, an antenna bend hanging a call up;
+  decline sent back and an abandoned call cleared, a hang-up from Reachy ending as `hung_up`, the quiet clock;
   (`tests/test_quick_commands.py`): "answer" in four languages, answering only while it rings, "sí" answers
   and "no" declines after the announcement.
 
 ## Changelog
+
+- 2026-10-30: A pat on his head hangs up (once the other side has been quiet 2 s), and antennas no longer
+  answer or hang up (a bend once failed to answer). Ringing has its own antenna movement, two flutters then
+  a rest, the same awake and asleep (it replaces the asleep perk-and-release wiggle).
 
 - 2026-10-30: A pat on the head answers a ringing call, and the announcement repeats at 15 and 30 s: on the
   first incoming call his "sí" was not heard (the answer window transcribed nothing); "Sí, Richie, atiende"

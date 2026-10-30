@@ -19,13 +19,13 @@ class _Clock:
 
 
 class _Movement:
-    """Records holds and antenna poses; a pat lands at ``pat_at`` seconds."""
+    """Records holds and the antenna ring; a pat lands at ``pat_at`` seconds."""
 
     def __init__(self, clock: _Clock, pat_at: float | None = None) -> None:
         self.clock = clock
         self.pat_at = pat_at
         self.holds: list[bool] = []
-        self.listening: list[bool] = []
+        self.rings: list[bool] = []
 
     def hold_still(self, active: bool) -> None:
         self.holds.append(active)
@@ -33,9 +33,8 @@ class _Movement:
     def head_touches(self) -> int:
         return 1 if self.pat_at is not None and self.clock.now >= self.pat_at else 0
 
-    def set_listening(self, listening: bool) -> None:
-        if not self.listening or self.listening[-1] != listening:
-            self.listening.append(listening)
+    def ring_antennas(self, active: bool) -> None:
+        self.rings.append(active)
 
 
 class _Runtime:
@@ -73,19 +72,19 @@ def test_awake_he_announces_again_until_answered_and_a_pat_answers() -> None:
     assert runtime.activations == ["Reachy, answer"] * 3
     assert movement.holds == [True, False]
     robot.disable_wobbling.assert_called_once()
-    assert movement.listening == []  # awake: no wiggle
+    assert movement.rings == [True, False]
 
 
-def test_asleep_it_rings_silently_with_a_wiggle_and_a_pat_still_answers() -> None:
-    """Asleep: no voice, the antennas perk and release, and a pat answers."""
+def test_asleep_it_rings_silently_with_the_same_flutter_and_a_pat_still_answers() -> None:
+    """Asleep: no voice, the antennas ring as when awake, and a pat answers."""
     runtime, movement, _ = _ring(asleep=True, pat_at=5.0)
     assert runtime.announced == []
     assert runtime.activations[0] == "Reachy, answer"
-    assert movement.listening[:4] == [True, False, True, False] and movement.listening[-1] is False
+    assert movement.rings == [True, False]
 
 
 def test_unanswered_it_stops_ringing_and_lets_go_of_the_head() -> None:
     """Nobody answers: it gives up after the ring time without activating anything."""
     runtime, movement, _ = _ring(asleep=False, pat_at=None)
     assert runtime.activations == [] and len(runtime.announced) == 3
-    assert movement.holds == [True, False]
+    assert movement.holds == [True, False] and movement.rings == [True, False]
