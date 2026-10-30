@@ -4,7 +4,7 @@
 - Owner: household
 - Created: 2026-10-30
 - Last updated: 2026-10-30
-- Feature doc: none yet (`docs/features/whatsapp-calls.md` once stage 3 lands)
+- Feature doc: [WhatsApp calls through Reachy](../features/whatsapp-calls.md)
 - Builds on: [Voice messages and photos to family groups](whatsapp-family-messages.md)
 
 ## Goal
@@ -193,6 +193,13 @@ not on the approved list, recording calls.
   "Reconnecting") with the 2 s wait. Calls so far that worked: 2 outgoing, 1 incoming. GOWA connected
   throughout. Left for stage 1: about two more calls and a week without a WhatsApp warning or logout
   (watch until 2026-11-06).
+- 2026-10-30: **Stage 2 built** (not yet checked live): `reachy-calls serve` (loopback WebSocket with a
+  token, one call at a time, approved list checked by the service, incoming calls declined until stage 3,
+  60 s unanswered and 60 min limits); `whatsapp_calls.CallLink`; `HybridRuntime.stream_call` with a call
+  tap on post-activation frames; the "call x" quick command in four languages with the face check
+  (Eduardo or Adriana). The mic's first channel goes to the call, as Gemini Live hears the room while
+  Reachy talks. Feature doc: [whatsapp-calls.md](../features/whatsapp-calls.md). Hanging up from Reachy
+  (antenna bend) is left for stage 3.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.

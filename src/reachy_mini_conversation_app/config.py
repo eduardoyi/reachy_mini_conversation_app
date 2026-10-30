@@ -203,6 +203,11 @@ def _warn_on_obsolete_backend_env() -> None:
         )
 
 
+def _csv_set(value: str) -> frozenset[str]:
+    """Return the lowercase, comma-separated names in ``value``."""
+    return frozenset(part.strip().lower() for part in value.split(",") if part.strip())
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     """Parse a boolean environment flag.
 
@@ -812,6 +817,17 @@ class Config:
     WHATSAPP_CONTACTS_FILE = os.path.expanduser(
         os.getenv("WHATSAPP_CONTACTS_FILE") or "~/.config/reachy-whatsapp/contacts.json"
     )
+    # WhatsApp calls through Reachy (whatsapp_calls.py, tools/whatsapp-calls): the local call service, the
+    # token it created, its approved list (only names are read here; the numbers stay with the service), and
+    # the household people (face ids) who may start a call. No calls without the token file.
+    WHATSAPP_CALLS_URL = (os.getenv("WHATSAPP_CALLS_URL") or "").strip() or "ws://127.0.0.1:8793/call"
+    WHATSAPP_CALLS_TOKEN_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CALLS_TOKEN_FILE") or "~/.local/share/reachy-whatsapp-calls/token"
+    )
+    WHATSAPP_CALLS_APPROVED_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CALLS_APPROVED_FILE") or "~/.config/reachy-whatsapp/calls.json"
+    )
+    WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -1024,6 +1040,14 @@ def refresh_runtime_config_from_env() -> None:
     config.WHATSAPP_CONTACTS_FILE = os.path.expanduser(
         os.getenv("WHATSAPP_CONTACTS_FILE") or "~/.config/reachy-whatsapp/contacts.json"
     )
+    config.WHATSAPP_CALLS_URL = (os.getenv("WHATSAPP_CALLS_URL") or "").strip() or "ws://127.0.0.1:8793/call"
+    config.WHATSAPP_CALLS_TOKEN_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CALLS_TOKEN_FILE") or "~/.local/share/reachy-whatsapp-calls/token"
+    )
+    config.WHATSAPP_CALLS_APPROVED_FILE = os.path.expanduser(
+        os.getenv("WHATSAPP_CALLS_APPROVED_FILE") or "~/.config/reachy-whatsapp/calls.json"
+    )
+    config.WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

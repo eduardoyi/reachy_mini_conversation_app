@@ -29,6 +29,7 @@ the implementation.
 | Music on a Bluetooth speaker | [music-speaker.md](music-speaker.md) | in-progress |
 | E-ink display (TRMNL) | [eink-display.md](eink-display.md) | in-progress |
 | Photos and messages to WhatsApp | [whatsapp-photos.md](whatsapp-photos.md) | in-progress; photos checked live on the Mac mini; family messages checked live |
+| WhatsApp calls through Reachy | [whatsapp-calls.md](whatsapp-calls.md) | in-progress; outgoing calls through Reachy built (stage 2), live check pending; incoming declined |
 | Skill tools (progressive tool disclosure) | [skill-tools.md](skill-tools.md) | in-progress |
 | Maribel hand-off (Grok Bot) | [maribel-handoff.md](maribel-handoff.md) | in-progress |
 

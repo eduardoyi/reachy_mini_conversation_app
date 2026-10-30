@@ -67,6 +67,8 @@ class ToolDependencies:
     # Hybrid runtime only: beep, then record a voice message until the speaker stops (rate, mono int16) or None.
     # Records a voice message; the argument counts touches on his head, which end it.
     record_message: Callable[[Callable[[], int] | None], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
+    # During a quick command: stream a WhatsApp call (whatsapp_calls.CallLink) through Reachy (stream_call).
+    stream_call: Callable[[Any], Awaitable[bool]] | None = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).

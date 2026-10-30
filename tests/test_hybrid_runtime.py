@@ -5078,3 +5078,65 @@ async def test_a_message_is_recorded_only_during_a_quick_command() -> None:
         assert await runtime.record_message() is None
     finally:
         await runtime.close()
+
+
+class _FakeCallLink:
+    """A call that hears the frames Reachy sends and plays ``chunks`` from the other side, then ends."""
+
+    def __init__(self, chunks: list[np.ndarray]) -> None:
+        self.sent: list[Any] = []
+        self.chunks = chunks
+        self.streaming = asyncio.Event()
+        self.hang_up = asyncio.Event()
+
+    def send_frame(self, frame: Any) -> None:
+        self.sent.append(frame)
+
+    async def received(self):  # type: ignore[no-untyped-def]
+        self.streaming.set()
+        for chunk in self.chunks:
+            yield chunk
+            await asyncio.sleep(0.01)
+        await self.hang_up.wait()
+
+
+@pytest.mark.asyncio
+async def test_a_call_sends_the_room_to_the_other_side_and_plays_their_voice() -> None:
+    """During a call the mic goes to the call, not the post-activation queue; their audio plays from Reachy."""
+    handler = FakeHandler()
+    link = _FakeCallLink([np.full(960, 1_000, dtype=np.int16)] * 3)
+    streamed: list[bool] = []
+    runtime: HybridRuntime
+
+    async def after() -> str | None:
+        streamed.append(await runtime.stream_call(link))
+        return None
+
+    async def quick(_text: str) -> _QuickReply:
+        return _QuickReply("Calling Eduardo!", after=after)
+
+    async def speak(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    async def feed() -> None:
+        await link.streaming.wait()
+        for sequence in range(1, 4):
+            await runtime.handle_frame((16_000, _SPEECH), capture_sequence=sequence)
+        link.hang_up.set()
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    runtime.set_capture_barrier_provider(lambda: 0)
+    feeder = asyncio.create_task(feed())
+    try:
+        assert await runtime.activate("acoustic_wake", addressed_text="Reachy, call Eduardo")
+        await feeder
+        assert streamed == [True]
+        assert len(link.sent) == 3 and link.sent[0][0] == 16_000
+        assert not runtime._postactivation_frames and runtime._call_tap is None
+        outputs = [await runtime.emit() for _ in range(6)]
+        played = [output for output in outputs if isinstance(output, tuple) and output[0] == 16_000]
+        assert len(played) == 3, "the other side's audio plays from Reachy"
+        assert not handler.started.is_set()
+    finally:
+        feeder.cancel()
+        await runtime.close()

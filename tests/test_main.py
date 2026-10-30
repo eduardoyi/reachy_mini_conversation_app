@@ -270,6 +270,9 @@ def test_hybrid_run_defers_provider_factory_until_activation(
         async def record_message(self) -> None:
             return None
 
+        async def stream_call(self, _link: object) -> bool:
+            return False
+
     class FakeLocalStream:
         def __init__(self, handler: object, _robot: object, **_kwargs: object) -> None:
             self.handler = handler
@@ -344,6 +347,9 @@ def test_face_recognition_is_wired_into_tools_console_wake_and_sessions(monkeypa
 
         async def record_message(self) -> None:
             return None
+
+        async def stream_call(self, _link: object) -> bool:
+            return False
 
     class FakeLocalStream:
         def __init__(self, _handler: object, _robot: object, **kwargs: object) -> None:
@@ -444,6 +450,9 @@ def test_hybrid_run_wires_loopback_context_wake_and_local_actions(
 
         async def record_message(self) -> None:
             return None
+
+        async def stream_call(self, _link: object) -> bool:
+            return False
 
     class FakeLocalStream:
         def __init__(self, handler: object, _robot: object, **_kwargs: object) -> None:
