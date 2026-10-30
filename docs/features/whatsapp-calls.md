@@ -13,8 +13,10 @@ calls are not answered yet (stage 3); video, group calls and recording are out o
 
 ## User-facing behavior
 
-- **Asking:** "call Eduardo", "please call dad", "llama a papá", "llámale a Eduardo", "chiama Eduardo",
-  "liga para o Eduardo". It is a call only when the name is on the approved list (its name or a `say`
+- **Asking:** "call Eduardo", "please call dad", "llama a papá", "¿puedes llamar a Eduardo?", "márcale a
+  Eduardo", "hazle una llamada a Eduardo", "llámale a Eduardo", "chiama Eduardo",
+  "liga para o Eduardo", and "calla Eduardo" / "Col Eduardo" (how the speech models heard "call Eduardo" on
+  the first try). It is a call only when the name is on the approved list (its name or a `say`
   name); anything else ("call grandma", "llama la atención") goes to the conversation, which has no way to
   place a call.
 - **Who may ask:** face recognition must see Eduardo or Adriana (`WHATSAPP_CALLERS`) in front of the camera
@@ -85,5 +87,6 @@ flowchart LR
 
 ## Changelog
 
+- 2026-10-30: "calla" and "col" accepted for "call" (the first live try was heard as both).
 - 2026-10-30: Stage 2: outgoing calls through Reachy (service mode, `CallLink`, `stream_call`, "call x"
   with the face check).

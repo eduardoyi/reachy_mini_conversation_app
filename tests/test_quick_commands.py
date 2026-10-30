@@ -1313,14 +1313,24 @@ def _call_runner(
     [
         ("Call Eduardo", "en", "eduardo"),
         ("please call dad", "en", "dad"),
+        ("calla Eduardo.", "en", "eduardo"),
+        ("Col Eduardo", "en", "eduardo"),
         ("Llama a papá", "es", "papa"),
+        ("llama a eduardo", "es", "eduardo"),
+        ("¿Puedes llamar a Eduardo?", "es", "eduardo"),
+        ("me puedes llamar a eduardo", "es", "eduardo"),
+        ("podrías llamar a papá", "es", "papa"),
+        ("márcale a Eduardo", "es", "eduardo"),
+        ("hazle una llamada a Eduardo", "es", "eduardo"),
+        ("can you call dad", "en", "dad"),
+        ("puoi chiamare Eduardo", "it", "eduardo"),
         ("llámale a Eduardo", "es", "eduardo"),
         ("chiama Eduardo", "it", "eduardo"),
         ("liga para o Eduardo", "pt", "o eduardo"),
     ],
 )
 def test_call_requests_are_recognized(text: str, language: str, to: str) -> None:
-    """ "Call x" in the four languages, with the name as said."""
+    """Requests to call someone, in the four languages, with the name as said."""
     command = parse(text)
     assert command is not None and (command.kind, command.language, command.args) == ("call", language, {"to": to})
 
