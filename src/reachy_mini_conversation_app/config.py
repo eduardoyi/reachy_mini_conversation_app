@@ -828,6 +828,8 @@ class Config:
         os.getenv("WHATSAPP_CALLS_APPROVED_FILE") or "~/.config/reachy-whatsapp/calls.json"
     )
     WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
+    # The language Reachy announces incoming calls in ("Te llama Eduardo").
+    WHATSAPP_CALLS_LANGUAGE = (os.getenv("WHATSAPP_CALLS_LANGUAGE") or "es").strip().lower()
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -1048,6 +1050,7 @@ def refresh_runtime_config_from_env() -> None:
         os.getenv("WHATSAPP_CALLS_APPROVED_FILE") or "~/.config/reachy-whatsapp/calls.json"
     )
     config.WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
+    config.WHATSAPP_CALLS_LANGUAGE = (os.getenv("WHATSAPP_CALLS_LANGUAGE") or "es").strip().lower()
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
+import threading
 from typing import Any, Callable, AsyncIterator
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -174,12 +176,25 @@ def call_pcm(frame: tuple[int, Any], gate: NoiseGate | None = None) -> bytes:
     return (np.clip(resampled, -1.0, 1.0) * 32767).astype("<i2").tobytes()
 
 
+async def _connect(url: str, token: str) -> Any:
+    """Open a WebSocket to the call service; raises OSError when it cannot be reached."""
+    import websockets
+
+    try:
+        return await websockets.connect(
+            url, additional_headers={"Authorization": "Bearer " + token}, max_size=1 << 20, open_timeout=5
+        )
+    except (OSError, websockets.exceptions.WebSocketException, asyncio.TimeoutError) as error:
+        raise OSError(f"call service unreachable: {type(error).__name__}") from error
+
+
 class CallLink:
     """One call through the service: Reachy's mic out, the other side in, and how it ended."""
 
-    def __init__(self, socket: Any) -> None:
-        """Wrap an open WebSocket on which the call request has been sent."""
+    def __init__(self, socket: Any, *, ringback: bool = True) -> None:
+        """Wrap an open WebSocket on which the call request has been sent; ``ringback`` while it rings."""
         self._socket = socket
+        self._ringback = ringback
         self._outgoing: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_SEND_QUEUE_FRAMES)
         self._incoming: asyncio.Queue[NDArray[np.int16] | None] = asyncio.Queue(maxsize=_RECEIVE_QUEUE_FRAMES)
         self.connected = False
@@ -195,16 +210,16 @@ class CallLink:
     @classmethod
     async def open(cls, url: str, token: str, name: str) -> CallLink:
         """Ask the service to call ``name``; raises OSError when the service cannot be reached."""
-        import websockets
-
-        try:
-            socket = await websockets.connect(
-                url, additional_headers={"Authorization": "Bearer " + token}, max_size=1 << 20, open_timeout=5
-            )
-        except (OSError, websockets.exceptions.WebSocketException, asyncio.TimeoutError) as error:
-            raise OSError(f"call service unreachable: {type(error).__name__}") from error
+        socket = await _connect(url, token)
         await socket.send(json.dumps({"op": "call", "name": name}))
         return cls(socket)
+
+    @classmethod
+    async def answer(cls, url: str, token: str, call_id: str) -> CallLink:
+        """Ask the service to answer the incoming call ``call_id``; raises OSError when it cannot be reached."""
+        socket = await _connect(url, token)
+        await socket.send(json.dumps({"op": "answer", "call_id": call_id}))
+        return cls(socket, ringback=False)
 
     def send_frame(self, frame: tuple[int, Any]) -> None:
         """Queue one captured mic frame for the call (nothing is sent before the other side answers)."""
@@ -221,7 +236,7 @@ class CallLink:
     async def received(self) -> AsyncIterator[NDArray[np.int16]]:
         """Yield a ringback tone until the other side answers, then their audio until the call ends."""
         index = 0
-        while not self.connected and self.reason is None:
+        while self._ringback and not self.connected and self.reason is None:
             yield ringback(index)
             index += 1
             if index < _RINGBACK_LEAD_CHUNKS:
@@ -298,3 +313,158 @@ class CallLink:
                 await self._socket.send(await self._outgoing.get())
         except Exception:
             return
+
+
+@dataclass(frozen=True)
+class Incoming:
+    """An approved person calling Reachy, held ringing by the service."""
+
+    call_id: str
+    name: str
+
+
+class CallManager:
+    """The call service as the app sees it: placing and answering calls, who is calling, and the call on now.
+
+    The service's /events socket is kept open on a thread of its own (reconnecting every ``RECONNECT_S``);
+    calls themselves run on the loop of whoever places or answers them. ``on_incoming`` and
+    ``on_ringing_ended`` are called from that thread.
+    """
+
+    RECONNECT_S = 5.0
+
+    def __init__(self, url: str, token: str) -> None:
+        """Talk to the service at ``url`` (its /call socket) with ``token``."""
+        self._url = url
+        self._events_url = url.rsplit("/", 1)[0] + "/events"
+        self._token = token
+        self._lock = threading.Lock()
+        self._ringing: Incoming | None = None
+        self._active: tuple[CallLink, asyncio.AbstractEventLoop] | None = None
+        self._events_loop: asyncio.AbstractEventLoop | None = None
+        self._events_socket: Any = None
+        self.on_incoming: Callable[[Incoming], None] | None = None
+        self.on_ringing_ended: Callable[[Incoming], None] | None = None
+
+    @property
+    def ringing(self) -> Incoming | None:
+        """The incoming call ringing now, if any."""
+        with self._lock:
+            return self._ringing
+
+    @property
+    def on_a_call(self) -> bool:
+        """Whether a call (placed or answered) is on now."""
+        with self._lock:
+            return self._active is not None
+
+    def start(self) -> None:
+        """Keep the event socket open from a daemon thread."""
+        threading.Thread(target=lambda: asyncio.run(self._events()), daemon=True, name="call-events").start()
+
+    async def place(self, name: str) -> CallLink:
+        """Call ``name`` (approved by the service); raises OSError when the service cannot be reached."""
+        link = await CallLink.open(self._url, self._token, name)
+        self._track(link)
+        return link
+
+    async def answer(self) -> CallLink | None:
+        """Answer the call ringing now; None when nothing rings. Raises OSError when the service is down."""
+        with self._lock:
+            incoming, self._ringing = self._ringing, None
+        if incoming is None:
+            return None
+        self._notify(self.on_ringing_ended, incoming)
+        link = await CallLink.answer(self._url, self._token, incoming.call_id)
+        self._track(link)
+        return link
+
+    def decline(self) -> Incoming | None:
+        """Decline the call ringing now (thread-safe); return it, or None when nothing rings."""
+        with self._lock:
+            incoming, self._ringing = self._ringing, None
+            loop, socket = self._events_loop, self._events_socket
+        if incoming is None:
+            return None
+        self._notify(self.on_ringing_ended, incoming)
+        if loop is not None and socket is not None:
+            message = json.dumps({"op": "decline", "call_id": incoming.call_id})
+            asyncio.run_coroutine_threadsafe(socket.send(message), loop)
+        return incoming
+
+    def finished(self, link: CallLink) -> None:
+        """Forget ``link`` once its call is over."""
+        with self._lock:
+            if self._active is not None and self._active[0] is link:
+                self._active = None
+
+    def antenna_touched(self) -> str | None:
+        """Return what a bend of his antenna does now (thread-safe): "hang_up", "answer" or None.
+
+        During a call it hangs up here; while a call rings, the caller should answer it.
+        """
+        with self._lock:
+            active, ringing = self._active, self._ringing
+        if active is not None:
+            link, loop = active
+            asyncio.run_coroutine_threadsafe(link.hang_up(), loop)
+            return "hang_up"
+        return "answer" if ringing is not None else None
+
+    def _track(self, link: CallLink) -> None:
+        with self._lock:
+            self._active = (link, asyncio.get_running_loop())
+
+    @staticmethod
+    def _notify(callback: Callable[[Incoming], None] | None, incoming: Incoming) -> None:
+        if callback is None:
+            return
+        try:
+            callback(incoming)
+        except Exception as error:
+            logger.warning("Incoming call callback failed: %s", type(error).__name__)
+
+    def _on_event(self, message: Any) -> None:
+        try:
+            event = json.loads(message)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(event, dict):
+            return
+        kind, call_id = event.get("event"), str(event.get("call_id") or "")
+        if kind == "incoming" and call_id:
+            incoming = Incoming(call_id, str(event.get("name") or ""))
+            with self._lock:
+                self._ringing = incoming
+            logger.info("Incoming call ringing")
+            self._notify(self.on_incoming, incoming)
+        elif kind == "incoming_ended":
+            with self._lock:
+                ended = self._ringing if self._ringing is not None and self._ringing.call_id == call_id else None
+                if ended is not None:
+                    self._ringing = None
+            if ended is not None:
+                logger.info("Incoming call stopped ringing reason=%s", event.get("reason"))
+                self._notify(self.on_ringing_ended, ended)
+
+    async def _events(self) -> None:
+        self._events_loop = asyncio.get_running_loop()
+        while True:
+            try:
+                socket = await _connect(self._events_url, self._token)
+            except OSError:
+                await asyncio.sleep(self.RECONNECT_S)
+                continue
+            with self._lock:
+                self._events_socket = socket
+            try:
+                async for message in socket:
+                    self._on_event(message)
+            except Exception as error:
+                logger.info("Call events closed: %s", type(error).__name__)
+            with self._lock:
+                self._events_socket = None
+                ringing, self._ringing = self._ringing, None
+            if ringing is not None:
+                self._notify(self.on_ringing_ended, ringing)
+            await asyncio.sleep(self.RECONNECT_S)

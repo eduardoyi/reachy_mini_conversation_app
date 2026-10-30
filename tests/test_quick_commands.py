@@ -1289,6 +1289,7 @@ def _call_runner(
 
     runner, _, deps = _runner()
     deps.face_recognition = _Faces(*faces)
+    deps.calls = whatsapp_calls.CallManager("ws://127.0.0.1:9/call", "secret")
     streamed: list[Any] = []
 
     async def stream(call: Any) -> bool:
@@ -1403,13 +1404,85 @@ async def test_an_unanswered_or_failed_call_says_so(callees: None, monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_no_calls_without_the_service_token(
-    callees: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    """Without the token file the service is not set up, so it is not a call."""
-    from reachy_mini_conversation_app.config import config
-
-    monkeypatch.setattr(config, "WHATSAPP_CALLS_TOKEN_FILE", str(tmp_path / "missing"))
+async def test_no_calls_without_the_call_service(callees: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the call service (no token file at startup) it is not a call."""
     runner, _, opened = _call_runner(monkeypatch, "eduardo", link=_Link(True, "ended"))
+    runner._deps.calls = None
     assert await runner.handle("call Eduardo") is None
     assert opened == []
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [("answer", "en"), ("answer the call", "en"), ("pick up", "en"), ("contesta", "es"), ("atiende la llamada", "es"),
+     ("rispondi", "it"), ("atende", "pt")],
+)  # fmt: skip
+def test_answer_requests_are_recognized(text: str, language: str) -> None:
+    """Picking up a ringing call, in the four languages."""
+    command = parse(text)
+    assert command is not None and (command.kind, command.language) == ("answer_call", language)
+
+
+class _Ringing:
+    """A call manager with ``Test Person`` calling, whose answered call connects and ends."""
+
+    def __init__(self) -> None:
+        from reachy_mini_conversation_app.whatsapp_calls import Incoming
+
+        self.ringing: Any = Incoming("C1", "Test Person")
+        self.declined = False
+        self.link = _Link(connected=True, reason="hung_up")
+
+    async def answer(self) -> Any:
+        self.ringing = None
+        return self.link
+
+    def decline(self) -> Any:
+        self.declined, self.ringing = True, None
+        return True
+
+    def finished(self, _link: Any) -> None:
+        pass
+
+
+def _ringing_runner() -> tuple[Any, _Ringing, list[Any]]:
+    runner, _, deps = _runner()
+    deps.calls = _Ringing()
+    streamed: list[Any] = []
+
+    async def stream(call: Any) -> bool:
+        streamed.append(call)
+        return True
+
+    deps.stream_call = stream
+    return runner, deps.calls, streamed
+
+
+@pytest.mark.asyncio
+async def test_answer_picks_up_the_ringing_call_through_reachy() -> None:
+    """Saying contesta while it rings answers the call and carries it until it ends."""
+    runner, calls, streamed = _ringing_runner()
+    reply = await runner.handle("contesta")
+    assert reply is not None and reply.text is None and reply.after is not None
+    assert await reply.after() == "Llamada terminada."
+    assert streamed == [calls.link] and calls.link.closed
+
+
+@pytest.mark.asyncio
+async def test_answer_is_not_a_command_when_nothing_rings() -> None:
+    """With no call ringing, "answer" is left to the conversation."""
+    runner, calls, _ = _ringing_runner()
+    calls.ringing = None
+    assert await runner.handle("answer") is None
+
+
+@pytest.mark.asyncio
+async def test_yes_answers_the_announced_call_and_no_declines_it() -> None:
+    """After "Te llama Test Person!": "sí" answers; "no" declines; anything else leaves it ringing."""
+    runner, calls, _ = _ringing_runner()
+    assert await runner.answer_incoming("what was that?") is None and calls.ringing is not None
+    reply = await runner.answer_incoming("sí")
+    assert reply is not None and reply.kind == "answer_call" and reply.after is not None
+    runner, calls, _ = _ringing_runner()
+    reply = await runner.answer_incoming("no")
+    assert reply is not None and reply.text == "Vale, no contesto." and calls.declined

@@ -215,6 +215,10 @@ not on the approved list, recording calls.
   The decision "Gemini gets no calling tool" is replaced: it gets a hand-off that keeps both checks.
 - 2026-10-30: Ringback tone while a call rings, asked for by the household (silence left them unsure
   whether it rang or had been answered).
+- 2026-10-30: **Stage 3 built** (live check pending): the service holds approved incoming calls ringing
+  and reports them on `/events`; `CallManager` keeps that socket and answers or declines; caller card on
+  the TRMNL, "¡Te llama Eduardo!" with yes/no, "contesta / answer" while it rings, a silent ring with an
+  antenna wiggle while asleep, an antenna bend answering a ringing call and hanging up any call.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
