@@ -132,6 +132,13 @@ answers when told. Nobody outside the approved list is ever called or answered.
   CLI example does not build at the newer commit. Network: WhatsApp's servers only. Its `DISCLAIMER.md`
   (read 2026-10-30) asks for research with one's own accounts and devices, or with the other party's
   consent in test calls: stage 1 calls only Eduardo's own phone.
+- **Since 2026-10-30, with the household's OK: the unmerged fix in meowcaller PR 26**
+  (`pedrobartolini/meowcaller` at `3494d98`, four commits on top of our pin, `replace` in
+  `tools/whatsapp-calls/go.mod`). It binds every relay the offer lists, so a phone caller that moves its
+  media to a closer relay after the accept is still heard (upstream issues #21, #22, #36, #40, all
+  open). Reviewed before use: it adds only relay fan-out code over the library's own relay package (no
+  new network, file or process access). Go back to upstream once a fix for incoming calls is merged
+  there; PR 49 (relay election steering) is a later alternative on the hypermeow line.
 - Go toolchain to build it (on the laptop, cross-compiled for the mini).
 
 ## Tests
@@ -171,6 +178,21 @@ not on the approved list, recording calls.
   (voice 3.2 s, peak RMS 0.35; the first 3 s of the recording silent). The local transcript of the
   recording read as his reply that he heard it perfectly; the recording was deleted after the check.
   Warnings at hang-up only (an SRTCP packet after the end). Calls so far: 1 outgoing, 0 incoming.
+- 2026-10-30: **Incoming calls silent from the phone's side** (calls 2-4, Eduardo calling the spare
+  number): answered within 1 s and the greeting heard on the phone, but only 4-8 small comfort-noise
+  packets ever arrived; the phone then showed "Reconnecting". Packet diagnostics (deleted after the
+  check: they hold key material) showed the phone's media leaving the relay we were bound to right after
+  the accept, matching upstream issues #21/#22. Switched to PR 26 (above).
+- 2026-10-30: **Call 5, incoming with PR 26: worked.** Fan-out to all 3 offered relays (IAD, LGA, LHR);
+  23.9 s of his side received with no gaps, the local transcript read his counting "one" to "seventeen"
+  (recording deleted). The phone still showed "Reconnecting" after Reachy hung up at 30 s: meowcaller's
+  `hangup` reports the end before it sends the terminate, and the tool closed the connection in between.
+  The tool now waits 2 s after a call ends. Calls so far: 1 outgoing, 1 incoming that worked (3 earlier
+  incoming silent).
+- 2026-10-30: **Call 6, outgoing, Reachy hanging up at 15 s: ended cleanly** on the phone (no
+  "Reconnecting") with the 2 s wait. Calls so far that worked: 2 outgoing, 1 incoming. GOWA connected
+  throughout. Left for stage 1: about two more calls and a week without a WhatsApp warning or logout
+  (watch until 2026-11-06).
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
