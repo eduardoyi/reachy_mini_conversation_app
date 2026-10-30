@@ -33,6 +33,7 @@ import (
 	"time"
 
 	meowcaller "github.com/purpshell/meowcaller"
+	"github.com/purpshell/meowcaller/diag"
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
@@ -49,6 +50,9 @@ import (
 const defaultMaxSeconds = 60
 
 var notDigits = regexp.MustCompile(`\D`)
+
+// diagRecorder is set when REACHY_CALLS_DIAG asks for packet diagnostics; closed when the program ends.
+var diagRecorder *diag.Recorder
 
 // person is one approved entry: the name it is logged as and its phone digits.
 type person struct {
@@ -76,6 +80,9 @@ func main() {
 	default:
 		fmt.Fprintln(os.Stderr, "usage: reachy-calls pair <spare-number> | call <name> <play.wav> <record.wav> [max-s] | wait <play.wav> <record.wav> [max-s]")
 		os.Exit(2)
+	}
+	if diagRecorder != nil {
+		diagRecorder.Close()
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("failed")
@@ -192,7 +199,23 @@ func connect(ctx context.Context) (*whatsmeow.Client, *meowcaller.Client, error)
 	if wa.Store.ID == nil {
 		return nil, nil, errors.New("not linked yet; run pair first")
 	}
-	client := meowcaller.NewClient(wa, meowcaller.WithLogger(zerolog.Ctx(ctx).Level(zerolog.WarnLevel)))
+	// REACHY_CALLS_DEBUG=1 logs the call engine in full (it can include numbers: for checks by hand only).
+	callLevel := zerolog.WarnLevel
+	if os.Getenv("REACHY_CALLS_DEBUG") == "1" {
+		callLevel = zerolog.DebugLevel
+	}
+	options := []meowcaller.Option{meowcaller.WithLogger(zerolog.Ctx(ctx).Level(callLevel))}
+	// REACHY_CALLS_DIAG=<dir> records every packet, including key material: local checks only, delete after.
+	if dir := strings.TrimSpace(os.Getenv("REACHY_CALLS_DIAG")); dir != "" {
+		recorder, err := diag.NewRecorder(dir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("diagnostics: %w", err)
+		}
+		options = append(options, meowcaller.WithDiagnostics(recorder))
+		go func() { <-ctx.Done(); recorder.Close() }()
+		diagRecorder = recorder
+	}
+	client := meowcaller.NewClient(wa, options...)
 	if err := wa.Connect(); err != nil {
 		return nil, nil, fmt.Errorf("connect: %w", err)
 	}
@@ -384,6 +407,9 @@ func runCall(ctx context.Context, c *meowcaller.Call, name, playPath, recordPath
 		_ = c.Hangup()
 	}
 	_ = sink.Close()
+	// Give a hang-up time to reach WhatsApp before the connection closes, or the other phone only sees
+	// the media stop and shows "Reconnecting".
+	time.Sleep(2 * time.Second)
 	talked := 0.0
 	if !connectedAt.IsZero() {
 		talked = time.Since(connectedAt).Seconds()
