@@ -24,6 +24,7 @@ USE_SKILL = "use_skill"
 # One line each for the menu; the tool's own description is what skill_help returns.
 SKILL_SUMMARIES: Dict[str, str] = {
     "home_lights": "home lights and smart plugs: what is on, on/off, brightness, warmth, color, scenes",
+    "call_person": "a WhatsApp voice call through you to someone on the call list, when Mom or Dad asks",
     "tv": "the TV: on/off, volume, mute, play/pause, remote buttons, open an app, search YouTube",
     "remember": "save a household memory, only when someone explicitly asks you to remember something",
     "forget": "remove a saved memory when someone asks you to forget it",

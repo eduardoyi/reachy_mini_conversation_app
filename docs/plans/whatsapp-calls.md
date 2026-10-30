@@ -83,7 +83,7 @@ answers when told. Nobody outside the approved list is ever called or answered.
 4. **Commands:** "call / llama a / chiama / liga para [x]" (quick commands, four languages, contact names
    as for messages). Reachy first runs `identify_now()`: only if Eduardo or Adriana is in front of him does
    he say "Calling Abuela…" and ring; anyone else (or nobody recognized) hears "Only Mom or Dad can start
-   a call." Gemini gets no calling tool, so a call never starts from a conversation. "Hang up / cuelga" cannot be heard (no wake in a call),
+   a call." In a conversation Gemini's `call_person` hands the request to this command (since 2026-10-30). "Hang up / cuelga" cannot be heard (no wake in a call),
    so a call ends by an **antenna bend**, by the other side hanging up, or at a 60 min cap.
 5. **Incoming:** an approved contact calls → the TRMNL shows a caller id card (their name, "is
    calling") for as long as it rings, and Reachy says "Abuela is calling" and listens once without the
@@ -206,6 +206,13 @@ not on the approved list, recording calls.
   head moved with his voice; what Reachy sent sounded like rustling (motors, or leftover echo?); shouting
   on the phone cut the audio from Reachy's speaker. Nothing was transcribed by the local speech server
   during the call. Next: record both directions (`REACHY_CALLS_RECORD_DIR`) to find both causes.
+- 2026-10-30: **Recorded call** (both directions, 36 s, files deleted after): no echo of Eduardo's voice
+  in what Reachy sent (his counting absent; the loud part was someone in the room); about 0.01 RMS of
+  high-pitched hiss whenever the room was quiet (the "rustling"); his shouts arrived whole, so the cut-out
+  is at Reachy's speaker; the incoming side had 28 gaps over 50 ms (phone silence, lost packets).
+  Changes: a noise gate on outgoing audio, a limiter on incoming, and a `call_person` tool so Gemini can
+  hand a call to the call command (two tries had been misheard into Gemini, which said it couldn't call).
+  The decision "Gemini gets no calling tool" is replaced: it gets a hand-off that keeps both checks.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.

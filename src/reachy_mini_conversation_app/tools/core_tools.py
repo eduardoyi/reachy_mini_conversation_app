@@ -69,6 +69,8 @@ class ToolDependencies:
     record_message: Callable[[Callable[[], int] | None], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
     # During a quick command: stream a WhatsApp call (whatsapp_calls.CallLink) through Reachy (stream_call).
     stream_call: Callable[[Any], Awaitable[bool]] | None = None
+    # Close the conversation after Reachy's reply, then handle this request locally (HybridRuntime.request_after_close).
+    request_after_close: Callable[[str], bool] | None = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).
@@ -360,6 +362,12 @@ DISPLAY_TOOLS = ("show_on_display",)
 # Enabled automatically once Maribel's webhook and Reachy's callback are configured, unless customized.
 MARIBEL_TOOLS = ("ask_maribel",)
 WHATSAPP_TOOLS = ("take_photo",)
+CALL_TOOLS = ("call_person",)
+
+
+def whatsapp_calls_configured() -> bool:
+    """Return whether the call service's token and approved list are both on this computer."""
+    return Path(config.WHATSAPP_CALLS_TOKEN_FILE).is_file() and Path(config.WHATSAPP_CALLS_APPROVED_FILE).is_file()
 
 
 def whatsapp_photos_configured() -> bool:
@@ -435,6 +443,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in WHATSAPP_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in WHATSAPP_TOOLS if name not in tool_names)
+
+    if not (config.HYBRID_RUNTIME_ENABLED and whatsapp_calls_configured()):
+        tool_names = [name for name in tool_names if name not in CALL_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in CALL_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]

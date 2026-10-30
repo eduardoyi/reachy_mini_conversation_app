@@ -113,3 +113,48 @@ async def test_an_unreachable_service_raises_os_error() -> None:
     """No service on the port: the caller hears that the call could not be placed."""
     with pytest.raises(OSError):
         await CallLink.open("ws://127.0.0.1:9/call", "secret", "Test Person")
+
+
+def test_the_gate_turns_down_a_quiet_room_and_opens_for_speech() -> None:
+    """Hiss (about 0.01 RMS) goes out at a tenth; speech opens the gate at once and holds it briefly."""
+    from reachy_mini_conversation_app.whatsapp_calls import GATE_FLOOR, NoiseGate
+
+    gate = NoiseGate()
+    rng = np.random.default_rng(0)
+    hiss = (rng.standard_normal(320) * 0.01).astype(np.float32)
+    quiet = gate.process(hiss)
+    assert np.allclose(quiet, hiss * GATE_FLOOR, atol=1e-6)
+    speech = np.full(320, 0.1, dtype=np.float32)
+    opened = gate.process(speech)
+    assert opened[-1] == pytest.approx(0.1) and opened[0] < 0.02  # ramped open, no click
+    assert np.allclose(gate.process(hiss), hiss)  # held open just after speech
+    for _ in range(25):  # 0.5 s of quiet closes it again
+        gate.process(hiss)
+    assert np.allclose(gate.process(hiss), hiss * GATE_FLOOR, atol=1e-6)
+
+
+def test_the_limiter_turns_shouting_down_and_eases_back() -> None:
+    """A shout is capped near LIMIT_PEAK; normal speech afterwards comes back up step by step."""
+    from reachy_mini_conversation_app.whatsapp_calls import LIMIT_PEAK, Limiter
+
+    limiter = Limiter()
+    shout = np.full(960, 30_000, dtype=np.int16)
+    once = limiter.process(shout)
+    again = limiter.process(shout)
+    assert int(np.abs(again).max()) <= LIMIT_PEAK * 32768 + 1
+    assert once[0] == 30_000 and once[-1] < once[0]  # ramped down within the first chunk
+    normal = np.full(960, 3_000, dtype=np.int16)
+    levels = [int(limiter.process(normal)[-1]) for _ in range(30)]
+    assert levels[0] < 3_000 and levels[-1] == 3_000 and levels == sorted(levels)
+
+
+def test_a_handed_off_call_is_asked_for_in_the_conversation_language() -> None:
+    """Gemini's hand-off becomes the request the call command understands."""
+    from reachy_mini_conversation_app.quick_commands import parse
+    from reachy_mini_conversation_app.whatsapp_calls import call_request
+
+    for language in ("en", "es", "it", "pt", "fr"):
+        text = call_request(language, "Eduardo")
+        assert text.startswith("Reachy, ")
+        command = parse(text.removeprefix("Reachy, "))
+        assert command is not None and command.kind == "call" and command.args["to"] == "eduardo"
