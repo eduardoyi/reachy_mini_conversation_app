@@ -9,7 +9,7 @@ import logging
 import weakref
 import threading
 from enum import Enum
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 from contextlib import aclosing
 from collections import deque
 from dataclasses import dataclass
@@ -30,6 +30,7 @@ from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE as SPEECH_SAMPLE_RATE
 from reachy_mini_conversation_app.local_speech import beep
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
+from reachy_mini_conversation_app.whatsapp_calls import CALL_SAMPLE_RATE
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
     AmbientContextStrategy,
@@ -50,6 +51,18 @@ from reachy_mini_conversation_app.local_audio_backends import RmsEnergyVAD
 
 
 logger = logging.getLogger(__name__)
+
+
+class CallAudio(Protocol):
+    """One WhatsApp call's audio, as ``whatsapp_calls.CallLink`` carries it."""
+
+    def send_frame(self, frame: AudioFrame) -> None:
+        """Queue one captured mic frame for the other side."""
+        ...
+
+    def received(self) -> AsyncIterator[NDArray[np.int16]]:
+        """Yield the other side's 16 kHz audio until the call ends."""
+        ...
 
 
 class RuntimeMode(str, Enum):
@@ -581,6 +594,8 @@ class HybridRuntime:
         self._request_clip_cut_off = False
         # A voice message is being recorded into _request_clip: post-activation audio is not kept for Gemini.
         self._recording_message = False
+        # During a WhatsApp call, every captured frame goes here instead of the post-activation queue.
+        self._call_tap: Callable[[AudioFrame], None] | None = None
         # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
         # without a conversation; a conversation reports through cloud_session_observer instead.
         self._listening_observer = listening_observer
@@ -1983,6 +1998,31 @@ class HybridRuntime:
                 self._clear_postactivation_queue()
                 self._transition(RuntimeMode.LOCAL_AMBIENT, reason)
 
+    async def stream_call(self, link: CallAudio) -> bool:
+        """During a quick command: Reachy's mic goes to ``link`` and what it receives plays from his speaker.
+
+        Returns once the call has ended and its audio has played, or False when the command is no longer
+        current. Wake detection, the room transcript and the cloud hear nothing meanwhile.
+        """
+        with self._lifecycle_lock:
+            generation = self._generation
+        if not self._quick_generation_current(generation):
+            return False
+
+        async def other_side() -> AsyncIterator[tuple[int, np.ndarray]]:
+            async for chunk in link.received():
+                yield CALL_SAMPLE_RATE, chunk
+
+        with self._lifecycle_lock:
+            self._clear_postactivation_queue()
+            self._call_tap = link.send_frame
+        try:
+            await self._queue_reply_audio(other_side(), generation, self._clock())
+        finally:
+            with self._lifecycle_lock:
+                self._call_tap = None
+        return True
+
     async def record_message(self, touches: Callable[[], int] | None = None) -> tuple[int, NDArray[np.int16]] | None:
         """During a quick command's follow-up: beep, then record until the speaker stops; None if nobody spoke.
 
@@ -2658,6 +2698,7 @@ class HybridRuntime:
         postactivation_frame = False
         observe_postactivation_locally = False
         observe_acoustic_ack_speech = False
+        call_tap: Callable[[AudioFrame], None] | None = None
         handler: ConversationHandler | None = None
         generation = 0
         async with self._state_lock:
@@ -2686,6 +2727,7 @@ class HybridRuntime:
                     observe_acoustic_ack_speech = self._pending_acoustic_ack_generation == generation
                 if barrier is not None and capture_sequence is not None and capture_sequence > barrier:
                     postactivation_frame = True
+                    call_tap = self._call_tap
                 else:
                     local_frame = True
                     with self._lifecycle_lock:
@@ -2704,6 +2746,9 @@ class HybridRuntime:
 
         if local_frame:
             await self._enqueue_local_frame(copied_frame, wait_for_completion=wait_for_local_processing)
+            return
+        if postactivation_frame and call_tap is not None:
+            call_tap(copied_frame)  # a call: the room goes to the other person, not to wake or the cloud
             return
         if postactivation_frame:
             self._enqueue_postactivation(copied_frame, capture_sequence)

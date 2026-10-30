@@ -1240,3 +1240,145 @@ async def test_while_writing_a_writing_word_steps_and_anything_else_ends_it() ->
     reply = await runner.handle("apaga las luces")
     assert deps.writing.stopped == 1
     assert reply is not None and tools["lights"].calls == [{"action": "set", "target": "all", "on": False}]
+
+
+@pytest.fixture
+def callees(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """One approved person for calls (a test number) and the service's token."""
+    import json
+
+    from reachy_mini_conversation_app.config import config
+
+    approved = tmp_path / "calls.json"
+    approved.write_text(
+        json.dumps({"approved": [{"name": "Eduardo", "phone": "+15550100000", "say": ["papa", "dad"]}]})
+    )
+    token = tmp_path / "token"
+    token.write_text("secret\n")
+    monkeypatch.setattr(config, "WHATSAPP_CALLS_APPROVED_FILE", str(approved))
+    monkeypatch.setattr(config, "WHATSAPP_CALLS_TOKEN_FILE", str(token))
+    monkeypatch.setattr(config, "WHATSAPP_CALLERS", frozenset({"eduardo", "adriana"}))
+
+
+class _Faces:
+    """Face recognition that sees ``person_ids`` in front of the camera."""
+
+    def __init__(self, *person_ids: str) -> None:
+        self.person_ids = person_ids
+
+    def identify_now(self) -> list[Any]:
+        return [MagicMock(person_id=person_id) for person_id in self.person_ids]
+
+
+class _Link:
+    """A call that was answered (or not) and then ended."""
+
+    def __init__(self, connected: bool, reason: str) -> None:
+        self.connected = connected
+        self.reason = reason
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _call_runner(
+    monkeypatch: pytest.MonkeyPatch, *faces: str, link: _Link | None = None
+) -> tuple[Any, Any, list[Any]]:
+    from reachy_mini_conversation_app import whatsapp_calls
+
+    runner, _, deps = _runner()
+    deps.face_recognition = _Faces(*faces)
+    streamed: list[Any] = []
+
+    async def stream(call: Any) -> bool:
+        streamed.append(call)
+        return True
+
+    deps.stream_call = stream
+    opened: list[str] = []
+
+    async def open_call(_url: str, token: str, name: str) -> Any:
+        opened.append(f"{name}:{token}")
+        if link is None:
+            raise OSError("call service unreachable")
+        return link
+
+    monkeypatch.setattr(whatsapp_calls.CallLink, "open", open_call)
+    return runner, streamed, opened
+
+
+@pytest.mark.parametrize(
+    ("text", "language", "to"),
+    [
+        ("Call Eduardo", "en", "eduardo"),
+        ("please call dad", "en", "dad"),
+        ("Llama a papá", "es", "papa"),
+        ("llámale a Eduardo", "es", "eduardo"),
+        ("chiama Eduardo", "it", "eduardo"),
+        ("liga para o Eduardo", "pt", "o eduardo"),
+    ],
+)
+def test_call_requests_are_recognized(text: str, language: str, to: str) -> None:
+    """ "Call x" in the four languages, with the name as said."""
+    command = parse(text)
+    assert command is not None and (command.kind, command.language, command.args) == ("call", language, {"to": to})
+
+
+@pytest.mark.asyncio
+async def test_a_parent_calls_an_approved_person_through_reachy(
+    callees: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eduardo in front of the camera: "Calling Eduardo!", the call streams, then "Call ended."."""
+    link = _Link(connected=True, reason="hung_up")
+    runner, streamed, opened = _call_runner(monkeypatch, "eduardo", link=link)
+    reply = await runner.handle("llama a papá")
+    assert reply is not None and reply.text == "¡Llamando a Eduardo!" and reply.after is not None
+    assert await reply.after() == "Llamada terminada."
+    assert opened == ["Eduardo:secret"] and streamed == [link] and link.closed
+
+
+@pytest.mark.asyncio
+async def test_only_a_parent_can_start_a_call(callees: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kid (or nobody) in front of the camera hears that only Mom or Dad can call; nothing is dialed."""
+    for faces in (("enzo",), ()):
+        runner, streamed, opened = _call_runner(monkeypatch, *faces, link=_Link(True, "ended"))
+        reply = await runner.handle("call Eduardo")
+        assert reply is not None and reply.text == "Only Mom or Dad can start a call." and reply.after is None
+        assert opened == [] and streamed == []
+
+
+@pytest.mark.asyncio
+async def test_calling_someone_not_approved_is_left_to_the_conversation(
+    callees: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only names on the approved list are calls here."""
+    runner, _, opened = _call_runner(monkeypatch, "eduardo", link=_Link(True, "ended"))
+    assert await runner.handle("call grandma") is None
+    assert opened == []
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_or_failed_call_says_so(callees: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No answer, and a service that cannot be reached, each get their own reply."""
+    runner, _, _ = _call_runner(monkeypatch, "adriana", link=_Link(False, "no_answer"))
+    reply = await runner.handle("call Eduardo")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == "Eduardo didn't answer."
+    runner, _, _ = _call_runner(monkeypatch, "adriana", link=None)
+    reply = await runner.handle("call Eduardo")
+    assert reply is not None and reply.after is not None
+    assert await reply.after() == "I couldn't call Eduardo."
+
+
+@pytest.mark.asyncio
+async def test_no_calls_without_the_service_token(
+    callees: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Without the token file the service is not set up, so it is not a call."""
+    from reachy_mini_conversation_app.config import config
+
+    monkeypatch.setattr(config, "WHATSAPP_CALLS_TOKEN_FILE", str(tmp_path / "missing"))
+    runner, _, opened = _call_runner(monkeypatch, "eduardo", link=_Link(True, "ended"))
+    assert await runner.handle("call Eduardo") is None
+    assert opened == []

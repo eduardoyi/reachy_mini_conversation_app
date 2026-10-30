@@ -695,6 +695,7 @@ def run(
         runtime_for_tools = hybrid_runtime
         deps.expect_answer = hybrid_runtime.expect_answer
         deps.record_message = hybrid_runtime.record_message
+        deps.stream_call = hybrid_runtime.stream_call
         if deps.display is not None:
             from reachy_mini_conversation_app.writing_mode import WritingMode
             from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
