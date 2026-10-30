@@ -407,6 +407,34 @@ async def test_ducker_leaves_music_from_a_quick_command_at_its_level(configured,
 
 
 @pytest.mark.asyncio
+async def test_ducker_restores_music_lowered_while_the_conversation_was_ending(configured, monkeypatch):
+    """A conversation that ends while its lowering is still on its way leaves the music at its level."""
+    state = {"volume": 30, "playing": True}
+    puts: list[int] = []
+    serve = _player_handler(state, puts)
+    reading_volume = asyncio.Event()
+    answer = asyncio.Event()
+
+    async def slow_handler(request):
+        if request.url.path.endswith("/me/player/devices") and not answer.is_set():
+            reading_volume.set()
+            await answer.wait()  # Spotify still answering when the conversation ends
+        return serve(request)
+
+    install_transport(monkeypatch, slow_handler)
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    started = asyncio.ensure_future(ducker.session_started())
+    await reading_volume.wait()
+    ended = asyncio.ensure_future(ducker.session_ended())
+    await asyncio.sleep(0)
+    answer.set()
+    await asyncio.gather(started, ended)
+
+    assert state["volume"] == 30
+
+
+@pytest.mark.asyncio
 async def test_ducker_does_nothing_without_spotify_configuration(monkeypatch):
     """Without credentials or a device, no request is made."""
     monkeypatch.delenv("SPOTIFY_CREDENTIALS_FILE", raising=False)

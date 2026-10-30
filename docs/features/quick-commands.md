@@ -28,7 +28,7 @@ Whisper, then the action and the first reply audio in 0.4–0.6 s).
 | "make the TV lights blue", "pon las luces azules" | color | silent |
 | "turn on the TV", "pon la tele", "open Netflix", "put Bluey on YouTube" | TV | silent (speaks only on failure) |
 | "play Bad Bunny", "pon a Bad Bunny", "play some jazz" (also "Richie plays X", how "Richie, play X" is often heard; 2026-10-30) | Spotify search, then play | "Playing Bad Bunny." (music starts after) |
-| "pause", "stop the music", "next song", "siguiente", "resume" | Spotify, or the TV when it is what plays | silent |
+| "pause", "stop the music", "next song", "siguiente", "resume" (also a plain "stop", and "stop." followed by misheard words; 2026-10-30) | Spotify, or the TV when it is what plays | silent |
 | "volume up", "louder", "baja la música", "set the volume to 40" | Spotify while it plays, else the TV when on | silent |
 | "what time is it?", "qué día es hoy?" | clock | "It's 10:28 AM." / "Hoy es domingo, 18 de octubre." |
 | "what's the weather?", "va a llover mañana?", "che tempo fa a Roma?" | Open-Meteo | one or two sentences |
@@ -241,3 +241,18 @@ touch and then reads "touched" forever. What works is sudden movement: the measu
 1 mm or 0.7 degrees within 0.2 s. Outside the 1.5 s after each "Stop", the untouched head never moved more than
 0.38 mm or 0.19 degrees in 0.2 s, and every touch phase crossed the threshold several times (taps peaked at
 3.3 mm, presses at 4.6 mm down and 3.9 degrees, pats at 4.2 mm).
+
+## "Stop" with music playing — 2026-10-30
+
+"Richie, stop" left the music playing several times in a row:
+
+- The old local "stop" (`local_intent_router`, `LocalIntent.STOP`) took a plain "stop" first and only
+  stopped Reachy moving. With quick commands set up it now steps aside, and the quick "stop" pauses
+  the music when it plays (and stops moving otherwise).
+- Music heard as words after the command ("Richie, stop. Oké, graag.") made the request too long to
+  match. A pause or stop in the first sentence now counts on its own, unless the rest takes it back
+  ("stop. no, keep playing"). Other commands still need the whole request.
+
+Tests: `test_a_plain_stop_goes_to_the_quick_command_that_pauses_music`, the two new rows in
+`test_everyday_commands_are_recognized`, and "stop. no, keep playing" in
+`test_conversation_requests_are_left_to_gemini`.

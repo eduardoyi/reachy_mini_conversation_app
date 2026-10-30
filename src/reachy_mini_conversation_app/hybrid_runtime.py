@@ -39,7 +39,7 @@ from reachy_mini_conversation_app.local_processing import (
     LocalProcessingBackend,
     NullLocalProcessingBackend,
 )
-from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
+from reachy_mini_conversation_app.local_intent_router import LocalIntent, LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.conversation_handler import (
     AudioFrame,
     TrafficKind,
@@ -1828,6 +1828,10 @@ class HybridRuntime:
                 self._local_command_escalations += 1
             return False
         decision = router.route_wake_stripped(addressed_text)
+        if decision.action is LocalIntent.STOP and self._quick_commands is not None:
+            # The quick "stop" pauses music that plays, and stops moving otherwise; this one only stops
+            # moving (2026-10-30: "Richie, stop" left the music playing).
+            return False
         if decision.should_escalate:
             with self._metrics_lock:
                 self._local_command_escalations += 1
