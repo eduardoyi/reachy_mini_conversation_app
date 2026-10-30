@@ -80,7 +80,9 @@ integration) is the path that scales.
   amber for warm through plain white for cool). Switching it on also puts it back
   in color mode if something left it in white mode, such as its own remote.
 - Targets match in this order:
-  1. everything: `all`, or plain "the lights" in any of the four languages;
+  1. everything: `all`, plain "the lights" in any of the four languages, or no target
+     at all (2026-10-30: Gemini sent "turn the light off" without one and the tool
+     refused it before reaching the lights; refusals are now logged, without the words);
   2. a device name, so "Living lamp" is the lamp and not the Living area
      (until 2026-10-19 areas came first and it switched the whole area);
   3. a room;

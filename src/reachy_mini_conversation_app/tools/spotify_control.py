@@ -163,6 +163,9 @@ class SpotifyDucker:
     async def session_ended(self) -> None:
         """Restore the volume lowered during the conversation."""
         self._session_active = False
+        # A lowering for music started just before the end (a quick "play") may still be on its way.
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         await self._restore()
 
     def playback_changed(self) -> None:
@@ -235,6 +238,8 @@ class SpotifyDucker:
             return False
         credentials_path, device_id = configuration
         async with self._lock:
+            if not require_playing and not self._session_active:
+                return False  # the conversation ended before music it started could be lowered
             try:
                 async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
                     headers = {"Authorization": "Bearer " + await spotify_access_token(client, credentials_path)}

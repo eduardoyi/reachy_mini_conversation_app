@@ -390,6 +390,23 @@ async def test_ducker_leaves_paused_music_alone_but_lowers_music_started_mid_con
 
 
 @pytest.mark.asyncio
+async def test_ducker_leaves_music_from_a_quick_command_at_its_level(configured, monkeypatch):
+    """Music started just before the conversation ends (a quick "play") is not left lowered."""
+    state = {"volume": 35, "playing": False}
+    puts: list[int] = []
+    install_transport(monkeypatch, _player_handler(state, puts))
+    ducker = spotify_control.SpotifyDucker(duck_percent=20)
+
+    await ducker.session_started()
+    ducker.playback_started()
+    await ducker.session_ended()
+    await asyncio.gather(*ducker._tasks)
+
+    assert state["volume"] == 35
+    assert ducker.level_before_ducking is None
+
+
+@pytest.mark.asyncio
 async def test_ducker_does_nothing_without_spotify_configuration(monkeypatch):
     """Without credentials or a device, no request is made."""
     monkeypatch.delenv("SPOTIFY_CREDENTIALS_FILE", raising=False)

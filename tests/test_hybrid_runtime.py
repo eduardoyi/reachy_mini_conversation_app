@@ -1557,7 +1557,7 @@ def _music_session(clock: FakeClock) -> tuple[HybridRuntime, "FakeHandler"]:
 
 @pytest.mark.asyncio
 async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
-    """With music playing, the session closes 5 s after Reachy's reply even though the model thinks someone speaks."""
+    """With music playing, the session closes 3 s after Reachy's reply even though the model thinks someone speaks."""
     clock = FakeClock()
     runtime, handler = _music_session(clock)
     assert await runtime.activate()
@@ -1568,9 +1568,9 @@ async def test_music_wind_down_closes_despite_music_heard_as_speech() -> None:
     runtime.request_music_wind_down()
     clock.advance(2)
     runtime.note_playback_queued(1.0)  # the reply plays from t=2 to t=3
-    clock.advance(4)  # t=6: 3 s after the reply
+    clock.advance(3)  # t=5: 2 s after the reply
     assert not await runtime.check_inactivity()
-    clock.advance(2.5)  # t=8.5: 5.5 s after the reply
+    clock.advance(1.5)  # t=6.5: 3.5 s after the reply
     assert await runtime.check_inactivity()
     assert runtime.mode in (RuntimeMode.STOPPING, RuntimeMode.LOCAL_AMBIENT)
     await runtime.close()
@@ -1592,7 +1592,7 @@ async def test_music_wind_down_waits_for_the_reply_to_a_new_user_turn() -> None:
     clock.advance(8)  # Reachy still thinking: no close
     assert not await runtime.check_inactivity()
     runtime.note_playback_queued(2.0)
-    clock.advance(6)  # 4 s after the reply ended
+    clock.advance(4)  # 2 s after the reply ended
     assert not await runtime.check_inactivity()
     clock.advance(1.5)
     assert await runtime.check_inactivity()
@@ -1654,7 +1654,7 @@ async def test_music_wind_down_keeps_a_follow_up_open_from_its_partial_transcrip
     clock.advance(5)  # t=12: Reachy thinking about the follow-up
     assert not await runtime.check_inactivity()
     runtime.note_playback_queued(1.0)  # answer plays t=12..13
-    clock.advance(5.5)  # t=17.5: 4.5 s after the answer
+    clock.advance(3.5)  # t=15.5: 2.5 s after the answer
     assert not await runtime.check_inactivity()
     clock.advance(1)
     assert await runtime.check_inactivity()
@@ -1695,9 +1695,9 @@ async def test_music_started_mid_conversation_waits_for_reachys_short_reply() ->
     clock.advance(0.5)
     assert not await runtime.check_inactivity()
     runtime.note_playback_queued(1.0)  # "Enjoy!" plays t=10.5..11.5
-    clock.advance(5)  # t=15.5: 4 s after "Enjoy!"
+    clock.advance(3)  # t=13.5: 2 s after "Enjoy!"
     assert not await runtime.check_inactivity()
-    clock.advance(1.5)  # 5.5 s after "Enjoy!"
+    clock.advance(1.5)  # 3.5 s after "Enjoy!"
     assert await runtime.check_inactivity()
     await runtime.close()
 
@@ -1719,7 +1719,7 @@ async def test_music_wind_down_waits_for_the_answer_after_let_me_check() -> None
     runtime.note_playback_queued(2.0)  # the answer, t=8..10
     clock.advance(2)
     runtime._on_handler_interaction_busy(handler, generation, False)
-    clock.advance(4)  # t=14: 4 s after the answer
+    clock.advance(2)  # t=12: 2 s after the answer
     assert not await runtime.check_inactivity()
     clock.advance(1.5)
     assert await runtime.check_inactivity()
@@ -1757,10 +1757,10 @@ async def test_new_song_over_music_already_playing_waits_for_reachys_short_reply
 
     clock.advance(4)  # t=4: the new song starts
     runtime.request_music_wind_down()
-    clock.advance(3)  # t=7: past 5 s after the first reply, but waiting for "Enjoy!"
+    clock.advance(3)  # t=7: past 3 s after the first reply, but waiting for "Enjoy!"
     assert not await runtime.check_inactivity()
     runtime.note_playback_queued(1.0)  # "Enjoy!", t=7..8
-    clock.advance(5.5)  # t=12.5: 4.5 s after "Enjoy!"
+    clock.advance(3.5)  # t=10.5: 2.5 s after "Enjoy!"
     assert not await runtime.check_inactivity()
     clock.advance(1)
     assert await runtime.check_inactivity()
