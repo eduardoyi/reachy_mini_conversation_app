@@ -399,9 +399,11 @@ _SEND_TO = {
 }
 # "Call Eduardo", "llama a papá": a WhatsApp call through Reachy to someone on the call service's approved list
 # (whatsapp_calls.py). It counts only when the name is on that list; anything else stays with the conversation.
+# "Calla" and "col" are how "call Eduardo" was heard on 2026-10-30 (the first call through Reachy).
 _CALL = {
-    "en": r"(?:lets |please )?(?:call|phone|ring|make a call to) (?P<to>.+)",
-    "es": r"(?:llama|llamale|llamar|llamarle|vamos a llamar(?:le)?|quiero llamar(?:le)?|haz una llamada)(?: a| al)? (?P<to>.+)",
+    "en": r"(?:lets |please )?(?:call|calla|col|cole|phone|ring|make a call to) (?P<to>.+)",
+    "es": r"(?:llama|llamale|llamar|llamarle|marca|marcale|marcar|marcarle|vamos a llamar(?:le)?|quiero llamar(?:le)?|"
+    r"haz(?:le)? una llamada)(?: a| al)? (?P<to>.+)",
     "it": r"(?:chiama|chiamiamo|chiamare|fai una chiamata)(?: a| al)? (?P<to>.+)",
     "pt": r"(?:liga|ligar|vamos ligar|faz uma chamada)(?: para| pro| pra| a| ao)? (?P<to>.+)",
 }
