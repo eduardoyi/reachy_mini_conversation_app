@@ -174,6 +174,14 @@ async def test_plain_the_lights_means_every_light_and_plug(target: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_without_a_target_means_every_light() -> None:
+    """A set with no target ("turn the light off") switches every light, as plain "the lights" does."""
+    home = _FakeHome([LAMP, PLUG, STRIP])
+    result = await HomeLights()(_deps(home), action="set", on=True)
+    assert result["changed"] == ["Lámpara de pie", "Floor lamp plug", "TV Lights"]
+
+
+@pytest.mark.asyncio
 async def test_areas_split_a_room_and_the_room_still_means_both() -> None:
     """With Living and Dining areas in one living room, each area switches alone; the room switches both."""
     from reachy_mini_conversation_app.home_devices import HomeLayout

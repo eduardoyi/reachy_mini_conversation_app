@@ -161,7 +161,7 @@ class HomeLights(Tool):
         "may use it, kids included. action=status lists rooms, lights, plugs and scenes with their state and "
         "which lights can show colors: use it first when you do not know the names, or when asked what is on. "
         "action=set changes a target: a room, an area within a room (e.g. the dining area), a light or plug name, "
-        "or 'all' (also for plain \"the lights\"). Give on=true/false, "
+        "or 'all' (also for plain \"the lights\"; no target means all). Give on=true/false, "
         "brightness 1-100, warmth (warm, neutral, cool) for white light, and/or color (red, orange, yellow, "
         "green, cyan, blue, purple, pink, white, or #rrggbb) for lights that show colors. Brightness, warmth "
         "or color alone also turns the light on. 'all' with on=true leaves out accent lights such as the TV "
@@ -172,7 +172,7 @@ class HomeLights(Tool):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["status", "set", "scene"]},
-            "target": {"type": "string", "description": "Room, light or plug name, or 'all' (for set)."},
+            "target": {"type": "string", "description": "Room, light or plug name, or 'all' (for set; the default)."},
             "on": {"type": "boolean", "description": "Turn on (true) or off (false)."},
             "brightness": {"type": "integer", "minimum": 1, "maximum": 100},
             "warmth": {"type": "string", "enum": ["warm", "neutral", "cool"]},
@@ -227,16 +227,18 @@ class HomeLights(Tool):
         return {"ok": True, "scene": matches[0].name}
 
     async def _set(self, home: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
-        target = str(kwargs.get("target") or "").strip()
+        # No target is plain "the lights", as the quick command reads it (2026-10-30: "turn the light off"
+        # through Gemini came without one and was refused).
+        target = str(kwargs.get("target") or "").strip() or "all"
         on = kwargs.get("on")
         brightness = kwargs.get("brightness")
         warmth = kwargs.get("warmth")
         color_name = kwargs.get("color")
-        if not target:
-            return {"error": "set needs a target: a room, a light or plug name, or 'all'."}
         if on is None and brightness is None and warmth is None and not color_name:
+            logger.info("home_lights set refused: no change given")
             return {"error": "set needs on, brightness, warmth or color."}
         if warmth is not None and warmth not in _WARMTH_POSITION:
+            logger.info("home_lights set refused: unknown warmth")
             return {"error": "warmth must be warm, neutral or cool."}
         color = None
         if color_name:
@@ -245,6 +247,7 @@ class HomeLights(Tool):
             else:
                 color = _parse_color(str(color_name))
                 if color is None:
+                    logger.info("home_lights set refused: unknown color")
                     return {"error": f"Unknown color {color_name!r}; use a color name or #rrggbb."}
         change = LightChange(
             on=None if on is None else bool(on),

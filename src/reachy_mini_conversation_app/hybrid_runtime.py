@@ -443,7 +443,7 @@ class HybridRuntime:
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
-    _MUSIC_WIND_DOWN_SILENCE_S = 5.0
+    _MUSIC_WIND_DOWN_SILENCE_S = 3.0
     # A reply that ends in a question gets longer to answer.
     _MUSIC_WIND_DOWN_QUESTION_SILENCE_S = 10.0
     # Close anyway if Reachy has not answered within this long after the user's last words, or this long

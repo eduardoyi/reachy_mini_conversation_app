@@ -311,7 +311,8 @@ _OPEN_APP = [
     ("pt", re.compile(r"^(?:abre|poe|coloca|mete)\s+(?P<app>.+?)(?:\s+na tv| na televisao)?$")),
 ]
 _PLAY = [
-    ("en", re.compile(r"^(?:play|put on)\s+(?P<q>.+?)(?:\s+on spotify)?$")),
+    # "Richie, play X" is often heard as "Richie plays X".
+    ("en", re.compile(r"^(?:play|plays|put on)\s+(?P<q>.+?)(?:\s+on spotify)?$")),
     ("es", re.compile(r"^(?:pon|ponme|reproduce|toca|tocame)\s+(?P<q>.+?)(?:\s+en spotify)?$")),
     ("it", re.compile(r"^(?:metti|mettimi|suona|riproduci)\s+(?P<q>.+?)(?:\s+su spotify)?$")),
     ("pt", re.compile(r"^(?:toca|poe|coloca|reproduz|mete)\s+(?P<q>.+?)(?:\s+no spotify)?$")),

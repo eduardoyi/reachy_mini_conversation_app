@@ -233,7 +233,7 @@ configured device (even if it was already below the lowered level) through
 `resume` during the conversation does the same. The runtime then closes the
 conversation once Reachy has answered the user's latest turn (the wake request counts
 as the first turn; a final user transcript starts a new one) and the user stays quiet
-for 5 s, or 10 s if that answer ended in a question mark. If Reachy has not answered a
+for 5 s (3 s since 2026-10-30), or 10 s if that answer ended in a question mark. If Reachy has not answered a
 turn within 20 s, the conversation closes anyway. Music on other devices or other apps
 is not detected and keeps the normal 60 s rule. Tests:
 `test_music_wind_down_waits_for_the_reply_to_a_new_user_turn`,
@@ -294,6 +294,19 @@ Tests: `test_ducker_pauses_an_episode_and_resumes_it_afterwards`,
 `test_ducker_keeps_the_level_when_restore_keeps_failing_and_restores_next_time`,
 `test_restore_on_exit_puts_the_volume_back_after_the_event_loop_ended`,
 `test_pausing_the_music_returns_the_conversation_to_the_normal_timeout`.
+
+## Music from a quick command stays at its level — 2026-10-30
+
+Every quick "play" since at least 2026-10-28 left the music lowered (35 % to 12 % on
+2026-10-30). `playback_started` sends the lowering as a background task, and the quick
+command's conversation ended about 0.2 s later, before it arrived: `session_ended` found
+nothing to restore, and the lowering landed afterwards with no restore to follow. Now
+`session_ended` waits for a lowering still on its way before restoring, and a lowering for
+music started in the conversation is skipped once the conversation has ended. Test:
+`test_ducker_leaves_music_from_a_quick_command_at_its_level` (fails on the old code).
+
+The music wind-down after Reachy's reply is also shorter: 3 s of quiet instead of 5 s
+(10 s after a question is unchanged), so the music comes back up sooner.
 
 ## Now playing on the e-ink screen — 2026-10-25
 

@@ -27,7 +27,7 @@ Whisper, then the action and the first reply audio in 0.4–0.6 s).
 | "dim the lights", "lights to 30%", "pon las luces al 50 por ciento" | brightness | silent |
 | "make the TV lights blue", "pon las luces azules" | color | silent |
 | "turn on the TV", "pon la tele", "open Netflix", "put Bluey on YouTube" | TV | silent (speaks only on failure) |
-| "play Bad Bunny", "pon a Bad Bunny", "play some jazz" | Spotify search, then play | "Playing Bad Bunny." (music starts after) |
+| "play Bad Bunny", "pon a Bad Bunny", "play some jazz" (also "Richie plays X", how "Richie, play X" is often heard; 2026-10-30) | Spotify search, then play | "Playing Bad Bunny." (music starts after) |
 | "pause", "stop the music", "next song", "siguiente", "resume" | Spotify, or the TV when it is what plays | silent |
 | "volume up", "louder", "baja la música", "set the volume to 40" | Spotify while it plays, else the TV when on | silent |
 | "what time is it?", "qué día es hoy?" | clock | "It's 10:28 AM." / "Hoy es domingo, 18 de octubre." |

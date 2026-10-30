@@ -82,6 +82,7 @@ from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
         ("play some music", "resume", "en", {}),
         ("pon a Bad Bunny", "play", "es", {"query": "bad bunny"}),
         ("play despacito by luis fonsi", "play", "en", {"query": "despacito by luis fonsi"}),
+        ("plays the rolling stones", "play", "en", {"query": "the rolling stones"}),
         ("turn up the tv", "volume", "en", {"direction": "up", "device": "tv"}),
         ("set the volume to 40", "volume", "en", {"level": 40, "device": None}),
         ("baja la música", "volume", "es", {"direction": "down", "device": "music"}),
