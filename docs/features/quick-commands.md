@@ -35,6 +35,8 @@ Whisper, then the action and the first reply audio in 0.4–0.6 s).
 | "go to sleep", "buenas noches" | standby | "Good night!", then the sleep pose |
 | "never mind", "nada", "lascia stare" | nothing | silent |
 | "head test", "haz la prueba de cabeza" | head-touch test (diagnostic) | seven cues, then "Done, thank you!" |
+| "enséñame a escribir papá", "quiero escribir Mara" (Spanish only) | writing practice on the e-ink screen ([eink-display.md](eink-display.md#writing-practice)); more than 12 letters, or a name to look up, goes to the conversation | each letter's name and sound |
+| while writing: "ya", "listo", "siguiente" / "atrás" / "ya terminé" (also without his name) | next letter / previous / end; any other request ends writing first | the letter, or "Vale, lo dejamos aquí." |
 
 Rooms, areas and device names match across languages ("comedor" → Dining, "salón" → Living room,
 "luces de la tele" → TV Lights). "Play with me" and other games are not music.

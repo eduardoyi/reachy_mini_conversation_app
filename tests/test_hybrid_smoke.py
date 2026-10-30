@@ -564,3 +564,30 @@ def test_bursty_provider_audio_uses_bounded_output_and_preserves_order() -> None
         output.close()
 
     assert pipeline.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_a_room_listener_takes_what_it_acts_on_before_wake_detection() -> None:
+    """Writing practice's "¡ya!" is used without the name; anything it declines still wakes Reachy as before."""
+    acknowledgements: list[str] = []
+    runtime, provider_factory, movement_manager = _local_runtime(acknowledgements=acknowledgements, silence_calls=[])
+    heard: list[str] = []
+
+    def listener(text: str) -> bool:
+        heard.append(text)
+        return text == "ya"
+
+    runtime.set_room_listener(listener)
+    try:
+        runtime.observe_local_transcript(TranscriptSegment("ya", 0.0, 0.1, 1))
+        assert runtime.status.wake_detections == 0
+
+        runtime.observe_local_transcript(TranscriptSegment("Reachy, stop", 0.2, 0.3, 2))
+        await _wait_until(lambda: runtime.status.local_commands_executed == 1)
+
+        assert heard == ["ya", "Reachy, stop"]
+        assert acknowledgements == ["wake_word"]
+        movement_manager.clear_move_queue.assert_called_once_with()
+        assert provider_factory.call_count == 0
+    finally:
+        await runtime.close()

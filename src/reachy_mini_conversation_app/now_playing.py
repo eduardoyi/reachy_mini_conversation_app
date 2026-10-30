@@ -184,6 +184,8 @@ class NowPlaying:
             ended_at = self._talk_ended_at
             if not talking and ended_at is not None and (self._song_changed or now - ended_at >= REQUESTED_HOLD_S):
                 await self.show(playback)
+        elif owner == "writing":
+            pass  # a child is copying a word letter by letter; the card waits until it is done
         elif owner == "home" or playback.item_id != self._shown_id:
             await self.show(playback)
         else:

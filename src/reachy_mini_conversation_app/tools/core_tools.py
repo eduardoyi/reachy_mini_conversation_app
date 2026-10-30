@@ -69,6 +69,8 @@ class ToolDependencies:
     record_message: Callable[[Callable[[], int] | None], Awaitable[tuple[int, NDArray[np.int16]] | None]] | None = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
+    # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).
+    writing: Any = None
 
 
 class ToolSpec(TypedDict):

@@ -496,6 +496,29 @@ _NOT_A_COMMAND_START = frozenset(
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
+# "Enséñame a escribir papá": writing practice (writing_mode.py), Spanish only. The word is taken from the
+# transcript as heard, accents included; a name to look up or "something nice" is left to the conversation.
+_WRITE = re.compile(
+    r"^(?:ensename|ensenarme|me ensenas|ayudame|me ayudas|quiero|vamos|podemos)(?: a| como| a como)? escribir .+$"
+)
+_WRITE_TEXT = re.compile(r"escribir\s+(?P<text>.+)$", re.IGNORECASE | re.DOTALL)
+_WRITE_LEAD = re.compile(r"^(?:la palabra|la frase|las letras de)\s+", re.IGNORECASE)
+_WRITE_TAIL = re.compile(r"[\s,]*(?:por favor|porfa|porfi)\s*$", re.IGNORECASE)
+_WRITE_NEEDS_CONTEXT = frozenset({"nombre", "algo", "cosa", "carta", "mensaje", "cuento", "frase", "palabra"})
+
+
+def _writing_text(text: str) -> str | None:
+    """Return what "enséñame a escribir X" asks to write, as heard; None when it needs the conversation."""
+    found = _WRITE_TEXT.search(text)
+    if found is None:
+        return None
+    written = re.sub(r"[¿?¡!.\"«»“”]", " ", found.group("text"))
+    written = _WRITE_LEAD.sub("", _WRITE_TAIL.sub("", written.strip()).strip())
+    words = normalize(written).split()
+    if not words or any(word in _WRITE_NEEDS_CONTEXT for word in words):
+        return None
+    return " ".join(written.split())
+
 
 def parse(text: str) -> QuickCommand | None:
     """Recognize one everyday command in ``text`` (the request after the wake word), or return None."""
@@ -521,6 +544,9 @@ def _parse(text: str) -> QuickCommand | None:
     found = _first_match(_CANCEL_RE, command)
     if found:
         return QuickCommand("cancel", _language(found[0], command))
+    if _WRITE.match(command):
+        written = _writing_text(text)
+        return QuickCommand("write", "es", {"text": written}) if written else None
     words = command.split()
     # Portuguese "no" also means "in the" ("no YouTube"), so "no" counts only as the first word.
     if words[0] == "no" or any(word in _NEGATIONS for word in words):
@@ -1000,6 +1026,11 @@ class QuickCommands:
 
     async def handle(self, text: str) -> QuickReply | None:
         """Run ``text`` if it is an everyday command; return None to leave it to the conversation."""
+        writing = getattr(self._deps, "writing", None)
+        if writing is not None and writing.active:
+            if writing.hear(text):  # "Richie, siguiente" while a child writes is the next letter, not a song
+                return QuickReply(None, "es", "writing")
+            writing.stop()  # any other request ends it
         maribel_language = maribel_request(text) if getattr(self._deps, "maribel", None) is not None else None
         if maribel_language is not None:
             self._maribel_language = maribel_language
@@ -1152,6 +1183,11 @@ class QuickCommands:
             return self._send_to(kind, command.language, command.args.get("to"))
         if kind == "head_test":
             return self._head_test(command.language)
+        if kind == "write":
+            writing = getattr(self._deps, "writing", None)
+            if writing is None or writing.start(command.args["text"]) is not None:
+                return None  # too long or not set up: the conversation suggests something shorter
+            return QuickReply(None, "es", kind, whole_request=True)
         return None
 
     def _send_to(self, kind: str, language: str, to: str | None) -> QuickReply | None:

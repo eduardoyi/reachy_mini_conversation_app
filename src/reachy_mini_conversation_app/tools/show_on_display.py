@@ -75,6 +75,10 @@ class ShowOnDisplay(Tool):
         "monument, an animal, a rocket); `subject` names it precisely in English, e.g. 'Mona Lisa "
         "painting by Leonardo da Vinci' or 'a tiger in the wild, photo'. If no suitable picture is found it is "
         "drawn instead. "
+        "kind=writing: every time a child wants to learn to write a word or short phrase ('enséñame a escribir "
+        "PAPÁ'), pass it as `word`, spelled correctly with its accents (at most 12 letters); it is shown one big "
+        "capital at a time and you say each letter by yourself, so then say only '¡Vamos!' and call "
+        "end_conversation. "
         "kind=word: a word card with `word`, `pronunciation`, `meaning`, an optional `header` and an optional "
         "`picture` (its subject in English); for every translation ('how do you say X in Y') and every word you "
         "teach. "
@@ -97,12 +101,23 @@ class ShowOnDisplay(Tool):
         "properties": {
             "kind": {
                 "type": "string",
-                "enum": ["drawing", "lesson", "picture", "word", "text", "steps", "camera", "now_playing", "home"],
+                "enum": [
+                    "drawing",
+                    "lesson",
+                    "picture",
+                    "word",
+                    "writing",
+                    "text",
+                    "steps",
+                    "camera",
+                    "now_playing",
+                    "home",
+                ],
             },
             "subject": {"type": "string", "description": "For drawing, lesson and picture: what to show, in English."},
             "caption": {"type": "string", "description": "For drawing, picture and camera: a few words under it."},
             "edit": {"type": "string", "description": "For camera: the change to draw into the photo, in English."},
-            "word": {"type": "string", "description": "For word: the word or short phrase, shown large."},
+            "word": {"type": "string", "description": "For word and writing: the word or short phrase, shown large."},
             "pronunciation": {"type": "string", "description": "For word: how to say it."},
             "meaning": {"type": "string", "description": "For word: what it means."},
             "header": {"type": "string", "description": "For word: an optional line above, e.g. the question."},
@@ -190,6 +205,19 @@ class ShowOnDisplay(Tool):
                     with Image.open(io.BytesIO(jpeg)) as photo:
                         photo_png = render_photo(photo.convert("RGB"), caption)
                 return self._show(display, photo_png, result, expires_after_s=PHOTO_ON_SCREEN_S)
+            if kind == "writing":
+                if deps.writing is None:
+                    return {"error": "Writing practice is not set up here."}
+                problem = deps.writing.start(_text(kwargs, "word"))
+                if problem is not None:
+                    return {
+                        "error": problem,
+                        "instruction": "Suggest something shorter (one of its words) and start that if they agree.",
+                    }
+                return {
+                    "ok": True,
+                    "instruction": "Say only '¡Vamos!' and call end_conversation now; the letters go on without you.",
+                }
             if kind == "now_playing":
                 if deps.now_playing is None:
                     return {"error": "The screen does not follow Spotify (it is not set up)."}
@@ -277,7 +305,7 @@ class ShowOnDisplay(Tool):
                 )
             else:
                 return {
-                    "error": "kind must be drawing, lesson, picture, word, text, steps, camera, now_playing or home."
+                    "error": "kind must be drawing, lesson, picture, word, writing, text, steps, camera, now_playing or home."
                 }
         except DrawingError as error:
             logger.warning("show_on_display drawing failed: %s", error)

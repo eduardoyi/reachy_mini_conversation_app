@@ -1162,3 +1162,81 @@ async def test_a_head_test_with_no_readings_says_so(tmp_path: Any) -> None:
     reply.before()
     assert await reply.after() == HEAD_TEST_FAILED["es"]
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "written"),
+    [
+        ("Enséñame a escribir papá.", "papá"),
+        ("¿Me enseñas a escribir te quiero, mamá?", "te quiero, mamá"),
+        ("Ayúdame a escribir la palabra perro, por favor", "perro"),
+        ("quiero escribir Mara", "Mara"),
+    ],
+)
+def test_teach_me_to_write_keeps_the_word_as_heard(text: str, written: str) -> None:
+    """The word to write is taken from the transcript with its accents and capitals."""
+    assert parse(text) == quick_commands.QuickCommand("write", "es", {"text": written})
+
+
+@pytest.mark.parametrize(
+    "text", ["Enséñame a escribir el nombre de la abuela", "quiero escribir algo bonito", "Enséñame a escribir."]
+)
+def test_writing_requests_that_need_thinking_go_to_the_conversation(text: str) -> None:
+    """A name to look up or "something nice" is not a word to copy."""
+    assert parse(text) is None
+
+
+class _Writing:
+    """A stand-in for WritingMode: refuses words over ``limit`` letters and hears only "ya"."""
+
+    def __init__(self, limit: int = 12) -> None:
+        self.limit = limit
+        self.active = False
+        self.started: list[str] = []
+        self.heard: list[str] = []
+        self.stopped = 0
+
+    def start(self, text: str) -> str | None:
+        if len(text.replace(" ", "")) > self.limit:
+            return "too long"
+        self.started.append(text)
+        self.active = True
+        return None
+
+    def hear(self, text: str) -> bool:
+        self.heard.append(text)
+        return normalize(text) == "ya"
+
+    def stop(self) -> None:
+        self.stopped += 1
+        self.active = False
+
+
+@pytest.mark.asyncio
+async def test_teach_me_to_write_starts_writing_without_the_cloud() -> None:
+    """A word that fits starts writing practice silently; one too long goes to the conversation."""
+    runner, _, deps = _runner()
+    deps.writing = _Writing()
+
+    reply = await runner.handle("Enséñame a escribir papá")
+    assert reply is not None and reply.kind == "write" and reply.text is None and reply.whole_request
+    assert deps.writing.started == ["papá"]
+
+    deps.writing = _Writing()
+    assert await runner.handle("Enséñame a escribir murciélago gigante") is None
+
+
+@pytest.mark.asyncio
+async def test_while_writing_a_writing_word_steps_and_anything_else_ends_it() -> None:
+    """Saying "Richie, ya" is the next letter (not a song); another request ends writing and runs as usual."""
+    runner, tools, deps = _runner()
+    deps.writing = _Writing()
+    deps.writing.active = True
+
+    reply = await runner.handle("ya")
+    assert reply is not None and reply.kind == "writing" and reply.text is None
+    assert deps.writing.stopped == 0
+
+    reply = await runner.handle("apaga las luces")
+    assert deps.writing.stopped == 1
+    assert reply is not None and tools["lights"].calls == [{"action": "set", "target": "all", "on": False}]

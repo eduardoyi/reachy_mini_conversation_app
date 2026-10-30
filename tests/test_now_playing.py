@@ -220,6 +220,20 @@ async def test_a_requested_screen_holds_while_the_conversation_is_open(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_a_writing_screen_holds_through_new_songs(tmp_path: Path) -> None:
+    """While a child copies a word letter by letter, new songs never bring the music card back."""
+    room = _Room(tmp_path)
+    room.display.show(render_text(["P"]), owner="writing")
+    letter = room.screen()
+
+    for song in ("t2", "t3"):
+        room.play(song)
+        room.clock.now += 200
+        await room.watcher.check()
+        assert room.screen() == letter
+
+
+@pytest.mark.asyncio
 async def test_after_the_conversation_the_card_returns_at_the_next_song(tmp_path: Path) -> None:
     """Once they stop talking, the next song brings the music card back."""
     room = _Room(tmp_path)

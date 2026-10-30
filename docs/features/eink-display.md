@@ -38,6 +38,8 @@ Out of scope so far: stories, scheduled pages such as a morning page or calendar
   ("Un óvalo grande para el cuerpo"). Faces only on things that have faces (people, animals, aliens,
   monsters, characters), never on objects. Reachy only says the steps are on the screen. About 11–16 s the
   first time; the same subject again is instant. Plan: [drawing-lessons.md](../plans/drawing-lessons.md).
+- "Enséñame a escribir PAPÁ": writing practice, one big capital at a time for a child to copy on paper; a pat
+  on Reachy's head or "¡ya!" shows the next. See [Writing practice](#writing-practice).
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
   large type, its pronunciation written for a Spanish speaker ("la MÉ-la"), the Spanish meaning, an
   optional header and an optional small drawing. If the drawing fails the card shows without it.
@@ -104,6 +106,41 @@ the image as a base64 `jpg` asset with `TypeSafe-Danger-Zone-Images: true`. Jev 
 "Invalid image dimensions" for a short side under ~280 px or a long side over ~1000 px, so each
 candidate is resized to a 300 px short side within a 1000 px long side first. Brave's plan allows
 about one search a second (a burst returned 429, which falls back to a drawing).
+
+## Writing practice
+
+"Enséñame a escribir PAPÁ" (Spanish): the screen shows the letter to copy now, very large, with the word filling
+in above it (written letters in black, the current slot underlined in black, the rest grey), "2 de 4" in the
+corner, and a space as its own "espacio" step. Reachy says the letter's name and its sound in this word
+("Primero, la pe. Suena p, como en pato."; CE/CI, GE/GI, CH, LL, QU, GUE/GUI, RR, soft R and silent H follow
+Spanish spelling). The child copies it on paper, then:
+
+- a pat on Reachy's head, or a room transcript that is only "ya", "listo", "siguiente"… (no name needed), or
+  "Richie, siguiente" → the next letter, at most one step every 2 s (a pat with a "¡ya!" is one step);
+- "otra vez" / "atrás" → the previous letter; "ya terminé" → "Vale, lo dejamos aquí.";
+- after the last letter: the whole word with "¡Muy bien!" and "¡Muy bien! Has escrito papá.";
+- 10 minutes without a step, or any other request to Reachy (quick command or conversation), ends it.
+
+How it stays cheap: the start is a quick command ("enséñame / ayúdame / quiero / vamos a escribir X") with no
+cloud. More than 12 letters (spaces not counted), or something to look up ("el nombre de la abuela"), goes to
+Gemini, which calls `show_on_display kind=writing` (or suggests something shorter) and then ends the
+conversation. During writing nothing goes to the cloud: the room is already transcribed by local Whisper, and
+every letter line is a fixed phrase the reply voice keeps on disk (`writing_mode.WRITING_PHRASES`, 106 lines);
+only the closing line, which names the word, is new speech each time.
+
+- `writing_mode.WritingMode` (built in `main.py` when the hybrid runtime and the screen are both on; on
+  `ToolDependencies.writing`): `start(text) -> problem | None`, `hear(text) -> bool`, `stop()`, `active`.
+- While writing the head is held still and the speech wobble is off (`quiet_head`), so a pat moves it
+  (`MovementManager.head_touches`); the hold is renewed every minute, since it lapses after 3. Breathing and
+  speaker turns pause meanwhile.
+- `HybridRuntime.set_room_listener(writing.hear)`: each final room transcript reaches it before wake detection
+  while Reachy waits for his name; it uses only a transcript that is just a writing word.
+- `QuickCommands.handle` offers every request to writing first while it runs, and stops it otherwise; a new
+  conversation (`on_cloud_session`) stops it too.
+- Phrases are spoken as announcements (`request_announcement`), once Reachy is free.
+- The screen's owner is `writing`, which the music card leaves alone; the finished word, and a word left after
+  "ya terminé", idle or another request, go back to `requested`.
+- Plan: [writing-practice.md](../plans/writing-practice.md).
 
 ## Now playing
 
@@ -217,11 +254,11 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/lesson/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/lesson/edit_photo/picture/start/stop`; `lesson(subject, title) -> [(caption, panel)] * 4` |
+| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/lesson/writing/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/lesson/edit_photo/picture/start/stop`; `lesson(subject, title) -> [(caption, panel)] * 4` |
 | Now playing | `now_playing.py` | `parse_playback(body, device_id) -> Playback`; `NowPlaying(display, fetch, in_conversation, art_dir).run/check/show_now/refresh_soon`; `spotify_fetcher(credentials, device)` |
 | Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` (incl. `owner`, `expires_at`, `private`) / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `lesson` (`subject`, `title`; tells Reachy not to read the steps), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `lesson` (`subject`, `title`; tells Reachy not to read the steps), `writing` (`word`; starts writing practice and asks Reachy to end the conversation, or says it is too long), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL` (`gpt-image-2.5-flare`), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
@@ -293,10 +330,13 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text, explanations of 2–4 panels with and without pictures and lessons with and without captions; a lesson cut from one sheet into four equal panels whose grey grows, its prompts, cost records and caches (a repeat asks nothing, a new title only captions); a lesson with later lines in step 1 shown but not kept; no captions from a bad answer or without a Gemini client; a slow caption answer gets a second request, two slow ones leave no captions; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; gpt-image models through OpenAI (1024x768 medium, edits send the JPEG, token record, credit / rate / moderation / server errors, missing `OPENAI_API_KEY`); the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. writing steps (first letter, a space, the longest word, done), overflowing text, explanations of 2–4 panels with and without pictures and lessons with and without captions; a lesson cut from one sheet into four equal panels whose grey grows, its prompts, cost records and caches (a repeat asks nothing, a new title only captions); a lesson with later lines in step 1 shown but not kept; no captions from a bad answer or without a Gemini client; a slow caption answer gets a second request, two slow ones leave no captions; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; gpt-image models through OpenAI (1024x768 medium, edits send the JPEG, token record, credit / rate / moderation / server errors, missing `OPENAI_API_KEY`); the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | One picture at a time (others refused without calling the model, text still shown, a cancelled picture frees it); No display; each kind incl. lessons; a lesson needs a title and tells Reachy not to read the steps; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
-| `tests/test_now_playing.py` | Track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
+| `tests/tools/test_show_on_display.py` | One picture at a time (others refused without calling the model, text still shown, a cancelled picture frees it); No display; each kind incl. lessons; writing starts practice, refuses a long word with a hint, and needs it set up; a lesson needs a title and tells Reachy not to read the steps; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/test_writing_mode.py` | Capitals and spaces from text, letters Spanish lacks refused; each letter's name and sound in context (CH, CE/CI, GE/GI, QU, LL, RR, soft R, silent H, final Y, spaces, digits), all cached lines; a word written one letter per pat with the head held and released and the finished screen back to `requested`; room words step, go back and end, other talk ignored; a pat with a "¡ya!" is one step; 10 idle minutes end it; the hold is renewed; too long or unwritable refused; a new word replaces the old |
+| `tests/test_quick_commands.py` | (writing) the word kept as heard; names and "algo" go to the conversation; a word that fits starts writing, one too long does not; while writing, "ya" steps and another request ends writing and runs |
+| `tests/test_hybrid_smoke.py` | (writing) the room listener takes what it acts on before wake detection and passes the rest on |
+| `tests/test_now_playing.py` | A writing screen holds through new songs; track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
 | `tests/tools/test_spotify_control.py` | Pause, next and resume refresh the screen; rejected commands do not |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
 
@@ -315,6 +355,10 @@ reusing the cached drawing and a list; the device fetched each at its next check
 through a spoken conversation.
 
 ## Changelog
+
+- 2026-10-30: Writing practice (`kind=writing`, quick command "enséñame a escribir X"): one capital at a time,
+  stepped by pats or "¡ya!" without the name, the letter's name and sound spoken from cached lines; no cloud
+  conversation while the child writes. Plan: [writing-practice.md](../plans/writing-practice.md).
 
 - 2026-10-30: Drawing lessons (`kind=lesson`): four numbered steps cut from one image-model sheet, captions
   read from it by Gemini 3.8 Flash. Live with the real APIs on the MacBook: a house (no face), a rocket and a

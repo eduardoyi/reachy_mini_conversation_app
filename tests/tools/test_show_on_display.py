@@ -153,6 +153,32 @@ async def test_a_lesson_tells_reachy_not_to_read_the_steps_out(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_writing_starts_practice_and_asks_reachy_to_end_the_conversation(tmp_path: Path) -> None:
+    """kind=writing hands the word to writing practice; a word too long comes back with a hint."""
+    started: list[str] = []
+
+    class Writing:
+        def start(self, text: str) -> str | None:
+            if len(text) > 12:
+                return "It has 17 letters."
+            started.append(text)
+            return None
+
+    deps = _deps(_display(tmp_path))
+    deps.writing = Writing()
+
+    result = await ShowOnDisplay()(deps, kind="writing", word="PAPÁ")
+    assert result["ok"] is True and "end_conversation" in result["instruction"]
+    assert started == ["PAPÁ"]
+
+    refused = await ShowOnDisplay()(deps, kind="writing", word="MURCIÉLAGO GIGANTE")
+    assert refused["error"] == "It has 17 letters." and "shorter" in refused["instruction"]
+
+    deps.writing = None
+    assert "error" in await ShowOnDisplay()(deps, kind="writing", word="PAPÁ")
+
+
+@pytest.mark.asyncio
 async def test_drawing_failures_tell_the_model_not_to_retry(tmp_path: Path) -> None:
     """A drawing that cannot be made keeps the screen and asks Reachy to say so without retrying."""
     display = _display(tmp_path, with_drawings=False)

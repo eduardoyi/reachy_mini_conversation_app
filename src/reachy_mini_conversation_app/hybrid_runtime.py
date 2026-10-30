@@ -619,6 +619,9 @@ class HybridRuntime:
         self._state_observer = state_observer
         self._activity_observer: ActivityObserver | None = None
         self._transcript_observer: TranscriptObserver | None = None
+        # Sees each final room transcript before wake detection while Reachy waits for his name; returns True
+        # when it acted on it (writing practice's "¡ya!", said without the name).
+        self._room_listener: Callable[[str], bool] | None = None
         self._inactivity_timeout_s = float(inactivity_timeout_s)
         self._wake_followup_timeout_s = float(wake_followup_timeout_s)
         self._clock = clock
@@ -966,6 +969,10 @@ class HybridRuntime:
         """Attach an observer for active provider transcript updates."""
         self._transcript_observer = observer
 
+    def set_room_listener(self, listener: Callable[[str], bool] | None) -> None:
+        """Offer each final room transcript to ``listener`` first while waiting for the name; True consumes it."""
+        self._room_listener = listener
+
     def record_provider_traffic(self, kind: TrafficKind, byte_count: int) -> None:
         """Record media only after a provider confirms a successful send."""
         if byte_count <= 0:
@@ -1093,8 +1100,13 @@ class HybridRuntime:
                     )
                 )
                 return
-            if detector is None or self._closed or mode is not RuntimeMode.LOCAL_AMBIENT:
+            if self._closed or mode is not RuntimeMode.LOCAL_AMBIENT:
                 return
+        listener = self._room_listener
+        if listener is not None and listener(segment.text):
+            return
+        if detector is None:
+            return
         try:
             detection = detector.process_transcript(
                 segment.text,

@@ -416,6 +416,49 @@ def render_lesson(title: str, panels: list[tuple[str, Image.Image]]) -> bytes:
     return encode_png(canvas)
 
 
+def render_writing(letters: list[str], step: int) -> bytes:
+    """Render writing practice: the word so far above the letter to copy now, or the whole word once done.
+
+    ``letters`` are capitals, with " " for a space; ``step`` is the one to write now (``len(letters)`` when done).
+    """
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    if step >= len(letters):
+        _draw_lines(draw, ["¡Muy bien!"], _font(44, bold=True), left=20, width=WIDTH - 40, top=50, centered=True)
+        word = "".join(letters)
+        _draw_glyphs_centered(draw, word, _fitted(word, WIDTH - 60, 220, 40), WIDTH / 2, 290)
+        return encode_png(canvas)
+    slot = min(56, (WIDTH - 40) // len(letters))
+    row_left = (WIDTH - slot * len(letters)) // 2
+    written_font = _font(int(slot * 0.75), bold=True)
+    for index, letter in enumerate(letters):
+        left = row_left + index * slot
+        if index < step and letter != " ":
+            draw.text((left + slot / 2, 62), letter, font=written_font, fill=0, anchor="ms")
+        if index == step:
+            draw.line((left + 5, 74, left + slot - 5, 74), fill=0, width=6)
+        elif letter != " ":
+            draw.line((left + 6, 74, left + slot - 6, 74), fill=_LIGHT_GREY, width=3)
+    if letters[step] == " ":
+        _draw_glyphs_centered(draw, "espacio", _font(72, bold=True), WIDTH / 2, 280, fill=_GREY)
+    else:
+        _draw_glyphs_centered(draw, letters[step], _font(330, bold=True), WIDTH / 2, 280)
+        count = sum(1 for letter in letters if letter != " ")
+        done = sum(1 for letter in letters[: step + 1] if letter != " ")
+        label = f"{done} de {count}"
+        font = _font(26)
+        draw.text((WIDTH - 20 - font.getlength(label), HEIGHT - 44), label, font=font, fill=_GREY)
+    return encode_png(canvas)
+
+
+def _draw_glyphs_centered(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, x: float, y: float, fill: int = 0
+) -> None:
+    """Draw ``text`` with its inked area (accents included) centered on ``(x, y)``."""
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    draw.text((x - (left + right) / 2, y - (top + bottom) / 2), text, font=font, fill=fill)
+
+
 def _draw_number(draw: ImageDraw.ImageDraw, number: int, left: int, top: int, size: int) -> None:
     """Draw a step number in white on a black disc."""
     draw.ellipse((left, top, left + size, top + size), fill=0)
@@ -507,7 +550,8 @@ class EInkDisplay:
     def show(self, png: bytes, owner: str = "requested", *, expires_after_s: float | None = None) -> None:
         """Make ``png`` the screen the TRMNL fetches at its next check-in.
 
-        ``owner`` says who put it up: "requested" (someone asked) or "music" (the now-playing card).
+        ``owner`` says who put it up: "requested" (someone asked), "writing" (writing practice, which the
+        music card leaves alone) or "music" (the now-playing card).
         With ``expires_after_s`` (camera photos) the screen leaves after that long and its file is deleted.
         """
         if len(png) > MAX_PNG_BYTES:
@@ -530,7 +574,7 @@ class EInkDisplay:
             self._update(screen=None, owner=None)
 
     def owner(self) -> str:
-        """Who the screen showing now belongs to: "home", "requested" or "music"."""
+        """Who the screen showing now belongs to: "home", "requested", "writing" or "music"."""
         current = read_json(self.spool / CURRENT)
         if current_filename(self.spool, self._clock()) in (None, current.get("home")):
             return "home"

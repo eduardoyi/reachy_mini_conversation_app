@@ -40,6 +40,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_steps,
     render_lesson,
     render_drawing,
+    render_writing,
     render_now_playing,
 )
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
@@ -155,6 +156,15 @@ def test_light_grey_fills_become_one_even_grey() -> None:
                 "Título " * 20, [(caption, Image.new("L", (300, 260), 170)) for caption in ("", "muy largo " * 30) * 3]
             ),
             id="lesson-overflowing-and-without-captions",
+        ),
+        *(
+            pytest.param(lambda letters=letters, step=step: render_writing(list(letters), step), id=f"writing-{name}")
+            for name, letters, step in (
+                ("first", "PAPÁ", 0),
+                ("space", "TE QUIERO", 2),
+                ("longest", "ÑANDÚ ROJO 12", 12),
+                ("done", "TE QUIERO", 9),
+            )
         ),
         pytest.param(
             lambda: render_now_playing(

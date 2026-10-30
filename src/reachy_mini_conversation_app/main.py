@@ -193,6 +193,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     from reachy_mini_conversation_app.weather import Place, WeatherService
     from reachy_mini_conversation_app.local_speech import LocalSpeech
     from reachy_mini_conversation_app.photographer import FACES
+    from reachy_mini_conversation_app.writing_mode import WRITING_PHRASES
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
 
     home = None
@@ -203,7 +204,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         (config.GEMINI_API_KEY or "").strip() or None,
         config.GEMINI_VOICE,
         model=config.LOCAL_SPEECH_MODEL,
-        cacheable=FIXED_PHRASES,
+        cacheable=FIXED_PHRASES | WRITING_PHRASES,
     )
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
@@ -564,6 +565,8 @@ def run(
             from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
 
             conversation_people.clear()
+            if active and deps.writing is not None:
+                deps.writing.stop()  # any other request ends writing practice
 
             if config.SPEAKER_FOLLOWING_ENABLED:
                 movement_manager.set_conversation_active(active)
@@ -692,6 +695,25 @@ def run(
         runtime_for_tools = hybrid_runtime
         deps.expect_answer = hybrid_runtime.expect_answer
         deps.record_message = hybrid_runtime.record_message
+        if deps.display is not None:
+            from reachy_mini_conversation_app.writing_mode import WritingMode
+            from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
+
+            def quiet_head(quiet: bool) -> None:
+                """Hold the head still with the speech wobble off, so a pat shows; or let it move again."""
+                movement_manager.hold_still(quiet)
+                if quiet:
+                    switch_wobble(robot, on=False)
+                else:
+                    restore_wobble(robot)
+
+            deps.writing = WritingMode(
+                display=deps.display,
+                say=hybrid_runtime.request_announcement,
+                quiet_head=quiet_head,
+                touches=movement_manager.head_touches,
+            )
+            hybrid_runtime.set_room_listener(deps.writing.hear)
         if deps.maribel is not None:
             from reachy_mini_conversation_app.maribel import MaribelReply
             from reachy_mini_conversation_app.quick_commands import guess_language
