@@ -1348,8 +1348,29 @@ async def test_a_parent_calls_an_approved_person_through_reachy(
     assert opened == ["Eduardo:secret"] and streamed == [link] and link.closed
 
 
+@pytest.fixture
+def quick_caller_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Look for a parent for a tenth of a second, not three."""
+    monkeypatch.setattr(quick_commands, "CALLER_CHECK_S", 0.1)
+    monkeypatch.setattr(quick_commands, "CALLER_CHECK_INTERVAL_S", 0.02)
+
+
 @pytest.mark.asyncio
-async def test_only_a_parent_can_start_a_call(callees: None, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_parent_recognized_a_moment_later_still_calls(
+    callees: None, monkeypatch: pytest.MonkeyPatch, quick_caller_check: None
+) -> None:
+    """The first looks are unsure; a later one sees Eduardo, so the call goes ahead."""
+    runner, _, _ = _call_runner(monkeypatch, link=_Link(True, "ended"))
+    looks = iter([[], [None], [MagicMock(person_id="eduardo")]])
+    runner._deps.face_recognition.identify_now = lambda: next(looks)
+    reply = await runner.handle("call Eduardo")
+    assert reply is not None and reply.text == "Calling Eduardo!"
+
+
+@pytest.mark.asyncio
+async def test_only_a_parent_can_start_a_call(
+    callees: None, monkeypatch: pytest.MonkeyPatch, quick_caller_check: None
+) -> None:
     """A kid (or nobody) in front of the camera hears that only Mom or Dad can call; nothing is dialed."""
     for faces in (("enzo",), ()):
         runner, streamed, opened = _call_runner(monkeypatch, *faces, link=_Link(True, "ended"))

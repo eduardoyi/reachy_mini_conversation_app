@@ -200,6 +200,12 @@ not on the approved list, recording calls.
   (Eduardo or Adriana). The mic's first channel goes to the call, as Gemini Live hears the room while
   Reachy talks. Feature doc: [whatsapp-calls.md](../features/whatsapp-calls.md). Hanging up from Reachy
   (antenna bend) is left for stage 3.
+- 2026-10-30: **First call through Reachy** ("Richie, call Eduardo", 14:17): recognized on the second try
+  (the first was refused: one camera frame scored 0.41, below the bar; the check now looks for 3 s);
+  connected 8 s after ringing, 78 s, ended by Eduardo. His report: Reachy's speaker clear, no delay, the
+  head moved with his voice; what Reachy sent sounded like rustling (motors, or leftover echo?); shouting
+  on the phone cut the audio from Reachy's speaker. Nothing was transcribed by the local speech server
+  during the call. Next: record both directions (`REACHY_CALLS_RECORD_DIR`) to find both causes.
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
