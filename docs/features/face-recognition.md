@@ -87,6 +87,16 @@ Eduardo's own matches. Other weak matches are logged as unsure; `who_is_here` st
 reports them with their confidence. No OpenCV or Pillow dependency: alignment and crops are numpy; photos
 are encoded with GStreamer (`camera_frames.encode_jpeg`).
 
+At night the camera exposes for the ceiling spots: the frame comes out grey (black level
+~28, mean ~65) and a backlit face sits near 32, too flat for the detector to find at all.
+Frames darker on average than 90 (`camera_frames.DIM_FRAME_MEAN`) are therefore stretched
+from their 1st to 99th percentile with a 0.7 gamma (`boost_dim_frame`) before recognition
+and enrollment. Measured live on 2026-10-30: no face in five raw frames; boosted, Eduardo
+in all five at 0.41–0.51. A frame with almost no spread (lights off) is left alone rather
+than stretched into noise. The model's view (the Gemini camera stream and the `camera`
+tool) gets the same boost (`boost_dim_jpeg`); photos people see (`take_photo`, the display's
+camera picture) do not, and head tracking runs in the daemon on its own frames.
+
 ## Canonical files and contracts
 
 | Area | File or interface | Responsibility / contract |
@@ -124,7 +134,7 @@ are encoded with GStreamer (`camera_frames.encode_jpeg`).
 
 - Face fingerprints are biometric data. They are stored only on this computer,
   owner-readable, for people who enrolled themselves, and are deleted on request.
-- Accuracy depends on light and distance (faces narrower than 48 px at 1920x1080
+- Accuracy depends on light and distance; dim frames are boosted (above), a dark room is not (faces narrower than 48 px at 1920x1080
   are ignored; enrollment needs 80 px). The camera's 120° lens makes faces small
   beyond ~2 m.
 - Recognition uses one CPU thread for ~50–150 ms once a second during
@@ -145,7 +155,7 @@ are encoded with GStreamer (`camera_frames.encode_jpeg`).
 | `tests/test_face_identity.py` | Similarity transform and warp; analyzer downscale, box scaling, small-face filter, unit fingerprints; person IDs; enroll/match/reload/forget with photo deletion; private permissions and model tag; foreign-model store ignored; unknown and ambiguous faces; sample cap; enrollment needs one clear face; refusing a face enrolled under another name; identify/expiry/hint; conversation end clears state; background loop runs only while active; photo enrollment skips unreadable/empty/group/cropped photos and an odd one out, refuses mixed people, too many photos, and faces enrolled under another name. |
 | `tests/tools/test_face_tools.py` | Tools when disabled; enroll turns toward the speaker and relays errors; forget by name; who_is_here output and startup state; `remember` attribution; tool auto-enable flag; identity hint ordering. |
 | `tests/test_faces_console.py` | List/photo locality and no-store, photo ownership and traversal; remote/rebinding rejection; enroll success/failure/origin/body checks; upload decoding, skipped reporting, malformed bodies, locality and 12 MB cap; forget; disabled 404s. |
-| `tests/test_camera_frames.py` | JPEG encode/decode round trip keeps colours and size; PNG decode; garbage rejected. |
+| `tests/test_camera_frames.py` | JPEG encode/decode round trip keeps colours and size; PNG decode; garbage rejected; a dim frame is lifted with more contrast, a well-lit frame and a dark room are left alone, a dim JPEG comes back brighter. |
 
 ### Live validation (pending)
 
@@ -167,4 +177,5 @@ matched.
 | 2026-10-17 | Repeated weak matches (three in a row, or the person already in front) count as recognized; Settings enrollment no longer refuses look-alikes such as siblings. |
 | 2026-10-17 | Delete a single photo (and its fingerprint) from Settings. |
 | 2026-10-17 | Identity is acted on only at score ≥ 0.50 after a live misrecognition (Eduardo taken for Mara at 0.41–0.43). |
+| 2026-10-30 | Dim frames are contrast-stretched before recognition, enrollment and the model's view (a parent backlit by the ceiling spots was not found at all, so a call was refused). |
 | 2026-10-16 | Enroll from uploaded photos in Settings; enrollment ignores faces cut off by the image edge; photos saved as standard JPEGs. Verified in a browser against real models with captured frames. |

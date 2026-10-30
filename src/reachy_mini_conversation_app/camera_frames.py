@@ -1,4 +1,4 @@
-"""Downscale camera JPEGs before they are sent to a cloud model."""
+"""Downscale camera JPEGs before they are sent to a cloud model, and brighten dim frames Reachy looks at."""
 
 import struct
 import logging
@@ -15,6 +15,14 @@ _PULL_TIMEOUT_NS = 1_000_000_000
 # The SDK's one-shot JPEG encoder is shared, so the camera tool and the live stream take turns.
 _CAPTURE_LOCK = threading.Lock()
 _SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF})
+# The camera exposes for the ceiling spots at night, leaving faces near black and the frame grey
+# (2026-10-30: mean 65, a face at 32; no face found until the contrast was stretched). Frames darker
+# on average than this get their contrast stretched and their shadows lifted before Reachy looks at them.
+DIM_FRAME_MEAN = 90.0
+# Below this spread between the dark and bright ends the room is simply dark (lights off): stretching
+# it would only blow up sensor noise.
+_MIN_BOOST_SPREAD = 32.0
+_BOOST_GAMMA = 0.7
 
 
 def capture_jpeg(media: Any) -> bytes | None:
@@ -28,6 +36,40 @@ def capture_frame(media: Any) -> Any:
     """Return the current camera frame as a BGR array (blocking), serialized with ``capture_jpeg``."""
     with _CAPTURE_LOCK:
         return media.get_frame()
+
+
+def boost_dim_frame(frame_bgr: Any) -> Any:
+    """Return a dim BGR frame with its contrast stretched and shadows lifted; any other frame unchanged.
+
+    For what Reachy looks at himself (faces, the model's view), never for photos people see: it
+    makes a dim picture grainy.
+    """
+    import numpy as np
+
+    if frame_bgr is None:
+        return None
+    sample = frame_bgr[::4, ::4]
+    if float(sample.mean()) >= DIM_FRAME_MEAN:
+        return frame_bgr
+    low, high = (float(v) for v in np.percentile(sample, (1, 99)))
+    if high - low < _MIN_BOOST_SPREAD:
+        return frame_bgr
+    levels = np.clip((np.arange(256, dtype=np.float32) - low) / (high - low), 0.0, 1.0)
+    lut = np.round(levels**_BOOST_GAMMA * 255.0).astype(np.uint8)
+    return lut[frame_bgr]
+
+
+def boost_dim_jpeg(jpeg: bytes) -> bytes:
+    """Return a dim JPEG re-encoded with :func:`boost_dim_frame`; any other (or unreadable) JPEG unchanged."""
+    if not jpeg.startswith(b"\xff\xd8"):
+        return jpeg
+    frame = decode_image(jpeg)
+    if frame is None:
+        return jpeg
+    boosted = boost_dim_frame(frame)
+    if boosted is frame:
+        return jpeg
+    return encode_jpeg(boosted) or jpeg
 
 
 def decode_image(data: bytes) -> Any:
