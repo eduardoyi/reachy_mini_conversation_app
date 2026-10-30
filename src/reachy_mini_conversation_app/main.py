@@ -155,7 +155,7 @@ def _build_display() -> Any:
         refresh_s=config.TRMNL_REFRESH_SECONDS,
         cache_dir=Path.home() / ".cache" / "reachy-mini-conversation-app" / "display",
         image_model=config.DISPLAY_IMAGE_MODEL,
-        client=genai.Client(api_key=api_key) if api_key and not uses_openai else None,
+        client=genai.Client(api_key=api_key) if api_key else None,
         openai_client=AsyncOpenAI(api_key=openai_key, max_retries=0) if openai_key and uses_openai else None,
         pictures=pictures,
     )

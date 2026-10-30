@@ -1,4 +1,4 @@
-"""Calm e-ink screens for a TRMNL display: drawings, web pictures, word cards and short text.
+"""Calm e-ink screens for a TRMNL display: drawings, web pictures, word cards, short text and drawing lessons.
 
 The TRMNL polls a small HTTP server here (its "bring your own server" API: ``/api/setup``,
 ``/api/display``, ``/api/log``) and draws whatever PNG the reply points to. Screens are 800x480
@@ -11,6 +11,7 @@ import io
 import os
 import re
 import sys
+import json
 import time
 import zlib
 import base64
@@ -91,6 +92,38 @@ PHOTO_EDIT_PROMPT = (
 # Drawings are cached per style, so a new style never shows old drawings: drawings/ holds the 2026-10-24
 # cartoons and drawings-v2/ the too-detailed encyclopedia style; neither is used any more.
 DRAWINGS_DIR = "drawings-v3"
+# Drawing lessons are one 2x2 "how to draw" sheet cut into its panels: separate drawings per step never showed the
+# same drawing growing (six subjects, 2026-10-30). Without "including the last one" the last panel came back all
+# black; asked for faces only on animals, houses and rockets still got them.
+LESSON_PROMPT = (
+    "A 'how to draw' tutorial sheet for young children (ages 3 to 5): how to draw a very simple, cute {subject} "
+    "in 4 steps, as a 2x2 grid of four equal panels separated by thin light grey lines (step 1 top-left, step 2 "
+    "top-right, step 3 bottom-left, step 4 bottom-right). All four panels show the same drawing at exactly the "
+    "same size and position, growing step by step. In every panel, including the last one, the lines drawn in "
+    "earlier steps are light grey and only the lines added in that step are thick black. Each step adds about "
+    "the same small amount, one to three simple shapes: step 1 is the one biggest shape, steps 2 and 3 add the "
+    "main parts, and step 4 adds the small details, which completes the drawing. Only simple shapes a small child "
+    "can copy (circles, ovals, straight lines, simple curves, triangles, rectangles), as few lines as possible. "
+    "Only people, animals, aliens, monsters and other characters get a simple friendly face; never draw a face on "
+    "objects, buildings, vehicles or food. Bold clean outlines on a plain white background, no shading, no colour, "
+    "no fills except small black pupils. No text, letters or numbers anywhere."
+)
+# Captions come from reading the finished sheet, so they name what each panel really adds: right on 12 of 12 test
+# sheets in 2-5 s. gpt-6-luna was under a second faster but wordier and once wrong (2026-10-30).
+LESSON_CAPTION_MODEL = "gemini-3.8-flash"
+LESSON_CAPTION_PROMPT = (
+    "This is a 2x2 'how to draw {subject}' sheet for children aged 3 to 5: panel 1 top-left, 2 top-right, 3 "
+    "bottom-left, 4 bottom-right. In each panel the thick black lines are what that step adds; light grey lines "
+    "were drawn in earlier steps. For each panel write a caption of at most 8 short words a small child "
+    "understands, naming the shapes that step adds and what they are for (like 'Un óvalo grande para el cuerpo' "
+    "or 'Two triangles for the ears'). Describe only what is black in that panel. Write the captions in the "
+    "language of this title: {title}. "
+    'Answer JSON: {{"captions": ["...", "...", "...", "..."]}}'
+)
+# The sheet (up to DRAWING_TIMEOUT_S) and its captions fit the conversation's 30 s tool deadline.
+CAPTION_TIMEOUT_S = 10.0
+CAPTION_HEDGE_S = 4.0
+LESSONS_DIR = "lessons"
 _ASSETS = Path(__file__).parent / "static" / "eink"
 _GREY, _LIGHT_GREY = 85, 170
 _LEVEL_EDGES = (64, 128, 230)
@@ -348,17 +381,47 @@ def render_steps(steps: list[tuple[str, Image.Image | None]], title: str = "") -
         else:
             caption_top = panel_top + (panel_height - line_height * len(lines)) // 2
         _draw_lines(draw, lines, font, left=left + 10, width=panel_width - 20, top=caption_top, centered=True)
-        badge = 34 if rows == 1 else 28
-        draw.ellipse((left + 6, panel_top + 6, left + 6 + badge, panel_top + 6 + badge), fill=0)
-        number = _font(badge - 10, bold=True)
-        label = str(index + 1)
-        draw.text(
-            (left + 6 + (badge - number.getlength(label)) / 2, panel_top + 6 + badge * 0.12),
-            label,
-            font=number,
-            fill=255,
-        )
+        _draw_number(draw, index + 1, left + 6, panel_top + 6, 34 if rows == 1 else 28)
     return encode_png(canvas)
+
+
+def render_lesson(title: str, panels: list[tuple[str, Image.Image]]) -> bytes:
+    """Render a drawing lesson: a title over four numbered panels, each a drawing beside its caption."""
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    font = _fitted(title, WIDTH - 40, 34, 24)
+    top = _draw_lines(
+        draw, _wrapped(title, font, WIDTH - 40, 1), font, left=20, width=WIDTH - 40, top=6, centered=True
+    )
+    gap = 10
+    panel_width, panel_height = (WIDTH - 20 - gap) // 2, (HEIGHT - top - 8 - gap) // 2
+    caption_font = _font(24)
+    line_height = int(caption_font.size * 1.2)
+    for index, (caption, picture) in enumerate(panels[:MAX_STEPS]):
+        left = 10 + (index % 2) * (panel_width + gap)
+        panel_top = top + (index // 2) * (panel_height + gap)
+        draw.rounded_rectangle(
+            (left, panel_top, left + panel_width, panel_top + panel_height), radius=12, outline=_LIGHT_GREY, width=2
+        )
+        side = panel_height - 12
+        box = (side, side) if caption else (panel_width - 12, side)
+        fitted = ImageOps.contain(picture.convert("L"), box)
+        canvas.paste(fitted, (left + 6 + (box[0] - fitted.width) // 2, panel_top + 6 + (side - fitted.height) // 2))
+        if caption:
+            width = panel_width - side - 24
+            lines = _wrapped(caption, caption_font, width, 4)
+            caption_top = panel_top + (panel_height - line_height * len(lines)) // 2
+            _draw_lines(draw, lines, caption_font, left=left + side + 14, width=width, top=caption_top)
+        _draw_number(draw, index + 1, left + 6, panel_top + 6, 30)
+    return encode_png(canvas)
+
+
+def _draw_number(draw: ImageDraw.ImageDraw, number: int, left: int, top: int, size: int) -> None:
+    """Draw a step number in white on a black disc."""
+    draw.ellipse((left, top, left + size, top + size), fill=0)
+    font = _font(size - 10, bold=True)
+    label = str(number)
+    draw.text((left + (size - font.getlength(label)) / 2, top + size * 0.12), label, font=font, fill=255)
 
 
 def render_text(lines: list[str], title: str = "") -> bytes:
@@ -416,8 +479,8 @@ class EInkDisplay:
     ) -> None:
         """Write the resting screen to the spool folder the device server reads; ``start()`` starts the server.
 
-        ``client`` draws with a Gemini image model and ``openai_client`` with a gpt-image model; only the one
-        matching ``image_model`` is used.
+        ``client`` draws with a Gemini image model and ``openai_client`` with a gpt-image model, whichever
+        matches ``image_model``; ``client`` also writes drawing lessons' captions.
         """
         self.port = port
         self.refresh_s = refresh_s
@@ -514,6 +577,115 @@ class EInkDisplay:
         path.parent.mkdir(parents=True, exist_ok=True)
         picture.save(path)
         return picture
+
+    async def lesson(self, subject: str, title: str) -> list[tuple[str, Image.Image]]:
+        """Return a drawing lesson's four panels with their captions: from the cache, else drawn and captioned."""
+        folder = self._cache_dir / LESSONS_DIR
+        sheet_path = folder / f"{_cache_key(subject)}.png"
+        captions_path = sheet_path.with_suffix(".json")
+        new_sheet = not sheet_path.is_file()
+        if new_sheet:
+            sheet = await self._generate(LESSON_PROMPT.format(subject=subject), None, "display_lesson", "the lesson")
+        else:
+            with Image.open(sheet_path) as cached:
+                sheet = cached.convert("L")
+        half_width, half_height = sheet.width // 2, sheet.height // 2
+        border = sheet.width // 64  # inside the grid lines between the panels
+        quarters = [
+            sheet.crop((x + border, y + border, x + half_width - border, y + half_height - border))
+            for y in (0, half_height)
+            for x in (0, half_width)
+        ]
+        # Every panel is cut to the same box around the drawing, so it fills the panel and stays in place.
+        ink_y, ink_x = np.nonzero(np.logical_or.reduce([np.asarray(quarter) < 200 for quarter in quarters]))
+        if len(ink_x):
+            box = (
+                max(int(ink_x.min()) - border, 0),
+                max(int(ink_y.min()) - border, 0),
+                min(int(ink_x.max()) + border + 1, quarters[0].width),
+                min(int(ink_y.max()) + border + 1, quarters[0].height),
+            )
+            quarters = [quarter.crop(box) for quarter in quarters]
+        keep = True
+        if new_sheet:
+            # Grey away from black lines in step 1 means later steps leaked into it: 0 on 17 test sheets, 1.5x the
+            # black on the one broken sheet. It is still shown, but not kept, so asking again draws a new one.
+            first = np.asarray(quarters[0])
+            near_black = np.asarray(quarters[0].filter(ImageFilter.MinFilter(5))) < 100
+            stray_grey = int(((first >= 110) & (first <= 215) & ~near_black).sum())
+            keep = stray_grey <= 0.2 * int((first < 100).sum())
+            if keep:
+                folder.mkdir(parents=True, exist_ok=True)
+                sheet.save(sheet_path)
+            else:
+                logger.info("Lesson sheet has later lines in its first step; shown but not kept")
+        captions_by_title = read_json(captions_path)
+        captions = captions_by_title.get(title)
+        if not isinstance(captions, list):
+            captions = await self._lesson_captions(sheet, subject, title)
+            if captions and keep:
+                write_json(captions_path, {**captions_by_title, title: captions})
+        return list(zip(captions or [""] * len(quarters), quarters))
+
+    async def _lesson_captions(self, sheet: Image.Image, subject: str, title: str) -> list[str]:
+        """Return a caption per panel read from the sheet, or [] when the caption model cannot give them."""
+        if self._client is None:
+            logger.warning("Lesson shown without captions: they need GEMINI_API_KEY")
+            return []
+        buffer = io.BytesIO()
+        sheet.save(buffer, format="PNG")
+        contents: list[types.PartUnionDict] = [
+            LESSON_CAPTION_PROMPT.format(subject=subject, title=title),
+            types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png"),
+        ]
+        request = functools.partial(
+            self._client.aio.models.generate_content,
+            model=LESSON_CAPTION_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+            ),
+        )
+        # Most answers take 2-4 s but 2 of 12 live calls took over 8 s (2026-10-30), so a second request starts
+        # after CAPTION_HEDGE_S and the first answer wins.
+        attempts = {asyncio.ensure_future(request())}
+        try:
+            done, _ = await asyncio.wait(attempts, timeout=CAPTION_HEDGE_S)
+            if not done:
+                attempts.add(asyncio.ensure_future(request()))
+                done, _ = await asyncio.wait(
+                    attempts, timeout=CAPTION_TIMEOUT_S - CAPTION_HEDGE_S, return_when=asyncio.FIRST_COMPLETED
+                )
+        finally:
+            for attempt in attempts:
+                attempt.cancel()
+        if not done:
+            logger.warning("Lesson shown without captions: the caption model took too long")
+            return []
+        try:
+            response = done.pop().result()
+            answer = json.loads(response.text or "")
+        except (genai_errors.APIError, ValueError) as error:
+            logger.warning("Lesson shown without captions: %s", type(error).__name__)
+            return []
+        usage = response.usage_metadata
+        if usage is not None:
+            tokens = {
+                "input_text": int(usage.prompt_token_count or 0),
+                "output_text": int(usage.candidates_token_count or 0),
+                "thinking": int(usage.thoughts_token_count or 0),
+            }
+            get_ledger().record("display_lesson_captions", LESSON_CAPTION_MODEL, tokens)
+        captions = answer.get("captions") if isinstance(answer, dict) else None
+        if (
+            not isinstance(captions, list)
+            or len(captions) != MAX_STEPS
+            or not all(isinstance(c, str) for c in captions)
+        ):
+            logger.warning("Lesson shown without captions: the caption model gave none to use")
+            return []
+        return [caption.strip().rstrip(".") for caption in captions]
 
     async def edit_photo(self, jpeg: bytes, edit: str) -> Image.Image:
         """Redraw a camera photo with ``edit`` in the drawing style; nothing is cached."""

@@ -12,6 +12,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_word,
     render_photo,
     render_steps,
+    render_lesson,
     render_drawing,
 )
 from reachy_mini_conversation_app.web_pictures import PictureError
@@ -29,7 +30,7 @@ PHOTO_ON_SCREEN_S = 10 * 60
 # Screens that wait for the image model or a web search. A drawing or photo edit takes 10-15 s, long enough
 # for people to keep talking and the model to ask again; on 2026-10-27 one "draw me as a Minecraft
 # character" became two edits and a plain drawing, each replacing the last. Only one is made at a time.
-PICTURE_KINDS = ("camera", "drawing", "picture", "steps")
+PICTURE_KINDS = ("camera", "drawing", "lesson", "picture", "steps")
 
 
 def _text(kwargs: dict[str, Any], key: str) -> str:
@@ -66,6 +67,10 @@ class ShowOnDisplay(Tool):
         "them; kind=drawing never knows what anyone here looks like. "
         "kind=drawing: a picture of `subject` (in English) with a short `caption`; for things and characters, "
         "not for the people in front of you. "
+        "kind=lesson: every time someone wants to learn to draw something ('enséñame a dibujar una jirafa', 'how do "
+        "I draw a shark?'), show 4 numbered steps for drawing a simple version of `subject` (in English), with a "
+        "`title` in their language, e.g. 'Cómo dibujar una jirafa'. It takes about 15 seconds; then only tell them "
+        "the steps are on the screen, do not read them out. 'Draw me a giraffe' is kind=drawing. "
         "kind=picture: a real photo or artwork from the web, to see what a real thing looks like (a painting, a "
         "monument, an animal, a rocket); `subject` names it precisely in English, e.g. 'Mona Lisa "
         "painting by Leonardo da Vinci' or 'a tiger in the wild, photo'. If no suitable picture is found it is "
@@ -92,9 +97,9 @@ class ShowOnDisplay(Tool):
         "properties": {
             "kind": {
                 "type": "string",
-                "enum": ["drawing", "picture", "word", "text", "steps", "camera", "now_playing", "home"],
+                "enum": ["drawing", "lesson", "picture", "word", "text", "steps", "camera", "now_playing", "home"],
             },
-            "subject": {"type": "string", "description": "For drawing and picture: what to show, in English."},
+            "subject": {"type": "string", "description": "For drawing, lesson and picture: what to show, in English."},
             "caption": {"type": "string", "description": "For drawing, picture and camera: a few words under it."},
             "edit": {"type": "string", "description": "For camera: the change to draw into the photo, in English."},
             "word": {"type": "string", "description": "For word: the word or short phrase, shown large."},
@@ -102,7 +107,10 @@ class ShowOnDisplay(Tool):
             "meaning": {"type": "string", "description": "For word: what it means."},
             "header": {"type": "string", "description": "For word: an optional line above, e.g. the question."},
             "picture": {"type": "string", "description": "For word: optional small drawing subject, in English."},
-            "title": {"type": "string", "description": "For text and steps: an optional title."},
+            "title": {
+                "type": "string",
+                "description": "For lesson: the title. For text and steps: an optional title.",
+            },
             "lines": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -211,6 +219,12 @@ class ShowOnDisplay(Tool):
                         )
                 if png is None:
                     png = render_drawing(await display.drawing(subject), caption)
+            elif kind == "lesson":
+                subject, title = _text(kwargs, "subject"), _text(kwargs, "title")
+                if not subject or not title:
+                    return {"error": "lesson needs a subject and a title."}
+                png = render_lesson(title, await display.lesson(subject, title))
+                result["instruction"] = "Tell them the steps are on the screen to draw along; do not read them out."
             elif kind == "word":
                 word = _text(kwargs, "word")
                 if not word:
@@ -262,7 +276,9 @@ class ShowOnDisplay(Tool):
                     [(caption, picture) for (caption, _), picture in zip(steps, pictures)], _text(kwargs, "title")
                 )
             else:
-                return {"error": "kind must be drawing, picture, word, text, steps, now_playing or home."}
+                return {
+                    "error": "kind must be drawing, lesson, picture, word, text, steps, camera, now_playing or home."
+                }
         except DrawingError as error:
             logger.warning("show_on_display drawing failed: %s", error)
             return {"error": f"Could not draw that: {error}.", "instruction": "Tell them kindly. Do not retry."}

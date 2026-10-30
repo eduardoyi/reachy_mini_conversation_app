@@ -45,6 +45,9 @@ DEFAULT_PRICES: Final[dict[str, dict[str, float]]] = {
     "gemini-3.1-flash-lite-image": {"input_text": 0.25, "output_image": 30.00},
     # OpenAI's published rates (2026-10-27); a drawing used 301 output image tokens, about $0.009.
     "gpt-image-2.5-flare": {"input_text": 5.00, "input_image": 8.00, "output_image": 30.00},
+    # Drawing lesson captions (eink_display.py): third-party listings of Google's introductory rate through
+    # 2026-12-31 (2026-10-30), said to double in 2027; thinking is billed as output.
+    "gemini-3.8-flash": {"input_text": 0.75, "output_text": 3.75, "thinking": 3.75},
     # E-ink web pictures (web_pictures.py). Jev: $0.042 per 1M input tokens, output free (TypeSafe's
     # published rate, 2026-10-25). Brave Image Search bills per request, recorded as "request": 1 at
     # $5 per 1,000 (the price per 1M requests is 5,000); Brave's $5 monthly credit is not deducted.

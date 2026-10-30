@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import openai
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from reachy_mini_conversation_app import eink_server, eink_display
 from reachy_mini_conversation_app.eink_server import SERVER, AWAKE_GAP_S, IDLE_AFTER_S, DeviceServer, read_json
@@ -26,8 +26,10 @@ from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.eink_display import (
     WIDTH,
     HEIGHT,
+    LESSONS_DIR,
     DRAWINGS_DIR,
     MAX_PNG_BYTES,
+    LESSON_CAPTION_MODEL,
     EInkDisplay,
     DrawingError,
     encode_png,
@@ -36,6 +38,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_word,
     render_photo,
     render_steps,
+    render_lesson,
     render_drawing,
     render_now_playing,
 )
@@ -72,7 +75,7 @@ class _Clock:
         return self.now
 
 
-def _display(tmp_path: Path, models: _FakeModels | None = None, **kwargs: Any) -> EInkDisplay:
+def _display(tmp_path: Path, models: Any = None, **kwargs: Any) -> EInkDisplay:
     client: Any = SimpleNamespace(aio=SimpleNamespace(models=models)) if models else None
     options: dict[str, Any] = {
         "port": 8090,
@@ -139,6 +142,19 @@ def test_light_grey_fills_become_one_even_grey() -> None:
         pytest.param(
             lambda: render_steps([("muy largo " * 30, None), ("sin dibujo", None), ("x" * 200, None)], "Título " * 20),
             id="steps-overflowing-without-pictures",
+        ),
+        pytest.param(
+            lambda: render_lesson(
+                "Cómo dibujar una jirafa",
+                [(f"Paso {n}: un óvalo grande para el cuerpo", Image.new("L", (300, 260), 170)) for n in range(4)],
+            ),
+            id="lesson",
+        ),
+        pytest.param(
+            lambda: render_lesson(
+                "Título " * 20, [(caption, Image.new("L", (300, 260), 170)) for caption in ("", "muy largo " * 30) * 3]
+            ),
+            id="lesson-overflowing-and-without-captions",
         ),
         pytest.param(
             lambda: render_now_playing(
@@ -698,3 +714,117 @@ async def test_gpt_image_models_need_the_openai_key_and_a_picture(tmp_path: Path
         await _openai_display(tmp_path, None).drawing("cat")
     with pytest.raises(DrawingError, match="blocked"):
         await _openai_display(tmp_path, _FakeImages(None)).drawing("cat")
+
+
+def _lesson_sheet(stray_grey: bool = False) -> bytes:
+    """Return a 2x2 lesson sheet: one more line per step, the new one black and the earlier ones grey."""
+    sheet = Image.new("L", (1024, 768), 255)
+    draw = ImageDraw.Draw(sheet)
+    for step in range(4):
+        left, top = (step % 2) * 512, (step // 2) * 384
+        for line in range(step + 1):
+            x = left + 150 + 50 * line
+            draw.line((x, top + 100, x, top + 300), fill=0 if line == step else 170, width=8)
+    if stray_grey:
+        draw.line((400, 100, 400, 300), fill=170, width=8)  # a later step's line, faintly, in step 1
+    buffer = io.BytesIO()
+    sheet.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class _FakeLessonModels:
+    """Gemini drawing a lesson sheet and, as the caption model, answering ``caption_answer``."""
+
+    def __init__(self, sheet: bytes, caption_answer: str, caption_delays_s: list[float] | None = None) -> None:
+        self.sheet = sheet
+        self.caption_answer = caption_answer
+        self.caption_delays_s = caption_delays_s or []
+        self.calls: list[tuple[str, Any]] = []
+
+    async def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+        self.calls.append((model, contents))
+        if model == LESSON_CAPTION_MODEL:
+            await asyncio.sleep(self.caption_delays_s.pop(0) if self.caption_delays_s else 0.0)
+            usage = SimpleNamespace(prompt_token_count=1267, candidates_token_count=72, thoughts_token_count=0)
+            return SimpleNamespace(text=self.caption_answer, usage_metadata=usage)
+        part = SimpleNamespace(inline_data=SimpleNamespace(data=self.sheet))
+        return SimpleNamespace(
+            candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))],
+            usage_metadata=SimpleNamespace(prompt_token_count=212, candidates_token_count=1290),
+        )
+
+
+_CAPTIONS = json.dumps({"captions": ["Un óvalo grande.", "Un cuello largo", "Cuatro patas", "La carita"]})
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_is_cut_from_one_sheet_and_kept_with_its_captions(tmp_path: Path) -> None:
+    """One sheet becomes four equal panels with captions read from it; a repeat asks nothing, a new title only captions."""
+    models = _FakeLessonModels(_lesson_sheet(), _CAPTIONS)
+    display = _display(tmp_path, models)
+
+    panels = await display.lesson("A Giraffe", "Cómo dibujar una jirafa")
+
+    assert [caption for caption, _ in panels] == ["Un óvalo grande", "Un cuello largo", "Cuatro patas", "La carita"]
+    sizes = {picture.size for _, picture in panels}
+    assert len(sizes) == 1 and sizes.pop() < (320, 240)  # trimmed to the drawing, the same box in every panel
+    grey = [sum(1 for value in picture.get_flattened_data() if 110 <= value <= 215) for _, picture in panels]
+    assert grey[0] < grey[1] < grey[2] < grey[3]  # each step keeps the earlier lines, in grey
+    (sheet_model, sheet_prompt), (caption_model, caption_contents) = models.calls
+    assert sheet_model == "gemini-3.1-flash-lite-image" and caption_model == LESSON_CAPTION_MODEL
+    assert "A Giraffe" in sheet_prompt and "never draw a face on objects" in sheet_prompt
+    assert "Cómo dibujar una jirafa" in caption_contents[0]
+    assert [entry["feature"] for entry in get_ledger().entries()[-2:]] == ["display_lesson", "display_lesson_captions"]
+    assert get_ledger().entries()[-1]["cost_usd"] is not None
+
+    again = await display.lesson("a giraffe", "Cómo dibujar una jirafa")
+    assert len(models.calls) == 2
+    assert [caption for caption, _ in again] == [caption for caption, _ in panels]
+
+    await display.lesson("a giraffe", "How to draw a giraffe")
+    assert [model for model, _ in models.calls[2:]] == [LESSON_CAPTION_MODEL]
+    assert (tmp_path / LESSONS_DIR / "a-giraffe.png").is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_with_later_lines_in_its_first_step_is_shown_but_not_kept(tmp_path: Path) -> None:
+    """Grey lines in step 1 mean the sheet came out wrong: it is still returned, and the next ask draws anew."""
+    models = _FakeLessonModels(_lesson_sheet(stray_grey=True), _CAPTIONS)
+    display = _display(tmp_path, models)
+
+    assert len(await display.lesson("a butterfly", "Cómo dibujar una mariposa")) == 4
+    await display.lesson("a butterfly", "Cómo dibujar una mariposa")
+
+    assert [model for model, _ in models.calls].count("gemini-3.1-flash-lite-image") == 2
+    assert not (tmp_path / LESSONS_DIR).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_without_captions_still_shows_its_panels(tmp_path: Path) -> None:
+    """An unusable caption answer, or no Gemini client, leaves the panels without captions; none are kept."""
+    models = _FakeLessonModels(_lesson_sheet(), "not json")
+    display = _display(tmp_path, models)
+
+    assert [caption for caption, _ in await display.lesson("a cat", "Cómo dibujar un gato")] == [""] * 4
+    await display.lesson("a cat", "Cómo dibujar un gato")
+    assert [model for model, _ in models.calls].count(LESSON_CAPTION_MODEL) == 2
+
+    openai_only = _openai_display(tmp_path / "openai", _FakeImages(_lesson_sheet()))
+    assert [caption for caption, _ in await openai_only.lesson("a cat", "Cómo dibujar un gato")] == [""] * 4
+
+
+@pytest.mark.asyncio
+async def test_a_slow_caption_answer_gets_a_second_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow caption answer starts a second request and the first answer wins; two slow ones leave no captions."""
+    monkeypatch.setattr(eink_display, "CAPTION_HEDGE_S", 0.05)
+    monkeypatch.setattr(eink_display, "CAPTION_TIMEOUT_S", 0.2)
+    models = _FakeLessonModels(_lesson_sheet(), _CAPTIONS, caption_delays_s=[5.0, 0.0])
+
+    panels = await _display(tmp_path, models).lesson("a cat", "Cómo dibujar un gato")
+
+    assert panels[0][0] == "Un óvalo grande"
+    assert [model for model, _ in models.calls].count(LESSON_CAPTION_MODEL) == 2
+
+    slow = _FakeLessonModels(_lesson_sheet(), _CAPTIONS, caption_delays_s=[5.0, 5.0])
+    panels = await _display(tmp_path / "slow", slow).lesson("a cat", "Cómo dibujar un gato")
+    assert [caption for caption, _ in panels] == [""] * 4

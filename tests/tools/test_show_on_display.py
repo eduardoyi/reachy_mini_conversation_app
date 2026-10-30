@@ -1,6 +1,7 @@
 """Tests for the show_on_display tool."""
 
 import io
+import json
 import time
 import asyncio
 from types import SimpleNamespace
@@ -35,7 +36,9 @@ class _FakeModels:
         await asyncio.sleep(0)
         part = SimpleNamespace(inline_data=SimpleNamespace(data=_jpeg()))
         return SimpleNamespace(
-            candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))], usage_metadata=None
+            candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))],
+            text=json.dumps({"captions": ["Un óvalo", "Un cuello", "Cuatro patas", "La carita"]}),  # lesson captions
+            usage_metadata=None,
         )
 
 
@@ -83,6 +86,7 @@ async def test_without_a_display_the_tool_says_so() -> None:
         {"kind": "word", "word": "arcobaleno", "meaning": "arcoíris", "header": "¿Cómo se dice «arcoíris»?"},
         {"kind": "text", "lines": ["3 + 4 = 7"]},
         {"kind": "text", "title": "Lista", "lines": ["leche", "pan"]},
+        {"kind": "lesson", "subject": "a giraffe", "title": "Cómo dibujar una jirafa"},
         {
             "kind": "steps",
             "title": "¿Cómo crece una planta?",
@@ -119,7 +123,13 @@ async def test_home_goes_back_to_the_resting_card(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "kwargs",
-    [{"kind": "drawing"}, {"kind": "word", "word": " "}, {"kind": "text", "lines": ["", 3]}, {"kind": "video"}],
+    [
+        {"kind": "drawing"},
+        {"kind": "lesson", "subject": "a giraffe"},
+        {"kind": "word", "word": " "},
+        {"kind": "text", "lines": ["", 3]},
+        {"kind": "video"},
+    ],
 )
 async def test_incomplete_requests_are_errors_and_change_nothing(tmp_path: Path, kwargs: dict[str, Any]) -> None:
     """Missing subjects, words or lines, and unknown kinds, return an error and keep the screen."""
@@ -128,6 +138,18 @@ async def test_incomplete_requests_are_errors_and_change_nothing(tmp_path: Path,
 
     assert "error" in await ShowOnDisplay()(_deps(display), **kwargs)
     assert display.current() == home
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_tells_reachy_not_to_read_the_steps_out(tmp_path: Path) -> None:
+    """A lesson is one screen of captioned steps; Reachy only points to it."""
+    display = _display(tmp_path)
+
+    result = await ShowOnDisplay()(_deps(display), kind="lesson", subject="a shark", title="Cómo dibujar un tiburón")
+
+    assert result["ok"] is True
+    assert "do not read them out" in result["instruction"]
+    assert "lesson" in ShowOnDisplay.parameters_schema["properties"]["kind"]["enum"]
 
 
 @pytest.mark.asyncio

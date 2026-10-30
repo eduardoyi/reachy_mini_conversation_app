@@ -1,13 +1,13 @@
 # Feature: E-ink display (TRMNL)
 
-- Status: `in-progress` (drawings, web pictures, word cards, text and visual explanations checked live on the household TRMNL; pictures used by voice; explanations not yet asked for by voice)
-- Last updated: 2026-10-27
+- Status: `in-progress` (drawings, web pictures, word cards, text and visual explanations checked live on the household TRMNL; pictures used by voice; explanations and drawing lessons not yet asked for by voice)
+- Last updated: 2026-10-30
 - Plan: [docs/plans/eink-display.md](../plans/eink-display.md)
 
 ## Overview
 
-Reachy shows drawings, checked pictures from the web, word cards, short text and step-by-step visual
-explanations on a TRMNL OG e-ink display (7.5", 800x480, four grays). It is a deliberately slow, low-stimulation screen: no video, no feed, no apps. The
+Reachy shows drawings, checked pictures from the web, word cards, short text, step-by-step visual
+explanations and drawing lessons on a TRMNL OG e-ink display (7.5", 800x480, four grays). It is a deliberately slow, low-stimulation screen: no video, no feed, no apps. The
 screen changes only when someone asks; otherwise it shows a resting card with a cartoon Reachy and
 "¡Hola! Soy Reachy / Hi, I'm Reachy".
 
@@ -32,6 +32,12 @@ Out of scope so far: stories, scheduled pages such as a morning page or calendar
   panels, each with its own drawing and a short caption in the child's language (one row for two or
   three steps, two rows of two for four). The drawings are made at the same time (measured: four in
   3.0 s, a 9 KB screen). A panel whose drawing fails shows only its words, and Reachy is told.
+- "Enséñame a dibujar una jirafa", "how do I draw a shark?": a drawing lesson for children aged 3 to 5, like
+  a how-to-draw book. A title over four numbered panels, each the same simple drawing one step further (the
+  new lines black, the earlier ones grey) beside a short caption in the title's language naming the shapes
+  ("Un óvalo grande para el cuerpo"). Faces only on things that have faces (people, animals, aliens,
+  monsters, characters), never on objects. Reachy only says the steps are on the screen. About 11–16 s the
+  first time; the same subject again is instant. Plan: [drawing-lessons.md](../plans/drawing-lessons.md).
 - Teaching an Italian word, or "how do you say rainbow in Italian?": a word card with the word in
   large type, its pronunciation written for a Spanish speaker ("la MÉ-la"), the Spanish meaning, an
   optional header and an optional small drawing. If the drawing fails the card shows without it.
@@ -192,7 +198,17 @@ flowchart LR
 - Drawings and pictures are cached as grayscale PNGs in `~/.cache/reachy-mini-conversation-app/display/`
   (`drawings-v3/` for the current style, `pictures/` with the source site in a PNG text chunk), named by the subject folded
   to ASCII ("A Cat" and "a cat" share one).
-- Each drawing's tokens go to the usage ledger as feature `display_drawing`, each Brave search as
+- Drawing lessons: the image model draws one 2x2 how-to-draw sheet (`LESSON_PROMPT`, through the same
+  `_generate` as drawings); `EInkDisplay.lesson()` cuts it into four panels trimmed to one shared box around
+  the drawing, and `LESSON_CAPTION_MODEL` (Gemini 3.8 Flash, low thinking) reads the sheet and returns one
+  caption per panel in the title's language. A caption answer slower than `CAPTION_HEDGE_S` (4 s) gets a
+  second request and the first answer wins; after `CAPTION_TIMEOUT_S` (10 s), an error or an unusable answer
+  the panels show without captions. Sheets are kept in `lessons/<subject>.png` and captions per title in
+  `lessons/<subject>.json`. A sheet whose first panel has grey away from its black lines (later steps leaked
+  in) is shown but neither it nor its captions are kept. Captions need `GEMINI_API_KEY` even when drawings
+  use OpenAI.
+- Each drawing's tokens go to the usage ledger as feature `display_drawing` (a lesson's sheet as
+  `display_lesson`, its captions as `display_lesson_captions`), each Brave search as
   `display_picture_search` (`{"request": 1}`, $0.005) and each Jev check as `display_picture_check`
   (Jev's reported input and output tokens; $0.042 per 1M input, output free). Failed searches and
   checks are not recorded.
@@ -201,11 +217,11 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/edit_photo/picture/start/stop` |
+| Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/lesson/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/lesson/edit_photo/picture/start/stop`; `lesson(subject, title) -> [(caption, panel)] * 4` |
 | Now playing | `now_playing.py` | `parse_playback(body, device_id) -> Playback`; `NowPlaying(display, fetch, in_conversation, art_dir).run/check/show_now/refresh_soon`; `spotify_fetcher(credentials, device)` |
 | Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` (incl. `owner`, `expires_at`, `private`) / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
-| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
+| Tool | `tools/show_on_display.py` | `kind`: `drawing` / `picture` (`subject`, `caption`), `lesson` (`subject`, `title`; tells Reachy not to read the steps), `word` (`word`, `pronunciation`, `meaning`, `header`, `picture`), `text` (`lines`, `title`), `steps` (`title`, `steps`: 2–4 of `{caption, picture}`), `camera` (`edit`, `caption`), `now_playing`, `home`. Returns `{"ok": True, "note": ...}` or `{"error": ..., "instruction"?: ...}` |
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL` (`gpt-image-2.5-flare`), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
@@ -225,6 +241,9 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 ### Safe to extend
 
 - New layouts: add a `render_*` function that returns `encode_png(canvas)` and a `kind` in the tool.
+- Lesson style: `LESSON_PROMPT`. A new style needs a new `LESSONS_DIR`. Keep "earlier lines light grey in
+  every panel, including the last one" (without it the last panel came back all black) and the 2x2 order,
+  which the cutting and the caption prompt rely on.
 - Drawing style: `DRAWING_PROMPT`. Keep "no text" and the grayscale wording, or fills speckle. A new
   style needs a new `DRAWINGS_DIR`, or cached drawings in the old style keep showing.
 
@@ -267,16 +286,16 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 ## Dependencies
 
 - Pillow (added for this feature): image decoding, scaling, text. HPND license, no network access.
-- `openai` (existing) for drawings and edits with `gpt-image-*` models; `google-genai` (existing) for Gemini image models.
+- `openai` (existing) for drawings and edits with `gpt-image-*` models; `google-genai` (existing) for Gemini image models and lesson captions.
 - Atkinson Hyperlegible, SIL Open Font License 1.1 (bundled with its license).
 
 ## Testing
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text and explanations of 2–4 panels with and without pictures; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; gpt-image models through OpenAI (1024x768 medium, edits send the JPEG, token record, credit / rate / moderation / server errors, missing `OPENAI_API_KEY`); the device API over real HTTP; 404s and the log endpoint |
+| `tests/test_eink_display.py` | Shown screens share one id so the device keeps only the latest; photo dithering keeps four levels; picture cache with source, no keys / failed / slow search; PNG format and four levels; light-grey fills; every layout incl. overflowing text, explanations of 2–4 panels with and without pictures and lessons with and without captions; a lesson cut from one sheet into four equal panels whose grey grows, its prompts, cost records and caches (a repeat asks nothing, a new title only captions); a lesson with later lines in step 1 shown but not kept; no captions from a bad answer or without a Gemini client; a slow caption answer gets a second request, two slow ones leave no captions; panels in one row up to three, two rows for four, at most four; the music card with and without art; screen owners and keep-alive; camera photos expire, are no longer served and their files are deleted, while normal screens keep theirs; photo edits recorded and never cached; idle return; filename rules; held check-ins answered on change and after the hold; awake only while checking in; a restarted app keeps the screen and the resting card name; a real server process outlives the app, is reused, and is replaced in place when its settings change; oversized screens; drawing cache, prompt and usage record; no key / blocked / timeout; gpt-image models through OpenAI (1024x768 medium, edits send the JPEG, token record, credit / rate / moderation / server errors, missing `OPENAI_API_KEY`); the device API over real HTTP; 404s and the log endpoint |
 | `tests/test_web_pictures.py` | Strict SafeSearch and Brave auth; best-ranked approved candidate and its source; Jev request shape (danger-zone header, bearer, jpg asset, placeholder in state, one Noul question per risk); every rejection rule incl. nudity outside fine art and suggestive art, each with its plain-words reason, and safety outranking clarity outranking match; classical nudes and calm wild animals pass; resizing into Jev's accepted sizes; only Brave thumbnails downloaded (LAN and other hosts never fetched); each search and check recorded with its cost, failures not; every doubt rejects; search, check, tiny and broken-image failures |
-| `tests/tools/test_show_on_display.py` | One picture at a time (others refused without calling the model, text still shown, a cancelled picture frees it); No display; each kind; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
+| `tests/tools/test_show_on_display.py` | One picture at a time (others refused without calling the model, text still shown, a cancelled picture frees it); No display; each kind incl. lessons; a lesson needs a title and tells Reachy not to read the steps; home; incomplete requests; drawing failure message; camera photos shown for 10 minutes and never cached, edits send the photo and the change, no camera / no frame / failed edit; `now_playing` returns the song or says nothing plays / not set up; explanations drawn together, shown with words only when drawings fail, and refused with fewer than two captioned steps; word card without its picture; the drawing fallback tells Reachy why; a sleeping screen is reported, not claimed shown; the `TRMNL_ENABLED` gate |
 | `tests/test_now_playing.py` | Track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
 | `tests/tools/test_spotify_control.py` | Pause, next and resume refresh the screen; rejected commands do not |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
@@ -296,6 +315,11 @@ reusing the cached drawing and a list; the device fetched each at its next check
 through a spoken conversation.
 
 ## Changelog
+
+- 2026-10-30: Drawing lessons (`kind=lesson`): four numbered steps cut from one image-model sheet, captions
+  read from it by Gemini 3.8 Flash. Live with the real APIs on the MacBook: a house (no face), a rocket and a
+  giraffe in 12.6–18.1 s; one of three caption calls ran past 8 s, which led to the second request. Not yet
+  shown on the TRMNL or asked for by voice. Plan: [drawing-lessons.md](../plans/drawing-lessons.md).
 
 - 2026-10-25: v1 — drawings, word and translation cards, text, resting card, device server.
 - 2026-10-25: v2 web pictures (Brave Image Search + Jev check, drawing fallback).
