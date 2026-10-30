@@ -69,7 +69,12 @@ flowchart LR
   online (GOWA is the first; photos and messages are untouched) and runs one call at a time for the app.
   It reads the approved list itself and refuses anyone not on it, declines every incoming call, hangs up an
   unanswered call at 60 s and a call at 60 min, and logs names, never numbers. It listens on loopback only
-  and requires the token it created in `~/.local/share/reachy-whatsapp-calls/token` (mode 600).
+  and requires the token it created in `~/.local/share/reachy-whatsapp-calls/token` (mode 600). On the Mac
+  mini it is the LaunchAgent `com.eduardo.reachy-calls` (`~/Library/LaunchAgents/com.eduardo.reachy-calls.plist`:
+  starts at login, restarted if it stops, at most every 30 s; log `~/Library/Logs/Reachy/calls.log`, rewritten
+  on each start), as GOWA is `com.eduardo.reachy-whatsapp`. It runs without `REACHY_CALLS_RECORD_DIR`, so no
+  call is recorded. Restart: `launchctl kickstart -k gui/$(id -u)/com.eduardo.reachy-calls`; the app's events
+  socket reconnects within 5 s. The approved list is read on every call, so edits need no restart.
 - `whatsapp_calls.py`: `CallLink` (one call over the WebSocket: mic out once answered, the other side in,
   the end reason), `load_callees` (names and spoken names from the approved list; numbers are not read),
   `call_pcm` (a captured frame's first channel at 16 kHz, as Gemini Live hears the room), `NoiseGate`
@@ -138,6 +143,9 @@ flowchart LR
   and "no" declines after the announcement.
 
 ## Changelog
+
+- 2026-10-30: The call service runs as the LaunchAgent `com.eduardo.reachy-calls` (until then it ran only
+  while a development session kept it open), with call recording off.
 
 - 2026-10-30: A pat on his head hangs up (once the other side has been quiet 2 s), and antennas no longer
   answer or hang up (a bend once failed to answer). Ringing has its own antenna movement, two flutters then

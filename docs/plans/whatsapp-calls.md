@@ -231,6 +231,10 @@ not on the approved list, recording calls.
   pat hangs up once the other side has been quiet 2 s (their voice moves his head through the speech
   wobble, which would read as pats), antennas do nothing during calls, and ringing flutters the antennas
   twice then rests, awake or asleep. Live check pending.
+- 2026-10-30: Installed as the LaunchAgent `com.eduardo.reachy-calls` at Eduardo's request (starts at login,
+  kept alive, log `~/Library/Logs/Reachy/calls.log`), recording off; the app reconnected to it at once.
+  The approved list now has seven people (names and spoken names only in the repo's docs; numbers only in
+  the list on the mini).
 - 2026-10-30: Household answers: only Eduardo approved first (stage 1 calls his phone); only Eduardo or
   Adriana start calls, checked by face; incoming calls announced with caller id on the TRMNL; no
   declining quiet hours, a silent ring with antenna movement and caller id instead.
