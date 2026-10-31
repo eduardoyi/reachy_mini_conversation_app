@@ -536,22 +536,114 @@ function faceName() {
   return name;
 }
 
-function shrink(file) {
+// Cropping: the box is kept as fractions of the photo, so it maps straight onto the full-size image.
+const crop = { box: null, resolve: null, drag: null };
+const CROP_MIN = 0.08;
+
+function placeCropBox() {
+  const box = $("#crop-box");
+  const { x, y, w, h } = crop.box;
+  Object.assign(box.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+}
+
+function cropPhoto(file, index, total) {
   return new Promise((resolve, reject) => {
-    const image = new Image();
+    const image = $("#crop-image");
+    const url = URL.createObjectURL(file);
     image.onload = () => {
-      const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(image.width * scale);
-      canvas.height = Math.round(image.height * scale);
-      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(image.src);
-      resolve(canvas.toDataURL("image/jpeg", 0.88).split(",")[1]);
+      // A centred square a little over half the shorter side, as a starting point around one face.
+      const side = 0.6 * Math.min(image.naturalWidth, image.naturalHeight);
+      const w = side / image.naturalWidth;
+      const h = side / image.naturalHeight;
+      crop.box = { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+      placeCropBox();
     };
-    image.onerror = () => reject(new Error("That photo couldn't be read."));
-    image.src = URL.createObjectURL(file);
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That photo couldn't be read."));
+    };
+    image.src = url;
+    $("#crop-title").textContent = total > 1 ? `Photo ${index + 1} of ${total}` : "";
+    crop.resolve = (choice) => {
+      crop.resolve = null;
+      resolve(choice === "skip" || choice === "cancel" ? choice : cropToJpeg(image, choice === "whole" ? null : crop.box));
+      URL.revokeObjectURL(url);
+    };
+    if (!$("#crop-sheet").open) $("#crop-sheet").showModal();
   });
 }
+
+function cropToJpeg(image, box) {
+  const area = box || { x: 0, y: 0, w: 1, h: 1 };
+  const sx = area.x * image.naturalWidth;
+  const sy = area.y * image.naturalHeight;
+  const sw = area.w * image.naturalWidth;
+  const sh = area.h * image.naturalHeight;
+  // Small crops are enlarged a little so the face finder has enough to work with.
+  const scale = Math.min(1280 / Math.max(sw, sh), Math.max(1, 480 / Math.max(sw, sh)));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  const context = canvas.getContext("2d");
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+}
+
+$("#crop-use").addEventListener("click", () => crop.resolve?.("box"));
+$("#crop-whole").addEventListener("click", () => crop.resolve?.("whole"));
+$("#crop-skip").addEventListener("click", () => crop.resolve?.("skip"));
+$("#crop-cancel").addEventListener("click", () => crop.resolve?.("cancel"));
+$("#crop-sheet").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  crop.resolve?.("cancel");
+});
+
+$("#crop-frame").addEventListener("pointerdown", (event) => {
+  const handle = event.target.closest("[data-handle]");
+  if (!handle && !event.target.closest("#crop-box")) return;
+  event.preventDefault();
+  const frame = $("#crop-frame").getBoundingClientRect();
+  crop.drag = { handle: handle ? handle.dataset.handle : "move", x: event.clientX, y: event.clientY, start: { ...crop.box }, frame };
+  $("#crop-frame").setPointerCapture(event.pointerId);
+});
+
+$("#crop-frame").addEventListener("pointermove", (event) => {
+  const drag = crop.drag;
+  if (!drag) return;
+  const dx = (event.clientX - drag.x) / drag.frame.width;
+  const dy = (event.clientY - drag.y) / drag.frame.height;
+  const s = drag.start;
+  let { x, y, w, h } = s;
+  if (drag.handle === "move") {
+    x = Math.min(Math.max(0, s.x + dx), 1 - s.w);
+    y = Math.min(Math.max(0, s.y + dy), 1 - s.h);
+  } else {
+    const right = s.x + s.w;
+    const bottom = s.y + s.h;
+    if (drag.handle.includes("w")) x = Math.min(Math.max(0, s.x + dx), right - CROP_MIN);
+    if (drag.handle.includes("n")) y = Math.min(Math.max(0, s.y + dy), bottom - CROP_MIN);
+    w = drag.handle.includes("w") ? right - x : Math.min(Math.max(CROP_MIN, s.w + dx), 1 - s.x);
+    h = drag.handle.includes("n") ? bottom - y : Math.min(Math.max(CROP_MIN, s.h + dy), 1 - s.y);
+  }
+  crop.box = { x, y, w, h };
+  placeCropBox();
+});
+
+for (const name of ["pointerup", "pointercancel"]) {
+  $("#crop-frame").addEventListener(name, () => (crop.drag = null));
+}
+
+$("#crop-box").addEventListener("keydown", (event) => {
+  const step = event.shiftKey ? 0.05 : 0.01;
+  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+  if (!moves[event.key]) return;
+  event.preventDefault();
+  const [dx, dy] = moves[event.key];
+  const b = crop.box;
+  crop.box = { ...b, x: Math.min(Math.max(0, b.x + dx), 1 - b.w), y: Math.min(Math.max(0, b.y + dy), 1 - b.h) };
+  placeCropBox();
+});
 
 $("#face-upload").addEventListener("change", (event) => {
   const files = [...event.target.files].slice(0, 6);
@@ -559,8 +651,18 @@ $("#face-upload").addEventListener("change", (event) => {
   if (!files.length) return;
   run(null, async () => {
     const name = faceName();
+    const photos = [];
+    try {
+      for (const [index, file] of files.entries()) {
+        const choice = await cropPhoto(file, index, files.length);
+        if (choice === "cancel") return;
+        if (choice !== "skip") photos.push(choice);
+      }
+    } finally {
+      $("#crop-sheet").close();
+    }
+    if (!photos.length) return;
     toast("Adding photos…");
-    const photos = await Promise.all(files.map(shrink));
     const result = await api("/api/faces/upload", { method: "POST", body: { name, photos } });
     state.draft.face = result.person.id;
     await refreshFaces();

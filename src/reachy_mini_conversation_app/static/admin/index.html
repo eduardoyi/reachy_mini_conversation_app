@@ -339,6 +339,28 @@
     </div>
   </dialog>
 
+  <dialog id="crop-sheet" class="viewer-sheet crop-sheet" aria-labelledby="crop-title">
+    <div class="viewer-top">
+      <button id="crop-cancel" class="round" type="button" aria-label="Stop adding photos"><svg class="icon"><use href="#i-x"/></svg></button>
+      <span id="crop-title" class="viewer-count"></span>
+    </div>
+    <p class="crop-hint">Drag the box onto their face.</p>
+    <div class="crop-stage">
+      <div id="crop-frame" class="crop-frame">
+        <img id="crop-image" alt="">
+        <div id="crop-box" class="crop-box" role="slider" aria-label="Crop area" tabindex="0">
+          <span class="handle" data-handle="nw"></span><span class="handle" data-handle="ne"></span>
+          <span class="handle" data-handle="sw"></span><span class="handle" data-handle="se"></span>
+        </div>
+      </div>
+    </div>
+    <div class="crop-actions">
+      <button id="crop-skip" class="pill ghost small" type="button">Skip</button>
+      <button id="crop-whole" class="pill ghost small" type="button">Whole photo</button>
+      <button id="crop-use" class="pill sun" type="button">Use this</button>
+    </div>
+  </dialog>
+
   <dialog id="ask" class="ask" aria-labelledby="ask-title">
     <form method="dialog">
       <h3 id="ask-title"></h3>
