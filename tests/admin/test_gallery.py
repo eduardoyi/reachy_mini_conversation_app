@@ -14,11 +14,13 @@ from reachy_mini_conversation_app import photo_archive
 from reachy_mini_conversation_app.admin.gallery import Gallery, GalleryError
 
 
-def _png(path: Path, source: str = "") -> Path:
+def _png(path: Path, source: str = "", subject: str = "") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     info = PngInfo()
     if source:
         info.add_text("source", source)
+    if subject:
+        info.add_text("subject", subject)
     Image.new("L", (800, 480), 255).save(path, pnginfo=info)
     return path
 
@@ -40,6 +42,10 @@ def test_items_cover_photos_drawings_lessons_and_web_pictures(tmp_path: Path, ga
     display = tmp_path / "display"
     old = _png(display / "drawings-v2" / "washing-machine-filter.png")
     _png(display / "drawings-v3" / "a-red-duck.png")
+    _png(
+        display / "drawings-v3" / "enzo-driving-a-convertible-with-a-lion-as-co-pilot-and-a-dolph.png",
+        subject="Enzo driving a convertible with a lion as co-pilot and a dolphin in the back seat",
+    )
     _png(display / "pictures" / "jaguar.png", source="https://example.org/jaguar")
     _png(display / "lessons" / "duck.png")
     (display / "lessons" / "duck.json").write_text(json.dumps({"Cómo dibujar un pato": ["Un óvalo", "Un círculo"]}))
@@ -51,9 +57,12 @@ def test_items_cover_photos_drawings_lessons_and_web_pictures(tmp_path: Path, ga
     items = {item["id"]: item for item in gallery.items()}
     assert set(items) == {
         "drawings-v2/washing-machine-filter.png", "drawings-v3/a-red-duck.png", "pictures/jaguar.png",
+        "drawings-v3/enzo-driving-a-convertible-with-a-lion-as-co-pilot-and-a-dolph.png",
         "lessons/duck.png", next(i for i in items if i.startswith("photos/")),
     }  # fmt: skip
     assert items["drawings-v3/a-red-duck.png"]["title"] == "A red duck"
+    long_one = items["drawings-v3/enzo-driving-a-convertible-with-a-lion-as-co-pilot-and-a-dolph.png"]
+    assert long_one["title"] == "Enzo driving a convertible with a lion as co-pilot and a dolphin in the back seat"
     assert items["drawings-v2/washing-machine-filter.png"]["old_style"] is True
     assert items["pictures/jaguar.png"]["source"] == "https://example.org/jaguar"
     assert items["lessons/duck.png"]["title"] == "Cómo dibujar un pato"

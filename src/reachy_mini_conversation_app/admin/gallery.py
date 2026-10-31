@@ -44,10 +44,10 @@ def _iso(timestamp: float) -> str:
 
 
 @lru_cache(maxsize=2048)
-def _image_info(path: Path, mtime: float) -> tuple[int, int, str]:
-    """Return width, height and the PNG's ``source`` note (web pictures keep where they came from)."""
+def _image_info(path: Path, mtime: float) -> tuple[int, int, str, str]:
+    """Return width, height and the PNG's notes: ``source`` (where a web picture came from), ``subject`` (a drawing's)."""
     with Image.open(path) as image:
-        return image.width, image.height, str(image.info.get("source", ""))
+        return image.width, image.height, str(image.info.get("source", "")), str(image.info.get("subject", ""))
 
 
 @lru_cache(maxsize=256)
@@ -84,7 +84,7 @@ class Gallery:
 
     def _item(self, source: str, kind: str, file: Path) -> dict[str, Any]:
         mtime = file.stat().st_mtime
-        width, height, web = _image_info(file, mtime)
+        width, height, web, subject = _image_info(file, mtime)
         item: dict[str, Any] = {
             "id": f"{source}/{file.name}", "kind": kind, "title": _title(file.stem), "at": _iso(mtime),
             "width": width, "height": height,
@@ -102,6 +102,8 @@ class Gallery:
                 item["steps"] = [str(step) for step in steps] if isinstance(steps, list) else []
         elif kind == "picture" and web:
             item["source"] = web
+        if subject:
+            item["title"] = subject[:1].upper() + subject[1:]
         if source != "drawings-v3" and kind == "drawing":
             item["old_style"] = True
         return item

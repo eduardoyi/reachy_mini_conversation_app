@@ -626,7 +626,9 @@ class EInkDisplay:
                 return cached.convert("L")
         picture = await self._generate(DRAWING_PROMPT.format(subject=subject), None, "display_drawing", "the drawing")
         path.parent.mkdir(parents=True, exist_ok=True)
-        picture.save(path)
+        info = PngInfo()
+        info.add_text("subject", subject[:300])  # the file name is cut short; the admin app's gallery shows this
+        picture.save(path, pnginfo=info)
         return picture
 
     async def lesson(self, subject: str, title: str) -> list[tuple[str, Image.Image]]:

@@ -338,6 +338,8 @@ async def test_drawings_are_made_once_and_then_cached(tmp_path: Path) -> None:
     assert "A Cat" in models.prompts[0] and "No text" in models.prompts[0]
     assert "No cartoon faces" in models.prompts[0] and "bold thick black outlines" in models.prompts[0]
     assert (tmp_path / DRAWINGS_DIR / "a-cat.png").is_file()  # a new style never reuses old drawings
+    with Image.open(tmp_path / DRAWINGS_DIR / "a-cat.png") as cached:
+        assert cached.info["subject"] == "A Cat"  # the gallery's title; the file name is cut short
     record = get_ledger().entries()[-1]
     assert record["feature"] == "display_drawing"
     assert record["tokens"] == {"input_text": 52, "output_image": 1407}

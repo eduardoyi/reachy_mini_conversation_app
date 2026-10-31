@@ -412,3 +412,4 @@ through a spoken conversation.
   screens share one id so the TRMNL's flash no longer fills up.
 - 2026-10-25: Held check-ins and a 1 s default refresh: screens appear in seconds instead of up to a minute.
 - 2026-10-31: After the TRMNL reports a failure, its screen is sent under a fresh name so it redraws.
+- 2026-10-31: Cached drawings keep their full subject as PNG text (`subject`); the admin app's gallery shows it as the title.

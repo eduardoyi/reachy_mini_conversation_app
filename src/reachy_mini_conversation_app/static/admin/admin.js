@@ -822,6 +822,7 @@ document.addEventListener("visibilitychange", () => {
     else openCamera();
   }
   if (currentTab === "home" && !document.hidden) loadHome();
+  if (currentTab === "gallery" && !document.hidden && !$("#viewer").open) loadGallery();
 });
 
 // Activity --------------------------------------------------------------------------------------
