@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import json
+import math
 import time
 import zlib
 import base64
@@ -451,6 +452,52 @@ def render_writing(letters: list[str], step: int) -> bytes:
     return encode_png(canvas)
 
 
+def render_game_prompt(word: str, stars: int, total: int, caption: str = "") -> bytes:
+    """Render a game's prompt: ``word`` very large, ``caption`` small above it, and a row of stars.
+
+    ``total`` stars, the first ``stars`` filled: the color hunt's "ROJO" and the finds so far.
+    """
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    if caption:
+        _draw_lines(draw, [caption], _font(36, bold=True), left=20, width=WIDTH - 40, top=28, centered=True)
+    _draw_glyphs_centered(draw, word, _fitted(word, WIDTH - 60, 200, 48), WIDTH / 2, 230)
+    size, gap = 52, 18
+    left = (WIDTH - total * size - (total - 1) * gap) / 2
+    for index in range(total):
+        _draw_star(draw, left + index * (size + gap) + size / 2, HEIGHT - 70, size / 2, filled=index < stars)
+    return encode_png(canvas)
+
+
+def render_game_paused(title: str, language: str) -> bytes:
+    """Render a paused game: PAUSA in large letters, the game's name and how to go on."""
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    big, hint = (
+        ("PAUSA", "Di «seguimos» o tócame la cabeza")
+        if language == "es"
+        else ("PAUSED", "Say “keep playing” or pat my head")
+    )
+    _draw_glyphs_centered(draw, big, _font(150, bold=True), WIDTH / 2, 200)
+    playing = f"Jugando {title}" if language == "es" else f"Playing {title}"
+    _draw_lines(draw, [playing], _font(36), left=20, width=WIDTH - 40, top=320, centered=True)
+    _draw_lines(draw, [hint], _font(28), left=20, width=WIDTH - 40, top=390, centered=True)
+    return encode_png(canvas)
+
+
+def _draw_star(draw: ImageDraw.ImageDraw, x: float, y: float, radius: float, *, filled: bool) -> None:
+    """Draw a five-pointed star centered on ``(x, y)``: solid black, or a grey outline still to win."""
+    points = []
+    for index in range(10):
+        angle = math.pi / 2 + index * math.pi / 5
+        reach = radius if index % 2 == 0 else radius * 0.45
+        points.append((x + reach * math.cos(angle), y - reach * math.sin(angle)))
+    if filled:
+        draw.polygon(points, fill=0)
+    else:
+        draw.polygon(points, outline=_GREY, width=4)
+
+
 def _draw_glyphs_centered(
     draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, x: float, y: float, fill: int = 0
 ) -> None:
@@ -545,8 +592,8 @@ class EInkDisplay:
     def show(self, png: bytes, owner: str = "requested", *, expires_after_s: float | None = None) -> None:
         """Make ``png`` the screen the TRMNL fetches at its next check-in.
 
-        ``owner`` says who put it up: "requested" (someone asked), "writing" (writing practice, which the
-        music card leaves alone) or "music" (the now-playing card).
+        ``owner`` says who put it up: "requested" (someone asked), "writing" (writing practice) or "game" (a game
+        in progress), both of which the music card leaves alone, or "music" (the now-playing card).
         With ``expires_after_s`` (camera photos) the screen leaves after that long and its file is deleted.
         """
         if len(png) > MAX_PNG_BYTES:
@@ -581,7 +628,7 @@ class EInkDisplay:
             self._update(screen=None, owner=None)
 
     def owner(self) -> str:
-        """Who the screen showing now belongs to: "home", "requested", "writing" or "music"."""
+        """Who the screen showing now belongs to: "home", "requested", "writing", "game" or "music"."""
         current = read_json(self.spool / CURRENT)
         if current_filename(self.spool, self._clock()) in (None, current.get("home")):
             return "home"

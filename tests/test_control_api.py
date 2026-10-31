@@ -2,6 +2,8 @@
 
 import io
 import sys
+import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
@@ -267,3 +269,65 @@ def test_a_recording_is_refused_when_he_cannot_listen(switch: PrivacySwitch, tmp
 
     assert client.post("/wake/take", json={"person": "Lucía", "prompt": ""}, headers=AUTH).status_code == 409
     assert client.post("/wake/take", json={"person": " ", "prompt": ""}, headers=AUTH).status_code == 400
+
+
+class _Games:
+    """A stand-in game host that records what the phone asked."""
+
+    def __init__(self) -> None:
+        self.actions: list[tuple[str, ...]] = []
+
+    def status(self) -> dict[str, Any]:
+        return {"state": "idle", "game": None, "progress": "", "games": [{"key": "colors", "title": {}}]}
+
+    def start(self, key: str, language: str) -> str | None:
+        self.actions.append(("start", key, language))
+        return None if key == "colors" else f"There is no game {key!r}."
+
+    def pause(self) -> None:
+        self.actions.append(("pause",))
+
+    def resume(self, *, say: bool = False) -> None:
+        self.actions.append(("resume",))
+
+    def end(self, reason: str) -> None:
+        self.actions.append(("end",))
+
+
+@pytest.fixture
+def runtime_loop() -> Any:
+    """Run the runtime's event loop in its own thread, as in the app."""
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    yield loop
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=2)
+    loop.close()
+
+
+def test_games_start_pause_and_end_from_the_phone(switch: PrivacySwitch, runtime_loop: Any) -> None:
+    """A tap starts a game (waking him first), and pauses or ends it; status shows the games."""
+    api, movement, runtime = _api(sleeping=True)
+    games = _Games()
+    api._deps.games = games  # type: ignore[attr-defined]
+    runtime.loop = runtime_loop
+    client = _client(api)
+    assert client.get("/status", headers=AUTH).json()["game"]["games"][0]["key"] == "colors"
+    assert client.post("/game", json={"action": "start", "game": "colors"}, headers=AUTH).status_code == 200
+    movement.wake_up.assert_called_once()
+    assert client.post("/game", json={"action": "pause"}, headers=AUTH).status_code == 200
+    assert client.post("/game", json={"action": "end"}, headers=AUTH).status_code == 200
+    refused = client.post("/game", json={"action": "start", "game": "chess"}, headers=AUTH)
+    assert refused.status_code == 400 and "chess" in refused.json()["error"]
+    assert games.actions == [("start", "colors", "es"), ("pause",), ("end",), ("start", "chess", "es")]
+    switch.set(True)
+    assert client.post("/game", json={"action": "start", "game": "colors"}, headers=AUTH).status_code == 409
+
+
+def test_games_are_refused_when_not_set_up(switch: PrivacySwitch) -> None:
+    """Without the game host (no hybrid runtime or no TypeSafe key) the phone is told so."""
+    api, _, _ = _api()
+    client = _client(api)
+    assert client.get("/status", headers=AUTH).json()["game"] is None
+    assert client.post("/game", json={"action": "pause"}, headers=AUTH).status_code == 404

@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Protocol, TypeAlias
 from contextlib import aclosing
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import replace, dataclass
 from collections.abc import Callable, Awaitable, AsyncIterator
 
 import numpy as np
@@ -388,6 +388,10 @@ class _PendingTurn:
     text: str = ""
     language: str = "en"
     answer: QuickCommandHandler | None = None
+    # Called once the announcement has been heard (a game waits for it before its tune starts).
+    on_spoken: Callable[[], None] | None = None
+    # A game's own line: spoken while other announcements wait for the game (set_announcement_hold).
+    game: bool = False
 
 
 class HybridRuntime:
@@ -654,6 +658,11 @@ class HybridRuntime:
         # Sees each final room transcript before wake detection while Reachy waits for his name; returns True
         # when it acted on it (writing practice's "¡ya!", said without the name).
         self._room_listener: Callable[[str], bool] | None = None
+        # Answers, instead of the conversation, a wake that no quick command took (a game in progress); its
+        # reply is None when the conversation should open after all.
+        self._cloud_gate: QuickCommandHandler | None = None
+        # While it returns True (a game is playing), announcements other than the game's own wait.
+        self._announcement_hold: Callable[[], bool] | None = None
         self._strict_wake: Callable[[], bool] | None = None
         self._inactivity_timeout_s = float(inactivity_timeout_s)
         self._wake_followup_timeout_s = float(wake_followup_timeout_s)
@@ -1016,6 +1025,32 @@ class HybridRuntime:
     def set_room_listener(self, listener: Callable[[str], bool] | None) -> None:
         """Offer each final room transcript to ``listener`` first while waiting for the name; True consumes it."""
         self._room_listener = listener
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop | None:
+        """The event loop the runtime runs on, once started (other threads schedule game actions on it)."""
+        with self._lifecycle_lock:
+            return self._owner_loop
+
+    def set_cloud_gate(self, gate: QuickCommandHandler | None) -> None:
+        """Offer every wake that would open the conversation to ``gate`` first; a reply keeps it closed."""
+        self._cloud_gate = gate
+
+    def set_announcement_hold(self, hold: Callable[[], bool] | None) -> None:
+        """Hold announcements other than a game's own while ``hold()`` is True; awaited answers still run."""
+        self._announcement_hold = hold
+
+    def play_ambient_audio(self, sample_rate: int, samples: NDArray[np.int16]) -> bool:
+        """Play ``samples`` while Reachy waits for his name (a game's tune); False when he is busy instead.
+
+        A wake clears what is queued, so a tune stops the moment he listens.
+        """
+        with self._lifecycle_lock:
+            if self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
+                return False
+            self._local_output.append((sample_rate, samples))
+        self._output_wakeup_event.set()
+        return True
 
     def set_strict_wake(self, strict: Callable[[], bool] | None) -> None:
         """While ``strict()`` (the TV is on), only the main wake model or a touch wakes Reachy.
@@ -1392,6 +1427,8 @@ class HybridRuntime:
                     await self._speak_locally(turn.text, turn.language, generation)
                     if turn.answer is not None:
                         self.expect_answer(turn.answer)
+                    if turn.on_spoken is not None:
+                        turn.on_spoken()
                 await self._return_to_ambient(generation, "announcement_spoken")
                 return True
 
@@ -1562,6 +1599,10 @@ class HybridRuntime:
                 self._notify_listening(True)
                 listening_notified = True
                 await self._invoke_acknowledgement(reason)
+            # A game in progress answers whatever would open the conversation ("Richie" alone pauses it).
+            gate = self._cloud_gate
+            if gate is not None and await self._try_quick_command(quick_text or addressed_text, generation, gate):
+                return True
 
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             hint = request_audio_hint(addressed_text) if request_in_audio and addressed_text else ""
@@ -2240,10 +2281,19 @@ class HybridRuntime:
         """
         self._queue_turn(_PendingTurn("awaited_answer", self._clock() + self._ANSWER_PENDING_S, answer=answer))
 
-    def request_announcement(self, text: str, language: str, *, answer: QuickCommandHandler | None = None) -> None:
+    def request_announcement(
+        self,
+        text: str,
+        language: str,
+        *,
+        answer: QuickCommandHandler | None = None,
+        on_spoken: Callable[[], None] | None = None,
+        game: bool = False,
+    ) -> None:
         """Say ``text`` once Reachy is free (no conversation or command), then await ``answer`` if given.
 
-        Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
+        ``on_spoken`` runs on the runtime's loop once it has been heard; ``game`` marks a game's own line, said
+        while other announcements are held. Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
         """
         self._queue_turn(
             _PendingTurn(
@@ -2252,6 +2302,8 @@ class HybridRuntime:
                 text=text,
                 language=language,
                 answer=answer,
+                on_spoken=on_spoken,
+                game=game,
             )
         )
 
@@ -2283,9 +2335,29 @@ class HybridRuntime:
         """Start each pending turn as its own activation once Reachy is free; returns whether any ran."""
         ran = False
         while self._pending_turns:
-            turn = self._pending_turns[0]
+            hold = self._announcement_hold
+            held = hold is not None and hold()
+            if held:
+                # Other announcements wait for the game to pause or end, and do not age meanwhile.
+                renewed = self._clock() + self._ANNOUNCEMENT_PENDING_S
+                self._pending_turns = deque(
+                    turn if turn.game or turn.reason == "awaited_answer" else replace(turn, expires_at=renewed)
+                    for turn in self._pending_turns
+                )
+            index = next(
+                (
+                    position
+                    for position, waiting in enumerate(self._pending_turns)
+                    if not held or waiting.game or waiting.reason == "awaited_answer"
+                ),
+                None,
+            )
+            if index is None:
+                await asyncio.sleep(self._PENDING_TURN_POLL_S)
+                continue
+            turn = self._pending_turns[index]
             if self._clock() > turn.expires_at:
-                self._pending_turns.popleft()
+                del self._pending_turns[index]
                 logger.info("Pending %s dropped: Reachy stayed busy", turn.reason)
                 continue
             with self._lifecycle_lock:
@@ -2299,7 +2371,7 @@ class HybridRuntime:
             if busy:
                 await asyncio.sleep(self._PENDING_TURN_POLL_S)
                 continue
-            self._pending_turns.popleft()
+            del self._pending_turns[index]
             self._next_turn = turn
             await self.activate(turn.reason)
             ran = True
@@ -3173,6 +3245,40 @@ class HybridRuntime:
                 return False
             self._after_close_request = addressed_text
         return self.request_close("handoff")
+
+    def request_when_free(self, addressed_text: str, reason: str = "handoff", within_s: float = 15.0) -> None:
+        """Handle ``addressed_text`` as a request once Reachy is free (after the reply being spoken); thread-safe.
+
+        A game ended for "Richie, enciende la luz" hands the request on this way. Dropped after ``within_s``.
+        """
+        with self._lifecycle_lock:
+            loop = self._owner_loop
+            closed = self._closed
+        if loop is None or closed or loop.is_closed():
+            return
+
+        async def when_free() -> bool:
+            deadline = self._clock() + within_s
+            while self._clock() < deadline:
+                with self._lifecycle_lock:
+                    busy = self._mode is not RuntimeMode.LOCAL_AMBIENT or (
+                        self._activation_task is not None and not self._activation_task.done()
+                    )
+                if not busy:
+                    return await self.activate(reason, addressed_text=addressed_text)
+                await asyncio.sleep(self._PENDING_TURN_POLL_S)
+            logger.info("Handed-over request dropped: Reachy stayed busy")
+            return False
+
+        def start() -> None:
+            task = asyncio.create_task(when_free(), name=f"hybrid-{reason}-when-free")
+            self._local_event_tasks.add(task)
+            task.add_done_callback(self._local_event_tasks.discard)
+
+        try:
+            loop.call_soon_threadsafe(start)
+        except RuntimeError:  # the loop closed between the check and the call
+            logger.debug("Handed-over request dropped: runtime loop closed")
 
     def request_activation(self, reason: str, addressed_text: str = "") -> None:
         """Start an activation from another thread (an antenna touch); ignored before the runtime has started."""

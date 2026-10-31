@@ -9,7 +9,7 @@ Eduardo and Adriana manage Reachy from a web app installed on their phones' home
 
 | Tab | What it does |
 |-----|--------------|
-| Home | Reachy drawn as he is (awake, napping, quiet hours, privacy mask, not running, restarting) with the one action that fits (wake, sleep, privacy off, restart); volume; WhatsApp, calls, the e-ink screen (battery) and storage; notifications; restart. Refreshes every 8 s. |
+| Home | Reachy drawn as he is (awake, napping, quiet hours, privacy mask, not running, restarting) with the one action that fits (wake, sleep, privacy off, restart); volume; Games (Play starts one at once, waking him; while one runs, its round and stars with Pause or Resume and End; see [games.md](games.md)); WhatsApp, calls, the e-ink screen (battery) and storage; notifications; restart. Refreshes every 8 s. |
 | People | A tile per person, including anyone Reachy only knows by face. A bottom sheet edits the name, face photos (from the phone, each cropped first by dragging a box around their head, since family photos often hold several people; Reachy checks each crop at once (`POST /api/faces/check`: no whole face, more than one face, or someone else's face) and the photo stays open to re-crop, swap for another photo, use whole or skip; problems and skipped photos are explained in the card; or from Reachy's camera; or link a face Reachy already knows: "Martin" onto "Abuelo Martín"), the WhatsApp call number, the group for voice notes and photos (by name; "New group with …" creates one with Reachy and that number; Reachy's own number is shown to add him to any other group) and other names people say (chips). Warns when two people answer to the same spoken name. |
 | Camera | A live view from Reachy's camera (about 5 frames a second, 640 px, never recorded). A pad turns his head; while he sleeps it lifts his head without waking him, and "Lift his head" looks straight ahead. The head lowers again two minutes after the last turn. |
 | Gallery | Photos Reachy took (sent to WhatsApp or shown on the e-ink screen, and photo edits titled by the change asked for; kept since 2026-10-31), his drawings (older styles marked), drawing lessons with their steps and pictures from the web (with where they came from), by day in a square grid. Search (title, who, lesson steps; accents ignored) and filter chips with counts. A full-screen viewer swipes between them and shares (Android share sheet), saves or deletes. |
@@ -137,7 +137,8 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 
 | Route | Body | Result |
 |-------|------|--------|
-| `GET /status` | | `mode`, `sleeping`, `privacy {on, since}`, `quiet_hours`, `calls_linked`, `in_call`, `faces`, `camera`, `game` |
+| `GET /status` | | `mode`, `sleeping`, `privacy {on, since}`, `quiet_hours`, `calls_linked`, `in_call`, `faces`, `camera`, `game` (`state`, `game`, `progress`, `games`; null without games) |
+| `POST /game` | `{"action": "start"\|"pause"\|"resume"\|"end", "game": "colors", "language": "es"\|"en"}` | status; start wakes him and is 409 while private, 400 for an unknown game; 404 without games |
 | `POST /privacy` | `{"on": bool}` | status |
 | `POST /sleep`, `POST /wake` | | status; wake is 409 while private |
 | `POST /head` | `{"direction": "left"\|"right"\|"up"\|"down"\|"center"}` | asleep: a peek step (20° yaw, 15° pitch; ±60°/±30°); awake: the `move_head` tool |

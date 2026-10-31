@@ -9,13 +9,13 @@ import httpx
 import pytest
 from PIL import Image
 
+from reachy_mini_conversation_app.jev import TYPESAFE_URL
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.web_pictures import (
     UNSAFE,
     UNCLEAR,
     NO_MATCH,
     NO_ANSWER,
-    TYPESAFE_URL,
     BRAVE_IMAGES_URL,
     WebPictures,
     PictureError,

@@ -10,8 +10,6 @@ clear every question, the clearest on screen is used.
 """
 
 import io
-import uuid
-import base64
 import asyncio
 import logging
 from typing import Callable
@@ -21,6 +19,8 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, UnidentifiedImageError
 
+from reachy_mini_conversation_app import jev
+from reachy_mini_conversation_app.jev import JevError, sized_jpeg
 from reachy_mini_conversation_app.usage_costs import get_ledger
 
 
@@ -28,13 +28,10 @@ logger = logging.getLogger(__name__)
 
 BRAVE_IMAGES_URL = "https://api.search.brave.com/res/v1/images/search"
 THUMBNAIL_HOST = "imgs.search.brave.com"
-TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
 CANDIDATES = 6
 REQUEST_TIMEOUT_S = 8.0
 MAX_THUMBNAIL_BYTES = 3_000_000
 MIN_SHORT_SIDE = 200
-# Jev rejects images with a short side under ~280 px or a long side over ~1000 px (probed 2026-10-25).
-CHECK_SIDES = (300, 1000)
 # Show a picture only when it very likely shows the subject and every risk is unlikely.
 MIN_SHOWS_SUBJECT = 0.7
 # Calibrated on real searches (2026-10-25): smoking, beer, horror and zombies score mature 0.84-0.98
@@ -228,59 +225,20 @@ class WebPictures:
 
     async def _check(self, client: httpx.AsyncClient, subject: str, picture: Image.Image) -> tuple[float | None, str]:
         """Ask Jev about ``picture``: (its clarity on screen, "") if it passes every check, else (None, why not)."""
-        short_side, long_side = CHECK_SIDES
-        scale = max(short_side / min(picture.size), 1.0)
-        scale = min(scale, long_side / max(picture.size))
-        sized = picture.resize((round(picture.width * scale), round(picture.height * scale)))
-        jpeg = io.BytesIO()
-        sized.save(jpeg, format="JPEG", quality=85)
         with Image.open(io.BytesIO(self._screen_preview(picture))) as rendered:
-            screen = io.BytesIO()
-            rendered.convert("L").save(screen, format="JPEG", quality=90)
-        placeholder, screen_placeholder = str(uuid.uuid4()), str(uuid.uuid4())
+            screen = sized_jpeg(rendered, quality=90, grayscale=True)
         try:
-            response = await client.post(
-                TYPESAFE_URL,
-                headers={
-                    "Authorization": f"Bearer {self._typesafe_api_key}",
-                    "TypeSafe-Danger-Zone-Images": "true",
-                },
-                json={
-                    "model": self._check_model,
-                    "state": {
-                        "subject": subject,
-                        "audience": _AUDIENCE,
-                        "image": placeholder,
-                        "screen": screen_placeholder,
-                    },
-                    "questions": _QUESTIONS,
-                    "assets": {
-                        placeholder: {
-                            "type": "image",
-                            "format": "jpg",
-                            "data_base64": base64.b64encode(jpeg.getvalue()).decode(),
-                        },
-                        screen_placeholder: {
-                            "type": "image",
-                            "format": "jpg",
-                            "data_base64": base64.b64encode(screen.getvalue()).decode(),
-                        },
-                    },
-                },
+            replies = await jev.ask(
+                client,
+                api_key=self._typesafe_api_key,
+                model=self._check_model,
+                state={"subject": subject, "audience": _AUDIENCE},
+                questions=_QUESTIONS,
+                images={"image": sized_jpeg(picture), "screen": screen},
+                feature="display_picture_check",
             )
-            response.raise_for_status()
-            body = response.json()
-            usage = body.get("usage") or {}
-            _record_usage(
-                "display_picture_check",
-                str(body.get("model") or self._check_model),
-                {
-                    "input_text": int(usage.get("input_tokens") or 0),
-                    "output_text": int(usage.get("output_tokens") or 0),
-                },
-            )
-            answers = {name: float(answer["noul"]) for name, answer in body["answers"].items()}
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            answers = {name: float(answer["noul"]) for name, answer in replies.items()}
+        except (JevError, KeyError, TypeError, ValueError) as error:
             logger.warning("Picture check failed: %s", type(error).__name__)
             return None, NO_ANSWER
         fine_art = answers.get("fine_art", 0.0) >= MIN_FINE_ART

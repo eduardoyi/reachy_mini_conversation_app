@@ -930,3 +930,18 @@ def test_memory_is_relayed_and_changes_audited_without_their_text(admin: Admin) 
     assert listed.status_code == 200 and forgot.json() == {"removed": True, "subject": "enzo"}
     assert admin.control.calls("/memory/forget") == [{"id": "m1"}]
     assert [(e["action"], e["target"]) for e in admin.audit()] == [("memory forgotten", "enzo")]
+
+
+def test_game_actions_are_relayed_and_audited(admin: Admin) -> None:
+    """Starting a game from the phone reaches the app and the activity log names the game."""
+    with admin.client() as client:
+        assert (
+            client.post("/api/game", json={"action": "start", "game": "colors"}, headers=SAME_ORIGIN).status_code
+            == 200
+        )
+        assert client.post("/api/game", json={"action": "end"}, headers=SAME_ORIGIN).status_code == 200
+    assert admin.control.calls("/game") == [
+        {"action": "start", "game": "colors", "language": None},
+        {"action": "end", "game": None, "language": None},
+    ]
+    assert [entry["action"] for entry in admin.audit()] == ["game end", "game start colors"]

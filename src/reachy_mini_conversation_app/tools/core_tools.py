@@ -80,6 +80,8 @@ class ToolDependencies:
     mark_missed: Callable[..., bool] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).
     writing: Any = None
+    # Hybrid runtime only: the game host (games/host.py), which owns requests, screen and speaker during a game.
+    games: Any = None
 
 
 class ToolSpec(TypedDict):
@@ -368,6 +370,13 @@ DISPLAY_TOOLS = ("show_on_display",)
 MARIBEL_TOOLS = ("ask_maribel",)
 WHATSAPP_TOOLS = ("take_photo",)
 CALL_TOOLS = ("call_person",)
+# Enabled automatically with the hybrid runtime and a TypeSafe key (the color hunt's camera checks), unless customized.
+GAME_TOOLS = ("play_game",)
+
+
+def games_configured() -> bool:
+    """Return whether games can run: they play locally in the hybrid runtime, judged by Jev."""
+    return bool(config.HYBRID_RUNTIME_ENABLED and config.QUICK_COMMANDS_ENABLED and config.TYPESAFE_API_KEY)
 
 
 def whatsapp_calls_configured() -> bool:
@@ -453,6 +462,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in CALL_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in CALL_TOOLS if name not in tool_names)
+
+    if not games_configured():
+        tool_names = [name for name in tool_names if name not in GAME_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in GAME_TOOLS if name not in tool_names)
 
     if not config.HOUSEHOLD_MEMORY_ENABLED:
         tool_names = [name for name in tool_names if name != "update_memory"]

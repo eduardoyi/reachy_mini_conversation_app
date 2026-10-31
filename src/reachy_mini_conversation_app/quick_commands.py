@@ -1164,11 +1164,23 @@ class QuickCommands:
 
     async def handle(self, text: str) -> QuickReply | None:
         """Run ``text`` if it is an everyday command; return None to leave it to the conversation."""
+        from reachy_mini_conversation_app.games.catalog import parse_game_request
+
+        games = getattr(self._deps, "games", None)
+        if games is not None:
+            # During a game every request reaches the game host first: pause, end, or end it for this request.
+            reply: QuickReply | None = await games.addressed(text)
+            if reply is not None:
+                return reply
         writing = getattr(self._deps, "writing", None)
         if writing is not None and writing.active:
             if writing.hear(text):  # "Richie, siguiente" while a child writes is the next letter, not a song
                 return QuickReply(None, "es", "writing")
             writing.stop()  # any other request ends it
+        game_request = parse_game_request(text) if games is not None else None
+        if games is not None and game_request is not None:
+            offered: QuickReply = games.offer(game_request)  # "juguemos a los colores": asks first, a yes starts it
+            return offered
         maribel_language = maribel_request(text) if getattr(self._deps, "maribel", None) is not None else None
         if maribel_language is not None:
             self._maribel_language = maribel_language
