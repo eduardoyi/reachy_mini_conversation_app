@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now
 from reachy_mini_conversation_app.face_routes import register_face_routes
 from reachy_mini_conversation_app.camera_frames import capture_jpeg
+from reachy_mini_conversation_app.memory_routes import register_memory_routes
 from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
 from reachy_mini_conversation_app.tools.move_head import MoveHead
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -83,6 +84,7 @@ class ControlApi:
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         self._add_routes()
         register_face_routes(self.app, deps.face_recognition, self._denied)
+        register_memory_routes(self.app, deps.instance_path, self._denied)
 
     def _denied(self, request: Request, *, mutation: bool = False) -> Response | None:
         """Refuse anything not from this computer with the shared token."""

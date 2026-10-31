@@ -92,7 +92,11 @@ class Gallery:
         if kind == "photo":
             meta = self._sidecar(file)
             item["who"] = str(meta.get("who") or "")
-            item["title"] = f"Photo for {item['who']}" if item["who"] else "Photo"
+            item["edit"] = str(meta.get("edit") or "")
+            if item["edit"]:
+                item["title"] = item["edit"][:1].upper() + item["edit"][1:]
+            else:
+                item["title"] = f"Photo for {item['who']}" if item["who"] else "Photo"
             item["at"] = str(meta.get("at") or item["at"])
         elif kind == "lesson":
             lesson = self._sidecar(file)

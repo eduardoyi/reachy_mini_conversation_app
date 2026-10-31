@@ -344,10 +344,14 @@ def no_countdown(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_camera_photo_is_shown_for_ten_minutes_and_never_saved(tmp_path: Path, no_countdown: None) -> None:
-    """kind=camera shows the photo, marked to leave after 10 minutes, with nothing cached."""
+async def test_a_camera_photo_is_shown_for_ten_minutes_and_kept_only_for_the_gallery(
+    tmp_path: Path, no_countdown: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """kind=camera shows the photo, marked to leave after 10 minutes; it is kept for the gallery, not cached."""
+    from reachy_mini_conversation_app import photo_archive
     from reachy_mini_conversation_app.eink_server import CURRENT, read_json
 
+    monkeypatch.setattr(photo_archive.config, "PHOTO_ARCHIVE_DIR", str(tmp_path / "photos"))
     display = _display(tmp_path)
     home = display.current()
 
@@ -357,11 +361,19 @@ async def test_a_camera_photo_is_shown_for_ten_minutes_and_never_saved(tmp_path:
     current = read_json(display.spool / CURRENT)
     assert current["private"] is True and current["expires_at"] == pytest.approx(current["shown_at"] + 600)
     assert not (tmp_path / DRAWINGS_DIR).exists() and not (tmp_path / "pictures").exists()
+    assert [path.suffix for path in (tmp_path / "photos").iterdir()] and len(
+        list((tmp_path / "photos").glob("*.jpg"))
+    ) == 1
 
 
 @pytest.mark.asyncio
-async def test_an_edited_photo_sends_the_photo_and_the_change(tmp_path: Path, no_countdown: None) -> None:
-    """With an edit, the photo and the change go to the image model and the result is not cached."""
+async def test_an_edited_photo_sends_the_photo_and_the_change(
+    tmp_path: Path, no_countdown: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With an edit, the photo and the change go to the image model; the photo and the edit are kept, not cached."""
+    from reachy_mini_conversation_app import photo_archive
+
+    monkeypatch.setattr(photo_archive.config, "PHOTO_ARCHIVE_DIR", str(tmp_path / "photos"))
     display = _display(tmp_path)
     models = display._client.aio.models
     sent: list[Any] = []
@@ -379,6 +391,9 @@ async def test_an_edited_photo_sends_the_photo_and_the_change(tmp_path: Path, no
     prompt, photo = sent[0]
     assert "make him a pirate" in prompt and photo.inline_data.mime_type == "image/jpeg"
     assert not (tmp_path / DRAWINGS_DIR).exists()
+    [edit] = (tmp_path / "photos").glob("*.png")
+    assert json.loads(edit.with_suffix(".json").read_text())["edit"] == "make him a pirate"
+    assert len(list((tmp_path / "photos").glob("*.jpg"))) == 1
 
 
 @pytest.mark.asyncio

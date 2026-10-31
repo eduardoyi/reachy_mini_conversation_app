@@ -238,3 +238,6 @@ security model); README and architecture diagram updated; this plan and the inde
   phone still showed them on; the page now re-registers on open and a test replaces an expired subscription. Eduardo
   confirmed a test arrived. Added an AI cost breakdown (from the Activity costs) and a personality editor in Settings
   (edits kept in `PERSONALITY_DIR`, per profile, outside the repository).
+- 2026-10-31: "Enzo driving a car" was a camera photo edit, which was never kept; camera photos and edits shown on the
+  screen are now kept for the gallery (edits titled by the change). Drawings keep their full subject for their title.
+  Added the memory view (Settings → Memory, and from a person's card) through new control API memory routes.

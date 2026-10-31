@@ -5,6 +5,7 @@ from typing import Any
 
 from PIL import Image
 
+from reachy_mini_conversation_app import photo_archive
 from reachy_mini_conversation_app.eink_display import (
     MAX_STEPS,
     DrawingError,
@@ -49,6 +50,13 @@ def _steps(raw: Any) -> list[tuple[str, str]]:
 
 async def _no_picture() -> None:
     return None
+
+
+def _keep_edit(picture: Image.Image, edit: str) -> None:
+    """Keep a photo edit for the admin app's gallery, with the change that was asked for."""
+    out = io.BytesIO()
+    picture.save(out, "PNG")
+    photo_archive.keep(out.getvalue(), "", "edited", suffix=".png", edit=edit)
 
 
 class ShowOnDisplay(Tool):
@@ -192,15 +200,18 @@ class ShowOnDisplay(Tool):
                 if jpeg is None:
                     return {"error": "The camera gave no picture.", "instruction": "Tell them kindly. Do not retry."}
                 caption, edit = _text(kwargs, "caption"), _text(kwargs, "edit")
+                await asyncio.to_thread(photo_archive.keep, jpeg, "", "edited" if edit else "shown")
                 if edit:
                     try:
-                        photo_png = render_drawing(await display.edit_photo(jpeg, edit), caption)
+                        edited = await display.edit_photo(jpeg, edit)
                     except DrawingError as error:
                         logger.info("Photo edit failed: %s", error)
                         return {
                             "error": f"Could not make that change to the photo: {error}.",
                             "instruction": "Tell them kindly; offer the plain photo instead. Do not retry.",
                         }
+                    await asyncio.to_thread(_keep_edit, edited, edit)
+                    photo_png = render_drawing(edited, caption)
                 else:
                     with Image.open(io.BytesIO(jpeg)) as photo:
                         photo_png = render_photo(photo.convert("RGB"), caption)

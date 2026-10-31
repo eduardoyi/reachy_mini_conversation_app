@@ -538,6 +538,37 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
         entries = await asyncio.to_thread(get_ledger().entries)
         return JSONResponse(breakdown(entries, datetime.now().astimezone(), days))
 
+    # Memory ----------------------------------------------------------------------------------------
+
+    @app.get("/api/memory")
+    async def _memory() -> Response:
+        try:
+            return _relay(await link.request("GET", "/memory"))
+        except AppUnavailable:
+            return _error("Reachy is not running, so his memory can't be read.", 503)
+
+    async def memory_change(request: Request, path: str, action: str) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        try:
+            response = await link.request("POST", path, json=payload)
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+        if response.status_code == 200:
+            answer = response.json()
+            subject = (answer.get("entry") or {}).get("subject") if "entry" in answer else answer.get("subject")
+            audit.append({"who": _who(request), "action": action, "target": str(subject or "")})
+        return _relay(response)
+
+    @app.post("/api/memory/update")
+    async def _memory_update(request: Request) -> Response:
+        return await memory_change(request, "/memory/update", "memory corrected")
+
+    @app.post("/api/memory/forget")
+    async def _memory_forget(request: Request) -> Response:
+        return await memory_change(request, "/memory/forget", "memory forgotten")
+
     # Personality -------------------------------------------------------------------------------------
 
     @app.get("/api/personality")

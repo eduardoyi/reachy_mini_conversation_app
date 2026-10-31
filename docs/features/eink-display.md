@@ -182,9 +182,10 @@ photo and turns creatures into a costume with their face showing, so the result 
   quick command: it shows the photo here the same way (`render_photo`, 10 minutes) and sends it to the
   family group, without Gemini.
 - **Anyone may use it**, kids included, but only on request (household choice).
-- **Not cached for the screen:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the
-  usage ledger records only an edit's tokens (`display_photo_edit`). Photos sent to WhatsApp by the quick
-  command are kept for the [phone admin app's](phone-admin-app.md) gallery unless `PHOTO_ARCHIVE_ENABLED=0`.
+- **Not cached for the screen, kept for the gallery:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the
+  usage ledger records only an edit's tokens (`display_photo_edit`). Since 2026-10-31 camera photos, their edits and
+  photos sent to WhatsApp are kept for the [phone admin app's](phone-admin-app.md) gallery unless
+  `PHOTO_ARCHIVE_ENABLED=0`; the screen's own copy still leaves after ten minutes.
 - **Ten minutes on screen:** the spool marks the screen `private` with `expires_at`; after that the
   device server shows the resting card, refuses to serve the photo (404) and deletes its file at the
   next check-in.

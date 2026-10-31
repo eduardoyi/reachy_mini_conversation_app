@@ -67,6 +67,12 @@ class ControlAPI:
             return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
         if path.startswith("/api/faces/"):
             return httpx.Response(self.change_status, json={"ok": self.change_status == 200})
+        if path == "/memory":
+            return httpx.Response(
+                200, json={"entries": [{"id": "m1", "text": "Enzo is called Panda.", "subject": "enzo"}]}
+            )
+        if path == "/memory/forget":
+            return httpx.Response(200, json={"removed": True, "subject": "enzo"})
         if path == "/privacy":
             self.privacy = {"on": body["on"], "since": "2026-10-30T10:00:00+00:00" if body["on"] else None}
             return httpx.Response(200, json=self.status())
@@ -149,6 +155,7 @@ def admin(tmp_path: Path) -> Admin:
         display_dir=tmp_path / "display",
         activity_file=tmp_path / "activity.jsonl",
         whatsapp_url=None,
+        photos_dir=tmp_path / "photos",
     )
     push = PushService()
     notifier = Notifier(settings.data_dir, client=httpx.AsyncClient(transport=httpx.MockTransport(push)))
@@ -910,3 +917,13 @@ def test_personality_saves_are_audited_and_stale_ones_refused(
         stale = client.put("/api/personality", headers=SAME_ORIGIN, json={"text": "x", "version": current["version"]})
     assert saved.json()["edited"] is True and stale.status_code == 409
     assert [(e["action"], e["target"]) for e in admin.audit()] == [("personality changed", "default")]
+
+
+def test_memory_is_relayed_and_changes_audited_without_their_text(admin: Admin) -> None:
+    """The admin app relays memory to and from the running app and audits who changed whose memory."""
+    with admin.client() as client:
+        listed = client.get("/api/memory")
+        forgot = client.post("/api/memory/forget", headers=SAME_ORIGIN, json={"id": "m1"})
+    assert listed.status_code == 200 and forgot.json() == {"removed": True, "subject": "enzo"}
+    assert admin.control.calls("/memory/forget") == [{"id": "m1"}]
+    assert [(e["action"], e["target"]) for e in admin.audit()] == [("memory forgotten", "enzo")]

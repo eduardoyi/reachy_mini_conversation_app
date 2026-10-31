@@ -147,7 +147,7 @@ function showTab() {
   if (tab !== "camera") closeCamera();
   if ($("#person-sheet").open) $("#person-sheet").close();
   if ($("#viewer").open) $("#viewer").close();
-  for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet")) if (sheet.open) sheet.close();
+  for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet, #memory-sheet")) if (sheet.open) sheet.close();
   $("#save-bar").hidden = true;
   window.scrollTo(0, 0);
   views[tab]();
@@ -460,6 +460,7 @@ function openPerson(index) {
   $("#person-delete").querySelector("span").textContent = index === null ? "Remove" : `Remove ${person.name}`;
   $("#person-error").hidden = true;
   renderDraft();
+  showPersonMemories(person);
   $("#person-sheet").showModal();
   $(".sheet-body").scrollTop = 0;
   if (index === null) form.name.focus();
@@ -885,6 +886,8 @@ const CHANGES = {
   "face forgotten": (t) => (t ? `made Reachy forget ${t}` : "made Reachy forget a face"),
   "personality changed": () => "changed Reachy's personality",
   "personality reset": () => "put Reachy's personality back to the original",
+  "memory corrected": (t) => (t ? `corrected something Reachy remembers about ${subjectName(t)}` : "corrected a memory"),
+  "memory forgotten": (t) => (t ? `made Reachy forget something about ${subjectName(t)}` : "made Reachy forget something"),
   "picture deleted": (t) => (t === "photos" ? "deleted a photo" : "deleted a picture"),
 };
 
@@ -984,7 +987,7 @@ async function loadGallery() {
 function matches(item) {
   if (gallery.kind !== "all" && item.kind !== gallery.kind) return false;
   if (!gallery.query) return true;
-  const haystack = fold([item.title, item.who, KINDS[item.kind].label, ...(item.steps || [])].join(" "));
+  const haystack = fold([item.title, item.who, item.edit, KINDS[item.kind].label, ...(item.steps || [])].join(" "));
   return fold(gallery.query).split(/\s+/).every((word) => haystack.includes(word));
 }
 
@@ -1059,7 +1062,7 @@ function showViewerItem() {
   const day = date ? dayLabel(date) : "";
   const meta = $("#viewer-meta");
   meta.replaceChildren(
-    item.kind === "photo" ? "Taken" : KINDS[item.kind].one,
+    item.kind !== "photo" ? KINDS[item.kind].one : item.edit ? "Photo edit" : "Taken",
     date ? `, ${["Today", "Yesterday"].includes(day) ? day.toLowerCase() : day} at ${clock(item.at)}` : "",
   );
   if (item.source) meta.append(". ", el("a", { className: "source", href: item.source, target: "_blank", rel: "noopener noreferrer" }, "Where it's from"));
@@ -1438,6 +1441,202 @@ for (const button of document.querySelectorAll("[data-close]")) {
   button.addEventListener("click", () => button.closest("dialog").close());
 }
 
+// Memory ----------------------------------------------------------------------------------------
+
+const MEMORY_KINDS = [
+  ["fact", "What he knows"],
+  ["note", "Notes"],
+  ["plan", "Plans"],
+  ["situation", "For now"],
+];
+const memory = { entries: null, subject: "all", query: "", editing: null, showOld: false };
+
+function subjectName(subject) {
+  if (!subject) return "Nobody in particular";
+  if (subject === "household") return "The family";
+  const person = state.people.find((p) => p.face === subject || fold(firstName(p.name)) === fold(subject) || fold(p.name) === fold(subject));
+  return person ? person.name : subject[0].toUpperCase() + subject.slice(1);
+}
+
+function shortDate(value) {
+  const date = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00`) : when(value);
+  return date ? date.toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+}
+
+async function fetchMemory() {
+  const payload = await api("/api/memory");
+  memory.entries = payload.entries;
+  return memory.entries;
+}
+
+async function openMemory(subject = "all") {
+  memory.subject = subject;
+  memory.query = "";
+  memory.editing = null;
+  memory.showOld = false;
+  $("#memory-search").value = "";
+  $("#memory-list").replaceChildren(el("p", { className: "hint" }, "Loading…"));
+  $("#memory-filters").replaceChildren();
+  if (!$("#memory-sheet").open) $("#memory-sheet").showModal();
+  const [entries] = await Promise.all([
+    run(null, fetchMemory),
+    state.people.length ? null : api("/api/people").then(takePeople).catch(() => {}),
+  ]);
+  if (!entries) {
+    $("#memory-list").replaceChildren(el("div", { className: "empty" }, [icon("brain"), el("p", {}, "His memory can't be read right now.")]));
+    return;
+  }
+  renderMemory();
+}
+
+function renderMemory() {
+  const current = memory.entries.filter((entry) => entry.status === "current");
+  const counts = new Map();
+  for (const entry of current) counts.set(entry.subject || "", (counts.get(entry.subject || "") || 0) + 1);
+  const chip = (subject, label, count) => {
+    const button = el("button", { className: "chip", type: "button", role: "tab" }, [label, el("span", {}, String(count))]);
+    button.setAttribute("aria-selected", String(memory.subject === subject));
+    button.addEventListener("click", () => {
+      memory.subject = subject;
+      memory.editing = null;
+      renderMemory();
+    });
+    return button;
+  };
+  $("#memory-filters").replaceChildren(
+    chip("all", "Everyone", current.length),
+    ...[...counts.entries()].sort((a, b) => b[1] - a[1]).map(([subject, count]) => chip(subject, subjectName(subject), count)),
+  );
+
+  const query = fold(memory.query);
+  const matches = (entry) =>
+    (memory.subject === "all" || (entry.subject || "") === memory.subject) &&
+    (!query || query.split(/\s+/).every((word) => fold(`${entry.text} ${subjectName(entry.subject)}`).includes(word)));
+  const shown = current.filter(matches);
+  const older = memory.entries.filter((entry) => entry.status !== "current" && matches(entry));
+  const box = $("#memory-list");
+  if (!shown.length && !older.length) {
+    const text = query ? `Nothing matches “${memory.query}”.` : "He hasn't saved anything here yet.";
+    box.replaceChildren(el("div", { className: "empty" }, [icon("brain"), el("p", {}, text)]));
+    return;
+  }
+  const parts = [];
+  for (const [kind, label] of MEMORY_KINDS) {
+    const group = shown.filter((entry) => entry.kind === kind)
+      .sort((a, b) => String(b.learned_at).localeCompare(String(a.learned_at)));
+    if (!group.length) continue;
+    parts.push(el("h3", { className: "section-title" }, label));
+    parts.push(el("ul", { className: "memories" }, group.map(memoryRow)));
+  }
+  if (older.length) {
+    if (memory.showOld) {
+      parts.push(el("h3", { className: "section-title" }, "Replaced or done"));
+      parts.push(el("ul", { className: "memories" }, older.map(memoryRow)));
+    } else {
+      const more = el("button", { className: "text-button show-older", type: "button" }, `Show ${older.length} replaced or done`);
+      more.addEventListener("click", () => {
+        memory.showOld = true;
+        renderMemory();
+      });
+      parts.push(more);
+    }
+  }
+  parts.push(el("p", { className: "footnote" }, "Changes reach him at his next conversation."));
+  box.replaceChildren(...parts);
+}
+
+function memoryMeta(entry) {
+  const bits = [];
+  if (memory.subject === "all") bits.push(subjectName(entry.subject));
+  bits.push(`saved ${shortDate(entry.learned_at)}`);
+  if (entry.event_start) bits.push(entry.event_end && entry.event_end !== entry.event_start ? `${shortDate(entry.event_start)} to ${shortDate(entry.event_end)}` : `on ${shortDate(entry.event_start)}`);
+  else if (entry.active_until && entry.status === "current") bits.push(`until ${shortDate(entry.active_until)}`);
+  const text = bits.join(", ");
+  return [text[0].toUpperCase() + text.slice(1), entry.certainty === "tentative" ? el("span", { className: "maybe" }, ". Not sure yet") : null];
+}
+
+function memoryRow(entry) {
+  const row = el("li", { className: `memory ${entry.status === "current" ? "" : "old"}` });
+  const view = el("button", { type: "button", ariaExpanded: String(memory.editing === entry.id) }, [
+    el("span", { className: "text" }, entry.text),
+    el("span", { className: "meta" }, memoryMeta(entry)),
+  ]);
+  view.addEventListener("click", () => {
+    memory.editing = memory.editing === entry.id ? null : entry.id;
+    renderMemory();
+    if (memory.editing) document.querySelector(".memory-edit textarea")?.focus();
+  });
+  row.append(view);
+  if (memory.editing === entry.id) {
+    const area = el("textarea", { value: entry.text, maxLength: 280, ariaLabel: "Memory" });
+    const save = el("button", { className: "pill sun small", type: "button" }, "Save");
+    const forget = el("button", { className: "text-button danger", type: "button" }, [icon("trash"), "Forget"]);
+    const cancel = el("button", { className: "pill ghost small", type: "button" }, "Cancel");
+    cancel.addEventListener("click", () => {
+      memory.editing = null;
+      renderMemory();
+    });
+    save.addEventListener("click", () => run(save, async () => {
+      const text = area.value.trim();
+      if (!text || text === entry.text) {
+        memory.editing = null;
+        renderMemory();
+        return;
+      }
+      const { entry: updated } = await api("/api/memory/update", { method: "POST", body: { id: entry.id, text } });
+      memory.entries = memory.entries.map((e) => (e.id === entry.id ? updated : e));
+      memory.editing = null;
+      renderMemory();
+      toast("Corrected.");
+    }));
+    forget.addEventListener("click", async () => {
+      if (!(await ask({ title: "Forget this?", body: `“${entry.text}”`, yes: "Forget", danger: true }))) return;
+      run(forget, async () => {
+        await api("/api/memory/forget", { method: "POST", body: { id: entry.id } });
+        memory.entries = memory.entries.filter((e) => e.id !== entry.id);
+        memory.editing = null;
+        renderMemory();
+        toast("Forgotten.");
+      });
+    });
+    row.append(el("div", { className: "memory-edit" }, [area, el("div", { className: "buttons-row" }, [forget, cancel, save])]));
+  }
+  return row;
+}
+
+let memorySearchTimer = null;
+$("#memory-search").addEventListener("input", (event) => {
+  clearTimeout(memorySearchTimer);
+  memorySearchTimer = setTimeout(() => {
+    memory.query = event.target.value.trim();
+    memory.editing = null;
+    renderMemory();
+  }, 150);
+});
+
+function subjectFor(person) {
+  const keys = new Set([person.face, fold(firstName(person.name)), fold(person.name)].filter(Boolean));
+  const subjects = new Set((memory.entries || []).map((entry) => entry.subject).filter(Boolean));
+  return [...subjects].find((subject) => keys.has(subject) || keys.has(fold(subject))) || null;
+}
+
+async function showPersonMemories(person) {
+  const link = $("#person-memories");
+  link.hidden = true;
+  if (!person.name) return;
+  try {
+    if (memory.entries === null) await fetchMemory();
+  } catch (error) {
+    return;
+  }
+  const subject = subjectFor(person);
+  const count = subject ? memory.entries.filter((e) => e.subject === subject && e.status === "current").length : 0;
+  if (!count || !state.draft) return;
+  $("#person-memories-label").textContent = `What he remembers about ${person.name} (${count})`;
+  link.hidden = false;
+  link.onclick = () => openMemory(subject);
+}
+
 // Settings --------------------------------------------------------------------------------------
 
 const LANGUAGES = { auto: "Detect automatically", es: "Español", en: "English", it: "Italiano", pt: "Português" };
@@ -1501,7 +1700,13 @@ function renderSettings() {
     icon("chevron"),
   ]);
   open.addEventListener("click", () => openPersonality());
-  panels.push(el("div", { className: "panel" }, open));
+  const remembered = el("button", { className: "row open-row", type: "button" }, [
+    icon("brain"),
+    el("span", { className: "row-text" }, [el("span", { className: "row-label" }, "Memory"), el("span", { className: "row-sub" }, "What he remembers about everyone")]),
+    icon("chevron"),
+  ]);
+  remembered.addEventListener("click", () => openMemory());
+  panels.push(el("div", { className: "panel" }, [open, remembered]));
 
   if (meta.QUIET_HOURS) {
     const [from, to] = (draft.QUIET_HOURS || "21:30-07:00").split("-");

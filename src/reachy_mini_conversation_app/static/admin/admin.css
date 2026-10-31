@@ -451,6 +451,29 @@ dialog { color: var(--ink); }
 .settings .open-row { width: 100%; text-align: left; }
 .settings .open-row .icon:last-child { color: var(--ink-3); }
 
+/* Memory ------------------------------------------------------------------------------------- */
+
+.search.soft { background: var(--paper); }
+.sheet .filters { margin-left: -20px; margin-right: -20px; padding: 0 20px 2px; }
+.sheet .filters .chip { background: var(--paper); }
+.sheet .filters .chip[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+.memories { list-style: none; margin: 0; padding: 0; background: var(--paper); border-radius: 20px; overflow: hidden; }
+.memory + .memory { border-top: 1px solid var(--line); }
+.memory > button { width: 100%; border: 0; background: none; text-align: left; padding: 12px 16px; display: grid; gap: 3px; }
+.memory .text { font-size: 16px; }
+.memory .meta { color: var(--ink-2); font-size: 13px; }
+.memory .meta .maybe { font-style: italic; }
+.memory.old .text { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.memory-edit { padding: 4px 12px 12px; display: grid; gap: 8px; }
+.memory-edit textarea {
+  width: 100%; border: 1.5px solid var(--sun); border-radius: 14px; background: var(--shell); color: var(--ink);
+  font: 400 16px/1.45 var(--body); padding: 10px 12px; resize: vertical; min-height: 72px;
+}
+.memory-edit .buttons-row { display: flex; gap: 8px; align-items: center; }
+.memory-edit .buttons-row .danger { margin-right: auto; }
+.show-older { display: flex; margin: 14px auto 0; }
+.memory-link { margin-top: 26px; background: var(--paper); border-radius: 18px; }
+
 /* Ask dialog ------------------------------------------------------------------------------------ */
 
 .ask {

@@ -45,6 +45,7 @@ def _api(*, sleeping: bool = False, media: Any = None, faces: Any = None) -> tup
         movement_manager=movement,
         face_recognition=faces,
         calls=SimpleNamespace(linked=True),
+        instance_path=None,
         camera_enabled=True,
     )
     return ControlApi(deps, runtime, TOKEN), movement, runtime  # type: ignore[arg-type]
