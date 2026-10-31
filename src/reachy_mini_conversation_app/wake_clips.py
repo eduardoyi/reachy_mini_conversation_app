@@ -252,7 +252,7 @@ class WakeClipRecorder:
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(descriptor, "a", encoding="utf-8") as file:
                 file.write(json.dumps(entry) + "\n")
-        except OSError as error:
+        except (OSError, TypeError, ValueError) as error:  # a record that cannot be written must not stop waking
             logger.warning("Wake event not logged: %s", type(error).__name__)
 
     def _background_gap(self) -> float:

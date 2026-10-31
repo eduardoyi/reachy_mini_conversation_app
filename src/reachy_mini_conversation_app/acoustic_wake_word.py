@@ -205,7 +205,10 @@ class OpenWakeWordDetector:
             if sample_rate != 16000:
                 pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32)
                 chunk = np.clip(resample_audio(pcm, sample_rate, 16000), -32768, 32767).astype("<i2").tobytes()
-            prediction = self._model.predict(np.frombuffer(chunk, dtype="<i2"))
+            # openWakeWord's scores are numpy float32, which the JSON wake records cannot hold.
+            prediction = {
+                name: float(raw) for name, raw in self._model.predict(np.frombuffer(chunk, dtype="<i2")).items()
+            }
             if len(prediction) != 1 + len(self._head_scales) + len(self._shadow_heads):
                 raise ValueError("Expected one wake-word score per head")
             score, head = -1.0, ""

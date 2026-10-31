@@ -1,5 +1,6 @@
 """Tests for the optional local acoustic wake-word detector."""
 
+import json
 import logging
 from types import SimpleNamespace
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 from numpy.typing import NDArray
 
 import reachy_mini_conversation_app.acoustic_wake_word as acoustic_wake_word
+from reachy_mini_conversation_app.wake_clips import EVENTS_FILE, WakeClipRecorder
 
 
 SAMPLE_RATE = 16_000
@@ -342,6 +344,32 @@ def test_event_observer_gets_each_near_miss_when_it_ends_and_detections_return()
     assert events[0].scores == {"reachy": 0.45}
     [detection] = [found for found in detections if found is not None]
     assert (detection.score, detection.head, detection.head_scores) == (0.8, "reachy", (("reachy", 0.8),))
+
+
+class Float32WakeModel(FakeWakeModel):
+    """Return numpy float32 scores, as openWakeWord does."""
+
+    def predict(self, audio: NDArray[np.int16]) -> dict[str, float]:
+        """Return the scripted score as float32."""
+        return {name: np.float32(raw) for name, raw in super().predict(audio).items()}  # type: ignore[misc]
+
+
+def test_float32_scores_reach_the_wake_records_as_plain_numbers(tmp_path: Path) -> None:
+    """A near miss and a wake from the real model's float32 scores are written to the events log."""
+    clips = WakeClipRecorder(tmp_path, keep_days=14)
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        Float32WakeModel(scores=[0.45, 0.05, 0.8]), event_observer=clips.save_score_event
+    )
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    detections = [detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) for _ in range(3)]
+    [detection] = [found for found in detections if found is not None]
+    clips.record("wake", score=round(detection.score or 0.0, 4), scores=dict(detection.head_scores))
+
+    [events_file] = tmp_path.glob(f"*/{EVENTS_FILE}")
+    events = [json.loads(line) for line in events_file.read_text().splitlines()]
+    assert [(event["kind"], event["score"]) for event in events] == [("near_miss", 0.45), ("wake", 0.8)]
+    assert type(detection.score) is float
 
 
 def test_rearming_lets_a_repeated_call_wake_inside_the_cooldown() -> None:

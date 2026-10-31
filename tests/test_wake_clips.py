@@ -164,6 +164,17 @@ def test_notes_join_their_event_by_id(tmp_path: Path) -> None:
     assert _events(tmp_path)[-1] == {"id": event_id, "t": START + 2, "heard": False, "outcome": "rejected"}
 
 
+def test_a_record_that_cannot_be_written_is_skipped_without_raising(tmp_path: Path) -> None:
+    """A detail JSON cannot hold loses only that record; the wake detector calling it keeps running."""
+    recorder = _recorder(tmp_path)
+    recorder.feed(_ramp(2.0), RATE)
+
+    recorder.record("near_miss", score=object())
+    recorder.record("near_miss", score=0.2)
+
+    assert [event["score"] for event in _events(tmp_path)] == [0.2]
+
+
 def test_background_samples_come_only_when_due_and_while_waiting_for_the_name(tmp_path: Path) -> None:
     """Random background samples arrive within half to one and a half times the average gap, never in a request."""
     clock = Clock()
