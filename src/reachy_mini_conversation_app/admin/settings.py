@@ -29,10 +29,10 @@ LANGUAGES: Final[tuple[str, ...]] = ("es", "en", "it", "pt")
 SETTINGS: Final[dict[str, Setting]] = {
     "QUIET_HOURS": Setting("Quiet hours (no wake, calls declined)", "hours"),
     "REALTIME_TRANSCRIPTION_LANGUAGE": Setting("Conversation language", "choice", ("auto", *LANGUAGES)),
-    "WHATSAPP_CALLS_LANGUAGE": Setting("Language for call announcements", "choice", LANGUAGES),
-    "WHATSAPP_CALLERS": Setting("Who may start calls (face ids)", "names"),
+    "WHATSAPP_CALLS_LANGUAGE": Setting("Language for call announcements", "choice", LANGUAGES, default="es"),
+    "WHATSAPP_CALLERS": Setting("Who may start calls (face ids)", "names", default="eduardo,adriana"),
     "LOCAL_ACOUSTIC_WAKE_THRESHOLD": Setting(
-        "Wake sensitivity (lower wakes more easily)", "number", low=0.05, high=0.99
+        "Wake sensitivity (lower wakes more easily)", "number", low=0.05, high=0.99, default="0.5"
     ),
     "FACE_RECOGNITION_ENABLED": Setting("Face recognition", "flag", default="0"),
     "SPEAKER_FOLLOWING_ENABLED": Setting("Turn toward whoever speaks", "flag", default="1"),

@@ -216,3 +216,15 @@ security model); README and architecture diagram updated; this plan and the inde
   down, Status, Activity and Settings (only changed keys written); it found and fixed hidden buttons still
   showing, unset on/off settings that would have been saved as off, and stale cached files after an update.
   Not run: the robot, the simulator, Tailscale, a real phone, push delivery through Apple.
+- 2026-10-31: Set up on the Mac mini: `.env` (`ADMIN_ALLOWED_LOGINS` for both logins, `ADMIN_APP_SERVICE=com.eduardo.reachy`;
+  backup `~/Coding/.env.bak-2026-10-31`), LaunchAgent `com.eduardo.reachy-admin` (log `~/Library/Logs/Reachy/admin.log`),
+  `tailscale serve --bg --https=9443 http://127.0.0.1:7870` (tailnet only; Maribel's Funnel on 443 untouched). Restart
+  from the app now stops the app with SIGINT and waits for it and `start-reachy` before `kickstart`, since the mini's
+  LaunchAgent only opens the launcher (which exits while Reachy runs); checked live. Eduardo opened it on his Pixel.
+- 2026-10-31: First phone use found group ids shown instead of names (name and id were swapped) and people known only by
+  face (Enzo, Mara, Fernanda, Elena, Martin, Miguel) missing. Both fixed with tests; faces with no card are now cards, a
+  known face can be linked onto a card, people with neither group nor number are kept under `others` in the contacts
+  file, and "New group with …" creates a WhatsApp group with Reachy and that number (GOWA `POST /group`). The page was
+  redesigned: a Home tab with Reachy drawn in his current state and the one action that fits, people tiles and a bottom
+  sheet, group options by name, name chips, a d-pad, activity by day, settings with real controls and a save bar, an
+  in-app confirm dialog, dark mode, a new icon. Checked in a local preview at phone size in light and dark.

@@ -1,7 +1,12 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
-const state = { people: [], versions: {}, faces: [], groups: [], editing: null, status: null };
+const state = {
+  me: null, status: null, people: [], versions: {}, shared: [], faces: [], facesAvailable: false,
+  groups: null, created: [], groupsError: "", number: "", draft: null, editing: null, log: "activity", settings: null,
+};
+
+// Basics ----------------------------------------------------------------------------------------
 
 async function api(path, { method = "GET", body } = {}) {
   const options = { method, headers: {} };
@@ -9,25 +14,52 @@ async function api(path, { method = "GET", body } = {}) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
-  const response = await fetch(path, options);
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch (error) {
+    throw new Error("Can't reach Reachy. Is Tailscale on?");
+  }
   let payload = {};
   try {
     payload = await response.json();
   } catch (error) {
     payload = {};
   }
-  if (!response.ok) {
-    throw new Error(payload.error || `Something went wrong (${response.status}).`);
-  }
+  if (!response.ok) throw new Error(payload.error || `Something went wrong (${response.status}).`);
   return payload;
 }
 
-function toast(message) {
+function icon(name, className = "icon") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key.startsWith("aria") || key.startsWith("data-") || key === "role") node.setAttribute(key.replace(/^aria([A-Z])/, (_, c) => `aria-${c.toLowerCase()}`), value);
+    else node[key] = value;
+  }
+  for (const child of [].concat(children)) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(child));
+  }
+  return node;
+}
+
+function toast(message, tone = "good") {
   const box = $("#toast");
-  box.textContent = message;
+  box.replaceChildren(icon(tone === "bad" ? "alert" : "check"), el("span", {}, message));
+  box.dataset.tone = tone;
   box.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (box.hidden = true), 3500);
+  toast.timer = setTimeout(() => (box.hidden = true), tone === "bad" ? 5000 : 3000);
 }
 
 async function run(button, action) {
@@ -35,47 +67,91 @@ async function run(button, action) {
   try {
     return await action();
   } catch (error) {
-    toast(error.message);
+    toast(error.message, "bad");
     return undefined;
   } finally {
     if (button) button.disabled = false;
   }
 }
 
-function element(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  Object.assign(node, props);
-  for (const child of [].concat(children)) {
-    node.append(child instanceof Node ? child : document.createTextNode(child));
-  }
-  return node;
+function ask({ title, body = "", yes = "OK", danger = false }) {
+  const dialog = $("#ask");
+  $("#ask-title").textContent = title;
+  $("#ask-body").textContent = body;
+  $("#ask-body").hidden = !body;
+  const button = $("#ask-yes");
+  button.textContent = yes;
+  button.className = danger ? "pill danger-fill" : "pill sun";
+  dialog.returnValue = "";
+  dialog.showModal();
+  return new Promise((resolve) => dialog.addEventListener("close", () => resolve(dialog.returnValue === "yes"), { once: true }));
+}
+
+function firstName(text) {
+  return String(text || "").trim().split(/\s+/)[0] || "";
+}
+
+function hue(text) {
+  let total = 0;
+  for (const char of String(text)) total = (total * 31 + char.codePointAt(0)) % 360;
+  return total;
+}
+
+function when(value) {
+  const then = typeof value === "number" ? value * 1000 : Date.parse(value);
+  return Number.isFinite(then) ? new Date(then) : null;
 }
 
 function ago(value) {
-  const then = typeof value === "number" ? value * 1000 : Date.parse(value);
+  const then = when(value);
   if (!then) return "";
   const minutes = Math.round((Date.now() - then) / 60000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
-  return new Date(then).toLocaleDateString();
+  return then.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function clock(value) {
+  const then = when(value);
+  return then ? then.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+}
+
+function digits(text) {
+  return String(text || "").replace(/\D/g, "");
+}
+
+function setFill(slider) {
+  const fill = ((slider.value - slider.min) / (slider.max - slider.min)) * 100;
+  slider.style.setProperty("--fill", `${fill}%`);
 }
 
 // Tabs ------------------------------------------------------------------------------------------
 
-const views = { people: loadPeople, camera: openCamera, status: loadStatus, activity: loadActivity, settings: loadSettings };
+const views = { home: loadHome, people: loadPeople, camera: openCamera, activity: loadActivity, settings: loadSettings };
+const titles = { people: "People", camera: "Camera", activity: "Activity", settings: "Settings" };
+let currentTab = "";
 
 function showTab() {
-  const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : "people";
+  const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : "home";
+  currentTab = tab;
   for (const view of document.querySelectorAll(".view")) view.hidden = view.id !== `view-${tab}`;
   for (const link of document.querySelectorAll(".tabs a")) {
-    link.toggleAttribute("aria-current", link.dataset.tab === tab);
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
+  showTitle();
   if (tab !== "camera") closeCamera();
-  if ($("#person-dialog").open) $("#person-dialog").close();
+  if ($("#person-sheet").open) $("#person-sheet").close();
+  $("#save-bar").hidden = true;
+  window.scrollTo(0, 0);
   views[tab]();
+}
+
+function showTitle() {
+  const name = state.me && firstName(state.me.name);
+  $("#title").textContent = currentTab === "home" ? (name ? `Hi, ${name}` : "Reachy") : titles[currentTab];
 }
 
 // Privacy ---------------------------------------------------------------------------------------
@@ -83,356 +159,140 @@ function showTab() {
 function showPrivacy(on) {
   const button = $("#privacy");
   button.setAttribute("aria-pressed", String(on));
-  button.textContent = on ? "Privacy on" : "Privacy off";
+  button.querySelector("use").setAttribute("href", on ? "#i-eye-off" : "#i-eye");
+  button.querySelector("span").textContent = on ? "Privacy on" : "Privacy";
 }
 
-$("#privacy").addEventListener("click", (event) => {
-  const on = $("#privacy").getAttribute("aria-pressed") !== "true";
-  const question = on
-    ? "Turn privacy on? Reachy's mic and camera go off and he goes to sleep."
-    : "Turn privacy off? Reachy's mic and camera come back on.";
-  if (!confirm(question)) return;
-  run(event.currentTarget, async () => {
+async function setPrivacy(on, button) {
+  const yes = await ask(on
+    ? { title: "Turn privacy on?", body: "His mic and camera switch off and he goes to sleep. Only this app turns them back on.", yes: "Turn on" }
+    : { title: "Turn privacy off?", body: "His mic and camera come back on.", yes: "Turn off" });
+  if (!yes) return;
+  await run(button, async () => {
     const status = await api("/api/privacy", { method: "POST", body: { on } });
     showPrivacy(status.privacy.on);
-    toast(on ? "Privacy on: mic and camera off." : "Privacy off.");
-    if (location.hash === "#camera") openCamera();
-  });
-});
-
-// People ----------------------------------------------------------------------------------------
-
-function faceFor(person) {
-  return state.faces.find((face) => face.id === person.face);
-}
-
-function photoUrl(face, photo) {
-  return `/api/faces/photo?person_id=${encodeURIComponent(face.id)}&photo=${encodeURIComponent(photo)}`;
-}
-
-function groupName(chat) {
-  const group = state.groups.find((g) => g.id === chat);
-  return group ? group.name : "a group";
-}
-
-function renderPeople() {
-  const list = $("#people");
-  list.replaceChildren();
-  for (const [index, person] of state.people.entries()) {
-    const face = faceFor(person);
-    const avatar = face && face.photos.length
-      ? element("img", { src: photoUrl(face, face.photos[0]), alt: "" })
-      : element("span", { className: "initial" }, person.name.slice(0, 1).toUpperCase());
-    const tags = [];
-    if (person.chat) tags.push(`Messages to ${groupName(person.chat)}`);
-    if (person.phone) tags.push("Calls");
-    if (face) tags.push("Face");
-    const card = element("button", { className: "card", type: "button" }, [
-      avatar,
-      element("span", { className: "who" }, [
-        element("div", { className: "name" }, person.name),
-        element("div", { className: "tags" }, tags.join(" · ") || "Nothing set up yet"),
-      ]),
-    ]);
-    card.addEventListener("click", () => openPerson(index));
-    list.append(element("li", {}, card));
-  }
-  const shared = $("#shared-names");
-  shared.hidden = !state.shared.length;
-  shared.textContent = state.shared.length
-    ? "Two people answer to the same name, so Reachy won't know who's meant: " +
-      state.shared.map((s) => `"${s.said}" (${s.people.join(", ")})`).join("; ")
-    : "";
-}
-
-function takePeople(payload) {
-  state.people = payload.people;
-  state.versions = payload.versions;
-  state.shared = payload.shared;
-  state.faces = payload.faces || [];
-  state.facesAvailable = payload.faces !== null;
-  renderPeople();
-}
-
-async function loadPeople() {
-  await run(null, async () => takePeople(await api("/api/people")));
-  if (!state.groups.length) {
-    api("/api/groups").then((payload) => {
-      state.groups = payload.groups;
-      renderPeople();
-    }).catch(() => {});
-  }
-}
-
-function openPerson(index) {
-  state.editing = index;
-  const person = index === null ? { name: "", say: [], chat: "", phone: "", face: "" } : state.people[index];
-  const form = $("#person-form");
-  $("#person-heading").textContent = index === null ? "New person" : person.name;
-  form.name.value = person.name;
-  form.say.value = person.say.join(", ");
-  form.phone.value = person.phone;
-  const select = form.chat;
-  select.replaceChildren(element("option", { value: "" }, "None"));
-  for (const group of state.groups) select.append(element("option", { value: group.id }, group.name));
-  if (person.chat && !state.groups.some((g) => g.id === person.chat)) {
-    select.append(element("option", { value: person.chat }, "Current group"));
-  }
-  select.value = person.chat;
-  $("#person-delete").hidden = index === null;
-  $("#person-error").hidden = true;
-  renderFace(person);
-  $("#person-dialog").showModal();
-}
-
-function renderFace(person) {
-  const box = $("#face-photos");
-  box.replaceChildren();
-  $("#face-box").hidden = !state.facesAvailable;
-  const face = faceFor(person);
-  if (!face) {
-    box.append(element("p", { className: "hint" }, person.name ? "No face yet." : "Save the name first."));
-    return;
-  }
-  for (const photo of face.photos) {
-    const remove = element("button", { type: "button", ariaLabel: "Delete photo" }, "×");
-    remove.addEventListener("click", () =>
-      run(remove, async () => {
-        if (!confirm("Delete this photo?")) return;
-        await api("/api/faces/forget-photo", { method: "POST", body: { person_id: face.id, photo } });
-        await refreshFaces(person);
-      })
-    );
-    box.append(element("figure", {}, [element("img", { src: photoUrl(face, photo), alt: "" }), remove]));
-  }
-}
-
-async function refreshFaces(person) {
-  takePeople(await api("/api/people"));
-  const current = state.people.find((p) => p.name === person.name) || person;
-  if (!current.face) {
-    const enrolled = state.faces.find((f) => f.name.toLowerCase() === person.name.toLowerCase());
-    if (enrolled) current.face = enrolled.id;
-  }
-  renderFace(current);
-}
-
-function editedPerson() {
-  const form = $("#person-form");
-  const previous = state.editing === null ? {} : state.people[state.editing];
-  return {
-    name: form.name.value.trim(),
-    say: form.say.value.split(",").map((s) => s.trim()).filter(Boolean),
-    chat: form.chat.value,
-    phone: form.phone.value.trim(),
-    face: previous.face || "",
-  };
-}
-
-async function savePeople(people) {
-  takePeople(await api("/api/people", { method: "PUT", body: { people, versions: state.versions } }));
-}
-
-$("#person-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const person = editedPerson();
-  const people = [...state.people];
-  if (state.editing === null) people.push(person);
-  else people[state.editing] = person;
-  run($("#person-save"), async () => {
-    try {
-      await savePeople(people);
-      $("#person-dialog").close();
-      toast(`${person.name} saved.`);
-    } catch (error) {
-      $("#person-error").textContent = error.message;
-      $("#person-error").hidden = false;
-    }
-  });
-});
-
-$("#person-cancel").addEventListener("click", () => $("#person-dialog").close());
-$("#add-person").addEventListener("click", () => openPerson(null));
-
-$("#person-delete").addEventListener("click", (event) => {
-  const person = state.people[state.editing];
-  if (!confirm(`Remove ${person.name}? Reachy won't message or call them any more.`)) return;
-  run(event.currentTarget, async () => {
-    await savePeople(state.people.filter((_, index) => index !== state.editing));
-    const face = faceFor(person);
-    if (face && confirm(`Also forget ${person.name}'s face?`)) {
-      await api("/api/faces/forget", { method: "POST", body: { person_id: face.id } });
-      takePeople(await api("/api/people"));
-    }
-    $("#person-dialog").close();
-  });
-});
-
-function shrink(file) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(image.width * scale);
-      canvas.height = Math.round(image.height * scale);
-      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(image.src);
-      resolve(canvas.toDataURL("image/jpeg", 0.88).split(",")[1]);
-    };
-    image.onerror = () => reject(new Error("That photo could not be read."));
-    image.src = URL.createObjectURL(file);
+    toast(on ? "Privacy on. Mic and camera are off." : "Privacy off.");
+    if (currentTab === "home") loadHome();
+    if (currentTab === "camera") openCamera();
   });
 }
 
-function faceName() {
-  const name = $("#person-form").name.value.trim();
-  if (!name) throw new Error("Type the name first.");
-  return name;
-}
-
-$("#face-upload").addEventListener("change", (event) => {
-  const files = [...event.target.files].slice(0, 6);
-  event.target.value = "";
-  run(null, async () => {
-    const name = faceName();
-    const photos = await Promise.all(files.map(shrink));
-    const result = await api("/api/faces/upload", { method: "POST", body: { name, photos } });
-    if (result.skipped && result.skipped.length) toast(result.skipped.join("; "));
-    await linkFace(name, result.person);
-  });
-});
-
-$("#face-enroll").addEventListener("click", (event) =>
-  run(event.currentTarget, async () => {
-    const name = faceName();
-    toast("Look at Reachy…");
-    const result = await api("/api/faces/enroll", { method: "POST", body: { name } });
-    await linkFace(name, result.person);
-  })
+$("#privacy").addEventListener("click", (event) =>
+  setPrivacy($("#privacy").getAttribute("aria-pressed") !== "true", event.currentTarget)
 );
 
-async function linkFace(name, enrolled) {
-  if (!enrolled) return;
-  const index = state.people.findIndex((p) => p.name === name);
-  if (index >= 0 && state.people[index].face !== enrolled.id) {
-    const people = state.people.map((p, i) => (i === index ? { ...p, face: enrolled.id } : p));
-    await savePeople(people);
-  } else {
-    takePeople(await api("/api/people"));
+// Home ------------------------------------------------------------------------------------------
+
+function reachyState(status) {
+  const app = status.app;
+  if (!app.running) return app.restarting ? "restarting" : "off";
+  if (status.privacy.on) return "private";
+  if (app.sleeping) return app.quiet_hours ? "quiet" : "asleep";
+  return "awake";
+}
+
+const MOODS = {
+  awake: { title: "Awake", detail: () => "He's listening.", action: ["Put to sleep", "moon", () => control("/api/sleep")] },
+  asleep: { title: "Napping", detail: () => "He wakes up when he hears his name.", action: ["Wake up", "sun", () => control("/api/wake")] },
+  quiet: { title: "Quiet hours", detail: () => "He won't listen or take calls until quiet hours end." },
+  private: {
+    title: "Privacy on",
+    detail: (s) => `His mic and camera have been off since ${clock(s.privacy.since) || "earlier"}.`,
+    action: ["Turn privacy off", "eye", (button) => setPrivacy(false, button)],
+  },
+  off: {
+    title: "Not running",
+    detail: (s) => (s.can_restart ? "Restart him to bring him back." : "Start Reachy on the Mac mini."),
+    action: ["Restart Reachy", "power", (button) => restart(button)],
+  },
+  restarting: { title: "Restarting", detail: () => "Back in about a minute." },
+};
+
+async function control(path) {
+  await api(path, { method: "POST" });
+  await loadHome();
+}
+
+function renderHome(status) {
+  const mood = reachyState(status);
+  const copy = MOODS[mood];
+  $("#stage").dataset.state = mood;
+  $("#mood").textContent = copy.title;
+  $("#mood-detail").textContent = copy.detail(status);
+  const button = $("#stage-action");
+  const action = mood === "off" && !status.can_restart ? null : copy.action;
+  button.hidden = !action;
+  if (action) {
+    button.replaceChildren(icon(action[1]), action[0]);
+    button.onclick = () => run(button, () => action[2](button));
   }
-  renderFace({ ...editedPerson(), face: enrolled.id });
-  toast("Face saved.");
+
+  const volume = status.volume;
+  $("#volume-row").hidden = typeof volume !== "number";
+  const slider = $("#volume");
+  if (typeof volume === "number" && document.activeElement !== slider) {
+    slider.value = volume;
+    $("#volume-value").textContent = volume;
+    setFill(slider);
+  }
+
+  $("#health").replaceChildren(...healthCells(status));
+  $("#restart").hidden = !status.can_restart || mood === "off";
 }
 
-// Camera ----------------------------------------------------------------------------------------
-
-function openCamera() {
-  const image = $("#camera");
-  const note = $("#camera-note");
-  note.hidden = true;
-  image.onerror = async () => {
-    image.removeAttribute("src");
-    let message = "The camera isn't available.";
-    try {
-      const status = await api("/api/status");
-      if (!status.app.running) message = "Reachy isn't running.";
-      else if (status.privacy.on) message = "Privacy is on: the camera is off.";
-    } catch (error) {
-      message = error.message;
-    }
-    note.textContent = message;
-    note.hidden = false;
-  };
-  image.src = `/api/camera?t=${Date.now()}`;
+function healthCells(status) {
+  const cell = (iconName, label, value, good) =>
+    el("div", { className: `cell ${good === true ? "good" : good === false ? "bad" : ""}` }, [icon(iconName), el("b", {}, label), el("span", {}, value)]);
+  const whatsapp = status.whatsapp;
+  const calls = status.calls;
+  const display = status.display;
+  let screen = "Not seen yet";
+  if (display.last_check_in) screen = display.recent ? "Checked in" : `Last seen ${ago(display.last_check_in)}`;
+  const volts = display.battery_v;
+  if (typeof volts === "number" && display.recent) {
+    screen = volts >= 4.3 ? "Charging" : `Battery ${Math.max(0, Math.min(100, Math.round(((volts - 3.4) / 0.75) * 100)))}%`;
+  }
+  return [
+    cell("chat", "WhatsApp", whatsapp.ok === null ? "Not set up" : whatsapp.ok ? "Linked" : "Not linked", whatsapp.ok),
+    cell("phone", "Calls", calls.ok === null ? "Not set up" : calls.ok ? "Ready" : "Not connected", calls.ok),
+    cell("screen", "E-ink screen", screen, display.last_check_in ? Boolean(display.recent) : null),
+    cell("drive", "Storage", `${Math.round(status.disk_free_gb)} GB free`, status.disk_free_gb > 5),
+  ];
 }
 
-function closeCamera() {
-  const image = $("#camera");
-  image.onerror = null;
-  image.removeAttribute("src");
-}
-
-for (const button of document.querySelectorAll("[data-head]")) {
-  button.addEventListener("click", () =>
-    run(button, () => api("/api/head", { method: "POST", body: { direction: button.dataset.head } }))
-  );
-}
-
-$("#look-up").addEventListener("click", (event) =>
-  run(event.currentTarget, async () => {
-    await api("/api/look-up", { method: "POST" });
-    toast("Head up for two minutes.");
-  })
-);
-
-document.addEventListener("visibilitychange", () => {
-  if (location.hash !== "#camera") return;
-  if (document.hidden) closeCamera();
-  else openCamera();
-});
-
-// Status ----------------------------------------------------------------------------------------
-
-function statusRow(label, value, good) {
-  const shown = element("span", { className: good === true ? "good" : good === false ? "bad" : "" }, value);
-  return element("li", {}, [element("span", {}, label), shown]);
-}
-
-async function loadStatus() {
+async function loadHome() {
   const status = await run(null, () => api("/api/status"));
   if (!status) return;
   state.status = status;
   showPrivacy(status.privacy.on);
-  const app = status.app;
-  const rows = [
-    statusRow("Reachy", app.running ? (app.sleeping ? "Asleep" : "Awake") : "Not running", app.running),
-    statusRow("Privacy", status.privacy.on ? `On since ${ago(status.privacy.since)}` : "Off", status.privacy.on ? false : true),
-    statusRow("WhatsApp", status.whatsapp.ok === null ? status.whatsapp.detail : status.whatsapp.ok ? "Linked" : status.whatsapp.detail, status.whatsapp.ok),
-    statusRow("Calls", status.calls.ok === null ? "Not set up" : status.calls.ok ? "Ready" : status.calls.detail, status.calls.ok),
-  ];
-  if (app.quiet_hours) rows.push(statusRow("Quiet hours", "Now", null));
-  const display = status.display;
-  if (display.last_check_in) {
-    const battery = display.battery_v ? `, battery ${display.battery_v} V` : "";
-    rows.push(statusRow("E-ink screen", `Seen ${ago(display.last_check_in)}${battery}`, display.recent));
-  }
-  rows.push(statusRow("Free disk", `${status.disk_free_gb} GB`, status.disk_free_gb > 5));
-  const list = $("#status");
-  list.replaceChildren(...rows);
-  if (status.volume !== null && status.volume !== undefined) list.append(volumeRow(status.volume));
-  $("#restart").hidden = !status.can_restart;
-  $("#wake").disabled = !app.running || status.privacy.on;
-  $("#sleep").disabled = !app.running;
+  if (currentTab === "home") renderHome(status);
   showPushState();
 }
 
-function volumeRow(volume) {
-  const slider = element("input", { type: "range", min: 0, max: 100, step: 5, value: volume, ariaLabel: "Volume" });
-  slider.addEventListener("change", () =>
-    run(null, () => api("/api/volume", { method: "POST", body: { level: Number(slider.value) } }))
-  );
-  return element("li", {}, [element("span", {}, "Volume"), slider]);
+let volumeTimer = null;
+$("#volume").addEventListener("input", (event) => {
+  const slider = event.target;
+  $("#volume-value").textContent = slider.value;
+  setFill(slider);
+  clearTimeout(volumeTimer);
+  volumeTimer = setTimeout(() => run(null, () => api("/api/volume", { method: "POST", body: { level: Number(slider.value) } })), 250);
+});
+
+async function restart(button) {
+  const yes = await ask({ title: "Restart Reachy?", body: "Whatever he's doing stops. He's back in about a minute.", yes: "Restart" });
+  if (!yes) return;
+  await run(button, async () => {
+    await api("/api/restart", { method: "POST" });
+    toast("Restarting Reachy.");
+    setTimeout(loadHome, 1500);
+  });
 }
 
-$("#wake").addEventListener("click", (event) => run(event.currentTarget, async () => {
-  await api("/api/wake", { method: "POST" });
-  loadStatus();
-}));
+$("#restart").addEventListener("click", (event) => restart(event.currentTarget));
 
-$("#sleep").addEventListener("click", (event) => run(event.currentTarget, async () => {
-  await api("/api/sleep", { method: "POST" });
-  loadStatus();
-}));
-
-$("#restart").addEventListener("click", (event) => {
-  if (!confirm("Restart Reachy? Anything he's doing stops.")) return;
-  run(event.currentTarget, async () => {
-    await api("/api/restart", { method: "POST" });
-    toast("Restarting…");
-    setTimeout(loadStatus, 15000);
-  });
-});
+setInterval(() => {
+  if (currentTab === "home" && !document.hidden) loadHome();
+}, 8000);
 
 // Notifications ---------------------------------------------------------------------------------
 
@@ -441,18 +301,17 @@ function pushSupported() {
 }
 
 async function showPushState() {
-  const on = $("#push-on");
-  const test = $("#push-test");
+  const toggle = $("#push-on");
   if (!pushSupported()) {
-    on.hidden = true;
-    test.hidden = true;
-    $("#push-hint").textContent = "Add Reachy to your home screen to get notifications.";
+    toggle.disabled = true;
+    $("#push-hint").textContent = "Install the app to get notifications.";
     return;
   }
   const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.getSubscription();
-  on.textContent = subscription ? "Turn off notifications" : "Turn on notifications";
-  test.hidden = !subscription;
+  toggle.setAttribute("aria-checked", String(Boolean(subscription)));
+  $("#push-test").hidden = !subscription;
+  if (Notification.permission === "denied") $("#push-hint").textContent = "Blocked. Allow notifications for this app in Android settings.";
 }
 
 function keyBytes(base64url) {
@@ -467,11 +326,13 @@ $("#push-on").addEventListener("click", (event) =>
     if (current) {
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: current.endpoint } });
       await current.unsubscribe();
+      toast("Notifications off.");
     } else {
-      if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are blocked.");
+      if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are blocked for this app.");
       const { key } = await api("/api/push/key");
       const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
       await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+      toast("Notifications on.");
     }
     await showPushState();
   })
@@ -480,94 +341,765 @@ $("#push-on").addEventListener("click", (event) =>
 $("#push-test").addEventListener("click", (event) =>
   run(event.currentTarget, async () => {
     const result = await api("/api/push/test", { method: "POST" });
-    toast(result.delivered ? "Sent." : "No phone accepted it.");
+    toast(result.delivered ? "Sent. Check your phone." : "No phone accepted it.", result.delivered ? "good" : "bad");
   })
 );
 
+// People ----------------------------------------------------------------------------------------
+
+function faceById(id) {
+  return state.faces.find((face) => face.id === id);
+}
+
+function photoUrl(face, photo) {
+  return `/api/faces/photo?person_id=${encodeURIComponent(face.id)}&photo=${encodeURIComponent(photo)}`;
+}
+
+function avatar(name, faceId, size = "") {
+  const face = faceById(faceId);
+  const box = el("div", { className: `avatar ${size}` });
+  box.style.setProperty("--hue", hue(name || "?"));
+  if (face && face.photos.length) box.append(el("img", { src: photoUrl(face, face.photos[face.photos.length - 1]), alt: "", loading: "lazy" }));
+  else box.textContent = (name || "?").trim().slice(0, 1).toUpperCase() || "?";
+  return box;
+}
+
+function takePeople(payload) {
+  state.people = payload.people;
+  state.versions = payload.versions;
+  state.shared = payload.shared;
+  state.faces = payload.faces || [];
+  state.facesAvailable = payload.faces !== null;
+}
+
+async function loadPeople() {
+  const payload = await run(null, () => api("/api/people"));
+  if (!payload) return;
+  takePeople(payload);
+  renderPeople();
+  loadGroups();
+}
+
+async function loadGroups() {
+  try {
+    const payload = await api("/api/groups");
+    // WhatsApp can take a moment to list a group just created here.
+    const created = state.created.filter((group) => !payload.groups.some((g) => g.id === group.id));
+    state.groups = [...payload.groups, ...created];
+    state.number = payload.number || "";
+    state.groupsError = "";
+  } catch (error) {
+    state.groups = state.groups || [];
+    state.groupsError = error.message;
+  }
+  if (state.draft) renderGroups();
+}
+
+function renderPeople() {
+  const list = $("#people");
+  const sorted = state.people.map((person, index) => ({ person, index }))
+    .sort((a, b) => a.person.name.localeCompare(b.person.name, undefined, { sensitivity: "base" }));
+  list.replaceChildren(...sorted.map(({ person, index }) => {
+    const cap = (on, iconName, label) => el("span", { className: `cap ${on ? "on" : ""}`, title: label, ariaLabel: label, role: "img" }, icon(iconName));
+    const tile = el("button", { className: "tile", type: "button" }, [
+      avatar(person.name, person.face),
+      el("span", { className: "name" }, person.name),
+      el("span", { className: "caps" }, [
+        cap(person.face, "face", person.face ? "Knows their face" : "Face not added"),
+        cap(person.phone, "phone", person.phone ? "WhatsApp calls" : "No calls"),
+        cap(person.chat, "chat", person.chat ? "Gets voice notes and photos" : "No voice notes"),
+      ]),
+    ]);
+    tile.addEventListener("click", () => openPerson(index));
+    return el("li", {}, tile);
+  }));
+  if (!state.people.length) {
+    list.replaceChildren(el("li", { className: "empty" }, [icon("people"), el("p", {}, "Add the people Reachy should know.")]));
+  }
+  const notice = $("#shared-names");
+  notice.hidden = !state.shared.length;
+  notice.replaceChildren(icon("alert"), el("span", {}, state.shared.map((s) =>
+    `“${s.said}” could mean ${s.people.join(" or ")}, so Reachy won't know who you mean.`).join(" ")));
+}
+
+function openPerson(index) {
+  const person = index === null ? { name: "", say: [], chat: "", phone: "", face: "" } : state.people[index];
+  state.editing = index;
+  state.draft = { ...person, say: [...person.say] };
+  state.creatingGroup = false;
+  const form = $("#person-form");
+  form.name.value = person.name;
+  form.phone.value = person.phone;
+  $("#person-title").textContent = index === null ? "New person" : "";
+  $("#person-delete").hidden = index === null;
+  $("#person-delete").querySelector("span").textContent = index === null ? "Remove" : `Remove ${person.name}`;
+  $("#person-error").hidden = true;
+  renderDraft();
+  $("#person-sheet").showModal();
+  $(".sheet-body").scrollTop = 0;
+  if (index === null) form.name.focus();
+  loadGroups();
+}
+
+function renderDraft() {
+  $("#person-avatar").replaceWith(Object.assign(avatar(state.draft.name, state.draft.face, "xl"), { id: "person-avatar" }));
+  renderFace();
+  renderGroups();
+  renderSay();
+}
+
+function faceOnlyCards() {
+  return state.people.filter((p, i) => i !== state.editing && p.face && !p.chat && !p.phone);
+}
+
+function renderFace() {
+  const draft = state.draft;
+  const strip = $("#face-strip");
+  $("#face-off").hidden = state.facesAvailable;
+  strip.hidden = !state.facesAvailable;
+  const face = faceById(draft.face);
+  const photos = face ? face.photos.map((photo) => {
+    const remove = el("button", { type: "button", ariaLabel: "Delete this photo" }, icon("x"));
+    remove.addEventListener("click", async () => {
+      if (!(await ask({ title: "Delete this photo?", yes: "Delete", danger: true }))) return;
+      run(remove, async () => {
+        const result = await api("/api/faces/forget-photo", { method: "POST", body: { person_id: face.id, photo } });
+        if (!result.person) draft.face = "";
+        await refreshFaces();
+      });
+    });
+    return el("div", { className: "face" }, [el("img", { src: photoUrl(face, photo), alt: "" }), remove]);
+  }) : [];
+  const upload = el("button", { className: "add-face", type: "button" }, [icon("image"), "Photos"]);
+  upload.addEventListener("click", () => $("#face-upload").click());
+  const camera = el("button", { className: "add-face", type: "button" }, [icon("camera"), "Reachy's camera"]);
+  camera.addEventListener("click", () => enrollFromCamera(camera));
+  strip.replaceChildren(...photos, upload, camera);
+
+  const candidates = draft.face ? [] : faceOnlyCards();
+  $("#face-link").hidden = !state.facesAvailable || !candidates.length;
+  $("#face-link-chips").replaceChildren(...candidates.map((card) => {
+    const chip = el("button", { className: "chip", type: "button" }, [avatar(card.name, card.face, "sm"), card.name]);
+    chip.addEventListener("click", () => {
+      draft.face = card.face;
+      draft.linkedFrom = card.name;
+      if (!draft.name.trim()) {
+        draft.name = card.name;
+        $("#person-form").name.value = card.name;
+      }
+      renderDraft();
+    });
+    return chip;
+  }));
+}
+
+async function refreshFaces() {
+  const payload = await api("/api/people");
+  state.faces = payload.faces || [];
+  state.facesAvailable = payload.faces !== null;
+  state.versions = payload.versions;
+  state.people = payload.people;
+  if (state.editing !== null && state.people[state.editing] === undefined) state.editing = null;
+  renderDraft();
+}
+
+function faceName() {
+  const face = faceById(state.draft.face);
+  const name = face ? face.name : state.draft.name.trim();
+  if (!name) throw new Error("Type their name first.");
+  return name;
+}
+
+function shrink(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(image.src);
+      resolve(canvas.toDataURL("image/jpeg", 0.88).split(",")[1]);
+    };
+    image.onerror = () => reject(new Error("That photo couldn't be read."));
+    image.src = URL.createObjectURL(file);
+  });
+}
+
+$("#face-upload").addEventListener("change", (event) => {
+  const files = [...event.target.files].slice(0, 6);
+  event.target.value = "";
+  if (!files.length) return;
+  run(null, async () => {
+    const name = faceName();
+    toast("Adding photos…");
+    const photos = await Promise.all(files.map(shrink));
+    const result = await api("/api/faces/upload", { method: "POST", body: { name, photos } });
+    state.draft.face = result.person.id;
+    await refreshFaces();
+    const skipped = (result.skipped || []).length;
+    toast(skipped ? `Added. ${skipped} photo${skipped > 1 ? "s" : ""} had no clear face.` : "Photos added.");
+  });
+});
+
+function enrollFromCamera(button) {
+  run(button, async () => {
+    const name = faceName();
+    toast(`Ask ${state.draft.name.trim() || name} to look at Reachy.`);
+    const result = await api("/api/faces/enroll", { method: "POST", body: { name } });
+    state.draft.face = result.person.id;
+    await refreshFaces();
+    toast("Face added.");
+  });
+}
+
+function groupOption({ checked, badge, label, detail, onPick, add = false }) {
+  const option = el("button", { className: `option ${add ? "add" : ""}`, type: "button", role: add ? "button" : "radio" }, [
+    el("span", { className: "group-badge" }, icon(badge)),
+    el("span", { className: "label" }, [label, detail ? el("small", {}, detail) : null]),
+    add ? null : el("span", { className: "tick" }, icon("check")),
+  ]);
+  if (!add) option.setAttribute("aria-checked", String(checked));
+  option.addEventListener("click", onPick);
+  return option;
+}
+
+function renderGroups() {
+  const draft = state.draft;
+  const pick = (chat) => () => {
+    draft.chat = chat;
+    renderGroups();
+  };
+  const options = [groupOption({ checked: !draft.chat, badge: "x", label: "Nowhere", onPick: pick("") })];
+  for (const group of state.groups || []) {
+    options.push(groupOption({ checked: draft.chat === group.id, badge: "chat", label: group.name, onPick: pick(group.id) }));
+  }
+  if (draft.chat && state.groups && !state.groups.some((g) => g.id === draft.chat)) {
+    options.push(groupOption({ checked: true, badge: "chat", label: "A group Reachy left", detail: "Pick another one", onPick: pick(draft.chat) }));
+  }
+  const canCreate = state.groups !== null && !state.groupsError && digits(draft.phone).length >= 7;
+  if (canCreate) {
+    options.push(groupOption({
+      badge: "plus", label: `New group with ${draft.name.trim() || "them"}`, add: true,
+      onPick: () => {
+        state.creatingGroup = true;
+        $("#new-group-name").value = `Reachy & ${draft.name.trim() || "family"}`;
+        renderGroups();
+        $("#new-group-name").focus();
+      },
+    }));
+  }
+  $("#group-list").replaceChildren(...options);
+  $("#new-group").hidden = !(state.creatingGroup && canCreate);
+
+  const help = $("#group-help");
+  if (state.groupsError) {
+    help.replaceChildren(state.groupsError);
+  } else if (state.groups === null) {
+    help.replaceChildren("Loading groups…");
+  } else if (state.number) {
+    const copy = el("button", { className: "copy", type: "button" }, state.number);
+    copy.addEventListener("click", () => navigator.clipboard.writeText(state.number).then(() => toast("Number copied.")).catch(() => {}));
+    help.replaceChildren(canCreate ? "Or add Reachy to any WhatsApp group: " : "Add Reachy to a WhatsApp group to see it here: ", copy);
+  } else {
+    help.replaceChildren(canCreate ? "" : "Add their number to start a new group with them.");
+  }
+}
+
+$("#new-group-create").addEventListener("click", (event) =>
+  run(event.currentTarget, async () => {
+    const title = $("#new-group-name").value.trim();
+    if (!title) throw new Error("Give the group a name.");
+    const group = await api("/api/groups", { method: "POST", body: { title, phones: [state.draft.phone] } });
+    state.creatingGroup = false;
+    state.draft.chat = group.id;
+    state.created.push(group);
+    state.groups = [...(state.groups || []), group];
+    renderGroups();
+    toast(`Created “${group.name}”.`);
+    loadGroups();
+  })
+);
+
+function renderSay() {
+  const box = $("#say-chips");
+  const input = $("#say-input");
+  box.replaceChildren(...state.draft.say.map((said, index) => {
+    const remove = el("button", { className: "remove", type: "button", ariaLabel: `Remove ${said}` }, icon("x"));
+    remove.addEventListener("click", () => {
+      state.draft.say.splice(index, 1);
+      renderSay();
+    });
+    return el("span", { className: "chip" }, [said, remove]);
+  }), input);
+}
+
+function addSaid() {
+  const input = $("#say-input");
+  for (const part of input.value.split(",")) {
+    const said = part.trim();
+    if (said && !state.draft.say.some((s) => s.toLowerCase() === said.toLowerCase())) state.draft.say.push(said);
+  }
+  input.value = "";
+  renderSay();
+  input.focus();
+}
+
+$("#say-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    addSaid();
+  } else if (event.key === "Backspace" && !event.target.value && state.draft.say.length) {
+    state.draft.say.pop();
+    renderSay();
+    $("#say-input").focus();
+  }
+});
+$("#say-input").addEventListener("input", (event) => {
+  if (event.target.value.includes(",")) addSaid();
+});
+$("#say-input").addEventListener("blur", () => {
+  if ($("#say-input").value.trim()) addSaid();
+});
+
+$("#person-form").name.addEventListener("input", (event) => {
+  state.draft.name = event.target.value;
+  const current = $("#person-avatar");
+  if (!faceById(state.draft.face)) {
+    current.textContent = event.target.value.trim().slice(0, 1).toUpperCase() || "?";
+    current.style.setProperty("--hue", hue(event.target.value || "?"));
+  }
+  renderGroups();
+});
+$("#person-form").phone.addEventListener("input", (event) => {
+  state.draft.phone = event.target.value;
+  renderGroups();
+});
+
+async function savePeople(people) {
+  takePeople(await api("/api/people", { method: "PUT", body: { people, versions: state.versions } }));
+  renderPeople();
+}
+
+$("#person-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const draft = state.draft;
+  if ($("#say-input").value.trim()) addSaid();
+  const person = { name: draft.name.trim(), say: draft.say, chat: draft.chat, phone: draft.phone.trim(), face: draft.face };
+  const error = $("#person-error");
+  if (!person.name) {
+    error.textContent = "Add their name.";
+    error.hidden = false;
+    $("#person-form").name.focus();
+    return;
+  }
+  let people = state.people.map((p, i) => (i === state.editing ? person : p));
+  if (state.editing === null) people.push(person);
+  // A face picked from a face-only card moves here, so that card goes.
+  people = people.filter((p) => p === person || !(p.face === person.face && person.face && !p.chat && !p.phone && !p.say.length));
+  run($("#person-save"), async () => {
+    try {
+      await savePeople(people);
+      $("#person-sheet").close();
+      toast(`${person.name} saved.`);
+    } catch (problem) {
+      error.textContent = problem.message;
+      error.hidden = false;
+    }
+  });
+});
+
+$("#person-cancel").addEventListener("click", () => $("#person-sheet").close());
+$("#person-sheet").addEventListener("close", () => (state.draft = null));
+$("#add-person").addEventListener("click", () => openPerson(null));
+
+$("#person-delete").addEventListener("click", async (event) => {
+  const person = state.people[state.editing];
+  const face = faceById(person.face);
+  const yes = await ask({
+    title: `Remove ${person.name}?`,
+    body: face ? "Reachy forgets their face, number and group." : "Reachy won't message or call them any more.",
+    yes: "Remove",
+    danger: true,
+  });
+  if (!yes) return;
+  const button = event.currentTarget;
+  run(button, async () => {
+    if (face) await api("/api/faces/forget", { method: "POST", body: { person_id: face.id } });
+    const fresh = await api("/api/people");
+    takePeople(fresh);
+    await savePeople(state.people.filter((p) => p.name !== person.name && !(face && p.face === face.id)));
+    $("#person-sheet").close();
+    toast(`${person.name} removed.`);
+  });
+});
+
+// Camera ----------------------------------------------------------------------------------------
+
+async function openCamera() {
+  const image = $("#camera");
+  const note = $("#camera-note");
+  const showNote = (message) => {
+    closeCamera();
+    note.querySelector("p").textContent = message;
+    note.hidden = false;
+    $("#live").hidden = true;
+  };
+  note.hidden = true;
+  let status;
+  try {
+    status = await api("/api/status");
+  } catch (error) {
+    showNote(error.message);
+    return;
+  }
+  if (currentTab !== "camera") return;
+  state.status = status;
+  showPrivacy(status.privacy.on);
+  const asleep = status.app.running && status.app.sleeping;
+  $("#look-up").hidden = !asleep || status.privacy.on;
+  $("#camera-hint").hidden = !asleep || status.privacy.on;
+  for (const button of document.querySelectorAll("[data-head]")) button.disabled = !status.app.running || status.privacy.on;
+  if (!status.app.running) return showNote("Reachy isn't running.");
+  if (status.privacy.on) return showNote("Privacy is on, so his camera is off.");
+  image.onerror = () => showNote("The camera stopped. Tap to try again.");
+  image.onload = () => ($("#live").hidden = false);
+  image.src = `/api/camera?t=${Date.now()}`;
+  $("#live").hidden = false;
+}
+
+function closeCamera() {
+  const image = $("#camera");
+  image.onerror = null;
+  image.onload = null;
+  image.removeAttribute("src");
+}
+
+$("#camera-note").addEventListener("click", () => openCamera());
+
+for (const button of document.querySelectorAll("[data-head]")) {
+  button.addEventListener("click", () =>
+    run(null, () => api("/api/head", { method: "POST", body: { direction: button.dataset.head } }))
+  );
+}
+
+$("#look-up").addEventListener("click", (event) =>
+  run(event.currentTarget, async () => {
+    await api("/api/look-up", { method: "POST" });
+    toast("Head up for two minutes.");
+  })
+);
+
+document.addEventListener("visibilitychange", () => {
+  if (currentTab === "camera") {
+    if (document.hidden) closeCamera();
+    else openCamera();
+  }
+  if (currentTab === "home" && !document.hidden) loadHome();
+});
+
 // Activity --------------------------------------------------------------------------------------
 
-const ACTIVITY_TEXT = {
-  call_out: (e) => `Called ${e.who}`,
-  call_in: (e) => (e.outcome === "missed" ? `Missed call from ${e.who}` : `${e.who} called`),
-  voice_note: (e) => `Voice note to ${e.who}`,
-  photo: (e) => `Photo to ${e.who}`,
+const OUTCOMES = {
+  declined_privacy: "Declined, privacy was on",
+  declined_quiet_hours: "Declined, quiet hours",
+  declined: "Declined",
+  failed: "Didn't go through",
+  no_answer: "No answer",
 };
 
-function describe(entry) {
-  const text = (ACTIVITY_TEXT[entry.kind] || ((e) => `${e.kind} ${e.who || ""}`))(entry);
-  const parts = [text];
-  if (entry.seconds) parts.push(`${Math.round(entry.seconds / 60) || "<1"} min`);
-  if (entry.outcome && !["sent", "missed", "hung_up"].includes(entry.outcome)) parts.push(entry.outcome.replace(/_/g, " "));
-  return parts.join(" · ");
+function minutes(seconds) {
+  if (!seconds) return "";
+  const whole = Math.round(seconds / 60);
+  return whole < 1 ? "Under a minute" : `${whole} min`;
+}
+
+function describeActivity(entry) {
+  const who = entry.who || "Someone";
+  const detail = OUTCOMES[entry.outcome] || minutes(entry.seconds);
+  switch (entry.kind) {
+    case "call_out":
+      return { badge: "call", icon: "phone-out", title: `Called ${who}`, detail };
+    case "call_in":
+      if (entry.outcome === "missed") return { badge: "missed", icon: "phone-missed", title: `Missed call from ${who}`, detail: "" };
+      return { badge: "call", icon: "phone-in", title: `${who} called`, detail };
+    case "voice_note":
+      return { badge: "note", icon: "mic", title: `Voice note to ${who}`, detail: entry.outcome === "failed" ? OUTCOMES.failed : "" };
+    case "photo":
+      return { badge: "photo", icon: "image", title: `Photo to ${who}`, detail: entry.outcome === "failed" ? OUTCOMES.failed : "" };
+    default:
+      return { badge: "", icon: "spark", title: `${entry.kind} ${entry.who || ""}`.trim(), detail };
+  }
+}
+
+function personFor(login) {
+  const local = String(login || "").split("@")[0].toLowerCase();
+  if (state.me && state.me.login === login) return firstName(state.me.name) || "You";
+  const match = state.people.find((p) => {
+    const first = firstName(p.name).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    return first.length >= 3 && local.startsWith(first);
+  });
+  return match ? firstName(match.name) : local;
+}
+
+const CHANGES = {
+  "privacy on": () => "turned privacy on",
+  "privacy off": () => "turned privacy off",
+  "put to sleep": () => "put Reachy to sleep",
+  "woken up": () => "woke Reachy up",
+  "volume set": (t) => `set the volume to ${t}`,
+  "restarted Reachy": () => "restarted Reachy",
+  "people saved": () => "updated people",
+  "settings changed": () => "changed settings",
+  "group created": (t) => `created the group “${t}”`,
+  "face photos added": (t) => (t ? `added face photos of ${t}` : "added face photos"),
+  "face enrolled from the camera": (t) => (t ? `added ${t}'s face from the camera` : "added a face from the camera"),
+  "face photo deleted": () => "deleted a face photo",
+  "face forgotten": (t) => (t ? `made Reachy forget ${t}` : "made Reachy forget a face"),
+};
+
+function describeChange(entry) {
+  const phrase = (CHANGES[entry.action] || ((t) => `${entry.action}${t ? ` ${t}` : ""}`))(entry.target || "");
+  return { badge: "", icon: "settings", title: `${personFor(entry.who)} ${phrase}`, detail: "" };
+}
+
+function dayLabel(date) {
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86400000);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
+
+function renderLog(entries, describe, emptyText) {
+  const box = $("#log");
+  if (!entries.length) {
+    box.replaceChildren(el("div", { className: "empty" }, [icon("activity"), el("p", {}, emptyText)]));
+    return;
+  }
+  const days = [];
+  for (const entry of entries) {
+    const date = when(entry.at) || new Date();
+    const label = dayLabel(date);
+    if (!days.length || days[days.length - 1].label !== label) days.push({ label, items: [] });
+    const text = describe(entry);
+    days[days.length - 1].items.push(el("li", { className: "event" }, [
+      el("span", { className: `badge ${text.badge}` }, icon(text.icon)),
+      el("span", { className: "event-text" }, [el("b", {}, text.title), text.detail ? el("span", {}, text.detail) : null]),
+      el("time", { dateTime: date.toISOString() }, clock(entry.at)),
+    ]));
+  }
+  box.replaceChildren(...days.flatMap((day) => [el("h3", { className: "day" }, day.label), el("ul", { className: "events" }, day.items)]));
 }
 
 async function loadActivity() {
-  const payload = await run(null, () => api("/api/activity"));
+  const [payload] = await Promise.all([
+    run(null, () => api("/api/activity")),
+    state.people.length ? null : api("/api/people").then(takePeople).catch(() => {}),
+  ]);
   if (!payload) return;
-  const row = (text, at) => element("li", {}, [element("span", {}, text), element("time", {}, ago(at))]);
-  const activity = payload.activity.map((e) => row(describe(e), e.at));
-  $("#activity").replaceChildren(...(activity.length ? activity : [element("li", {}, "Nothing yet.")]));
-  const changes = payload.changes.map((e) => row(`${e.who.split("@")[0]}: ${e.action}${e.target ? ` (${e.target})` : ""}`, e.at));
-  $("#changes").replaceChildren(...(changes.length ? changes : [element("li", {}, "No changes yet.")]));
-  const totals = payload.usage.totals || {};
-  $("#usage").textContent = totals.today === undefined
-    ? "No cost data."
-    : `Today $${totals.today.toFixed(2)} · 7 days $${totals.last_7_days.toFixed(2)} · 30 days $${totals.last_30_days.toFixed(2)} (estimates)`;
+  state.activity = payload;
+  renderActivity();
+}
+
+function renderActivity() {
+  const payload = state.activity;
+  for (const button of document.querySelectorAll("[data-log]")) button.setAttribute("aria-selected", String(button.dataset.log === state.log));
+  const totals = (payload.usage && payload.usage.totals) || {};
+  const usage = $("#usage");
+  usage.hidden = state.log !== "activity" || totals.today === undefined;
+  if (!usage.hidden) {
+    const cost = (value, label) => el("div", {}, [el("b", {}, `$${Number(value || 0).toFixed(2)}`), el("span", {}, label)]);
+    usage.replaceChildren(cost(totals.today, "AI today"), cost(totals.last_7_days, "This week"), cost(totals.last_30_days, "This month"));
+  }
+  if (state.log === "activity") renderLog(payload.activity, describeActivity, "Calls, voice notes and photos show up here.");
+  else renderLog(payload.changes, describeChange, "Changes made in this app show up here.");
+}
+
+for (const button of document.querySelectorAll("[data-log]")) {
+  button.addEventListener("click", () => {
+    state.log = button.dataset.log;
+    if (state.activity) renderActivity();
+  });
 }
 
 // Settings --------------------------------------------------------------------------------------
 
-async function loadSettings() {
-  const payload = await run(null, () => api("/api/settings"));
-  if (!payload) return;
-  const form = $("#settings");
-  form.replaceChildren();
-  state.settings = {};
-  for (const setting of payload.settings) {
-    state.settings[setting.key] = setting.value || setting.default;
-    let input;
-    if (setting.kind === "flag") {
-      input = element("input", { type: "checkbox", name: setting.key, checked: (setting.value || setting.default) === "1" });
-      form.append(element("label", { className: "toggle" }, [setting.label, input]));
-      continue;
-    }
-    if (setting.kind === "choice") {
-      input = element("select", { name: setting.key }, [element("option", { value: "" }, "Default")]);
-      for (const choice of setting.choices) input.append(element("option", { value: choice }, choice));
-    } else if (setting.kind === "number") {
-      input = element("input", { type: "number", name: setting.key, min: setting.low, max: setting.high, step: 0.05, placeholder: "Default" });
-    } else if (setting.kind === "hours") {
-      input = element("input", { name: setting.key, placeholder: "21:30-07:00, or empty for none", inputMode: "numeric" });
-    } else {
-      input = element("input", { name: setting.key, placeholder: "eduardo,adriana", autocapitalize: "none" });
-    }
-    input.value = setting.value;
-    form.append(element("label", {}, [setting.label, input]));
-  }
-  const save = element("button", { className: "primary", type: "submit" }, "Save and restart Reachy");
-  form.append(save);
+const LANGUAGES = { auto: "Detect automatically", es: "Español", en: "English", it: "Italiano", pt: "Português" };
+const WAKE = { low: 0.05, high: 0.99 };
+
+function settingRow({ iconName, label, sub, control, body }) {
+  return el("div", { className: "setting" }, [
+    el("div", { className: "setting-head" }, [
+      icon(iconName),
+      el("span", { className: "row-text" }, [el("span", { className: "row-label" }, label), sub ? el("span", { className: "row-sub" }, sub) : null]),
+      control || null,
+    ]),
+    body ? el("div", { className: "setting-body" }, body) : null,
+  ]);
 }
+
+function switchFor(key, label) {
+  const toggle = el("button", { className: "switch", type: "button", role: "switch", ariaLabel: label });
+  toggle.setAttribute("aria-checked", String(state.settings.draft[key] === "1"));
+  toggle.addEventListener("click", () => {
+    state.settings.draft[key] = state.settings.draft[key] === "1" ? "0" : "1";
+    toggle.setAttribute("aria-checked", String(state.settings.draft[key] === "1"));
+    settingsChanged();
+  });
+  return toggle;
+}
+
+function selectFor(key, choices, label) {
+  const select = el("select", { ariaLabel: label }, choices.map((choice) => el("option", { value: choice }, LANGUAGES[choice] || choice)));
+  select.value = state.settings.draft[key] || choices[0];
+  select.addEventListener("change", () => {
+    state.settings.draft[key] = select.value;
+    settingsChanged();
+  });
+  return select;
+}
+
+async function loadSettings() {
+  const [payload] = await Promise.all([
+    run(null, () => api("/api/settings")),
+    api("/api/people").then(takePeople).catch(() => {}),
+  ]);
+  if (!payload) return;
+  const original = {};
+  const meta = {};
+  for (const setting of payload.settings) {
+    original[setting.key] = setting.value || setting.default;
+    meta[setting.key] = setting;
+  }
+  state.settings = { original, draft: { ...original }, meta };
+  renderSettings();
+}
+
+function renderSettings() {
+  const { draft, meta } = state.settings;
+  const form = $("#settings");
+  const panels = [];
+
+  if (meta.QUIET_HOURS) {
+    const [from, to] = (draft.QUIET_HOURS || "21:30-07:00").split("-");
+    const on = Boolean(draft.QUIET_HOURS);
+    const toggle = el("button", { className: "switch", type: "button", role: "switch", ariaLabel: "Quiet hours" });
+    toggle.setAttribute("aria-checked", String(on));
+    const time = (label, value, index) => {
+      const input = el("input", { type: "time", value, required: true });
+      input.addEventListener("change", () => {
+        const parts = (state.settings.draft.QUIET_HOURS || "21:30-07:00").split("-");
+        parts[index] = input.value || parts[index];
+        state.settings.draft.QUIET_HOURS = parts.join("-");
+        settingsChanged();
+      });
+      return el("label", {}, [label, input]);
+    };
+    toggle.addEventListener("click", () => {
+      state.settings.draft.QUIET_HOURS = on ? "" : `${from}-${to}`;
+      renderSettings();
+      settingsChanged();
+    });
+    panels.push(el("div", { className: "panel" }, settingRow({
+      iconName: "moon", label: "Quiet hours", sub: "No listening, no calls", control: toggle,
+      body: on ? el("div", { className: "times" }, [time("From", from, 0), time("Until", to, 1)]) : null,
+    })));
+  }
+
+  const languages = [];
+  if (meta.REALTIME_TRANSCRIPTION_LANGUAGE) {
+    languages.push(settingRow({ iconName: "mic", label: "Language he listens for", body: selectFor("REALTIME_TRANSCRIPTION_LANGUAGE", meta.REALTIME_TRANSCRIPTION_LANGUAGE.choices, "Language he listens for") }));
+  }
+  if (meta.WHATSAPP_CALLS_LANGUAGE) {
+    languages.push(settingRow({ iconName: "phone-in", label: "Language for incoming calls", body: selectFor("WHATSAPP_CALLS_LANGUAGE", meta.WHATSAPP_CALLS_LANGUAGE.choices, "Language for incoming calls") }));
+  }
+  if (languages.length) panels.push(el("div", { className: "panel" }, languages));
+
+  if (meta.WHATSAPP_CALLERS) {
+    const chosen = new Set((draft.WHATSAPP_CALLERS || "").split(",").filter(Boolean));
+    const known = state.faces.length ? state.faces : [...chosen].map((id) => ({ id, name: id }));
+    const chips = known.map((face) => {
+      const chip = el("button", { className: `chip ${chosen.has(face.id) ? "on" : ""}`, type: "button" }, [avatar(face.name, face.id, "sm"), face.name]);
+      chip.setAttribute("aria-pressed", String(chosen.has(face.id)));
+      chip.addEventListener("click", () => {
+        if (chosen.has(face.id)) chosen.delete(face.id);
+        else chosen.add(face.id);
+        state.settings.draft.WHATSAPP_CALLERS = [...chosen].join(",");
+        renderSettings();
+        settingsChanged();
+      });
+      return chip;
+    });
+    panels.push(el("div", { className: "panel" }, settingRow({
+      iconName: "phone-out", label: "Who can ask him to call", sub: "He checks their face first",
+      body: chips.length ? el("div", { className: "chips" }, chips) : el("p", { className: "hint" }, "Add faces in People first."),
+    })));
+  }
+
+  if (meta.LOCAL_ACOUSTIC_WAKE_THRESHOLD) {
+    const threshold = Number(draft.LOCAL_ACOUSTIC_WAKE_THRESHOLD || meta.LOCAL_ACOUSTIC_WAKE_THRESHOLD.default || 0.5);
+    const slider = el("input", { type: "range", min: 0, max: 100, step: 1, ariaLabel: "Wake sensitivity" });
+    slider.value = Math.round(((WAKE.high - threshold) / (WAKE.high - WAKE.low)) * 100);
+    setFill(slider);
+    slider.addEventListener("input", () => {
+      setFill(slider);
+      const value = WAKE.high - (slider.value / 100) * (WAKE.high - WAKE.low);
+      state.settings.draft.LOCAL_ACOUSTIC_WAKE_THRESHOLD = String(Math.round(value * 100) / 100);
+      settingsChanged();
+    });
+    const reset = el("button", { className: "text-button reset", type: "button" }, "Reset");
+    reset.hidden = String(threshold) === String(Number(meta.LOCAL_ACOUSTIC_WAKE_THRESHOLD.default));
+    reset.addEventListener("click", () => {
+      state.settings.draft.LOCAL_ACOUSTIC_WAKE_THRESHOLD = meta.LOCAL_ACOUSTIC_WAKE_THRESHOLD.default;
+      renderSettings();
+      settingsChanged();
+    });
+    panels.push(el("div", { className: "panel" }, settingRow({
+      iconName: "spark", label: "Wake sensitivity", control: reset,
+      body: [slider, el("div", { className: "scale" }, [el("span", {}, "Harder to wake"), el("span", {}, "Wakes easily")])],
+    })));
+  }
+
+  const flags = [
+    ["FACE_RECOGNITION_ENABLED", "face", "Recognize faces", "Greets people by name"],
+    ["SPEAKER_FOLLOWING_ENABLED", "speaker", "Turn toward voices", "Looks at whoever is talking"],
+    ["DISPLAY_NOW_PLAYING", "screen", "Show the song on the e-ink screen", ""],
+  ].filter(([key]) => meta[key]);
+  if (flags.length) {
+    panels.push(el("div", { className: "panel" }, flags.map(([key, iconName, label, sub]) => settingRow({ iconName, label, sub, control: switchFor(key, label) }))));
+  }
+  form.replaceChildren(...panels);
+}
+
+function settingsChanged() {
+  const { original, draft } = state.settings;
+  $("#save-bar").hidden = !Object.keys(draft).some((key) => draft[key] !== original[key]);
+}
+
+$("#settings-discard").addEventListener("click", () => {
+  state.settings.draft = { ...state.settings.original };
+  renderSettings();
+  settingsChanged();
+});
 
 $("#settings").addEventListener("submit", (event) => {
   event.preventDefault();
+  const { original, draft } = state.settings;
   const changes = {};
-  for (const input of event.target.elements) {
-    if (!input.name) continue;
-    const value = input.type === "checkbox" ? (input.checked ? "1" : "0") : input.value.trim();
-    if (value !== state.settings[input.name]) changes[input.name] = value;
-  }
-  if (!Object.keys(changes).length) {
-    toast("Nothing changed.");
-    return;
-  }
-  run(event.submitter, async () => {
+  for (const key of Object.keys(draft)) if (draft[key] !== original[key]) changes[key] = draft[key];
+  if (!Object.keys(changes).length) return;
+  run($("#settings-save"), async () => {
     await api("/api/settings", { method: "PUT", body: { changes } });
+    $("#save-bar").hidden = true;
     try {
       await api("/api/restart", { method: "POST" });
       toast("Saved. Reachy is restarting.");
     } catch (error) {
-      toast(`Saved. Restart Reachy for it to apply (${error.message})`);
+      toast(`Saved. Restart Reachy for it to apply. ${error.message}`, "bad");
     }
+    loadSettings();
   });
 });
 
@@ -575,6 +1107,9 @@ $("#settings").addEventListener("submit", (event) => {
 
 window.addEventListener("hashchange", showTab);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-api("/api/me").then((me) => ($("#title").textContent = me.name ? `Reachy · ${me.name.split(" ")[0]}` : "Reachy")).catch(() => {});
+api("/api/me").then((me) => {
+  state.me = me;
+  showTitle();
+}).catch(() => {});
 api("/api/status").then((status) => showPrivacy(status.privacy.on)).catch(() => {});
 showTab();

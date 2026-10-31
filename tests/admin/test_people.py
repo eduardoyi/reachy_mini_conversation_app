@@ -336,3 +336,35 @@ def test_shared_spoken_names_lists_names_more_than_one_person_answers_to() -> No
         {"said": "ana", "people": ["Ana", "Ben"]},
     ]
     assert shared_spoken_names([Person(name="Ana", say=["anita"])]) == []
+
+
+def test_faces_nobody_is_linked_to_become_their_own_cards(files: tuple[PeopleFiles, Path, Path]) -> None:
+    """A face with no card (Enzo) is a card of its own; a face linked by name (Eduardo) is not repeated."""
+    people_files, _, calls = files
+    _write(calls, {"approved": [{"name": "Eduardo", "phone": "+351910000001"}]})
+    people, _ = people_files.load({"eduardo": "Eduardo", "enzo": "Enzo"})
+    assert [(p.name, p.face, p.phone) for p in people] == [
+        ("Eduardo", "eduardo", "+351910000001"),
+        ("Enzo", "enzo", ""),
+    ]
+
+
+def test_people_with_neither_group_nor_phone_are_kept_aside(files: tuple[PeopleFiles, Path, Path]) -> None:
+    """Someone with only a face and spoken names survives a save, outside the app's own contact list."""
+    people_files, contacts, _ = files
+    people_files.save([Person(name="Enzo", say=["enzito"], face="enzo")], {"contacts": "", "calls": ""})
+    document, _ = read_json(contacts)
+    assert document["contacts"] == [] and document["others"] == [{"name": "Enzo", "say": ["enzito"], "face": "enzo"}]
+    assert load_contacts(contacts, normalize) == []
+    people, _ = people_files.load({"enzo": "Enzo"})
+    assert [p.as_json() for p in people] == [
+        {"name": "Enzo", "say": ["enzito"], "chat": "", "phone": "", "face": "enzo"}
+    ]
+
+
+def test_a_face_linked_to_another_name_is_not_its_own_card(files: tuple[PeopleFiles, Path, Path]) -> None:
+    """The Martin face linked to Abuelo Martín shows only on his card."""
+    people_files, _, calls = files
+    _write(calls, {"approved": [{"name": "Abuelo Martín", "phone": "+584140000003", "face": "martin"}]})
+    people, _ = people_files.load({"martin": "Martin"})
+    assert [(p.name, p.face) for p in people] == [("Abuelo Martín", "martin")]

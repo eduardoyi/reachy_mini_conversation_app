@@ -1,6 +1,6 @@
 # Phone admin app
 
-- Status: built and tested; live check on the Mac mini pending
+- Status: running on the Mac mini (LaunchAgent `com.eduardo.reachy-admin`, Tailscale Serve on 9443) since 2026-10-31
 - Plan: [Phone admin app](../plans/phone-admin-app.md)
 
 ## Overview
@@ -9,11 +9,11 @@ Eduardo and Adriana manage Reachy from a web app installed on their phones' home
 
 | Tab | What it does |
 |-----|--------------|
-| People | One card per person: the name Reachy uses, other names people say, the WhatsApp group for voice notes and photos (picked from Reachy's own group list), the phone number for calls, and face photos (added from the phone or from Reachy's camera). Warns when two people answer to the same spoken name. |
+| Home | Reachy drawn as he is (awake, napping, quiet hours, privacy mask, not running, restarting) with the one action that fits (wake, sleep, privacy off, restart); volume; WhatsApp, calls, the e-ink screen (battery) and storage; notifications; restart. Refreshes every 8 s. |
+| People | A tile per person, including anyone Reachy only knows by face. A bottom sheet edits the name, face photos (from the phone or Reachy's camera, or link a face Reachy already knows: "Martin" onto "Abuelo Martín"), the WhatsApp call number, the group for voice notes and photos (by name; "New group with …" creates one with Reachy and that number; Reachy's own number is shown to add him to any other group) and other names people say (chips). Warns when two people answer to the same spoken name. |
 | Camera | A live view from Reachy's camera (about 5 frames a second, 640 px, never recorded). A pad turns his head; while he sleeps it lifts his head without waking him, and "Lift his head" looks straight ahead. The head lowers again two minutes after the last turn. |
-| Status | Reachy running or not, asleep or awake, privacy, WhatsApp linked, call service connected, quiet hours, the e-ink screen's last check-in and battery, free disk, the speaker volume. Wake up, go to sleep, restart. Turn notifications on. |
-| Activity | Calls in, out and missed (with minutes), voice notes and photos sent, who changed what in the admin app, AI cost estimates. |
-| Settings | Quiet hours, languages, who may start calls, wake sensitivity, face recognition, speaker following, the song on the e-ink screen. Saving restarts Reachy. |
+| Activity | Calls in, out and missed (with minutes), voice notes and photos sent, by day; who changed what in the admin app; AI costs today, this week, this month. |
+| Settings | Quiet hours (switch and two times), languages, who may start calls (face chips), wake sensitivity (a slider), face recognition, speaker following, the song on the e-ink screen. A save bar appears on a change; saving restarts Reachy. |
 
 The **privacy switch** sits at the top of every tab. On: the microphone audio is dropped before anything
 hears it (wake word, local speech, the cloud conversation, calls, voice notes), the camera is not read (face
@@ -77,13 +77,14 @@ flowchart LR
 | File | Role |
 |------|------|
 | `admin/server.py` | `AdminSettings.from_env`, `refusal` (the guard), `create_app` (routes, health, the watch), `main` (`reachy-admin`). |
-| `admin/people.py` | `PeopleFiles.load/save`, `person_from_json`, `validate`, `shared_spoken_names`. |
+| `admin/people.py` | `PeopleFiles.load/save`, `person_from_json`, `validate`, `shared_spoken_names`. Faces with no card become cards; people with neither a group nor a number are kept under `others` in the contacts file (the app's contact loader reads only `contacts`). |
 | `admin/records.py` | `read_json`/`write_json` with versions (a hash of the file) so two phones never silently overwrite each other; atomic owner-only writes with three backups. |
 | `admin/settings.py` | `SETTINGS` (the only `.env` keys the app may change), `read_settings`, `write_settings` (other lines kept byte for byte). |
 | `admin/app_link.py` | `AppLink`: the control API client. |
 | `admin/notifier.py` | `Notifier` (subscriptions in `push.json`, VAPID key `vapid.pem`), `Watch` (checks every minute). |
 | `admin/web_push.py` | RFC 8291 aes128gcm encryption and RFC 8292 VAPID with `cryptography`; checked against the RFC 8291 example. |
-| `static/admin/` | `index.html`, `admin.js`, `admin.css`, `manifest.webmanifest`, `sw.js`, icons. Plain JS, no build step. |
+| `static/admin/` | `index.html` (icons as an inline SVG sprite, Reachy as inline SVG whose pose follows `data-state`), `admin.js`, `admin.css` (light and dark tokens; Unbounded and Figtree from Google Fonts), `manifest.webmanifest`, `sw.js`, icons. Plain JS, no build step. |
+| `whatsapp.py` | `WhatsAppLink.groups` (names and ids), `create_group` (GOWA `POST /group`), `ServerStatus.number` (Reachy's own number). |
 | `control_api.py` | `ControlApi` (status, privacy, camera, head, look-up, sleep, wake, faces), `load_or_create_token`, `start_control_server`. |
 | `privacy.py` | `PrivacySwitch`, `PRIVACY`, `quiet_now`, `listening_allowed`. |
 | `activity_log.py`, `json_lines.py` | `record(kind, who, outcome, seconds)` into `ACTIVITY_LOG_FILE`; `JsonLines` shared with the audit log. |
@@ -140,7 +141,7 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
    users reach the mini on 9443.
 5. On each phone: Tailscale signed in (iPhone: VPN On Demand for `*.ts.net`), open
    `https://<mini>.<tailnet>.ts.net:9443` in Safari, Share → Add to Home Screen, open it from the home
-   screen, Status → Turn on notifications.
+   screen, Home → Notifications.
 
 ## Constraints and gotchas
 

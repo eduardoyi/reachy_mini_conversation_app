@@ -8,6 +8,7 @@ header (a Funnel request, or another program on this computer). Changes must com
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -54,6 +55,8 @@ LOGIN_HEADER: Final[str] = "tailscale-user-login"
 NAME_HEADER: Final[str] = "tailscale-user-name"
 MAX_BODY_BYTES: Final[int] = 64 * 1024
 MAX_PHOTOS_BYTES: Final[int] = 12 * 1024 * 1024
+MAX_GROUP_TITLE_CHARS: Final[int] = 100
+MAX_GROUP_PHONES: Final[int] = 20
 # The TRMNL counts as checking in when it did so within this long.
 DISPLAY_RECENT_S: Final[float] = 15 * 60
 STATIC_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "admin"
@@ -345,7 +348,35 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
             groups = await whatsapp.groups()
         except (httpx.HTTPError, ValueError, KeyError):
             return _error("Reachy's WhatsApp did not answer.", 503)
-        return JSONResponse({"groups": [{"id": chat, "name": name} for chat, name in groups]})
+        server = await whatsapp.status()
+        number = f"+{server.number}" if server is not None and server.number.isdigit() else ""
+        return JSONResponse(
+            {"groups": [{"id": chat, "name": name or "Unnamed group"} for name, chat in groups], "number": number}
+        )
+
+    @app.post("/api/groups")
+    async def _create_group(request: Request) -> Response:
+        if whatsapp is None:
+            return _error("Reachy's WhatsApp is not set up.", 404)
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        title, phones = payload.get("title"), payload.get("phones")
+        if not isinstance(title, str) or not 0 < len(title.strip()) <= MAX_GROUP_TITLE_CHARS or "\n" in title:
+            return _error(f"The group name must be 1 to {MAX_GROUP_TITLE_CHARS} characters.", 400)
+        if not isinstance(phones, list) or not 0 < len(phones) <= MAX_GROUP_PHONES:
+            return _error("Pick who is in the group.", 400)
+        digits = [re.sub(r"\D", "", phone) for phone in phones if isinstance(phone, str)]
+        if len(digits) != len(phones) or not all(7 <= len(number) <= 15 for number in digits):
+            return _error("Every phone number needs its country code.", 400)
+        try:
+            group = await whatsapp.create_group(title.strip(), digits)
+        except httpx.HTTPError:
+            group = None
+        if group is None:
+            return _error("WhatsApp did not create the group.", 502)
+        audit.append({"who": _who(request), "action": "group created", "target": title.strip()})
+        return JSONResponse({"id": group, "name": title.strip()})
 
     # Faces (through the running app, which owns the face store) ---------------------------------
 
@@ -562,6 +593,7 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
 def main() -> None:
     """Serve the admin app on 127.0.0.1:ADMIN_PORT."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # a status check every minute is not news
     port = int(os.getenv("ADMIN_PORT") or 7870)
     settings = AdminSettings.from_env()
     uvicorn.run(create_app(settings), host="127.0.0.1", port=port, log_level="warning", proxy_headers=False)

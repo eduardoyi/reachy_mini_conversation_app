@@ -2,111 +2,246 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#edf0f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#10132a" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Reachy">
   <title>Reachy</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/admin/icon-192.png">
   <link rel="icon" href="/static/admin/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap">
   <link rel="stylesheet" href="/static/admin/admin.css">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 4l8.5 6.5V19a1 1 0 0 1-1 1H15v-5.5H9V20H4.5a1 1 0 0 1-1-1z"/></symbol>
+      <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.8 14.6c2.5.3 4.2 2 4.8 5.4"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7.5h3L9 4.5h6l2 3h3a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.8"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M18 7h2M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15.5" cy="7" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="17" r="2.2"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="m3.5 3.5 17 17M10.4 5.7c.5-.1 1-.2 1.6-.2 6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.9 3.7M6.7 6.9C4 8.6 2.5 12 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.2-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.8 4.6-2.3 1.4a10.5 10.5 0 0 0 5.5 5.5l1.4-2.3 4.6 1.8v3a2 2 0 0 1-2 2A15.5 15.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/></symbol>
+      <symbol id="i-phone-out" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.8 4.6-2.3 1.4a10.5 10.5 0 0 0 5.5 5.5l1.4-2.3 4.6 1.8v3a2 2 0 0 1-2 2A15.5 15.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2zM15 3.5h5.5V9M20.5 3.5 15 9"/></symbol>
+      <symbol id="i-phone-in" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.8 4.6-2.3 1.4a10.5 10.5 0 0 0 5.5 5.5l1.4-2.3 4.6 1.8v3a2 2 0 0 1-2 2A15.5 15.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2zM20.5 3.5 15 9M15 3.5V9h5.5"/></symbol>
+      <symbol id="i-phone-missed" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.8 4.6-2.3 1.4a10.5 10.5 0 0 0 5.5 5.5l1.4-2.3 4.6 1.8v3a2 2 0 0 1-2 2A15.5 15.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2zM15 3.5l5.5 5.5M20.5 3.5 15 9"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-4.5-4.5-8.5 8.5"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-5.5 4V6A1.5 1.5 0 0 1 5 4.5z"/></symbol>
+      <symbol id="i-face" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M9 9.5v1M15 9.5v1M9 15c1.6 1.4 4.4 1.4 6 0"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16v.5"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.5H15"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></symbol>
+      <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.5"/></symbol>
+      <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5h3.5l5-4v13l-5-4H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5zM10 20.5h4"/></symbol>
+      <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8M6.7 7a7.5 7.5 0 1 0 10.6 0"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+      <symbol id="i-lift" viewBox="0 0 24 24"><path d="M12 19V6M6.5 11 12 5.5l5.5 5.5"/></symbol>
+      <symbol id="i-screen" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 8h7M8.5 11.5h7M8.5 15h4"/></symbol>
+      <symbol id="i-drive" viewBox="0 0 24 24"><path d="M3.5 13.5 6.5 5h11l3 8.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18zM3.5 13.5h17M7.5 16.5h.5"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5c.6 4.3 2.2 5.9 6.5 6.5-4.3.6-5.9 2.2-6.5 6.5-.6-4.3-2.2-5.9-6.5-6.5 4.3-.6 5.9-2.2 6.5-6.5zM18.5 15.5c.3 1.9 1 2.6 3 3-2 .3-2.7 1-3 3-.3-2-1-2.7-3-3 2-.4 2.7-1.1 3-3z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l1 13h9l1-13"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    </defs>
+  </svg>
+
   <header class="top">
     <h1 id="title">Reachy</h1>
-    <button id="privacy" class="privacy" type="button" aria-pressed="false">Privacy off</button>
+    <button id="privacy" class="privacy" type="button" aria-pressed="false">
+      <svg class="icon"><use href="#i-eye"/></svg><span>Privacy</span>
+    </button>
   </header>
 
   <main>
-    <section id="view-people" class="view" hidden>
-      <div class="row-head">
-        <h2>People</h2>
-        <button id="add-person" class="small" type="button">Add</button>
+    <section id="view-home" class="view" hidden>
+      <div id="stage" class="stage" data-state="off">
+        <svg class="reachy" viewBox="0 0 240 210" role="img" aria-labelledby="mood">
+          <ellipse class="r-shadow" cx="120" cy="203" rx="62" ry="6"/>
+          <path class="r-body" d="M66 200c0-36 20-58 54-58s54 22 54 58z"/>
+          <path class="r-neck" d="M104 146h32"/>
+          <g class="r-head">
+            <g class="r-antenna r-antenna-l"><path d="M96 62C94 44 86 30 78 18"/><circle cx="77" cy="15" r="6.5"/></g>
+            <g class="r-antenna r-antenna-r"><path d="M144 62c2-18 10-32 18-44"/><circle cx="163" cy="15" r="6.5"/></g>
+            <rect class="r-skull" x="50" y="56" width="140" height="94" rx="46"/>
+            <g class="r-eyes">
+              <circle class="r-eye" cx="95" cy="104" r="21"/><circle class="r-eye" cx="145" cy="104" r="21"/>
+              <circle class="r-glint" cx="102" cy="96" r="5.5"/><circle class="r-glint" cx="152" cy="96" r="5.5"/>
+            </g>
+            <g class="r-shut"><path d="M80 104q15 11 30 0M130 104q15 11 30 0"/></g>
+            <g class="r-mask">
+              <rect x="58" y="84" width="124" height="40" rx="20"/>
+              <path class="r-lock" d="M113.5 104h13v10h-13zM116 104v-3.5a4 4 0 0 1 8 0v3.5"/>
+            </g>
+          </g>
+          <g class="r-z"><text x="196" y="78">z</text><text x="212" y="56">z</text></g>
+        </svg>
+        <div class="mood">
+          <h2 id="mood">Looking for Reachy…</h2>
+          <p id="mood-detail"></p>
+        </div>
+        <button id="stage-action" class="pill sun" type="button" hidden></button>
       </div>
-      <p id="shared-names" class="warn" hidden></p>
-      <ul id="people" class="cards"></ul>
+
+      <div class="panel" id="volume-row" hidden>
+        <div class="row volume">
+          <svg class="icon"><use href="#i-speaker"/></svg>
+          <label for="volume" class="row-label">Volume</label>
+          <input id="volume" type="range" min="0" max="100" step="5">
+          <output id="volume-value" for="volume"></output>
+        </div>
+      </div>
+
+      <h3 class="section-title">Health</h3>
+      <div id="health" class="health"></div>
+
+      <div class="panel">
+        <div class="row">
+          <svg class="icon"><use href="#i-bell"/></svg>
+          <div class="row-text">
+            <span class="row-label">Notifications</span>
+            <span class="row-sub" id="push-hint">Missed calls and anything that breaks</span>
+          </div>
+          <button id="push-on" class="switch" role="switch" type="button" aria-checked="false" aria-label="Notifications"></button>
+        </div>
+        <button id="push-test" class="row link-row" type="button" hidden>
+          <svg class="icon"><use href="#i-spark"/></svg><span class="row-label">Send a test notification</span>
+        </button>
+      </div>
+
+      <div class="panel">
+        <button id="restart" class="row link-row danger" type="button" hidden>
+          <svg class="icon"><use href="#i-power"/></svg><span class="row-label">Restart Reachy</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="view-people" class="view" hidden>
+      <div id="shared-names" class="notice" hidden></div>
+      <ul id="people" class="people"></ul>
+      <button id="add-person" class="fab" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add person</button>
     </section>
 
     <section id="view-camera" class="view" hidden>
-      <div class="camera">
-        <img id="camera" alt="Reachy's camera">
-        <p id="camera-note" class="camera-note" hidden></p>
+      <div class="viewer">
+        <img id="camera" alt="What Reachy sees">
+        <span id="live" class="live" hidden>Live</span>
+        <div id="camera-note" class="viewer-note" hidden>
+          <svg class="icon"><use href="#i-eye-off"/></svg><p></p>
+        </div>
       </div>
-      <div class="pad" aria-label="Turn the head">
-        <button data-head="up" type="button" aria-label="Look up">▲</button>
-        <button data-head="left" type="button" aria-label="Look left">◀</button>
-        <button data-head="center" type="button" aria-label="Look ahead">●</button>
-        <button data-head="right" type="button" aria-label="Look right">▶</button>
-        <button data-head="down" type="button" aria-label="Look down">▼</button>
+      <p id="camera-hint" class="center-hint" hidden>He stays asleep while you look around.</p>
+      <div class="dpad" role="group" aria-label="Turn his head">
+        <button data-head="up" type="button" aria-label="Look up"><svg class="icon"><use href="#i-up"/></svg></button>
+        <button data-head="left" type="button" aria-label="Look left"><svg class="icon"><use href="#i-left"/></svg></button>
+        <button data-head="center" type="button" aria-label="Look straight ahead"><svg class="icon"><use href="#i-target"/></svg></button>
+        <button data-head="right" type="button" aria-label="Look right"><svg class="icon"><use href="#i-right"/></svg></button>
+        <button data-head="down" type="button" aria-label="Look down"><svg class="icon"><use href="#i-down"/></svg></button>
       </div>
-      <button id="look-up" class="wide" type="button">Lift his head (stays asleep)</button>
-    </section>
-
-    <section id="view-status" class="view" hidden>
-      <h2>Status</h2>
-      <ul id="status" class="status"></ul>
-      <div class="buttons">
-        <button id="wake" type="button">Wake up</button>
-        <button id="sleep" type="button">Go to sleep</button>
-        <button id="restart" class="danger" type="button">Restart Reachy</button>
-      </div>
-      <h3>Notifications</h3>
-      <p class="hint" id="push-hint">Missed calls, WhatsApp unlinked, Reachy stopped, privacy left on.</p>
-      <div class="buttons">
-        <button id="push-on" type="button">Turn on notifications</button>
-        <button id="push-test" type="button" hidden>Send a test</button>
-      </div>
+      <button id="look-up" class="pill soft center" type="button" hidden><svg class="icon"><use href="#i-lift"/></svg>Lift his head</button>
     </section>
 
     <section id="view-activity" class="view" hidden>
-      <h2>Activity</h2>
-      <ul id="activity" class="log"></ul>
-      <h3>Changes</h3>
-      <ul id="changes" class="log"></ul>
-      <h3>AI costs</h3>
-      <div id="usage" class="hint"></div>
+      <div class="segmented" role="tablist">
+        <button type="button" role="tab" data-log="activity" aria-selected="true">Reachy</button>
+        <button type="button" role="tab" data-log="changes" aria-selected="false">Changes</button>
+      </div>
+      <div id="usage" class="usage" hidden></div>
+      <div id="log"></div>
     </section>
 
     <section id="view-settings" class="view" hidden>
-      <h2>Settings</h2>
-      <p class="hint">Saved settings apply when Reachy restarts.</p>
       <form id="settings" class="settings"></form>
+      <div id="save-bar" class="save-bar" hidden>
+        <button id="settings-discard" class="pill ghost" type="button">Discard</button>
+        <button id="settings-save" class="pill sun" type="submit" form="settings">Save and restart Reachy</button>
+      </div>
     </section>
   </main>
 
   <nav class="tabs">
-    <a href="#people" data-tab="people">People</a>
-    <a href="#camera" data-tab="camera">Camera</a>
-    <a href="#status" data-tab="status">Status</a>
-    <a href="#activity" data-tab="activity">Activity</a>
-    <a href="#settings" data-tab="settings">Settings</a>
+    <a href="#home" data-tab="home"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+    <a href="#people" data-tab="people"><svg class="icon"><use href="#i-people"/></svg>People</a>
+    <a href="#camera" data-tab="camera"><svg class="icon"><use href="#i-camera"/></svg>Camera</a>
+    <a href="#activity" data-tab="activity"><svg class="icon"><use href="#i-activity"/></svg>Activity</a>
+    <a href="#settings" data-tab="settings"><svg class="icon"><use href="#i-settings"/></svg>Settings</a>
   </nav>
 
-  <dialog id="person-dialog">
-    <form id="person-form" method="dialog">
-      <h2 id="person-heading">Person</h2>
-      <label>Name Reachy uses<input name="name" required maxlength="60" autocomplete="off"></label>
-      <label>Other names people say (comma separated)<input name="say" maxlength="400" autocomplete="off"></label>
-      <label>WhatsApp group for voice notes and photos
-        <select name="chat"><option value="">None</option></select>
-      </label>
-      <label>Phone for calls (with country code)<input name="phone" type="tel" maxlength="24" placeholder="+34 600 000 000"></label>
-      <fieldset id="face-box">
-        <legend>Face</legend>
-        <div id="face-photos" class="photos"></div>
-        <div class="buttons">
-          <label class="button">Add photos<input id="face-upload" type="file" accept="image/*" multiple hidden></label>
-          <button id="face-enroll" type="button">From Reachy's camera</button>
+  <dialog id="person-sheet" class="sheet" aria-labelledby="person-title">
+    <form id="person-form" novalidate>
+      <div class="sheet-bar">
+        <button id="person-cancel" class="text-button" type="button">Cancel</button>
+        <span id="person-title" class="sheet-title">New person</span>
+        <button id="person-save" class="pill sun small" type="submit">Save</button>
+      </div>
+      <div class="sheet-body">
+        <div class="who">
+          <div id="person-avatar" class="avatar xl"></div>
+          <input name="name" class="name-input" placeholder="Name" required maxlength="60" autocomplete="off" aria-label="Name">
         </div>
-      </fieldset>
-      <p id="person-error" class="error" hidden></p>
-      <div class="buttons end">
-        <button id="person-delete" class="danger" type="button">Remove</button>
-        <button value="cancel" type="button" id="person-cancel">Cancel</button>
-        <button id="person-save" class="primary" type="submit">Save</button>
+        <p id="person-error" class="error" role="alert" hidden></p>
+
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-face"/></svg>Face</h4>
+          <div id="face-strip" class="face-strip"></div>
+          <div id="face-link" class="face-link" hidden>
+            <p class="hint">Already known to Reachy?</p>
+            <div id="face-link-chips" class="chips"></div>
+          </div>
+          <p id="face-off" class="hint" hidden>Faces need Reachy running.</p>
+          <input id="face-upload" type="file" accept="image/*" multiple hidden>
+        </section>
+
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-phone"/></svg>WhatsApp calls</h4>
+          <input name="phone" type="tel" inputmode="tel" maxlength="24" placeholder="+351 912 345 678" autocomplete="off" aria-label="Phone number with country code">
+        </section>
+
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-chat"/></svg>Voice notes and photos go to</h4>
+          <div id="group-list" class="options" role="radiogroup" aria-label="WhatsApp group"></div>
+          <div id="new-group" class="new-group" hidden>
+            <input id="new-group-name" maxlength="100" autocomplete="off" aria-label="Group name">
+            <button id="new-group-create" class="pill sun small" type="button">Create</button>
+          </div>
+          <p id="group-help" class="hint"></p>
+        </section>
+
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-mic"/></svg>Also called</h4>
+          <div id="say-chips" class="chips editable">
+            <input id="say-input" maxlength="60" autocomplete="off" placeholder="Add a name" aria-label="Another name people use">
+          </div>
+          <p class="hint">Names people say to Reachy, like “abuela”.</p>
+        </section>
+
+        <button id="person-delete" class="text-button danger wide-button" type="button">
+          <svg class="icon"><use href="#i-trash"/></svg><span>Remove</span>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" class="ask" aria-labelledby="ask-title">
+    <form method="dialog">
+      <h3 id="ask-title"></h3>
+      <p id="ask-body"></p>
+      <div class="ask-buttons">
+        <button value="no" class="pill ghost" type="submit">Cancel</button>
+        <button id="ask-yes" value="yes" class="pill sun" type="submit">OK</button>
       </div>
     </form>
   </dialog>

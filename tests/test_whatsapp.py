@@ -1,3 +1,4 @@
+import json
 import base64
 import asyncio
 import logging
@@ -129,7 +130,7 @@ async def test_status_reports_the_server_or_none_when_it_does_not_answer() -> No
     sent: list[httpx.Request] = []
     reply = _ok(is_connected=True, is_logged_in=True, device_id="reachy", jid="351900000000@s.whatsapp.net")
     status = await _link([reply], sent).status()
-    assert status is not None and status.connected and status.logged_in
+    assert status is not None and status.connected and status.logged_in and status.number == "351900000000"
     assert str(sent[0].url) == f"{URL}/app/status"
 
     unpaired = httpx.Response(404, json={"code": "DEVICE_NOT_FOUND", "message": "create a device first"})
@@ -144,6 +145,18 @@ async def test_groups_lists_names_and_ids() -> None:
     """Groups come back as names with their ids."""
     reply = _ok(data=[{"JID": GROUP, "Name": "Reachy photos"}, {"JID": "1@g.us", "Name": "Family"}])
     assert await _link([reply], []).groups() == [("Reachy photos", GROUP), ("Family", "1@g.us")]
+
+
+@pytest.mark.asyncio
+async def test_create_group_sends_the_title_and_numbers_and_returns_its_id() -> None:
+    """A new group is posted with its title and members; its id comes back, or None when refused."""
+    sent: list[httpx.Request] = []
+    group = await _link([_ok(group_id=GROUP)], sent).create_group("Reachy & Sergio", ["447450000000"])
+    assert group == GROUP
+    assert (sent[0].method, sent[0].url.path) == ("POST", "/group")
+    assert json.loads(sent[0].content) == {"title": "Reachy & Sergio", "participants": ["447450000000"]}
+    refused = httpx.Response(400, json={"code": "VALIDATION_ERROR", "message": "participants: cannot be blank"})
+    assert await _link([refused], []).create_group("Reachy", ["1"]) is None
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ credentials or the images.
     python -m reachy_mini_conversation_app.whatsapp status | groups | pair PHONE
 """
 
+import re
 import sys
 import enum
 import time
@@ -46,6 +47,7 @@ class ServerStatus:
     connected: bool
     logged_in: bool
     message: str
+    number: str = ""
 
 
 class WhatsAppLink:
@@ -158,6 +160,7 @@ class WhatsAppLink:
             connected=results.get("is_connected") is True,
             logged_in=results.get("is_logged_in") is True,
             message=f"HTTP {response.status_code} {body.get('code', '')}: {body.get('message', '')}",
+            number=re.split(r"[:@]", str(results.get("jid") or ""))[0],
         )
 
     async def groups(self) -> list[tuple[str, str]]:
@@ -169,6 +172,18 @@ class WhatsAppLink:
         return [
             (str(item.get("Name", "")), str(item.get("JID", ""))) for item in items or [] if isinstance(item, dict)
         ]
+
+    async def create_group(self, title: str, phones: list[str]) -> str | None:
+        """Create a group titled ``title`` with Reachy and ``phones`` (digits only); return its id, or None."""
+        response = await self._request(
+            "POST", "/group", STATUS_TIMEOUT_S, json={"title": title, "participants": phones}
+        )
+        if response.status_code != 200:
+            logger.warning("WhatsApp group not created: HTTP %d %s", response.status_code, _json(response).get("code"))
+            return None
+        results = _json(response).get("results") or {}
+        group = results.get("group_id") if isinstance(results, dict) else None
+        return str(group) if group else None
 
     async def pairing_code(self, phone: str) -> str | None:
         """Ask GOWA for the code that links it to ``phone`` (WhatsApp, Linked devices, Link with phone number)."""

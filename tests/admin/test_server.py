@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reachy_mini_conversation_app.admin import server
+from reachy_mini_conversation_app.whatsapp import ServerStatus, WhatsAppLink
 from reachy_mini_conversation_app.json_lines import JsonLines
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.admin.server import AdminSettings, create_app
@@ -774,3 +775,71 @@ def test_groups_without_whatsapp_is_not_found(admin: Admin) -> None:
     with admin.client() as client:
         response = client.get("/api/groups")
     assert response.status_code == 404 and "not set up" in response.json()["error"]
+
+
+# Groups --------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def whatsapp_admin(
+    admin: Admin, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Admin, AdminSettings, list[tuple[str, list[str]]]]:
+    """Run the admin app against a fake WhatsApp server with two groups, recording the groups created."""
+    created: list[tuple[str, list[str]]] = []
+
+    async def groups(self: WhatsAppLink) -> list[tuple[str, str]]:
+        return [("Reachy <> Sergio", GROUP), ("", "120363000000000002@g.us")]
+
+    async def status(self: WhatsAppLink) -> ServerStatus:
+        return ServerStatus(True, True, "", "351913705633")
+
+    async def create_group(self: WhatsAppLink, title: str, phones: list[str]) -> str | None:
+        created.append((title, phones))
+        return "120363000000000099@g.us"
+
+    monkeypatch.setattr(WhatsAppLink, "groups", groups)
+    monkeypatch.setattr(WhatsAppLink, "status", status)
+    monkeypatch.setattr(WhatsAppLink, "create_group", create_group)
+    settings = AdminSettings(**{**admin.settings.__dict__, "whatsapp_url": "http://gowa", "whatsapp_auth": "u:p"})
+    return admin, settings, created
+
+
+def test_groups_are_listed_by_name_with_reachys_number(whatsapp_admin: tuple[Admin, AdminSettings, Any]) -> None:
+    """Each group shows its name (or "Unnamed group") with its id, and Reachy's own number to add him elsewhere."""
+    admin, settings, _ = whatsapp_admin
+    with admin.client(settings=settings) as client:
+        payload = client.get("/api/groups").json()
+    assert payload == {
+        "groups": [
+            {"id": GROUP, "name": "Reachy <> Sergio"},
+            {"id": "120363000000000002@g.us", "name": "Unnamed group"},
+        ],
+        "number": "+351913705633",
+    }
+
+
+def test_a_group_is_created_with_their_number_and_audited(whatsapp_admin: tuple[Admin, AdminSettings, Any]) -> None:
+    """Creating a group passes the title and digits only, and the change is audited by title."""
+    admin, settings, created = whatsapp_admin
+    with admin.client(settings=settings) as client:
+        response = client.post(
+            "/api/groups", headers=SAME_ORIGIN, json={"title": " Reachy & Sergio ", "phones": ["+44 7450 000000"]}
+        )
+    assert response.json() == {"id": "120363000000000099@g.us", "name": "Reachy & Sergio"}
+    assert created == [("Reachy & Sergio", ["447450000000"])]
+    assert [(e["action"], e["target"]) for e in admin.audit()] == [("group created", "Reachy & Sergio")]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"title": "", "phones": ["+447450000000"]}, {"title": "a\nb", "phones": ["+447450000000"]},
+     {"title": "Family", "phones": []}, {"title": "Family", "phones": ["12"]}, {"title": "Family", "phones": [7]}],
+)  # fmt: skip
+def test_a_group_needs_a_name_and_full_numbers(
+    whatsapp_admin: tuple[Admin, AdminSettings, Any], body: dict[str, Any]
+) -> None:
+    """A blank or multi-line name, no members or a number without its country code is refused."""
+    admin, settings, created = whatsapp_admin
+    with admin.client(settings=settings) as client:
+        assert client.post("/api/groups", headers=SAME_ORIGIN, json=body).status_code == 400
+    assert created == [] and admin.audit() == []

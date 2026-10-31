@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 MAX_NAME_CHARS: Final[int] = 60
 MAX_SPOKEN_NAMES: Final[int] = 12
 MAX_PEOPLE: Final[int] = 100
+# People with neither a group nor a call number (a face, spoken names) live under this key of the contacts
+# file, which the app's own loader does not read.
+OTHERS: Final[str] = "others"
 _PHONE = re.compile(r"\+?[0-9][0-9 ()-]{5,22}")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -92,6 +95,12 @@ class PeopleFiles:
             person = card(entry)
             if person is not None:
                 person.phone = _text(entry.get("phone"))
+        for entry in _entries(contacts, OTHERS):
+            card(entry)
+        linked = {person.face for person in people.values()}
+        for face_id, name in (faces or {}).items():
+            if face_id not in linked and normalize(name) not in people:
+                people[normalize(name)] = Person(name=name, face=face_id)
         return list(people.values()), {"contacts": contacts_version, "calls": calls_version}
 
     def save(self, people: list[Person], versions: dict[str, str]) -> dict[str, str]:
@@ -112,13 +121,16 @@ class PeopleFiles:
 
         new_contacts = [entry(old_contacts.get(normalize(p.name)), p, {"chat": p.chat}) for p in people if p.chat]
         new_calls = [entry(old_calls.get(normalize(p.name)), p, {"phone": p.phone}) for p in people if p.phone]
+        old_others = {normalize(_text(e.get("name"))): e for e in _entries(contacts, OTHERS)}
+        new_others = [entry(old_others.get(normalize(p.name)), p, {}) for p in people if not p.chat and not p.phone]
+        document = {**contacts, "contacts": new_contacts}
+        if new_others or OTHERS in contacts:
+            document[OTHERS] = new_others
         written_calls = calls_version
         if new_calls or calls_version:
             written_calls = write_json(self._calls_path, {**calls, "approved": new_calls}, calls_version)
         try:
-            written_contacts = write_json(
-                self._contacts_path, {**contacts, "contacts": new_contacts}, contacts_version
-            )
+            written_contacts = write_json(self._contacts_path, document, contacts_version)
         except RecordError:
             logger.warning("Approved callers were saved but family groups were not")
             raise
