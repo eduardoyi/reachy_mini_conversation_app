@@ -51,14 +51,16 @@ HELD_QUESTION: Final[dict[str, Any]] = {
     ),
 }
 
-_STARS: Final[dict[str, tuple[str, ...]]] = {
+STARS: Final[dict[str, tuple[str, ...]]] = {
     "es": ("Esta vez, ninguna estrella.", "¡Una estrella!", "¡Dos estrellas!", "¡Tres estrellas!",
-           "¡Cuatro estrellas!", "¡Cinco estrellas!"),
-    "en": ("No stars this time.", "One star!", "Two stars!", "Three stars!", "Four stars!", "Five stars!"),
+           "¡Cuatro estrellas!", "¡Cinco estrellas!", "¡Seis estrellas!", "¡Siete estrellas!", "¡Ocho estrellas!",
+           "¡Nueve estrellas!", "¡Diez estrellas!"),
+    "en": ("No stars this time.", "One star!", "Two stars!", "Three stars!", "Four stars!", "Five stars!",
+           "Six stars!", "Seven stars!", "Eight stars!", "Nine stars!", "Ten stars!"),
 }  # fmt: skip
 _AGAIN: Final[dict[str, str]] = {"es": "¿Otra vez?", "en": "Play again?"}
-_THANKS: Final[dict[str, str]] = {"es": "¡Gracias por jugar!", "en": "Thanks for playing!"}
-_WELL_DONE: Final[dict[str, str]] = {"es": "¡Muy bien!", "en": "Well done!"}
+THANKS: Final[dict[str, str]] = {"es": "¡Gracias por jugar!", "en": "Thanks for playing!"}
+WELL_DONE: Final[dict[str, str]] = {"es": "¡Muy bien!", "en": "Well done!"}
 
 # The tune: a bouncy figure on a C major arpeggio, staccato, sped up from START_BPM to END_BPM over the round.
 START_BPM: Final[float] = 100.0
@@ -70,7 +72,7 @@ _TUNE_LEVEL: Final[float] = 0.18
 def hunt_phrases() -> frozenset[str]:
     """Return the lines every finding game shares, in both languages, for the speech cache."""
     return frozenset(
-        line for language in ("es", "en") for line in (_AGAIN[language], _THANKS[language], *_STARS[language])
+        line for language in ("es", "en") for line in (_AGAIN[language], THANKS[language], *STARS[language])
     )
 
 
@@ -84,7 +86,7 @@ def beep_note(frequency: float, seconds: float) -> NDArray[np.int16]:
     return np.concatenate([tone, np.zeros(samples - sounding)]).astype(np.int16)
 
 
-def _thumbnail(jpeg: bytes) -> tuple[Image.Image, NDArray[np.float32]] | None:
+def thumbnail(jpeg: bytes) -> tuple[Image.Image, NDArray[np.float32]] | None:
     """Decode a camera frame: the picture, and a small gray copy to tell whether anything changed."""
     try:
         with Image.open(io.BytesIO(jpeg)) as opened:
@@ -93,6 +95,25 @@ def _thumbnail(jpeg: bytes) -> tuple[Image.Image, NDArray[np.float32]] | None:
         return None
     small = np.asarray(picture.convert("L").resize((48, 27)), dtype=np.float32)
     return picture, small
+
+
+async def ask_again(context: GameContext) -> bool:
+    """Ask "¿Otra vez?" and wait for a yes (OTHER_ROUND_ANSWER_S at most)."""
+    answered: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+
+    async def answer(text: str) -> None:
+        if not answered.done():
+            answered.set_result(words(text) in YES_WORDS)
+
+    await context.playing()
+    context.services.ask(_AGAIN[context.language], context.language, answer)
+    try:
+        again = await asyncio.wait_for(answered, OTHER_ROUND_ANSWER_S)
+    except asyncio.TimeoutError:
+        return False
+    if again:
+        context.played()
+    return again
 
 
 @dataclass(frozen=True)
@@ -170,29 +191,11 @@ class Hunt(Game):
                 if await self._play_round(context, target):
                     self._stars += 1
                 context.progress = f"Round {self._round} of {ROUNDS}, {self._stars} star{'s' * (self._stars != 1)}"
-            context.show(render_game_prompt(_WELL_DONE[language], self._stars, ROUNDS))
-            await context.say(_STARS[language][self._stars])
-            if not await self._again(context):
-                await context.say(_THANKS[language])
+            context.show(render_game_prompt(WELL_DONE[language], self._stars, ROUNDS))
+            await context.say(STARS[language][self._stars])
+            if not await ask_again(context):
+                await context.say(THANKS[language])
                 return
-
-    async def _again(self, context: GameContext) -> bool:
-        """Ask "¿Otra vez?" and wait for a yes."""
-        answered: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-
-        async def answer(text: str) -> None:
-            if not answered.done():
-                answered.set_result(words(text) in YES_WORDS)
-
-        await context.playing()
-        context.services.ask(_AGAIN[context.language], context.language, answer)
-        try:
-            again = await asyncio.wait_for(answered, OTHER_ROUND_ANSWER_S)
-        except asyncio.TimeoutError:
-            return False
-        if again:
-            context.played()
-        return again
 
     async def _play_round(self, context: GameContext, target: str) -> bool:
         """One round: name ``target``, play the tune and look until it is found or time is up."""
@@ -238,7 +241,7 @@ class Hunt(Game):
         while context.played_s - started < self.round_s:
             await context.sleep(CHECK_EVERY_S)
             frame = await asyncio.to_thread(context.services.camera)
-            decoded = await asyncio.to_thread(_thumbnail, frame) if frame else None
+            decoded = await asyncio.to_thread(thumbnail, frame) if frame else None
             if decoded is None:
                 continue
             picture, small = decoded

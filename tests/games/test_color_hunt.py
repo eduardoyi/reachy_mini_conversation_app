@@ -156,7 +156,7 @@ async def test_a_pause_stops_the_tune_and_the_clock(game) -> None:
 def test_every_line_is_cached_and_no_wrong_line_names_an_accepted_color(monkeypatch: pytest.MonkeyPatch) -> None:
     """All lines are fixed (cached); red's lines never call orange wrong."""
     phrases = color_hunt_phrases()
-    assert {"¡Busca algo ROJO!", "Find something red!", "¡Sí! ¡Rosa!", "Time's up! It was black."} <= phrases
+    assert {"¡Busca algo ROJO!", "Find something red!", "¡Sí! ¡Rosado!", "Time's up! It was black."} <= phrases
     assert "Mmm, eso es azul. ¡Busca algo rojo!" in phrases
     assert "Mmm, eso es naranja. ¡Busca algo rojo!" not in phrases
     assert "Mmm, eso es naranja. ¡Busca algo azul!" in phrases

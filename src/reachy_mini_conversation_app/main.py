@@ -150,7 +150,9 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.host import GameHost
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
+    from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
+    from reachy_mini_conversation_app.games.simon_says import SimonSays
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
     from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
     from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
@@ -222,6 +224,10 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             feature="game_check",
         )
 
+    async def gesture(direction: str) -> None:
+        """Turn the head as a pose asks ("up", "left"), or back to the front."""
+        await MoveHead()(deps, direction=direction)
+
     def emotion(intent: str) -> None:
         threading.Thread(target=queue_intent_move, args=(movement, intent), name="game-emotion", daemon=True).start()
 
@@ -242,9 +248,10 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         call_busy=(lambda: bool(calls.busy)) if calls is not None else (lambda: False),
         picture=display.game_picture if display is not None else None,
         draw_pictures=display.draw_game_pictures if display is not None else None,
+        gesture=gesture,
     )
     games: dict[str, Callable[[], Game]] = (
-        {"colors": ColorHunt, "treasure": TreasureHunt} if deps.camera_enabled else {}
+        {"colors": ColorHunt, "treasure": TreasureHunt, "simon": SimonSays} if deps.camera_enabled else {}
     )
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
@@ -380,6 +387,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     from reachy_mini_conversation_app.writing_mode import WRITING_PHRASES
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
     from reachy_mini_conversation_app.games.color_hunt import color_hunt_phrases
+    from reachy_mini_conversation_app.games.simon_says import simon_says_phrases
     from reachy_mini_conversation_app.games.treasure_hunt import treasure_hunt_phrases
 
     home = None
@@ -390,7 +398,12 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         (config.GEMINI_API_KEY or "").strip() or None,
         config.GEMINI_VOICE,
         model=config.LOCAL_SPEECH_MODEL,
-        cacheable=FIXED_PHRASES | WRITING_PHRASES | host_phrases() | color_hunt_phrases() | treasure_hunt_phrases(),
+        cacheable=FIXED_PHRASES
+        | WRITING_PHRASES
+        | host_phrases()
+        | color_hunt_phrases()
+        | treasure_hunt_phrases()
+        | simon_says_phrases(),
     )
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"

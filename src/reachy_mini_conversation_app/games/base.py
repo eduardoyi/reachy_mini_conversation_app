@@ -49,6 +49,8 @@ class GameServices:
     picture: Optional[Callable[[str], Any]] = None
     # Make the drawings of these subjects that are not made yet (in the background, a few cents each, once).
     draw_pictures: Optional[Callable[[list[str]], Coroutine[Any, Any, None]]] = None
+    # Reachy does a pose too: "up" or "left" with his head, "front" back to looking ahead.
+    gesture: Optional[Callable[[str], Awaitable[None]]] = None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
     clock: Callable[[], float] = time.monotonic
