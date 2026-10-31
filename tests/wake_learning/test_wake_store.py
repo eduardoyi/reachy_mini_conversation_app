@@ -35,6 +35,7 @@ def test_answered_clips_leave_the_queue_and_the_latest_answer_counts(tmp_path: P
     with pytest.raises(ValueError):
         store.answer("d/b@1.00", "maybe", "eduardo")
     assert (store.root / "answers.jsonl").stat().st_mode & 0o777 == 0o600
+    assert store.root.stat().st_mode & 0o777 == 0o700  # the folders it creates are private too
 
 
 def test_a_clip_to_check_is_cut_to_its_seconds_and_stays_inside_the_clips(tmp_path: Path) -> None:

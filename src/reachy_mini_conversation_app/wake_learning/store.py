@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from dataclasses import asdict, dataclass
 
-from reachy_mini_conversation_app.wake_clips import EVENTS_FILE, wake_clips_directory
+from reachy_mini_conversation_app.wake_clips import EVENTS_FILE, make_private_dir, wake_clips_directory
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def wake_learning_directory() -> Path:
 
 def write_private(path: Path, raw: bytes) -> None:
     """Replace ``path`` atomically with an owner-only file."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    make_private_dir(path.parent)
     temporary = path.with_name(f".{path.name}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "wb") as file:
@@ -51,7 +51,7 @@ def write_private(path: Path, raw: bytes) -> None:
 
 def append_line(path: Path, entry: dict[str, Any]) -> None:
     """Append ``entry`` as one JSON line to an owner-only file."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    make_private_dir(path.parent)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(descriptor, "a", encoding="utf-8") as file:
         file.write(json.dumps(entry, ensure_ascii=False) + "\n")

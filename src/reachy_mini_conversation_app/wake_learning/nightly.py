@@ -35,6 +35,7 @@ from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.wake_clips import make_private_dir
 from reachy_mini_conversation_app.admin.server import restart_app
 from reachy_mini_conversation_app.wake_learning.store import (
     HeadRecord,
@@ -272,7 +273,7 @@ def score_day(runs: list[FeatureRun], heads: list[Head], cache: Path | None = No
         parts = [head.scores(run.windows()[0]) for run in runs]
         scores[head.name] = np.concatenate(parts) if parts else np.zeros(0, np.float32)
         if cached is not None:
-            cached.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            make_private_dir(cached.parent)
             np.save(cached, scores[head.name])
     hours = sum(len(run.frames) for run in runs) * FRAME_S / 3600
     return DayScores(ends, hours, scores)
@@ -575,7 +576,7 @@ def train_challenger(
         return None
     work = settings.store.root / "train"
     data, out = work / "dataset.npz", work / "challenger.onnx"
-    work.mkdir(parents=True, exist_ok=True, mode=0o700)
+    make_private_dir(work)
     np.savez(data, X=windows, Y=labels)
     trainer = Path(__file__).resolve().parents[3] / "scripts" / "wake_train.py"
     command = [settings.trainer_python, str(trainer), "--data", str(data), "--init", str(settings.model_dir / MAIN_HEAD),

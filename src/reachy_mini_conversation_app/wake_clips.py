@@ -58,6 +58,16 @@ def wake_clips_directory() -> Path:
     return data_root / "reachy_mini_conversation_app" / "wake-clips"
 
 
+def make_private_dir(path: Path) -> None:
+    """Create ``path`` and any missing parent folders, each readable only by its owner."""
+    missing = []
+    while not path.exists():
+        missing.append(path)
+        path = path.parent
+    for folder in reversed(missing):
+        folder.mkdir(mode=0o700, exist_ok=True)
+
+
 @dataclass
 class _PendingClip:
     path: Path
@@ -221,7 +231,7 @@ class WakeClipRecorder:
             if not audio:
                 continue
             try:
-                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                make_private_dir(path.parent)
                 with wave.open(str(path), "wb") as out:
                     out.setnchannels(1)
                     out.setsampwidth(2)
@@ -238,7 +248,7 @@ class WakeClipRecorder:
     def _append(self, day: str, entry: dict[str, object]) -> None:
         path = self._directory / day / EVENTS_FILE
         try:
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            make_private_dir(path.parent)
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(descriptor, "a", encoding="utf-8") as file:
                 file.write(json.dumps(entry) + "\n")

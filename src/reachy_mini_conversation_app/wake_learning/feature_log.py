@@ -19,6 +19,8 @@ from collections.abc import Callable
 import numpy as np
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.wake_clips import make_private_dir
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,7 @@ class WakeFeatureLog:
             self._buffer.clear()
             return
         try:
-            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            make_private_dir(self._path.parent)
             descriptor = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(descriptor, "ab") as file:
                 file.write(b"".join(self._buffer))
