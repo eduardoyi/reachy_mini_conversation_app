@@ -686,7 +686,7 @@ async def test_her_question_listens_for_the_answer_and_sends_it_back() -> None:
     runner, _, deps = _runner()
     deps.maribel = _Maribel(MaribelReply("r-1", "c-1", "question", "For how many?", "q-1"))
     expected: list[Any] = []
-    deps.expect_answer = expected.append
+    deps.expect_answer = lambda answer, language: expected.append(answer)
 
     reply = await runner.handle("Ask Maribel to book dinner")
     assert reply is not None and reply.after is not None
@@ -993,7 +993,7 @@ def _family_runner(
     runner, deps = _photo_runner(steps)
     deps.whatsapp = _WhatsAppAudio(result)
     answers: list[Any] = []
-    deps.expect_answer = answers.append
+    deps.expect_answer = lambda answer, language: (answers.append(answer), setattr(deps, "asked_in", language))
 
     async def record(touches: Any = None) -> Any:
         steps.append("record")
@@ -1115,6 +1115,7 @@ async def test_without_a_name_reachy_asks_who_and_goes_on_with_the_answer(family
     assert reply is not None and reply.text == SEND_TO_WHO["es"].format(names="Tío Sergio")
     assert reply.after is not None and await reply.after() is None
     (answer,) = answers
+    assert deps.asked_in == "es"  # the answer is listened for in Spanish if the speech model picks another script
     follow = await answer("a Sergio")
     assert follow.text == MESSAGE_PROMPT["es"].format(name="Tío Sergio") and follow.after is not None
     assert await follow.after() == SENT_TO["es"].format(name="Tío Sergio")

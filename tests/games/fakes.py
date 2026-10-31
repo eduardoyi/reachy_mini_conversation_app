@@ -41,7 +41,7 @@ class FakeReachy:
         self.services = GameServices(
             speak=self._speak,
             ask=lambda text, language, answer: (self.said.append(text), self.asked.append((text, answer))),
-            expect_answer=self.expected.append,
+            expect_answer=lambda answer, language: self.expected.append(answer),
             play_audio=lambda rate, samples: self.audio.append(samples) is None,
             show=self.screens.append,
             save_screen=self._save_screen,

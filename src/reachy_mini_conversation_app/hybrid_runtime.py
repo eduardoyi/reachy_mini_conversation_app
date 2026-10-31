@@ -35,6 +35,7 @@ from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
     AmbientContextStrategy,
     AmbientContextProcessor,
+    is_mostly_latin,
 )
 from reachy_mini_conversation_app.local_processing import (
     LocalProcessingBackend,
@@ -63,6 +64,14 @@ class CallAudio(Protocol):
 
     def received(self) -> AsyncIterator[NDArray[np.int16]]:
         """Yield the other side's 16 kHz audio until the call ends."""
+        ...
+
+
+class RequestTranscriber(Protocol):
+    """The accurate speech model; ``language`` forces one language instead of letting the model pick."""
+
+    def __call__(self, audio: AudioFrame, *, language: str = "") -> Awaitable[str]:
+        """Return the text said in ``audio``."""
         ...
 
 
@@ -539,7 +548,7 @@ class HybridRuntime:
         quick_commands: QuickCommandHandler | None = None,
         reply_speaker: ReplySpeaker | None = None,
         speaking_callback: Callable[[bool], None] | None = None,
-        request_transcriber: Callable[[AudioFrame], Awaitable[str]] | None = None,
+        request_transcriber: RequestTranscriber | None = None,
         name_check_transcriber: Callable[[AudioFrame], Awaitable[str]] | None = None,
         listening_observer: Callable[[bool], Awaitable[None]] | None = None,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
@@ -1396,6 +1405,7 @@ class HybridRuntime:
                         lead_in=wake_audio,
                         wake_event=wake_event,
                         start_s=self._ANSWER_START_S if reason == "awaited_answer" else self._REQUEST_CLIP_START_S,
+                        language=turn.language if reason == "awaited_answer" and turn is not None else "",
                     ),
                     name=f"hybrid-request-clip-{generation}",
                 )
@@ -1426,7 +1436,7 @@ class HybridRuntime:
                 if turn is not None:
                     await self._speak_locally(turn.text, turn.language, generation)
                     if turn.answer is not None:
-                        self.expect_answer(turn.answer)
+                        self.expect_answer(turn.answer, turn.language)
                     if turn.on_spoken is not None:
                         turn.on_spoken()
                 await self._return_to_ambient(generation, "announcement_spoken")
@@ -1754,6 +1764,7 @@ class HybridRuntime:
         lead_in: tuple[int, NDArray[np.int16]] | None = None,
         start_s: float = _REQUEST_CLIP_START_S,
         wake_event: str | None = None,
+        language: str = "",
     ) -> str:
         """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip.
 
@@ -1761,6 +1772,9 @@ class HybridRuntime:
         only: the wake fires a moment after the name, so the request's first word ("Richie, lights | out") can
         fall before the clip; one clip keeps that word whole (2026-10-28: the clip alone heard "off"). Gemini
         never gets the lead-in audio.
+
+        ``language`` is what an awaited answer is expected in: a short answer the speech model put in another
+        script ("Familia Yi" as "फैमिलिया जी" on 2026-10-31) is transcribed again in that language.
         """
         transcriber = self._request_transcriber
         self._request_clip_cut_off = False
@@ -1810,6 +1824,11 @@ class HybridRuntime:
             parts.insert(0, lead_in[1])
         audio = np.concatenate(parts)
         text = await asyncio.wait_for(transcriber((sample_rate, audio)), self._REQUEST_CLIP_STT_TIMEOUT_S)
+        if language and isinstance(text, str) and not is_mostly_latin(text):
+            logger.info("Request clip not in Latin script; transcribing again in %s", language)
+            text = await asyncio.wait_for(
+                transcriber((sample_rate, audio), language=language), self._REQUEST_CLIP_STT_TIMEOUT_S
+            )
         logger.info(
             "Request clip transcribed audio_s=%.1f chars=%d cut_off=%s",
             audio.size / sample_rate,
@@ -2274,12 +2293,15 @@ class HybridRuntime:
             logger.debug("Head touches unavailable: %s", type(error).__name__)
             return 0
 
-    def expect_answer(self, answer: QuickCommandHandler) -> None:
+    def expect_answer(self, answer: QuickCommandHandler, language: str = "") -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
 
-        Thread-safe. Silence for ``_ANSWER_START_S`` ends it without opening the conversation.
+        ``language`` is the one the question was asked in, when known. Thread-safe. Silence for
+        ``_ANSWER_START_S`` ends it without opening the conversation.
         """
-        self._queue_turn(_PendingTurn("awaited_answer", self._clock() + self._ANSWER_PENDING_S, answer=answer))
+        self._queue_turn(
+            _PendingTurn("awaited_answer", self._clock() + self._ANSWER_PENDING_S, language=language, answer=answer)
+        )
 
     def request_announcement(
         self,

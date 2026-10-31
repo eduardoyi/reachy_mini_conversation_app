@@ -31,7 +31,7 @@ class GameServices:
     speak: Callable[[str, str], Awaitable[None]]
     # Say a line, then hand the next thing heard (without the name) to the answer handler.
     ask: Callable[[str, str, Callable[[str], Awaitable[object]]], None]
-    expect_answer: Callable[[Callable[[str], Awaitable[object]]], None]
+    expect_answer: Callable[[Callable[[str], Awaitable[object]], str], None]
     # Play sound while Reachy waits for his name; False while he is busy.
     play_audio: Callable[[int, NDArray[np.int16]], bool]
     show: Callable[[bytes], None]

@@ -74,7 +74,7 @@ class ToolDependencies:
     # The local WhatsApp call service (whatsapp_calls.CallManager), when its token is on this computer.
     calls: Any = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
-    expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
+    expect_answer: Callable[[Callable[[str], Awaitable[Any]], str], None] | None = None
     # Hybrid runtime with wake clips only: keep the minute before this wake as a call he missed
     # (HybridRuntime.mark_missed); False when it could not.
     mark_missed: Callable[..., bool] | None = None

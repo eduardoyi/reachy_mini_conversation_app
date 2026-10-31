@@ -4888,6 +4888,41 @@ async def test_a_question_listens_once_for_the_answer_without_the_name() -> None
 
 
 @pytest.mark.asyncio
+async def test_an_answer_heard_in_another_script_is_transcribed_again_in_the_question_language() -> None:
+    """A short answer the model wrote in Devanagari ("Familia Yi" on 2026-10-31) is heard again in Spanish."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+    languages: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply("¡Enviada!")
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer, "es")
+        return _QuickReply("¿A quién se lo mando?")
+
+    async def accurate(_audio: AudioFrame, *, language: str = "") -> str:
+        languages.append(language)
+        return "Familia Yi" if language == "es" else "फैमिलिया जी"
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    runtime._request_transcriber = accurate
+    try:
+        assert await runtime.activate("keyboard", addressed_text="manda una foto")
+        await _eventually(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        await _eventually(lambda: spoken == ["¿A quién se lo mando?", "¡Enviada!"])
+        assert answers == ["Familia Yi"] and languages == ["", "es"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_no_answer_after_a_question_goes_back_to_listening_for_the_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1225,7 +1225,7 @@ class QuickCommands:
                 return MARIBEL_PASSED_ON[language]
             expect_answer = getattr(self._deps, "expect_answer", None)
             if reply.type == "question" and expect_answer is not None:
-                expect_answer(self.answer_maribel)
+                expect_answer(self.answer_maribel, language)
             return reply.speak or None
 
         return QuickReply(
@@ -1373,7 +1373,7 @@ class QuickCommands:
             return reply or QuickReply(SEND_TO_ONLY[language].format(names=names), language, kind)
 
         async def ask() -> str | None:
-            expect_answer(answer)
+            expect_answer(answer, language)
             return None
 
         return QuickReply(SEND_TO_WHO[language].format(names=names), language, kind, after=ask)

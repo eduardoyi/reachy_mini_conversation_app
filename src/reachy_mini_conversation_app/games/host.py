@@ -148,7 +148,7 @@ class GameHost:
         logger.info("Game offered: %s", game.key if game is not None else "which game")
 
         async def listen() -> str | None:
-            self._services.expect_answer(self._start_answer)
+            self._services.expect_answer(self._start_answer, language)
             return None
 
         return QuickReply(text, language, "game", after=listen)
@@ -266,7 +266,7 @@ class GameHost:
 
     def _question(self, text: str, answer: Callable[[str], Awaitable[object]]) -> QuickReply:
         async def listen() -> str | None:
-            self._services.expect_answer(answer)
+            self._services.expect_answer(answer, self._language)
             return None
 
         return QuickReply(text, self._language, "game", after=listen)

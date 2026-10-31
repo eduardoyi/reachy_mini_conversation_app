@@ -36,7 +36,7 @@ from reachy_mini_conversation_app.wake_learning.feature_log import WakeFeatureLo
 
 if TYPE_CHECKING:
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
+    from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime, RequestTranscriber
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
@@ -802,7 +802,7 @@ def run(
         intent_router: LocalIntentRouter | None = None
         action_executor: LocalActionExecutor | None = None
         local_processor: AmbientContextProcessor | None = None
-        request_transcriber: Callable[[Any], Awaitable[str]] | None = None
+        request_transcriber: RequestTranscriber | None = None
         name_check_transcriber: Callable[[Any], Awaitable[str]] | None = None
         if config.LOCAL_STT_BASE_URL is not None:
             context_strategy = (
