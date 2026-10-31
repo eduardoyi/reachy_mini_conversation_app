@@ -5380,6 +5380,7 @@ async def test_a_rejected_wake_keeps_listening_without_a_reset_and_its_record_sa
         assert (first["heard"], first["trusted"], first["outcome"]) == (False, False, "rejected")
         assert first["score"] == 1.0 and first["head"] == "reachy" and first["asleep"] is False
         assert not handler.started.is_set()
+        assert not runtime.mark_false_wake(by="voice")  # he never woke, so there is no false wake to mark
     finally:
         await runtime.close()
 
@@ -5413,6 +5414,49 @@ async def test_a_confirmed_wake_records_its_name_check(tmp_path: Path) -> None:
         assert (wake["heard"], wake["trusted"]) == (True, False)
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wake_nobody_meant_is_marked_and_its_conversation_closes(tmp_path: Path) -> None:
+    """From the phone the latest wake is marked false and its conversation ends; a sleep soon after is noted."""
+
+    async def fast(_audio: AudioFrame) -> str:
+        return "Richie."
+
+    async def accurate(_audio: AudioFrame) -> str:
+        return ""
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+    )
+    bare = HybridRuntime(lambda: FakeHandler())
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime.set_capture_barrier_provider(lambda: 2)
+    try:
+        assert not runtime.mark_false_wake(by="app")  # no wake yet
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+        await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+        for _ in range(300):
+            if runtime.mode is RuntimeMode.CLOUD_CONVERSATION:
+                break
+            await asyncio.sleep(0.01)
+
+        assert runtime.mark_false_wake(by="app", close=True)
+        assert runtime._close_requested is not None and runtime._close_requested[0] == "false_wake"
+        runtime.request_close("go_to_sleep")
+        assert not bare.mark_false_wake(by="app")
+
+        [wake] = [event for event in _wake_events(tmp_path) if event["kind"] == "wake"]
+        assert (wake["said"], wake["by"]) == ("not_called", "app")
+        assert 0 <= wake["slept_after_s"] <= 60
+    finally:
+        await runtime.close()
+        await bare.close()
 
 
 @pytest.mark.asyncio

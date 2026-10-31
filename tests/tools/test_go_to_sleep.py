@@ -80,6 +80,24 @@ async def test_end_conversation_asks_the_runtime_to_close() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_ending_because_nobody_called_him_marks_a_false_wake() -> None:
+    """Told in the conversation nobody was talking to him, he keeps that wake as a false one and closes as usual."""
+    from reachy_mini_conversation_app.tools.end_conversation import EndConversation
+
+    marks: list[str] = []
+    deps = ToolDependencies(
+        reachy_mini=MagicMock(),
+        movement_manager=MagicMock(),
+        end_conversation=MagicMock(return_value={"status": "ending"}),
+        mark_false_wake=lambda *, by: marks.append(by) or True,
+    )
+
+    assert await EndConversation()(deps, not_for_me=True) == {"status": "ending"}
+    assert await EndConversation()(deps) == {"status": "ending"}
+    assert marks == ["conversation"]
+
+
 @pytest.mark.parametrize(("hybrid", "expected"), [(True, True), (False, False)])
 def test_standby_tools_join_go_to_sleep_with_the_hybrid_runtime(
     monkeypatch: pytest.MonkeyPatch, hybrid: bool, expected: bool

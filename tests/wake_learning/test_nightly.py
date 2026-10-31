@@ -116,6 +116,30 @@ def test_the_score_counts_episodes_answered_at_once_and_false_wakes() -> None:
     assert score["by_condition"]["no_tv"] == {"calls": 3, "first_time": 1}
 
 
+def test_wakes_nobody_meant_are_false_and_are_not_asked_about() -> None:
+    """A wake someone said wasn't for him, or sent to sleep at once with no name in it, is a false one.
+
+    Sent to sleep with the name in it, he was called to go to sleep; nothing asked and no name is unknown until
+    someone answers its question.
+    """
+    told = _event("wake", DAY + 100, heard=True, request_chars=20, said="not_called", by="voice")
+    sent_away = _event("wake", DAY + 300, heard=True, request_chars=8, slept_after_s=4.0)
+    called_to_sleep = _event("wake", DAY + 500, heard=True, request_chars=8, slept_after_s=3.0)
+    empty = _event("wake", DAY + 700, heard=True, request_chars=0)
+    events = [told, sent_away, called_to_sleep, empty]
+    names = {told["id"]: [9.8], called_to_sleep["id"]: [9.8]}
+
+    moments = day_moments(events, names, {})
+    score = day_score(events, names, {})
+    items = review_items(events, names, {}, random.Random(1))
+
+    assert moments.calls == [DAY + 500]
+    assert moments.not_calls == [DAY + 100, DAY + 300]
+    assert moments.unsure == [(DAY + 698.5, DAY + 700.5)]
+    assert (score["calls"], score["false_wakes"]) == (1, 3)
+    assert [item.id.split("@")[0] for item in items] == [empty["id"]]
+
+
 class FakeHead:
     """A head whose score is one feature of the window's last frame."""
 

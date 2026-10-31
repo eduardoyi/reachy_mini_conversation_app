@@ -285,6 +285,17 @@ class ControlApi:
                 return JSONResponse({"error": "He isn't listening now."}, status_code=409, headers=_NO_STORE)
             return JSONResponse({"ok": True}, headers=_NO_STORE)
 
+        @app.post("/wake/false")
+        async def _false_wake(request: Request) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            if self._runtime is None or not self._runtime.mark_false_wake(by="app", close=True):
+                return JSONResponse(
+                    {"error": "He hasn't woken in the last ten minutes."}, status_code=409, headers=_NO_STORE
+                )
+            return JSONResponse({"ok": True}, headers=_NO_STORE)
+
         @app.post("/wake/take")
         async def _take(request: Request) -> Response:
             denied = self._denied(request, mutation=True)

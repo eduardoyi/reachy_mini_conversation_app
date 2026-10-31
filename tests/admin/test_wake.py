@@ -311,7 +311,9 @@ def test_wake_routes_need_a_household_login_and_the_apps_own_origin(wake: Wake) 
     with wake.client() as client:
         assert client.post("/api/wake/answer", json={"item": "c0", "answer": "call"}).status_code == 403
         assert client.post("/api/wake/missed").status_code == 403
+        assert client.post("/api/wake/false").status_code == 403
     assert wake.store.answers() == {} and wake.control.calls("/wake/missed") == []
+    assert wake.control.calls("/wake/false") == []
 
 
 # "He missed me" and voice recordings -------------------------------------------------------------------
@@ -324,6 +326,15 @@ def test_he_missed_me_is_relayed_with_who_and_audited(wake: Wake) -> None:
     assert response.json() == {"ok": True}
     assert wake.control.calls("/wake/missed") == [{"who": "eduardo@example.com"}]
     assert [entry["action"] for entry in wake.audit()] == ["wake miss marked"]
+
+
+def test_woke_for_nothing_is_relayed_and_audited(wake: Wake) -> None:
+    """The app marks the latest wake as false; Reachy does the rest."""
+    with wake.client() as client:
+        response = client.post("/api/wake/false", headers=SAME_ORIGIN)
+    assert response.status_code == 200
+    assert len(wake.control.calls("/wake/false")) == 1
+    assert [entry["action"] for entry in wake.audit()] == ["false wake marked"]
 
 
 def test_he_missed_me_when_he_is_not_listening_is_relayed_without_audit(wake: Wake) -> None:

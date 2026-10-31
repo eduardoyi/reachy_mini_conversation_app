@@ -919,6 +919,7 @@ def run(
         deps.record_message = hybrid_runtime.record_message
         if wake_clips is not None:
             deps.mark_missed = hybrid_runtime.mark_missed
+            deps.mark_false_wake = hybrid_runtime.mark_false_wake
         deps.stream_call = hybrid_runtime.stream_call
         calls = _start_calls(deps, hybrid_runtime, movement_manager, quick)
 

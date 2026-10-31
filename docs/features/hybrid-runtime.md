@@ -1082,6 +1082,13 @@ the 90 s head test on 2026-10-29 had logged 6,912 warnings. Test:
 - **Missed calls.** `mark_missed(by=, who=)` keeps the minute before the current activation (or before now).
   - It is used by the `missed` quick command ("you didn't hear me", "no me escuchaste") and by the control API's
     `POST /wake/missed`.
+- **False wakes.** `mark_false_wake(by=, close=)` notes `said: "not_called"` on the latest wake that woke him (an
+  acoustic fire or a transcript wake, within 10 minutes; a rejected one never counts). `close=True` also ends that
+  wake's conversation if it is still going.
+  - It is used by the `not_for_me` quick command ("no estábamos hablando contigo"), the `end_conversation` tool's
+    `not_for_me`, and the control API's `POST /wake/false`.
+  - A sleep within 60 s of that wake (the `sleep` quick command or `request_close("go_to_sleep")`) notes
+    `slept_after_s`.
   - `record_name(wait_s=)` collects what is heard (through the recorder's capture) until a voice has stopped for
     0.7 s, and holds wakes meanwhile (acoustic and transcript). It is used by `POST /wake/take` for the household's
     recordings.

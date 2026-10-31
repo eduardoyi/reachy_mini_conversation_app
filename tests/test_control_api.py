@@ -225,6 +225,20 @@ def test_a_missed_call_is_marked_for_whoever_tapped_it_unless_privacy_is_on(swit
     assert runtime.mark_missed.call_count == 1
 
 
+def test_a_false_wake_is_marked_and_ends_its_conversation() -> None:
+    """The phone's "Woke for nothing" marks the latest wake and closes it; with no recent wake it says so."""
+    api, _, runtime = _api()
+    runtime.mark_false_wake.return_value = True
+    client = _client(api)
+
+    response = client.post("/wake/false", headers=AUTH)
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    runtime.mark_false_wake.assert_called_once_with(by="app", close=True)
+
+    runtime.mark_false_wake.return_value = False
+    assert client.post("/wake/false", headers=AUTH).status_code == 409
+
+
 @pytest.mark.parametrize(
     ("samples", "expected"),
     [

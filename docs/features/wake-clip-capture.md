@@ -36,7 +36,9 @@ the day's `events.jsonl` and saves a clip:
 
   What came of an event is added later under the same `id`:
   - the name check (`heard`, `trusted`), the outcome (`rejected`, `woke`, `ignored` with why);
-  - the request's length (`request_chars`, 0 when nothing was said), and who marked a missed call.
+  - the request's length (`request_chars`, 0 when nothing was said), and who marked a missed call;
+  - `said: "not_called"` with `by` (`voice`, `conversation` or `app`) when someone said the wake wasn't for him,
+    and `slept_after_s` when he was sent to sleep within a minute of it.
 
   Never any words.
 - **Conversations.** Nothing is buffered or saved during a cloud conversation. A clip still waiting for its

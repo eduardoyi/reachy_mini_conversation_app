@@ -644,6 +644,10 @@ def create_app(
     async def _wake_missed(request: Request) -> Response:
         return await control(request, "/wake/missed", "wake miss marked", {"who": _who(request)})
 
+    @app.post("/api/wake/false")
+    async def _wake_false(request: Request) -> Response:
+        return await control(request, "/wake/false", "false wake marked")
+
     @app.post("/api/wake/take")
     async def _wake_take(request: Request) -> Response:
         payload = await _json_body(request)

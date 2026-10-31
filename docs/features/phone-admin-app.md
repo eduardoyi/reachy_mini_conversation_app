@@ -32,9 +32,11 @@ incoming calls are declined. The camera stays available to the admin app.
 
 **Wake word** ([wake-learning.md](wake-learning.md)):
 - **Home card.** It shows this week's score ("47 of 49 calls answered first time · 0.6 false wakes a day", with
-  the goal), a badge for what's waiting ("6 clips · new model"), and a big "He missed me" button that keeps the
-  minute before now as a call he missed. The same button is an Android home-screen shortcut (long-press the
-  icon → `/#missed`).
+  the goal), a badge for what's waiting ("6 clips · new model"), and two big buttons:
+  - **He missed me** keeps the minute before now as a call he missed. It is also an Android home-screen shortcut
+    (long-press the icon → `/#missed`).
+  - **Woke for nothing** marks his latest wake (in the last ten minutes) as one nobody meant, and ends its
+    conversation if it is still going.
 - **The sheet** (tap the card, or `/#wake`), with what to do first:
   - **Check clips:** a card stack. Each clip plays by itself; answer "Called Reachy" (swipe right), "Didn't"
     (swipe left) or "Not sure". At most 10 a day.

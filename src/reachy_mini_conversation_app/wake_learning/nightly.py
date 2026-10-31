@@ -169,10 +169,34 @@ def clip_start(event: dict[str, Any]) -> float:
     return float(event["t"]) - float(event.get("event_at") or 0.0)
 
 
+def _not_called(event: dict[str, Any]) -> bool:
+    """Whether someone said this wake was not for him ("we weren't talking to you", or from the phone)."""
+    return event.get("said") == "not_called"
+
+
+def _sent_away(event: dict[str, Any], located: list[float]) -> bool:
+    """Whether he was sent to sleep within the minute after waking and no name was found: nothing called him."""
+    return event.get("slept_after_s") is not None and not located
+
+
+def _nothing_asked(event: dict[str, Any], located: list[float]) -> bool:
+    """Whether he woke, nobody said anything and no name was found: unknown until someone answers."""
+    return event.get("request_chars") == 0 and not located
+
+
+def _located(event: dict[str, Any], names: dict[str, list[float]], said_not: list[float]) -> list[float]:
+    """Return when the name ended in the event's clip, leaving out what the household said was no call."""
+    if _not_called(event):
+        return []
+    times = (clip_start(event) + offset for offset in names.get(event["id"], []))
+    return [time for time in times if not _near(time, said_not, 1.5)]
+
+
 def human_answers(events: list[dict[str, Any]], answers: dict[str, str]) -> tuple[list[float], list[float]]:
     """Return when the household said there was a call, and when there was none, for this day's clips."""
     by_id = {event["id"]: event for event in events}
-    calls, not_calls = [], []
+    calls: list[float] = []
+    not_calls = [float(event["t"]) for event in events if _not_called(event)]
     for item_id, answer in answers.items():
         event_id, _, offset = item_id.rpartition("@")
         event = by_id.get(event_id)
@@ -196,11 +220,7 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
     found: list[float] = []
     quiet: list[float] = []
     for event in events:
-        located = [
-            time
-            for time in (clip_start(event) + offset for offset in names.get(event["id"], []))
-            if not _near(time, said_not, 1.5)
-        ]
+        located = _located(event, names, said_not)
         kind, at = event["kind"], float(event["t"])
         if kind in ("missed", "antenna"):
             # Somewhere in the minute (or seconds) before was a call; unless its name was found, nothing there is
@@ -209,7 +229,13 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
             if not located and not _near(at, said_call, CALL_GAP_S * 3):
                 moments.unsure.append((clip_start(event), at))
         elif _woke(event):
-            if not _near(at, said_not, 1.5):
+            if _near(at, said_call + said_not, 1.5):
+                pass  # the household answered for this wake; their answer is added below
+            elif _sent_away(event, located):
+                quiet.append(at)
+            elif _nothing_asked(event, located):
+                moments.unsure.append((at - 1.5, at + 0.5))
+            else:
                 found.append(at)
             found.extend(time for time in located if time < at - EARLIER_CALL_S)
         elif located:
@@ -460,9 +486,11 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
         ranked.append((rank, ReviewItem(item_id, event["clip"], max(0.0, at - 3.0), at + 1.5, question)))
 
     for event in events:
-        if not event.get("clip"):
+        if not event.get("clip") or _not_called(event):  # someone already said nobody called him
             continue
         located = names.get(event["id"], [])
+        if _woke(event) and _sent_away(event, located):
+            continue  # sent to sleep at once with no name in it: already a false wake
         kind, fired_at = event["kind"], float(event.get("event_at") or 0.0)
         if kind == "missed":
             for at in located[-2:]:
@@ -498,14 +526,12 @@ def day_score(events: list[dict[str, Any]], names: dict[str, list[float]], answe
     false_wakes = 0
     for event in events:
         at, tv = float(event["t"]), bool(event.get("tv"))
-        located = [
-            time
-            for time in (clip_start(event) + offset for offset in names.get(event["id"], []))
-            if not _near(time, said_not, 1.5)
-        ]
+        located = _located(event, names, said_not)
         if _woke(event):
-            nothing_asked = event.get("request_chars") == 0 and not located and not _near(at, said_call, 1.5)
-            if _near(at, said_not, 1.5) or nothing_asked:
+            unexplained = not _near(at, said_call, 1.5) and (
+                _nothing_asked(event, located) or _sent_away(event, located)
+            )
+            if _near(at, said_not, 1.5) or unexplained:
                 false_wakes += 1
                 continue
             seeds.append((at, "woke", tv))

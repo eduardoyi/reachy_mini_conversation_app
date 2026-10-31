@@ -78,6 +78,9 @@ class ToolDependencies:
     # Hybrid runtime with wake clips only: keep the minute before this wake as a call he missed
     # (HybridRuntime.mark_missed); False when it could not.
     mark_missed: Callable[..., bool] | None = None
+    # Hybrid runtime with wake clips only: mark the latest wake as one nobody meant ("we weren't talking to
+    # you"; HybridRuntime.mark_false_wake); False when there is none.
+    mark_false_wake: Callable[..., bool] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).
     writing: Any = None
     # Hybrid runtime only: the game host (games/host.py), which owns requests, screen and speaker during a game.

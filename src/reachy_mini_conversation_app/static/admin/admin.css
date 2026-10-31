@@ -274,7 +274,8 @@ input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius
 }
 .wake-score { font-weight: 600; font-size: 17px; line-height: 1.35; }
 .wake-goal { color: var(--ink-3); font-size: 13px; }
-.wake-card .missed { width: 100%; min-height: 56px; font-size: 17px; }
+.wake-marks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.wake-marks .pill { width: 100%; min-height: 56px; font-size: 16px; padding: 0 8px; white-space: nowrap; }
 
 .todo { background: var(--paper); border-radius: 20px; padding: 16px 16px 14px; margin-top: 12px; }
 .todo:first-child { margin-top: 0; }

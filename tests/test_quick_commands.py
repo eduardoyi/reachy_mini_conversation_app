@@ -472,6 +472,43 @@ async def test_you_didnt_hear_me_marks_the_call_before_this_wake(said: str, sorr
     assert await runner.handle(said) is None
 
 
+@pytest.mark.parametrize(
+    "said",
+    [
+        "No estábamos hablando contigo",
+        "no, no estábamos hablando contigo, Richie",
+        "No te estábamos hablando a ti",
+        "nadie te llamó",
+        "no es contigo",
+        "Reachy, no te llamé",
+        "I wasn't talking to you",
+        "nobody called you",
+        "non parlavo con te",
+        "não estávamos a falar contigo",
+    ],
+)
+@pytest.mark.asyncio
+async def test_we_werent_talking_to_you_marks_a_false_wake_without_a_word(said: str) -> None:
+    """Said once he woke, the wake is kept as a false one and he goes back to waiting, silently."""
+    runner, _, deps = _runner()
+    marks: list[str] = []
+    deps.mark_false_wake = lambda *, by: marks.append(by) or True
+
+    reply = await runner.handle(said)
+
+    assert reply is not None and reply.kind == "not_for_me" and reply.text is None and marks == ["voice"]
+    deps.mark_false_wake = None
+    reply = await runner.handle(said)
+    assert reply is not None and reply.text is None  # without wake clips it still sends him back
+
+
+@pytest.mark.parametrize("said", ["no estábamos hablando de ti", "no te llamé ayer", "nada"])
+def test_other_sentences_are_not_a_false_wake(said: str) -> None:
+    """Talking about him, or a plain "nothing", is not "we weren't talking to you"."""
+    command = quick_commands.parse(said)
+    assert command is None or command.kind != "not_for_me"
+
+
 class _Weather:
     def __init__(self) -> None:
         self.places: list[Any] = []

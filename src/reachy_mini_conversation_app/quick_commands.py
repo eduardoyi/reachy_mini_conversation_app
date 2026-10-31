@@ -194,12 +194,24 @@ _MISSED = {
     "it": r"(?:non mi hai sentito|non mi hai ascoltato)",
     "pt": r"(?:voce nao me ouviu|nao me ouviste|nao me escutaste|nao me escutou)",
 }
+# "We weren't talking to you", said once he woke: nobody called him, so that wake is kept as a false one.
+_NAME = r"(?:reachy|richie|richi|ritchie|reachi)"
+_NOT_FOR_ME = {
+    "en": r"(?:(?:i|we) (?:wasnt|werent|was not|were not) talking to you|not talking to you|not you|wrong robot|"
+    r"nobody called you|no one called you|(?:i|we) didnt call you|nobody was talking to you)",
+    "es": r"(?:no (?:te )?(?:estaba|estabamos|estamos|estoy) hablando (?:contigo|a ti)|"
+    r"no (?:hablaba|hablabamos|hablamos|hablo) contigo|no te (?:hablaba|hablabamos|hablamos) a ti|"
+    r"no (?:es|era) contigo|no te (?:llame|llamamos|llamo nadie)|nadie te (?:llamo|hablo|esta hablando|hablaba))",
+    "it": r"(?:non (?:parlavo|parlavamo|stavo parlando|stavamo parlando) con te|nessuno ti ha chiamato|"
+    r"non ti (?:ho|abbiamo) chiamato)",
+    "pt": r"(?:nao (?:e|era) contigo|nao (?:estava|estavamos) a falar contigo|nao (?:falava|falavamos) contigo|"
+    r"ninguem te chamou|nao te (?:chamei|chamamos))",
+}
 _CANCEL = {
-    "en": r"(?:never mind|nevermind|nothing|cancel|forget it|no thanks|nothing thanks|not you|sorry|my bad|"
-    r"i wasnt talking to you|wrong robot)",
-    "es": r"(?:nada|olvidalo|da igual|dejalo|no importa|cancela|perdon|no es contigo|no te hablaba a ti)",
-    "it": r"(?:niente|lascia stare|lascia perdere|annulla|non importa|scusa|non parlavo con te)",
-    "pt": r"(?:nada|esquece|deixa|cancela|deixa estar|nao importa|desculpa|nao e contigo)",
+    "en": r"(?:never mind|nevermind|nothing|cancel|forget it|no thanks|nothing thanks|sorry|my bad)",
+    "es": r"(?:nada|olvidalo|da igual|dejalo|no importa|cancela|perdon)",
+    "it": r"(?:niente|lascia stare|lascia perdere|annulla|non importa|scusa)",
+    "pt": r"(?:nada|esquece|deixa|cancela|deixa estar|nao importa|desculpa)",
 }
 _PAUSE = {
     "en": r"(?:pause|pause it|stop the music|stop music|pause the music|pause music|stop the song|pause the song)",
@@ -447,6 +459,10 @@ _WEATHER_RE = {language: [_full(pattern) for pattern in patterns] for language, 
 _RAIN_RE = {language: _full(pattern) for language, pattern in _RAIN.items()}
 _SLEEP_RE = {language: _full(pattern) for language, pattern in _SLEEP.items()}
 _MISSED_RE = {language: _full(pattern) for language, pattern in _MISSED.items()}
+_NOT_FOR_ME_RE = {
+    language: _full(rf"(?:(?:no|perdon|perdona|sorry|scusa|desculpa|{_NAME}) )*{pattern}(?: {_NAME})?")
+    for language, pattern in _NOT_FOR_ME.items()
+}
 _CANCEL_RE = {language: _full(pattern) for language, pattern in _CANCEL.items()}
 _PAUSE_RE = {language: _full(pattern) for language, pattern in _PAUSE.items()}
 _STOP_RE = {language: _full(pattern) for language, pattern in _STOP.items()}
@@ -585,6 +601,9 @@ def _parse(text: str) -> QuickCommand | None:
     command = strip_politeness(normalize(text))
     if not command or len(command.split()) > MAX_COMMAND_WORDS:
         return None
+    found = _first_match(_NOT_FOR_ME_RE, command)  # before negations: "no estábamos hablando contigo"
+    if found:
+        return QuickCommand("not_for_me", found[0])
     found = _first_match(_CANCEL_RE, command)
     if found:
         return QuickCommand("cancel", _language(found[0], command))
@@ -1300,6 +1319,11 @@ class QuickCommands:
         kind = command.kind
         if kind == "cancel":
             return QuickReply(None, language, kind)
+        if kind == "not_for_me":
+            mark = self._deps.mark_false_wake
+            if mark is not None:
+                mark(by="voice")
+            return QuickReply(None, language, kind)  # back to waiting for his name, without a word
         if kind == "missed":
             mark = self._deps.mark_missed
             if mark is None or not mark(by="voice"):
@@ -1366,7 +1390,7 @@ class QuickCommands:
 
         async def answer(text: str) -> QuickReply:
             command = parse(text)
-            if command is not None and command.kind == "cancel":
+            if command is not None and command.kind in ("cancel", "not_for_me"):
                 return QuickReply(None, language, kind)
             named = find_contact(strip_politeness(normalize(text)), self._contacts())
             reply = self._send_reply(kind, language, named) if named is not None else None
@@ -1490,7 +1514,7 @@ class QuickCommands:
         command = parse(text)
         if words in _YES_WORDS or (command is not None and command.kind == "answer_call"):
             return self._answer_call(language)
-        if words in _NO_WORDS or (command is not None and command.kind in ("cancel", "stop")):
+        if words in _NO_WORDS or (command is not None and command.kind in ("cancel", "not_for_me", "stop")):
             calls.decline()
             return QuickReply(CALL_DECLINED[language], language, "answer_call")
         return None

@@ -21,7 +21,15 @@ class EndConversation(Tool):
     needs_response = False
     parameters_schema = {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "not_for_me": {
+                "type": "boolean",
+                "description": (
+                    "True only when someone said they were not talking to you or nobody called you "
+                    '("no estábamos hablando contigo", "nobody called you"): you woke by mistake.'
+                ),
+            },
+        },
         "required": [],
     }
 
@@ -29,7 +37,10 @@ class EndConversation(Tool):
         """Ask the runtime to close the conversation once the current reply has played."""
         if deps.end_conversation is None:
             return {"error": "end_conversation is unavailable in this runtime"}
-        logger.info("Tool call: end_conversation")
+        not_for_me = kwargs.get("not_for_me") is True
+        logger.info("Tool call: end_conversation not_for_me=%s", not_for_me)
+        if not_for_me and deps.mark_false_wake is not None:
+            deps.mark_false_wake(by="conversation")
         try:
             return deps.end_conversation()
         except Exception as e:

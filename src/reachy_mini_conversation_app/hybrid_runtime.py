@@ -473,6 +473,10 @@ class HybridRuntime:
     _ACOUSTIC_RESUME_S = 1.5
     _NAME_TAKE_POLL_S = 0.1
     _NAME_TAKE_MAX_S = 4.0
+    # "He woke for nothing" from the phone can come a while later; sent to sleep within the minute after a wake,
+    # with no name found in it overnight, the wake counts as a false one.
+    _FALSE_WAKE_WINDOW_S = 600.0
+    _SLEPT_AFTER_WAKE_S = 60.0
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
@@ -590,6 +594,9 @@ class HybridRuntime:
         self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
         self._wake_score: float | None = None  # the wake model's score for that audio
         self._wake_event: str | None = None  # that fire's id in the wake clip record
+        self._name_event: str | None = None  # a room-transcript wake's id in the record
+        # The latest wake that woke him (record id, when, generation), for "we weren't talking to you".
+        self._last_wake: tuple[str, float, int] | None = None
         # When the wake model last scored a frame and the clip recorder was last fed: a short pause (a rejected
         # wake) carries on where it was, a longer one (a conversation) starts over.
         self._acoustic_scored_at: float | None = None
@@ -1239,6 +1246,8 @@ class HybridRuntime:
             self._note_wake(name_event, outcome="ignored", why="asleep_mid_sentence")
             return
         self._note_wake(name_event, outcome="woke")
+        with self._lifecycle_lock:
+            self._name_event = name_event
         followup_waiter: asyncio.Future[TranscriptSegment] | None = None
         if not detection.remaining_text:
             try:
@@ -1386,9 +1395,12 @@ class HybridRuntime:
                     wake_audio = self._wake_name_audio if reason == "acoustic_wake" else None
                     wake_score = self._wake_score if wake_audio is not None else None
                     wake_event = self._wake_event if reason == "acoustic_wake" else None
+                    woken_by = wake_event or (self._name_event if reason == "wake_word" else None)
+                    self._last_wake = (woken_by, self._activated_at or 0.0, generation) if woken_by else None
                     self._wake_name_audio = None
                     self._wake_score = None
                     self._wake_event = None
+                    self._name_event = None
                     # Without that audio, asleep, an acoustic wake counts once the transcript has the name first.
                     confirm_wake = asleep and transcribe_request and wake_audio is None and reason == "acoustic_wake"
                     if asleep and not confirm_wake and wake_audio is None:
@@ -1962,6 +1974,28 @@ class HybridRuntime:
         logger.info("Missed call marked by=%s", by)
         return True
 
+    def mark_false_wake(self, *, by: str, close: bool = False) -> bool:
+        """Mark the latest wake as one nobody meant; False when there was none in the last ten minutes.
+
+        ``close`` also ends that wake's conversation if it is still going (from the phone).
+        """
+        with self._lifecycle_lock:
+            last, generation, mode = self._last_wake, self._generation, self._mode
+        if last is None or self._wake_clips is None or self._clock() - last[1] > self._FALSE_WAKE_WINDOW_S:
+            return False
+        self._note_wake(last[0], said="not_called", by=by)
+        logger.info("False wake marked by=%s", by)
+        if close and last[2] == generation and mode is RuntimeMode.CLOUD_CONVERSATION:
+            self.request_close("false_wake")
+        return True
+
+    def _note_slept_after_wake(self) -> None:
+        """Note how soon after the latest wake he was sent to sleep, when it was within the minute."""
+        with self._lifecycle_lock:
+            last = self._last_wake
+        if last is not None and self._clock() - last[1] <= self._SLEPT_AFTER_WAKE_S:
+            self._note_wake(last[0], slept_after_s=round(self._clock() - last[1], 1))
+
     async def record_name(self, *, wait_s: float = 6.0) -> tuple[int, NDArray[np.int16]] | None:
         """Record someone calling Reachy, for the household's voices; hearing it wakes nobody meanwhile.
 
@@ -1998,6 +2032,7 @@ class HybridRuntime:
         async with self._state_lock:
             with self._lifecycle_lock:
                 if self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation:
+                    self._last_wake = None  # he did not wake, so there is nothing to call a false wake
                     self._pending_acoustic_ack_generation = None
                     self._clear_wake_followup_waiter()
                     self._clear_postactivation_queue()
@@ -2162,6 +2197,7 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation:
                     self._asleep = True
+            self._note_slept_after_wake()
         await self._return_to_ambient(generation, "quick_command_completed")
         with self._metrics_lock:
             self._local_commands_executed += 1
@@ -3335,6 +3371,8 @@ class HybridRuntime:
                 self._close_requested = (reason, self._clock())
             if reason == "go_to_sleep":
                 self._asleep = True
+        if reason == "go_to_sleep":
+            self._note_slept_after_wake()
         logger.info("Conversation will close after Reachy's reply reason=%s", reason)
         return True
 

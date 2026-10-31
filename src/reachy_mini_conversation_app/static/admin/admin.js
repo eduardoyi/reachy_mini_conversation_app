@@ -418,7 +418,15 @@ async function markMissed(button) {
   });
 }
 
+async function markFalseWake(button) {
+  await run(button, async () => {
+    await api("/api/wake/false", { method: "POST" });
+    toast("Got it, that wake won't count as a call.");
+  });
+}
+
 $("#missed").addEventListener("click", (event) => markMissed(event.currentTarget));
+$("#false-wake").addEventListener("click", (event) => markFalseWake(event.currentTarget));
 $("#wake-open").addEventListener("click", () => openWake());
 
 async function openWake() {
@@ -1700,6 +1708,7 @@ const CHANGES = {
   "picture deleted": (t) => (t === "photos" ? "deleted a photo" : "deleted a picture"),
   "wake clip checked": () => "checked a wake word clip",
   "wake miss marked": () => "said Reachy missed a call",
+  "false wake marked": () => "said Reachy woke for nothing",
   "wake call recorded": (t) => (t ? `recorded ${t} calling Reachy` : "recorded a call to Reachy"),
   "wake model switched": () => "switched Reachy's wake model",
   "wake model kept": () => "kept Reachy's wake model",
