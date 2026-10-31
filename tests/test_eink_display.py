@@ -421,6 +421,21 @@ def test_the_server_serves_nothing_but_the_current_screens(served_display: EInkD
         assert response.status == 204
 
 
+def test_after_a_reported_failure_the_screen_is_sent_under_a_new_name(served_display: EInkDisplay) -> None:
+    """A device log makes the next check-in send the same screen as an alias (redrawn), kept until it changes."""
+    first = json.loads(_get(served_display, "/api/display")[1])["filename"]
+    log = urllib.request.Request(
+        f"http://127.0.0.1:{served_display.port}/api/log", data=b'{"logs": [{"level": "error"}]}', method="POST"
+    )
+    urllib.request.urlopen(log, timeout=5).close()
+    alias = json.loads(_get(served_display, "/api/display")[1])
+    assert alias["filename"] == f"{first}~1" and alias["image_url"].endswith(f"/screens/{first}~1.png")
+    assert _get(served_display, f"/screens/{first}~1.png")[1] == served_display.current().png
+    assert json.loads(_get(served_display, "/api/display")[1])["filename"] == f"{first}~1"  # no second redraw
+    served_display.show(render_text(["hola"]))
+    assert json.loads(_get(served_display, "/api/display")[1])["filename"] == served_display.current().filename
+
+
 def test_photos_are_dithered_so_their_tones_survive_four_grays() -> None:
     """A smooth photo keeps its gradient as a dither of all four levels rather than four flat bands."""
     image = _decoded(render_photo(Image.linear_gradient("L").resize((800, 400)))).convert("L")

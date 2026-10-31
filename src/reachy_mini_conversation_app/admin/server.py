@@ -43,6 +43,7 @@ from reachy_mini_conversation_app.admin.people import (
     person_from_json,
     shared_spoken_names,
 )
+from reachy_mini_conversation_app.admin.gallery import Gallery, GalleryError
 from reachy_mini_conversation_app.admin.records import RecordError, StaleVersion
 from reachy_mini_conversation_app.admin.app_link import AppLink, AppUnavailable
 from reachy_mini_conversation_app.admin.notifier import Watch, Notifier
@@ -87,6 +88,7 @@ class AdminSettings:
     activity_file: Path
     whatsapp_url: str | None = None
     whatsapp_auth: str | None = None
+    photos_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> "AdminSettings":
@@ -106,6 +108,7 @@ class AdminSettings:
             activity_file=Path(config.ACTIVITY_LOG_FILE),
             whatsapp_url=config.WHATSAPP_API_URL,
             whatsapp_auth=config.WHATSAPP_API_AUTH,
+            photos_dir=Path(config.PHOTO_ARCHIVE_DIR),
         )
 
 
@@ -195,6 +198,7 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
         else None
     )
     http = httpx.AsyncClient(timeout=5.0)
+    gallery = Gallery(settings.photos_dir or Path(config.PHOTO_ARCHIVE_DIR), settings.display_dir.parent)
     restarts: set[asyncio.Task[None]] = set()
     restarted_at: list[float] = []
 
@@ -555,6 +559,37 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
             return _error("The settings file cannot be written.", 503)
         audit.append({"who": _who(request), "action": "settings changed", "target": ", ".join(sorted(changes))})
         return await _settings()
+
+    # Gallery ---------------------------------------------------------------------------------------
+
+    @app.get("/api/gallery")
+    async def _gallery() -> JSONResponse:
+        return JSONResponse({"items": await asyncio.to_thread(gallery.items)})
+
+    @app.get("/api/gallery/file")
+    async def _gallery_file(id: str, thumb: bool = False) -> Response:
+        try:
+            if thumb:
+                return Response(await asyncio.to_thread(gallery.thumbnail, id), media_type="image/jpeg")
+            path = gallery.path(id)
+        except (GalleryError, OSError, ValueError):
+            return Response(status_code=404)
+        return FileResponse(path, media_type="image/jpeg" if path.suffix == ".jpg" else "image/png")
+
+    @app.post("/api/gallery/delete")
+    async def _gallery_delete(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        item_id = str(payload.get("id") or "")
+        try:
+            await asyncio.to_thread(gallery.delete, item_id)
+        except GalleryError:
+            return _error("That picture is gone.", 404)
+        except OSError:
+            return _error("The picture could not be deleted.", 503)
+        audit.append({"who": _who(request), "action": "picture deleted", "target": item_id.split("/", 1)[0]})
+        return JSONResponse({"deleted": True})
 
     # Notifications ---------------------------------------------------------------------------------
 

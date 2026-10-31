@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image
 from numpy.typing import NDArray
 
-from reachy_mini_conversation_app import activity_log
+from reachy_mini_conversation_app import activity_log, photo_archive
 from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
 from reachy_mini_conversation_app.eink_display import render_photo
 from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
@@ -172,4 +172,5 @@ async def take_and_share(
             logger.warning("Photo preview failed: %s", type(error).__name__)
     result: SendResult = await deps.whatsapp.send_image(chat, jpeg)
     activity_log.record("photo", who, result.value)
+    await asyncio.to_thread(photo_archive.keep, jpeg, who, result.value)
     return result

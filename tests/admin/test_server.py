@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from reachy_mini_conversation_app.admin import server
@@ -843,3 +844,27 @@ def test_a_group_needs_a_name_and_full_numbers(
     with admin.client(settings=settings) as client:
         assert client.post("/api/groups", headers=SAME_ORIGIN, json=body).status_code == 400
     assert created == [] and admin.audit() == []
+
+
+# Gallery -------------------------------------------------------------------------------------------
+
+
+def test_the_gallery_lists_serves_and_deletes_pictures(admin: Admin) -> None:
+    """The gallery lists the display cache's pictures, serves a file and a thumbnail, and audits a delete."""
+    folder = admin.settings.display_dir.parent / "drawings-v3"
+    folder.mkdir(parents=True)
+    Image.new("L", (800, 480), 255).save(folder / "duck.png")
+    with admin.client() as client:
+        items = client.get("/api/gallery").json()["items"]
+        assert [(i["id"], i["kind"], i["title"]) for i in items] == [("drawings-v3/duck.png", "drawing", "Duck")]
+        file = client.get("/api/gallery/file", params={"id": "drawings-v3/duck.png"})
+        assert (file.status_code, file.headers["content-type"]) == (200, "image/png")
+        thumb = client.get("/api/gallery/file", params={"id": "drawings-v3/duck.png", "thumb": "1"})
+        assert thumb.headers["content-type"] == "image/jpeg"
+        assert client.get("/api/gallery/file", params={"id": "../contacts.json"}).status_code == 404
+        response = client.post("/api/gallery/delete", headers=SAME_ORIGIN, json={"id": "drawings-v3/duck.png"})
+        assert response.json() == {"deleted": True}
+        missing = client.post("/api/gallery/delete", headers=SAME_ORIGIN, json={"id": "drawings-v3/duck.png"})
+        assert missing.status_code == 404
+    assert not (folder / "duck.png").exists()
+    assert [(e["action"], e["target"]) for e in admin.audit()] == [("picture deleted", "drawings-v3")]

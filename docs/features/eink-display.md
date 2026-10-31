@@ -182,8 +182,9 @@ photo and turns creatures into a costume with their face showing, so the result 
   quick command: it shows the photo here the same way (`render_photo`, 10 minutes) and sends it to the
   family group, without Gemini.
 - **Anyone may use it**, kids included, but only on request (household choice).
-- **Never saved:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the usage
-  ledger records only an edit's tokens (`display_photo_edit`).
+- **Not cached for the screen:** photos and edits are not cached (`edit_photo` bypasses `DRAWINGS_DIR`); the
+  usage ledger records only an edit's tokens (`display_photo_edit`). Photos sent to WhatsApp by the quick
+  command are kept for the [phone admin app's](phone-admin-app.md) gallery unless `PHOTO_ARCHIVE_ENABLED=0`.
 - **Ten minutes on screen:** the spool marks the screen `private` with `expires_at`; after that the
   device server shows the resting card, refuses to serve the photo (404) and deletes its file at the
   next check-in.
@@ -271,7 +272,10 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 - `GET /api/display` → held up to 10 s for a screen not yet sent, then `{"status": 0, "image_url", "filename", "refresh_rate": <int>, "reset_firmware": false, "update_firmware": false, "firmware_url": null, "special_function": "none"}`.
   `refresh_rate` must be an integer: the firmware reads a string as 0 and wakes immediately.
 - `GET /screens/<filename>.png` → the current screen or the resting card, else 404.
-- `POST /api/log` → 204; the device's report is logged (first 500 characters).
+- `POST /api/log` → 204; the device's report is logged (first 500 characters). The device reports a failed
+  image download this way, and can then sit on its error screen while being sent the file name it already has,
+  which it never redraws (seen 2026-10-31 after a server restart). So the next check-in after a report sends the
+  same screen as `<filename>~<n>` (served like the original) until the screen changes.
 
 ## Extension guide
 
@@ -407,3 +411,4 @@ through a spoken conversation.
 - 2026-10-25: Live calibration of Jev's questions and limits, resizing for Jev, six candidates; shown
   screens share one id so the TRMNL's flash no longer fills up.
 - 2026-10-25: Held check-ins and a 1 s default refresh: screens appear in seconds instead of up to a minute.
+- 2026-10-31: After the TRMNL reports a failure, its screen is sent under a fresh name so it redraws.

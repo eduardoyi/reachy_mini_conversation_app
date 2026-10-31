@@ -19,11 +19,12 @@ os.environ["REACHY_MINI_SKIP_DOTENV"] = "1"
 os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", None)
-# Privacy state, the activity log and the control token default to the developer's real files.
+# Privacy state, the activity log, kept photos and the control token default to the developer's real files.
 _PRIVATE_STATE = tempfile.mkdtemp(prefix="reachy-tests-")
 os.environ["PRIVACY_STATE_FILE"] = os.path.join(_PRIVATE_STATE, "privacy.json")
 os.environ["ACTIVITY_LOG_FILE"] = os.path.join(_PRIVATE_STATE, "activity.jsonl")
 os.environ["APP_CONTROL_TOKEN_FILE"] = os.path.join(_PRIVATE_STATE, "control-token")
+os.environ["PHOTO_ARCHIVE_DIR"] = os.path.join(_PRIVATE_STATE, "photos")
 os.environ.pop("QUIET_HOURS", None)
 
 

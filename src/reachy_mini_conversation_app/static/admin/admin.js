@@ -129,8 +129,8 @@ function setFill(slider) {
 
 // Tabs ------------------------------------------------------------------------------------------
 
-const views = { home: loadHome, people: loadPeople, camera: openCamera, activity: loadActivity, settings: loadSettings };
-const titles = { people: "People", camera: "Camera", activity: "Activity", settings: "Settings" };
+const views = { home: loadHome, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
+const titles = { people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
 let currentTab = "";
 
 function showTab() {
@@ -141,9 +141,12 @@ function showTab() {
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
+  if (tab === "settings") $(".gear").setAttribute("aria-current", "page");
+  else $(".gear").removeAttribute("aria-current");
   showTitle();
   if (tab !== "camera") closeCamera();
   if ($("#person-sheet").open) $("#person-sheet").close();
+  if ($("#viewer").open) $("#viewer").close();
   $("#save-bar").hidden = true;
   window.scrollTo(0, 0);
   views[tab]();
@@ -857,6 +860,7 @@ const CHANGES = {
   "face enrolled from the camera": (t) => (t ? `added ${t}'s face from the camera` : "added a face from the camera"),
   "face photo deleted": () => "deleted a face photo",
   "face forgotten": (t) => (t ? `made Reachy forget ${t}` : "made Reachy forget a face"),
+  "picture deleted": (t) => (t === "photos" ? "deleted a photo" : "deleted a picture"),
 };
 
 function describeChange(entry) {
@@ -923,6 +927,206 @@ for (const button of document.querySelectorAll("[data-log]")) {
     if (state.activity) renderActivity();
   });
 }
+
+// Gallery ---------------------------------------------------------------------------------------
+
+const KINDS = {
+  photo: { label: "Photos", one: "Photo", icon: "camera" },
+  drawing: { label: "Drawings", one: "Drawing", icon: "pencil" },
+  lesson: { label: "Lessons", one: "Drawing lesson", icon: "steps" },
+  picture: { label: "Pictures", one: "Picture from the web", icon: "globe" },
+};
+const gallery = { items: [], kind: "all", query: "", shown: [], index: 0 };
+
+function fileUrl(item, thumb = false) {
+  return `/api/gallery/file?id=${encodeURIComponent(item.id)}${thumb ? "&thumb=1" : ""}`;
+}
+
+function fold(text) {
+  return String(text || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+async function loadGallery() {
+  const payload = await run(null, () => api("/api/gallery"));
+  if (!payload) return;
+  gallery.items = payload.items;
+  renderGallery();
+}
+
+function matches(item) {
+  if (gallery.kind !== "all" && item.kind !== gallery.kind) return false;
+  if (!gallery.query) return true;
+  const haystack = fold([item.title, item.who, KINDS[item.kind].label, ...(item.steps || [])].join(" "));
+  return fold(gallery.query).split(/\s+/).every((word) => haystack.includes(word));
+}
+
+function renderGallery() {
+  const counts = {};
+  for (const item of gallery.items) counts[item.kind] = (counts[item.kind] || 0) + 1;
+  const filter = (kind, label, count) => {
+    const chip = el("button", { className: "chip", type: "button", role: "tab" }, [label, el("span", {}, String(count))]);
+    chip.setAttribute("aria-selected", String(gallery.kind === kind));
+    chip.addEventListener("click", () => {
+      gallery.kind = kind;
+      renderGallery();
+    });
+    return chip;
+  };
+  $("#gallery-filters").replaceChildren(
+    filter("all", "All", gallery.items.length),
+    ...Object.entries(KINDS).filter(([kind]) => counts[kind]).map(([kind, info]) => filter(kind, info.label, counts[kind])),
+  );
+
+  gallery.shown = gallery.items.filter(matches);
+  const box = $("#gallery");
+  if (!gallery.shown.length) {
+    const text = gallery.query
+      ? `Nothing matches “${gallery.query}”.`
+      : gallery.kind === "photo" ? "Photos Reachy takes show up here." : "Pictures Reachy makes show up here.";
+    box.replaceChildren(el("div", { className: "empty" }, [icon(gallery.query ? "search" : "gallery"), el("p", {}, text)]));
+    return;
+  }
+  const days = [];
+  gallery.shown.forEach((item, index) => {
+    const label = dayLabel(when(item.at) || new Date());
+    if (!days.length || days[days.length - 1].label !== label) days.push({ label, tiles: [] });
+    const image = el("img", { src: fileUrl(item, true), alt: item.title, loading: "lazy", decoding: "async" });
+    image.setAttribute("data-loading", "");
+    image.addEventListener("load", () => image.removeAttribute("data-loading"));
+    const tile = el("button", { className: "shot", type: "button", ariaLabel: item.title }, [
+      image,
+      gallery.kind === "all" ? el("span", { className: "kind" }, icon(KINDS[item.kind].icon)) : null,
+    ]);
+    tile.addEventListener("click", () => openViewer(index));
+    days[days.length - 1].tiles.push(tile);
+  });
+  box.replaceChildren(...days.flatMap((day) => [el("h3", { className: "day" }, day.label), el("div", { className: "grid" }, day.tiles)]));
+}
+
+let searchTimer = null;
+$("#gallery-search").addEventListener("input", (event) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    gallery.query = event.target.value.trim();
+    renderGallery();
+  }, 150);
+});
+
+function openViewer(index) {
+  gallery.index = index;
+  showViewerItem();
+  if (!$("#viewer").open) $("#viewer").showModal();
+}
+
+function showViewerItem() {
+  const item = gallery.shown[gallery.index];
+  if (!item) return;
+  const image = $("#viewer-image");
+  image.src = fileUrl(item);
+  image.alt = item.title;
+  image.classList.toggle("ink", item.kind !== "photo");
+  image.style.transform = "";
+  $("#viewer-title").textContent = item.title;
+  const date = when(item.at);
+  const day = date ? dayLabel(date) : "";
+  const meta = $("#viewer-meta");
+  meta.replaceChildren(
+    item.kind === "photo" ? "Taken" : KINDS[item.kind].one,
+    date ? `, ${["Today", "Yesterday"].includes(day) ? day.toLowerCase() : day} at ${clock(item.at)}` : "",
+  );
+  if (item.source) meta.append(". ", el("a", { className: "source", href: item.source, target: "_blank", rel: "noopener noreferrer" }, "Where it's from"));
+  if (item.old_style) meta.append(". An older drawing style");
+  const steps = $("#viewer-steps");
+  steps.hidden = !(item.steps && item.steps.length);
+  steps.replaceChildren(...(item.steps || []).map((step) => el("li", {}, step)));
+  $("#viewer-count").textContent = `${gallery.index + 1} of ${gallery.shown.length}`;
+  const save = $("#viewer-save");
+  save.href = fileUrl(item);
+  save.download = `${item.title}.${item.id.endsWith(".jpg") ? "jpg" : "png"}`;
+  $("#viewer-prev").hidden = gallery.index === 0;
+  $("#viewer-next").hidden = gallery.index >= gallery.shown.length - 1;
+  for (const offset of [-1, 1]) {
+    const neighbour = gallery.shown[gallery.index + offset];
+    if (neighbour) new Image().src = fileUrl(neighbour);
+  }
+}
+
+function stepViewer(offset) {
+  const next = gallery.index + offset;
+  if (next < 0 || next >= gallery.shown.length) return;
+  gallery.index = next;
+  showViewerItem();
+}
+
+$("#viewer-close").addEventListener("click", () => $("#viewer").close());
+$("#viewer-prev").addEventListener("click", () => stepViewer(-1));
+$("#viewer-next").addEventListener("click", () => stepViewer(1));
+$("#viewer").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowLeft") stepViewer(-1);
+  if (event.key === "ArrowRight") stepViewer(1);
+});
+
+let swipe = null;
+$("#viewer-stage").addEventListener("pointerdown", (event) => {
+  if (event.target.closest("button")) return;
+  swipe = { x: event.clientX, y: event.clientY };
+});
+$("#viewer-stage").addEventListener("pointermove", (event) => {
+  if (!swipe) return;
+  $("#viewer-image").style.transform = `translateX(${(event.clientX - swipe.x) * 0.6}px)`;
+});
+for (const name of ["pointerup", "pointercancel"]) {
+  $("#viewer-stage").addEventListener(name, (event) => {
+    if (!swipe) return;
+    const dx = event.clientX - swipe.x;
+    const dy = event.clientY - swipe.y;
+    swipe = null;
+    $("#viewer-image").style.transform = "";
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) stepViewer(dx < 0 ? 1 : -1);
+    else if (dy > 90) $("#viewer").close();
+  });
+}
+
+$("#viewer-share").addEventListener("click", (event) =>
+  run(event.currentTarget, async () => {
+    const item = gallery.shown[gallery.index];
+    const response = await fetch(fileUrl(item));
+    const blob = await response.blob();
+    const file = new File([blob], `${item.title}.${blob.type === "image/jpeg" ? "jpg" : "png"}`, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: item.title });
+      } catch (error) {
+        if (error.name !== "AbortError") throw new Error("Sharing didn't work.");
+      }
+    } else {
+      $("#viewer-save").click();
+    }
+  })
+);
+
+$("#viewer-delete").addEventListener("click", async (event) => {
+  const item = gallery.shown[gallery.index];
+  const button = event.currentTarget;
+  const yes = await ask({
+    title: item.kind === "photo" ? "Delete this photo?" : `Delete “${item.title}”?`,
+    body: item.kind === "photo" ? "It stays in WhatsApp if it was sent." : "Reachy makes it again if someone asks for it.",
+    yes: "Delete",
+    danger: true,
+  });
+  if (!yes) return;
+  run(button, async () => {
+    await api("/api/gallery/delete", { method: "POST", body: { id: item.id } });
+    gallery.items = gallery.items.filter((i) => i.id !== item.id);
+    renderGallery();
+    toast("Deleted.");
+    if (!gallery.shown.length) $("#viewer").close();
+    else {
+      gallery.index = Math.min(gallery.index, gallery.shown.length - 1);
+      showViewerItem();
+    }
+  });
+});
 
 // Settings --------------------------------------------------------------------------------------
 
@@ -1066,6 +1270,7 @@ function renderSettings() {
     ["FACE_RECOGNITION_ENABLED", "face", "Recognize faces", "Greets people by name"],
     ["SPEAKER_FOLLOWING_ENABLED", "speaker", "Turn toward voices", "Looks at whoever is talking"],
     ["DISPLAY_NOW_PLAYING", "screen", "Show the song on the e-ink screen", ""],
+    ["PHOTO_ARCHIVE_ENABLED", "gallery", "Keep photos in the gallery", "Photos he takes stay on the Mac mini"],
   ].filter(([key]) => meta[key]);
   if (flags.length) {
     panels.push(el("div", { className: "panel" }, flags.map(([key, iconName, label, sub]) => settingRow({ iconName, label, sub, control: switchFor(key, label) }))));

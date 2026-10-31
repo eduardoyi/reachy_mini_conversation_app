@@ -37,6 +37,7 @@ SETTINGS: Final[dict[str, Setting]] = {
     "FACE_RECOGNITION_ENABLED": Setting("Face recognition", "flag", default="0"),
     "SPEAKER_FOLLOWING_ENABLED": Setting("Turn toward whoever speaks", "flag", default="1"),
     "DISPLAY_NOW_PLAYING": Setting("Show the song on the e-ink screen", "flag", default="1"),
+    "PHOTO_ARCHIVE_ENABLED": Setting("Keep photos in the gallery", "flag", default="1"),
 }
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$")
 _NAMES = re.compile(r"[a-z0-9_-]+(?:,[a-z0-9_-]+)*")

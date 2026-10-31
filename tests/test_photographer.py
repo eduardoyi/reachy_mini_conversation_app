@@ -1,11 +1,15 @@
+import json
 import threading
+from types import SimpleNamespace
 from typing import Any
+from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from reachy_mini_conversation_app import photographer
+from reachy_mini_conversation_app import photographer, photo_archive
+from reachy_mini_conversation_app.whatsapp import SendResult
 from reachy_mini_conversation_app.photographer import BURST_FRAMES, FaceFinder, sharpness, take_photo
 
 
@@ -201,3 +205,20 @@ def test_a_failed_encode_is_tried_once_more(monkeypatch: pytest.MonkeyPatch) -> 
 
     results[:] = [None, None]
     assert _take(Camera([_sharp(i) for i in range(BURST_FRAMES)]), _no_faces()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_shared_photo_is_kept_for_the_gallery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After sending, the photo is kept with who it was for and how the send went."""
+    monkeypatch.setattr(photo_archive.config, "PHOTO_ARCHIVE_DIR", str(tmp_path))
+
+    class WhatsApp:
+        async def send_image(self, chat: str, jpeg: bytes) -> SendResult:
+            return SendResult.SENT
+
+    deps = SimpleNamespace(reachy_mini=SimpleNamespace(media=None), display=None, whatsapp=WhatsApp())
+    result = await photographer.take_and_share(deps, "1@g.us", "Tío Sergio", take=lambda media, faces: b"jpeg")
+    assert result is SendResult.SENT
+    [kept] = tmp_path.glob("*.jpg")
+    assert kept.read_bytes() == b"jpeg"
+    assert json.loads(kept.with_suffix(".json").read_text())["who"] == "Tío Sergio"

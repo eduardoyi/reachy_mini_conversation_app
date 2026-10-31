@@ -853,6 +853,9 @@ class Config:
     PRIVACY_STATE_FILE = os.path.expanduser(os.getenv("PRIVACY_STATE_FILE") or "~/.local/share/reachy/privacy.json")
     # Calls, voice notes and photos sent, for the admin app's activity page (names only).
     ACTIVITY_LOG_FILE = os.path.expanduser(os.getenv("ACTIVITY_LOG_FILE") or "~/.local/share/reachy/activity.jsonl")
+    # Photos Reachy takes, kept for the admin app's gallery (photo_archive.py); 0 sends them without keeping them.
+    PHOTO_ARCHIVE_ENABLED = _env_flag("PHOTO_ARCHIVE_ENABLED", default=True)
+    PHOTO_ARCHIVE_DIR = os.path.expanduser(os.getenv("PHOTO_ARCHIVE_DIR") or "~/.local/share/reachy/photos")
     # Quiet hours, "21:30-07:00" local time: no wake and incoming calls declined. Empty for none.
     QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
@@ -1086,6 +1089,8 @@ def refresh_runtime_config_from_env() -> None:
     config.ACTIVITY_LOG_FILE = os.path.expanduser(
         os.getenv("ACTIVITY_LOG_FILE") or "~/.local/share/reachy/activity.jsonl"
     )
+    config.PHOTO_ARCHIVE_ENABLED = _env_flag("PHOTO_ARCHIVE_ENABLED", default=True)
+    config.PHOTO_ARCHIVE_DIR = os.path.expanduser(os.getenv("PHOTO_ARCHIVE_DIR") or "~/.local/share/reachy/photos")
     config.QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)

@@ -228,3 +228,9 @@ security model); README and architecture diagram updated; this plan and the inde
   redesigned: a Home tab with Reachy drawn in his current state and the one action that fits, people tiles and a bottom
   sheet, group options by name, name chips, a d-pad, activity by day, settings with real controls and a save bar, an
   in-app confirm dialog, dark mode, a new icon. Checked in a local preview at phone size in light and dark.
+- 2026-10-31: Martin's and Miguel's faces linked onto Abuelo Martín and Tío Gangue (their cards; the face store still
+  greets them as Martin and Miguel). Gallery added: photos are now kept (`photo_archive.py`, setting
+  `PHOTO_ARCHIVE_ENABLED`, on by default as asked), with drawings, lessons and web pictures from the display cache;
+  search, filters, a swiping viewer with share, save and delete. Settings moved to a gear in the header to keep five
+  tabs. The TRMNL had been checking in normally but stayed on an error screen after a failed download during a
+  server restart; the device server now resends the screen under a new name after a reported failure.

@@ -34,6 +34,9 @@ CHECK_IN_HOLD_S = 10.0
 # silence means it is asleep: one failed check-in sends it to sleep for 5 minutes.
 AWAKE_GAP_S = 30.0
 POLL_S = 0.2
+# After the firmware reports a failure it can sit on its error screen while being sent the file name it
+# already has, which it never redraws; the screen then goes out under a fresh name (``home~1``).
+ALIAS_MARK = "~"
 BIND_TIMEOUT_S = 5.0
 DEFAULT_SPOOL = Path.home() / ".cache" / "reachy-mini-conversation-app" / "display" / "screen"
 CURRENT, DEVICE, SERVER = "current.json", "device.json", "server.json"
@@ -105,6 +108,9 @@ class DeviceServer(ThreadingHTTPServer):
         self._lock = threading.Lock()
         self._open = 0
         self._last_sent: str | None = None
+        self._redraw = False
+        self._redraws = 0
+        self._alias: tuple[str, str] | None = None
         deadline = time.monotonic() + BIND_TIMEOUT_S
         while True:
             try:
@@ -134,8 +140,28 @@ class DeviceServer(ThreadingHTTPServer):
         finally:
             self._record_check_in(opening=False)
 
+    def request_redraw(self) -> None:
+        """Make the next check-in send its screen under a name the TRMNL has not drawn yet."""
+        with self._lock:
+            self._redraw = True
+
+    def name_for_device(self, filename: str | None) -> str | None:
+        """Return the name the TRMNL is sent for ``filename``: an alias after a reported failure."""
+        if filename is None:
+            return None
+        with self._lock:
+            if self._redraw:
+                self._redraw = False
+                self._redraws += 1
+                self._alias = (filename, f"{filename}{ALIAS_MARK}{self._redraws}")
+                logger.info("TRMNL reported a failure; sending the screen again to redraw it")
+            if self._alias is not None and self._alias[0] == filename:
+                return self._alias[1]
+            return filename
+
     def screen_png(self, filename: str) -> bytes | None:
-        """Return the PNG of the current or resting screen with this file name, else None."""
+        """Return the PNG of the current or resting screen with this file name (or its alias), else None."""
+        filename = filename.split(ALIAS_MARK, 1)[0]
         current = read_json(self.spool / CURRENT)
         if filename not in (current_filename(self.spool, self._clock()), current.get("home")):
             return None
@@ -210,7 +236,7 @@ class _Handler(BaseHTTPRequestHandler):
             )
             server.record_battery(self.headers.get("Battery-Voltage"))
             # Answering as soon as a screen changes saves the device a sleep, a reboot and a Wi-Fi reconnect.
-            filename = server.screen_for_check_in(CHECK_IN_HOLD_S)
+            filename = server.name_for_device(server.screen_for_check_in(CHECK_IN_HOLD_S))
             self._send_json(
                 {
                     "status": 0,
@@ -242,6 +268,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         length = min(int(self.headers.get("Content-Length") or 0), 64_000)
         logger.info("TRMNL reported: %s", self.rfile.read(length).decode(errors="replace")[:500])
+        self.server.request_redraw()
         self.send_response(204)
         self.end_headers()
 
