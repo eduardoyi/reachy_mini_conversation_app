@@ -87,13 +87,14 @@ class PushService:
     """A fake push service that accepts everything."""
 
     def __init__(self) -> None:
-        """No pushes yet."""
+        """No pushes yet, and no expired subscriptions."""
         self.requests: list[httpx.Request] = []
+        self.expired: set[str] = set()
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        """Accept the push."""
+        """Accept the push, or answer 410 for an expired subscription."""
         self.requests.append(request)
-        return httpx.Response(201)
+        return httpx.Response(410 if str(request.url) in self.expired else 201)
 
 
 @dataclass
@@ -712,21 +713,32 @@ def test_push_subscribe_test_and_unsubscribe(admin: Admin) -> None:
     with admin.client() as client:
         key = client.get("/api/push/key")
         subscribed = client.post("/api/push/subscribe", headers=SAME_ORIGIN, json=subscription)
-        tested = client.post("/api/push/test", headers=SAME_ORIGIN)
+        tested = client.post("/api/push/test", headers=SAME_ORIGIN, json={"endpoint": subscription["endpoint"]})
         unsubscribed = client.post(
             "/api/push/unsubscribe", headers=SAME_ORIGIN, json={"endpoint": subscription["endpoint"]}
         )
-        after = client.post("/api/push/test", headers=SAME_ORIGIN)
+        after = client.post("/api/push/test", headers=SAME_ORIGIN, json={})
 
     assert key.json() == {"key": admin.notifier.public_key}
     assert subscribed.json() == {"subscribed": True}
-    assert tested.json() == {"delivered": 1}
+    assert tested.json() == {"delivered": 1, "gone": False}
     assert unsubscribed.json() == {"subscribed": False}
-    assert after.json() == {"delivered": 0}
+    assert after.json() == {"delivered": 0, "gone": False}
     assert [str(r.url) for r in admin.push.requests] == ["https://push.example.com/phone"]
     assert read_json(admin.settings.data_dir / SUBSCRIPTIONS_FILE)[0] == {"subscriptions": []}
     for response in (key, subscribed, tested, unsubscribed):
         assert response.headers["cache-control"] == "no-store"
+
+
+def test_a_test_tells_the_phone_its_expired_subscription_was_dropped(admin: Admin) -> None:
+    """The push service saying 410 for this phone comes back as gone, so the phone subscribes afresh."""
+    subscription = {"endpoint": "https://push.example.com/old", "keys": {"p256dh": UA_PUBLIC, "auth": AUTH}}
+    admin.push.expired.add(subscription["endpoint"])
+    with admin.client() as client:
+        client.post("/api/push/subscribe", headers=SAME_ORIGIN, json=subscription)
+        tested = client.post("/api/push/test", headers=SAME_ORIGIN, json={"endpoint": subscription["endpoint"]})
+    assert tested.json() == {"delivered": 0, "gone": True}
+    assert read_json(admin.settings.data_dir / SUBSCRIPTIONS_FILE)[0] == {"subscriptions": []}
 
 
 def test_push_subscription_records_who_and_the_apps_origin(admin: Admin) -> None:

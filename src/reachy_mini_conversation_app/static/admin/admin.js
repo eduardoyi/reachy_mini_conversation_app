@@ -312,6 +312,11 @@ async function showPushState() {
   }
   const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.getSubscription();
+  // Reachy forgets a phone the push service said was expired; telling it again keeps the two in step.
+  if (subscription && !showPushState.synced) {
+    showPushState.synced = true;
+    api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() }).catch(() => {});
+  }
   toggle.setAttribute("aria-checked", String(Boolean(subscription)));
   $("#push-test").hidden = !subscription;
   if (Notification.permission === "denied") $("#push-hint").textContent = "Blocked. Allow notifications for this app in Android settings.";
@@ -332,19 +337,35 @@ $("#push-on").addEventListener("click", (event) =>
       toast("Notifications off.");
     } else {
       if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are blocked for this app.");
-      const { key } = await api("/api/push/key");
-      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
-      await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+      await subscribePush(registration);
       toast("Notifications on.");
     }
     await showPushState();
   })
 );
 
+async function subscribePush(registration) {
+  const { key } = await api("/api/push/key");
+  const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+  await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+  return subscription;
+}
+
 $("#push-test").addEventListener("click", (event) =>
   run(event.currentTarget, async () => {
-    const result = await api("/api/push/test", { method: "POST" });
-    toast(result.delivered ? "Sent. Check your phone." : "No phone accepted it.", result.delivered ? "good" : "bad");
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) throw new Error("Turn notifications on first.");
+    await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+    let result = await api("/api/push/test", { method: "POST", body: { endpoint: subscription.endpoint } });
+    if (result.gone) {
+      // The push service retired this phone's subscription; a fresh one replaces it.
+      await subscription.unsubscribe();
+      subscription = await subscribePush(registration);
+      result = await api("/api/push/test", { method: "POST", body: { endpoint: subscription.endpoint } });
+    }
+    if (result.delivered) toast("Sent. It should arrive in a few seconds.");
+    else toast("Google's push service didn't take it. Turn notifications off and on, then try again.", "bad");
   })
 );
 

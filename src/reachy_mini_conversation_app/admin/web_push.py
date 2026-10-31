@@ -136,5 +136,5 @@ async def send(
         logger.warning("Push not delivered: %s", type(error).__name__)
         return 0
     if response.status_code >= 300:
-        logger.warning("Push refused by the push service: HTTP %d", response.status_code)
+        logger.warning("Push refused by the push service: HTTP %d %s", response.status_code, response.text[:200])
     return response.status_code

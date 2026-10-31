@@ -40,6 +40,8 @@ class Notifier:
         self._key = load_or_create_key(directory / KEY_FILE)
         self._client = client or httpx.AsyncClient()
         self._lock = asyncio.Lock()
+        # The endpoints the last notification found expired, so a phone can tell its own was dropped.
+        self.last_gone: set[str] = set()
 
     @property
     def public_key(self) -> str:
@@ -107,6 +109,7 @@ class Notifier:
                     )
                 except (StaleVersion, RecordError) as error:
                     logger.warning("Dropped push subscriptions not forgotten: %s", error)
+            self.last_gone = {str(endpoint) for endpoint in gone}
         logger.info("Notification sent to %d of %d phones", delivered, len(entries))
         return delivered
 

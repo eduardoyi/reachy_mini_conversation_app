@@ -618,9 +618,12 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
         return JSONResponse({"subscribed": False})
 
     @app.post("/api/push/test")
-    async def _push_test() -> JSONResponse:
+    async def _push_test(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
         delivered = await notifier.notify("Reachy", "Notifications work.")
-        return JSONResponse({"delivered": delivered})
+        return JSONResponse({"delivered": delivered, "gone": str(payload.get("endpoint") or "") in notifier.last_gone})
 
     return app
 
