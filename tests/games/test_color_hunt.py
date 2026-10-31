@@ -9,21 +9,21 @@ import pytest
 import pytest_asyncio
 
 from .fakes import FakeReachy, seen, frame
-from reachy_mini_conversation_app.games import color_hunt
+from reachy_mini_conversation_app.games import hunt
 from reachy_mini_conversation_app.games.host import GameHost, GameState
-from reachy_mini_conversation_app.games.color_hunt import TARGETS, ColorHunt, color_hunt_phrases
+from reachy_mini_conversation_app.games.color_hunt import ColorHunt, color_hunt_phrases
 
 
 @pytest.fixture(autouse=True)
 def fast_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
     """One short round, frames every 20 ms, and only red to find unless a test changes it."""
-    monkeypatch.setattr(color_hunt, "ROUNDS", 1)
-    monkeypatch.setattr(color_hunt, "ROUND_S", 0.8)
-    monkeypatch.setattr(color_hunt, "CHECK_EVERY_S", 0.02)
-    monkeypatch.setattr(color_hunt, "RECHECK_STILL_S", 0.1)
-    monkeypatch.setattr(color_hunt, "WRONG_EVERY_S", 0.3)
-    monkeypatch.setattr(color_hunt, "OTHER_ROUND_ANSWER_S", 0.3)
-    monkeypatch.setattr(color_hunt, "TARGETS", {"red": TARGETS["red"]})
+    monkeypatch.setattr(hunt, "ROUNDS", 1)
+    monkeypatch.setattr(ColorHunt, "round_s", 0.8)
+    monkeypatch.setattr(hunt, "CHECK_EVERY_S", 0.02)
+    monkeypatch.setattr(hunt, "RECHECK_STILL_S", 0.1)
+    monkeypatch.setattr(hunt, "WRONG_EVERY_S", 0.3)
+    monkeypatch.setattr(hunt, "OTHER_ROUND_ANSWER_S", 0.3)
+    monkeypatch.setattr(ColorHunt, "targets", lambda self: ["red"])
 
 
 @pytest_asyncio.fixture
@@ -104,7 +104,7 @@ async def test_an_unsure_or_not_held_color_finds_nothing(game) -> None:
 @pytest.mark.asyncio
 async def test_a_color_already_in_view_counts_only_after_it_left(game, monkeypatch: pytest.MonkeyPatch) -> None:
     """A red bottle in front of the camera from the start is not a find, until it goes and comes back."""
-    monkeypatch.setattr(color_hunt, "ROUND_S", 3.0)
+    monkeypatch.setattr(ColorHunt, "round_s", 3.0)
     reachy, host = game
     reachy.jev_answer = _answers(*[seen("red")] * 6, seen("none", held=0.05), seen("red"))
     host.start("colors", "es")
@@ -155,9 +155,27 @@ async def test_a_pause_stops_the_tune_and_the_clock(game) -> None:
 
 def test_every_line_is_cached_and_no_wrong_line_names_an_accepted_color(monkeypatch: pytest.MonkeyPatch) -> None:
     """All lines are fixed (cached); red's lines never call orange wrong."""
-    monkeypatch.setattr(color_hunt, "TARGETS", TARGETS)
     phrases = color_hunt_phrases()
     assert {"¡Busca algo ROJO!", "Find something red!", "¡Sí! ¡Rosa!", "Time's up! It was black."} <= phrases
     assert "Mmm, eso es azul. ¡Busca algo rojo!" in phrases
     assert "Mmm, eso es naranja. ¡Busca algo rojo!" not in phrases
     assert "Mmm, eso es naranja. ¡Busca algo azul!" in phrases
+
+
+@pytest.mark.parametrize(
+    ("target", "shown", "counts"),
+    [
+        ("red", "pink", True),
+        ("orange", "red", True),
+        ("pink", "orange", True),
+        ("blue", "purple", True),
+        ("gray", "white", True),
+        ("brown", "black", True),
+        ("green", "blue", False),
+        ("yellow", "purple", False),
+    ],
+)
+def test_each_color_accepts_its_neighbors(target: str, shown: str, counts: bool) -> None:
+    """Close colors count (the household chose generous matches); far ones are named as wrong when sure."""
+    check = ColorHunt().judge(seen(shown), target)
+    assert check.match is counts and check.wrong is not counts

@@ -152,6 +152,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
+    from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
     from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
 
     log = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             state=state,
             questions=questions,
             images=images,
-            feature="game_color_check",
+            feature="game_check",
         )
 
     def emotion(intent: str) -> None:
@@ -239,8 +240,12 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         jev=ask_jev,
         emotion=emotion,
         call_busy=(lambda: bool(calls.busy)) if calls is not None else (lambda: False),
+        picture=display.game_picture if display is not None else None,
+        draw_pictures=display.draw_game_pictures if display is not None else None,
     )
-    games: dict[str, Callable[[], Game]] = {"colors": ColorHunt} if deps.camera_enabled else {}
+    games: dict[str, Callable[[], Game]] = (
+        {"colors": ColorHunt, "treasure": TreasureHunt} if deps.camera_enabled else {}
+    )
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)
@@ -375,6 +380,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     from reachy_mini_conversation_app.writing_mode import WRITING_PHRASES
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
     from reachy_mini_conversation_app.games.color_hunt import color_hunt_phrases
+    from reachy_mini_conversation_app.games.treasure_hunt import treasure_hunt_phrases
 
     home = None
     if config.HOME_LOCATION and config.HOME_LATITUDE is not None and config.HOME_LONGITUDE is not None:
@@ -384,7 +390,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         (config.GEMINI_API_KEY or "").strip() or None,
         config.GEMINI_VOICE,
         model=config.LOCAL_SPEECH_MODEL,
-        cacheable=FIXED_PHRASES | WRITING_PHRASES | host_phrases() | color_hunt_phrases(),
+        cacheable=FIXED_PHRASES | WRITING_PHRASES | host_phrases() | color_hunt_phrases() | treasure_hunt_phrases(),
     )
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"

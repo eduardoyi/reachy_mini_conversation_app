@@ -7,7 +7,7 @@ starting, pausing, ending and putting things back; a game only plays.
 
 import time
 import asyncio
-from typing import Any, Callable, Optional, Awaitable
+from typing import Any, Callable, Optional, Awaitable, Coroutine
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -45,6 +45,10 @@ class GameServices:
     camera: Callable[[], Optional[bytes]]
     jev: Optional[JevAsk]
     emotion: Callable[[str], None]
+    # The kept drawing of a subject for a game's screen, or None when it is not made yet (never waits for one).
+    picture: Optional[Callable[[str], Any]] = None
+    # Make the drawings of these subjects that are not made yet (in the background, a few cents each, once).
+    draw_pictures: Optional[Callable[[list[str]], Coroutine[Any, Any, None]]] = None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
     clock: Callable[[], float] = time.monotonic

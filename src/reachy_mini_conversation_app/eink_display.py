@@ -93,6 +93,8 @@ PHOTO_EDIT_PROMPT = (
 # Drawings are cached per style, so a new style never shows old drawings: drawings/ holds the 2026-10-24
 # cartoons and drawings-v2/ the too-detailed encyclopedia style; neither is used any more.
 DRAWINGS_DIR = "drawings-v3"
+# Drawings a game shows (the treasure hunt's ball, shoe, Lego): kept apart so the gallery does not list them.
+GAME_PICTURES_DIR = "game-pictures"
 # Drawing lessons are one 2x2 "how to draw" sheet cut into its panels: separate drawings per step never showed the
 # same drawing growing (six subjects, 2026-10-30). Without "including the last one" the last panel came back all
 # black; asked for faces only on animals, houses and rockets still got them.
@@ -469,6 +471,30 @@ def render_game_prompt(word: str, stars: int, total: int, caption: str = "") -> 
     return encode_png(canvas)
 
 
+def render_game_picture(picture: Image.Image, word: str, stars: int, total: int, caption: str = "") -> bytes:
+    """Render a game's prompt with a drawing, for children who cannot read yet.
+
+    The picture is on the left; ``caption``, ``word`` and a row of ``total`` stars (the first ``stars`` filled)
+    are on the right.
+    """
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    fitted = ImageOps.contain(picture.convert("L"), (420, HEIGHT - 40))
+    canvas.paste(fitted, (20 + (420 - fitted.width) // 2, (HEIGHT - fitted.height) // 2))
+    draw = ImageDraw.Draw(canvas)
+    left, width = 460, WIDTH - 480
+    if caption:
+        _draw_lines(draw, [caption], _font(32, bold=True), left=left, width=width, top=70, centered=True)
+    font = _fitted(max(word.split(), key=len), width, 84, 40)
+    lines = _wrapped(word, font, width, 3)
+    middle = 230 - len(lines) * int(font.size * 1.2) / 2
+    _draw_lines(draw, lines, font, left=left, width=width, top=int(middle), centered=True)
+    size, gap = 40, 12
+    first = left + (width - total * size - (total - 1) * gap) / 2
+    for index in range(total):
+        _draw_star(draw, first + index * (size + gap) + size / 2, HEIGHT - 70, size / 2, filled=index < stars)
+    return encode_png(canvas)
+
+
 def render_game_paused(title: str, language: str) -> bytes:
     """Render a paused game: PAUSA in large letters, the game's name and how to go on."""
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
@@ -665,9 +691,9 @@ class EInkDisplay:
             if old.name not in keep:
                 old.unlink(missing_ok=True)
 
-    async def drawing(self, subject: str) -> Image.Image:
-        """Return a drawing of ``subject``: from the cache, else a new one."""
-        path = self._cache_dir / DRAWINGS_DIR / f"{_cache_key(subject)}.png"
+    async def drawing(self, subject: str, folder: str = DRAWINGS_DIR) -> Image.Image:
+        """Return a drawing of ``subject``: from the cache in ``folder``, else a new one kept there."""
+        path = self._cache_dir / folder / f"{_cache_key(subject)}.png"
         if path.is_file():
             with Image.open(path) as cached:
                 return cached.convert("L")
@@ -677,6 +703,25 @@ class EInkDisplay:
         info.add_text("subject", subject[:300])  # the file name is cut short; the admin app's gallery shows this
         picture.save(path, pnginfo=info)
         return picture
+
+    def game_picture(self, subject: str) -> Image.Image | None:
+        """Return the kept game drawing of ``subject``, or None when it has not been made (never waits for one)."""
+        path = self._cache_dir / GAME_PICTURES_DIR / f"{_cache_key(subject)}.png"
+        if not path.is_file():
+            return None
+        with Image.open(path) as cached:
+            return cached.convert("L")
+
+    async def draw_game_pictures(self, subjects: list[str]) -> None:
+        """Make the game drawings of ``subjects`` not made yet, one at a time; a failure leaves that one out."""
+        for subject in subjects:
+            if self.game_picture(subject) is not None:
+                continue
+            try:
+                await self.drawing(subject, GAME_PICTURES_DIR)
+                logger.info("Game picture drawn: %s", subject)
+            except Exception as error:
+                logger.warning("Game picture not drawn (%s): %s", subject, type(error).__name__)
 
     async def lesson(self, subject: str, title: str) -> list[tuple[str, Image.Image]]:
         """Return a drawing lesson's four panels with their captions: from the cache, else drawn and captioned."""

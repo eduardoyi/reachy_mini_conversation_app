@@ -70,7 +70,51 @@ COLOR_HUNT: Final[GameInfo] = GameInfo(
     ),
 )
 
-GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT,)}
+TREASURE_HUNT: Final[GameInfo] = GameInfo(
+    key="treasure",
+    names=frozenset(
+        {
+            "buscar tesoros",
+            "busca tesoros",
+            "tesoros",
+            "tesoro",
+            "el tesoro",
+            "los tesoros",
+            "busca el tesoro",
+            "buscar el tesoro",
+            "la busqueda del tesoro",
+            "busqueda del tesoro",
+            "el juego del tesoro",
+            "juego del tesoro",
+            "cazar tesoros",
+            "caza del tesoro",
+            "la caza del tesoro",
+            "treasure hunt",
+            "the treasure hunt",
+            "treasure",
+            "treasure game",
+            "the treasure game",
+            "scavenger hunt",
+            "a scavenger hunt",
+            "a treasure hunt",
+            "treasure hunting",
+            "treasure hunts",
+        }
+    ),  # fmt: skip
+    title={"es": "a buscar tesoros", "en": "treasure hunt"},
+    pitch={
+        "es": "Yo te digo algo de la casa, y tú lo buscas y me lo enseñas.",
+        "en": "I name something from around the house, and you find it and show it to me.",
+    },
+    rules=(
+        "Reachy names something from around the house (a ball, a shoe, a Lego, an animal, a fruit, something "
+        "round...) and shows a drawing of it; a tune speeds up for 60 seconds while the children find it and hold "
+        "it up to his camera. He cheers when he sees it and says 'not that one' when it is something else. Five "
+        "rounds, a star for each find; nobody loses. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
+GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT)}
 
 
 @dataclass(frozen=True)
