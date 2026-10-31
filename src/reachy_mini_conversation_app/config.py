@@ -4,6 +4,7 @@ import sys
 import math
 import logging
 from pathlib import Path
+from datetime import time as dt_time
 from dataclasses import dataclass
 from urllib.parse import urlsplit, parse_qsl, urlunsplit
 from importlib.resources import files
@@ -351,6 +352,19 @@ def _optional_float(value: str | None) -> float | None:
         return float(value) if value and value.strip() else None
     except ValueError:
         return None
+
+
+def _quiet_hours(value: str | None) -> tuple[dt_time, dt_time] | None:
+    """Parse "HH:MM-HH:MM" (it may cross midnight); empty or invalid is None."""
+    if not value or not value.strip():
+        return None
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*", value)
+    if match is not None:
+        start_h, start_m, end_h, end_m = (int(part) for part in match.groups())
+        if start_h < 24 and end_h < 24 and start_m < 60 and end_m < 60 and (start_h, start_m) != (end_h, end_m):
+            return dt_time(start_h, start_m), dt_time(end_h, end_m)
+    logger.warning("Ignoring invalid QUIET_HOURS=%r; expected HH:MM-HH:MM.", value)
+    return None
 
 
 def _bounded_int(env_name: str, default: int, low: int, high: int) -> int:
@@ -830,6 +844,17 @@ class Config:
     WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
     # The language Reachy announces incoming calls in ("Te llama Eduardo").
     WHATSAPP_CALLS_LANGUAGE = (os.getenv("WHATSAPP_CALLS_LANGUAGE") or "es").strip().lower()
+    # The phone admin app (admin/): the app's loopback control API it drives, and the token both share.
+    APP_CONTROL_PORT = _bounded_int("APP_CONTROL_PORT", 7861, 1024, 65535)
+    APP_CONTROL_TOKEN_FILE = os.path.expanduser(
+        os.getenv("APP_CONTROL_TOKEN_FILE") or "~/.local/share/reachy/control-token"
+    )
+    # The privacy switch's saved state (privacy.py): while on, the mic and camera stay off, across restarts.
+    PRIVACY_STATE_FILE = os.path.expanduser(os.getenv("PRIVACY_STATE_FILE") or "~/.local/share/reachy/privacy.json")
+    # Calls, voice notes and photos sent, for the admin app's activity page (names only).
+    ACTIVITY_LOG_FILE = os.path.expanduser(os.getenv("ACTIVITY_LOG_FILE") or "~/.local/share/reachy/activity.jsonl")
+    # Quiet hours, "21:30-07:00" local time: no wake and incoming calls declined. Empty for none.
+    QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
     SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
@@ -1051,6 +1076,17 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.WHATSAPP_CALLERS = _csv_set(os.getenv("WHATSAPP_CALLERS") or "eduardo,adriana")
     config.WHATSAPP_CALLS_LANGUAGE = (os.getenv("WHATSAPP_CALLS_LANGUAGE") or "es").strip().lower()
+    config.APP_CONTROL_PORT = _bounded_int("APP_CONTROL_PORT", 7861, 1024, 65535)
+    config.APP_CONTROL_TOKEN_FILE = os.path.expanduser(
+        os.getenv("APP_CONTROL_TOKEN_FILE") or "~/.local/share/reachy/control-token"
+    )
+    config.PRIVACY_STATE_FILE = os.path.expanduser(
+        os.getenv("PRIVACY_STATE_FILE") or "~/.local/share/reachy/privacy.json"
+    )
+    config.ACTIVITY_LOG_FILE = os.path.expanduser(
+        os.getenv("ACTIVITY_LOG_FILE") or "~/.local/share/reachy/activity.jsonl"
+    )
+    config.QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)
     config.TRMNL_REFRESH_SECONDS = _bounded_int("TRMNL_REFRESH_SECONDS", 1, 1, 3600)

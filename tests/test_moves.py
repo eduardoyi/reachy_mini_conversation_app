@@ -1,5 +1,6 @@
 import time
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, call
 from collections.abc import Callable
 
@@ -7,10 +8,12 @@ import numpy as np
 import pytest
 
 from reachy_mini.utils import create_head_pose
+from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
     RING_MAX_S,
     RING_CYCLE_S,
+    SLEEP_ANTENNAS,
     HEAD_HOLD_MAX_S,
     ATTENTIVE_HOLD_S,
     RING_FLUTTER_RAD,
@@ -27,7 +30,16 @@ from reachy_mini_conversation_app.moves import (
     ActivationAcknowledgementMove,
     head_world_yaw,
 )
+from reachy_mini_conversation_app.privacy import PrivacySwitch
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, EmotionQueueMove
+
+
+@pytest.fixture(autouse=True)
+def privacy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> PrivacySwitch:
+    """Start each test with privacy off, whatever this machine has saved."""
+    switch = PrivacySwitch(tmp_path / "privacy.json")
+    monkeypatch.setattr("reachy_mini_conversation_app.moves.PRIVACY", switch)
+    return switch
 
 
 class _FakeMove:
@@ -921,3 +933,136 @@ def test_without_a_reading_the_antennas_start_from_neutral() -> None:
     robot = MagicMock()
     robot.get_current_joint_positions.side_effect = AssertionError("No joint positions received yet.")
     assert MovementManager(robot)._last_commanded_pose[1] == (0.0, 0.0)
+
+
+def _asleep(clock: dict[str, float]) -> MovementManager:
+    """Return a manager settled in the sleep pose, on the fake ``clock``."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager._now = lambda: clock["now"]
+    manager.go_to_sleep()
+    _run(manager, clock, 3.0)
+    return manager
+
+
+def _run(manager: MovementManager, clock: dict[str, float], seconds: float) -> list[tuple[float, float]]:
+    """Run the worker's control steps at 20 Hz on the fake clock; return the commanded antennas."""
+    commanded = []
+    for _ in range(round(seconds * 20)):
+        clock["now"] += 0.05
+        manager._poll_signals(clock["now"])
+        manager._update_primary_motion(clock["now"])
+        head, antennas, body_yaw = manager._get_primary_pose(clock["now"])
+        manager._issue_control_command(head, manager._calculate_blended_antennas(antennas), body_yaw)
+        commanded.append(manager._last_commanded_pose[1])
+    return commanded
+
+
+def _commanded_head(manager: MovementManager) -> np.ndarray:
+    return np.asarray(manager._last_commanded_pose[0])
+
+
+def test_a_peek_lifts_the_sleeping_head_and_keeps_the_antennas_folded() -> None:
+    """Asleep, a peek looks where asked with the antennas at their sleep targets, and he stays asleep."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.peek(30.0, -10.0, 5.0)
+    antennas = _run(manager, clock, 2.0)
+
+    assert all(pair == pytest.approx(SLEEP_ANTENNAS) for pair in antennas)
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, -10, 30), atol=1e-9)
+    assert manager.sleeping
+
+    peek = manager.state.current_move
+    manager.queue_move(_FakeMove(np.eye(4)))
+    manager.turn_toward_speaker()
+    _run(manager, clock, 0.5)
+    assert manager.state.current_move is peek and not manager.move_queue
+
+
+def test_a_peek_while_awake_is_ignored() -> None:
+    """Awake, the head moves normally; a peek queues nothing."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager.peek(30.0, -10.0, 5.0)
+    manager._poll_signals(manager._now())
+    assert not manager.sleeping and not manager.move_queue
+
+
+def test_a_peek_lowers_back_into_the_sleep_pose_when_its_hold_ends() -> None:
+    """The head looks for ``hold_s``, then goes back down to the sleep pose, still asleep."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.peek(-20.0, 0.0, 3.0)
+    _run(manager, clock, 2.9)
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, 0, -20), atol=1e-9)
+
+    _run(manager, clock, 2.5)
+    np.testing.assert_allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
+    assert manager.sleeping
+
+
+def test_a_second_peek_replaces_the_target_and_extends_the_hold() -> None:
+    """A new peek looks at the new (clamped) target and restarts the hold timer."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.peek(30.0, 0.0, 3.0)
+    _run(manager, clock, 2.0)
+    manager.peek(-90.0, -45.0, 3.0)
+    _run(manager, clock, 2.5)  # past the first peek's hold
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, -30, -60), atol=1e-9)
+
+    _run(manager, clock, 3.0)
+    np.testing.assert_allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
+
+
+@pytest.mark.parametrize("wake", ["wake_up", "acknowledge_activation"])
+def test_a_wake_during_a_peek_rises_to_neutral_and_stays_up(wake: str) -> None:
+    """Waking from a peek is a normal wake; the peek's hold ending later does not lower the head."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.peek(30.0, -10.0, 3.0)
+    _run(manager, clock, 2.0)
+
+    getattr(manager, wake)()
+    _run(manager, clock, 1.5)
+    assert not manager.sleeping
+    np.testing.assert_allclose(_commanded_head(manager), np.eye(4), atol=1e-9)
+
+    _run(manager, clock, 3.0)
+    assert not manager.sleeping
+    assert not np.allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
+
+
+def test_going_to_sleep_during_a_peek_lowers_the_head() -> None:
+    """``go_to_sleep`` while peeking ends the peek early."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.peek(30.0, -10.0, 60.0)
+    _run(manager, clock, 2.0)
+
+    manager.go_to_sleep()
+    _run(manager, clock, 2.5)
+    np.testing.assert_allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
+    assert manager.sleeping
+
+
+def test_head_tracking_is_not_started_while_privacy_is_on(privacy: PrivacySwitch) -> None:
+    """With privacy on, nothing turns the daemon's face tracking (its own camera reads) on; turning it off works."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.set_head_tracking(True)
+    manager._poll_signals(manager._now())
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+
+    privacy.set(True)
+    manager.set_head_tracking(False)
+    manager.set_head_tracking(True)
+    manager.frame_faces(True)
+    manager.set_conversation_active(True)
+    manager._poll_signals(manager._now())
+    robot.stop_head_tracking.assert_called_once()
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+
+    privacy.set(False)
+    manager.set_head_tracking(True)
+    manager._poll_signals(manager._now())
+    assert robot.start_head_tracking.call_args_list == [call(weight=1.0), call(weight=1.0)]

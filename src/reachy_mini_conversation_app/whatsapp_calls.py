@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app import activity_log
 from reachy_mini_conversation_app.streaming import resample_audio, audio_to_mono_int16
 from reachy_mini_conversation_app.whatsapp_contacts import Contact
 
@@ -204,6 +205,8 @@ class CallLink:
         self._incoming: asyncio.Queue[NDArray[np.int16] | None] = asyncio.Queue(maxsize=_RECEIVE_QUEUE_FRAMES)
         self.connected = False
         self.reason: str | None = None
+        self._connected_at: float | None = None
+        self._ended_at: float | None = None
         self._gate = NoiseGate()
         self._answered = asyncio.Event()  # answered, or ended before that: the ringback stops
         self._limiter = Limiter()
@@ -238,6 +241,14 @@ class CallLink:
         if self._outgoing.full():
             self._outgoing.get_nowait()  # the network fell behind: drop the oldest
         self._outgoing.put_nowait(data)
+
+    @property
+    def connected_s(self) -> float | None:
+        """Seconds the call has been connected (until it ended); None when it never connected."""
+        if self._connected_at is None:
+            return None
+        ended_at = self._ended_at if self._ended_at is not None else time.monotonic()
+        return ended_at - self._connected_at
 
     def quiet_for(self) -> float:
         """Return the seconds since the last audible chunk of the other side (or the ringback) was yielded."""
@@ -289,6 +300,7 @@ class CallLink:
     def _finish(self, reason: str) -> None:
         if self.reason is None:
             self.reason = reason
+            self._ended_at = time.monotonic()
         self._answered.set()
         while True:
             try:
@@ -315,6 +327,7 @@ class CallLink:
                 kind = event.get("event") if isinstance(event, dict) else None
                 if kind == "connected":
                     self.connected = True
+                    self._connected_at = time.monotonic()
                     self._answered.set()
                 elif kind == "ended":
                     self._finish(str(event.get("reason") or ENDED_FAILED))
@@ -356,7 +369,8 @@ class CallManager:
         self._token = token
         self._lock = threading.Lock()
         self._ringing: Incoming | None = None
-        self._active: tuple[CallLink, asyncio.AbstractEventLoop] | None = None
+        # The call on now, its loop, and its activity log kind and person.
+        self._active: tuple[CallLink, asyncio.AbstractEventLoop, str, str] | None = None
         self._events_loop: asyncio.AbstractEventLoop | None = None
         self._events_socket: Any = None
         self.on_incoming: Callable[[Incoming], None] | None = None
@@ -374,14 +388,24 @@ class CallManager:
         with self._lock:
             return self._active is not None
 
+    @property
+    def linked(self) -> bool:
+        """Whether the event socket to the call service is connected now."""
+        with self._lock:
+            return self._events_socket is not None
+
     def start(self) -> None:
         """Keep the event socket open from a daemon thread."""
         threading.Thread(target=lambda: asyncio.run(self._events()), daemon=True, name="call-events").start()
 
     async def place(self, name: str) -> CallLink:
         """Call ``name`` (approved by the service); raises OSError when the service cannot be reached."""
-        link = await CallLink.open(self._url, self._token, name)
-        self._track(link)
+        try:
+            link = await CallLink.open(self._url, self._token, name)
+        except OSError:
+            activity_log.record("call_out", name, ENDED_FAILED)
+            raise
+        self._track(link, "call_out", name)
         return link
 
     async def answer(self) -> CallLink | None:
@@ -391,17 +415,22 @@ class CallManager:
         if incoming is None:
             return None
         self._notify(self.on_ringing_ended, incoming)
-        link = await CallLink.answer(self._url, self._token, incoming.call_id)
-        self._track(link)
+        try:
+            link = await CallLink.answer(self._url, self._token, incoming.call_id)
+        except OSError:
+            activity_log.record("call_in", incoming.name, ENDED_FAILED)
+            raise
+        self._track(link, "call_in", incoming.name)
         return link
 
-    def decline(self) -> Incoming | None:
-        """Decline the call ringing now (thread-safe); return it, or None when nothing rings."""
+    def decline(self, outcome: str = ENDED_DECLINED) -> Incoming | None:
+        """Decline the call ringing now (thread-safe), logged as ``outcome``; return it, or None when nothing rings."""
         with self._lock:
             incoming, self._ringing = self._ringing, None
             loop, socket = self._events_loop, self._events_socket
         if incoming is None:
             return None
+        activity_log.record("call_in", incoming.name, outcome)
         self._notify(self.on_ringing_ended, incoming)
         if loop is not None and socket is not None:
             message = json.dumps({"op": "decline", "call_id": incoming.call_id})
@@ -409,10 +438,13 @@ class CallManager:
         return incoming
 
     def finished(self, link: CallLink) -> None:
-        """Forget ``link`` once its call is over."""
+        """Forget ``link`` once its call is over, noting it in the activity log."""
         with self._lock:
-            if self._active is not None and self._active[0] is link:
-                self._active = None
+            if self._active is None or self._active[0] is not link:
+                return
+            _, _, kind, who = self._active
+            self._active = None
+        activity_log.record(kind, who, link.reason or ENDED_FAILED, link.connected_s)
 
     @property
     def busy(self) -> bool:
@@ -420,9 +452,9 @@ class CallManager:
         with self._lock:
             return self._ringing is not None or self._active is not None
 
-    def _track(self, link: CallLink) -> None:
+    def _track(self, link: CallLink, kind: str, who: str) -> None:
         with self._lock:
-            self._active = (link, asyncio.get_running_loop())
+            self._active = (link, asyncio.get_running_loop(), kind, who)
 
     @staticmethod
     def _notify(callback: Callable[[Incoming], None] | None, incoming: Incoming) -> None:
@@ -454,6 +486,7 @@ class CallManager:
                     self._ringing = None
             if ended is not None:
                 logger.info("Incoming call stopped ringing reason=%s", event.get("reason"))
+                activity_log.record("call_in", ended.name, "missed")
                 self._notify(self.on_ringing_ended, ended)
 
     async def _events(self) -> None:
@@ -475,5 +508,6 @@ class CallManager:
                 self._events_socket = None
                 ringing, self._ringing = self._ringing, None
             if ringing is not None:
+                activity_log.record("call_in", ringing.name, "missed")
                 self._notify(self.on_ringing_ended, ringing)
             await asyncio.sleep(self.RECONNECT_S)

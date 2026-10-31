@@ -16,6 +16,7 @@ import numpy as np
 from PIL import Image
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app import activity_log
 from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
 from reachy_mini_conversation_app.eink_display import render_photo
 from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
@@ -37,6 +38,8 @@ PHOTO_TAKE_S: Final[float] = 4.0
 PHOTO_PREVIEW_S: Final[float] = 1.0
 # Taking, showing and sending: longer than the send's own deadline, so a caller never cuts it short.
 SHARE_TIMEOUT_S: Final[float] = PHOTO_TAKE_S + PHOTO_PREVIEW_S + SEND_DEADLINE_S + 2.0
+# The photos group's name in the activity log.
+PHOTOS_GROUP: Final[str] = "Reachy photos"
 
 
 def _sdk_detector() -> Any:
@@ -142,17 +145,19 @@ FACES = FaceFinder()
 async def take_and_share(
     deps: Any,
     chat: str,
+    who: str,
     *,
     faces: FaceFinder = FACES,
     take: Callable[[Any, FaceFinder], bytes | None] = take_photo,
 ) -> SendResult | None:
-    """Take the photo, show it on the screen and send it to ``chat``; None when there was no picture."""
+    """Take the photo, show it on the screen and send it to ``chat`` (logged as ``who``); None if no picture."""
     try:
         jpeg = await asyncio.wait_for(asyncio.to_thread(take, deps.reachy_mini.media, faces), PHOTO_TAKE_S)
     except asyncio.TimeoutError:
         logger.warning("Photo took longer than %.0f s; not sent", PHOTO_TAKE_S)
         jpeg = None
     if jpeg is None:
+        activity_log.record("photo", who, "no_picture")
         return None
     display = deps.display
     if display is not None:
@@ -166,4 +171,5 @@ async def take_and_share(
         except Exception as error:  # the screen is a preview; the photo still goes to the group
             logger.warning("Photo preview failed: %s", type(error).__name__)
     result: SendResult = await deps.whatsapp.send_image(chat, jpeg)
+    activity_log.record("photo", who, result.value)
     return result

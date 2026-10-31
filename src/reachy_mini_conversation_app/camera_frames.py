@@ -5,6 +5,8 @@ import logging
 import threading
 from typing import Any
 
+from reachy_mini_conversation_app.privacy import PRIVACY
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +28,18 @@ _BOOST_GAMMA = 0.7
 
 
 def capture_jpeg(media: Any) -> bytes | None:
-    """Return the current camera frame as JPEG bytes (blocking), serialized across callers."""
+    """Return the current camera frame as JPEG bytes (blocking), serialized across callers; None while private."""
+    if PRIVACY.on:
+        return None
     with _CAPTURE_LOCK:
         jpeg: bytes | None = media.get_frame_jpeg()
     return jpeg
 
 
 def capture_frame(media: Any) -> Any:
-    """Return the current camera frame as a BGR array (blocking), serialized with ``capture_jpeg``."""
+    """Return the current camera frame as a BGR array (blocking), serialized with ``capture_jpeg``; None while private."""
+    if PRIVACY.on:
+        return None
     with _CAPTURE_LOCK:
         return media.get_frame()
 

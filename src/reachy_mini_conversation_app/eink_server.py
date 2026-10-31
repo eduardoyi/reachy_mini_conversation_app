@@ -159,6 +159,17 @@ class DeviceServer(ThreadingHTTPServer):
             device["started" if opening else "ended"] = self._clock()
             write_json(self.spool / DEVICE, device)
 
+    def record_battery(self, voltage: str | None) -> None:
+        """Keep the battery voltage the TRMNL reported, for the admin app's status page."""
+        try:
+            volts = float(voltage or "")
+        except ValueError:
+            return
+        with self._lock:
+            device = read_json(self.spool / DEVICE)
+            device["battery_v"] = round(volts, 2)
+            write_json(self.spool / DEVICE, device)
+
     def wait_for_check_ins(self, timeout_s: float) -> None:
         """Wait for open check-ins to be answered, so a replacement does not cut one off."""
         deadline = time.monotonic() + timeout_s
@@ -197,6 +208,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.headers.get("Battery-Voltage"),
                 self.headers.get("RSSI"),
             )
+            server.record_battery(self.headers.get("Battery-Voltage"))
             # Answering as soon as a screen changes saves the device a sleep, a reboot and a Wi-Fi reconnect.
             filename = server.screen_for_check_in(CHECK_IN_HOLD_S)
             self._send_json(

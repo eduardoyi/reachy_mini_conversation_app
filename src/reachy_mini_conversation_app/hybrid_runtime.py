@@ -734,6 +734,11 @@ class HybridRuntime:
         with self._lifecycle_lock:
             return self._asleep
 
+    def set_asleep(self, asleep: bool) -> None:
+        """Mark him asleep (only his name, or an antenna, wakes him) or awake; thread-safe."""
+        with self._lifecycle_lock:
+            self._asleep = asleep
+
     @property
     def active_handler(self) -> ConversationHandler | None:
         """Return the selected cloud handler, if any."""

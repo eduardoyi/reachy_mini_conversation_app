@@ -13,6 +13,12 @@ from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.utils import parse_args
 
 
+@pytest.fixture(autouse=True)
+def _no_control_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``run`` from binding the real control API port."""
+    monkeypatch.setattr(main_mod, "start_control_server", lambda api, port: MagicMock())
+
+
 def _install_fake_handler_module(monkeypatch, module_name: str, class_name: str) -> MagicMock:
     """Install a fake provider module and return its handler constructor."""
     module = types.ModuleType(module_name)

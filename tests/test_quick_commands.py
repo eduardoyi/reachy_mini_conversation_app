@@ -8,11 +8,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from reachy_mini_conversation_app import moves, photographer, quick_commands
+from reachy_mini_conversation_app import moves, activity_log, photographer, quick_commands
 from reachy_mini_conversation_app.maribel import MaribelReply
 from reachy_mini_conversation_app.weather import Forecast, DayForecast
 from reachy_mini_conversation_app.whatsapp import SendResult
 from reachy_mini_conversation_app.android_tv import TVState
+from reachy_mini_conversation_app.json_lines import JsonLines
 from reachy_mini_conversation_app.home_devices import HubDevice
 from reachy_mini_conversation_app.quick_commands import (
     SENT_TO,
@@ -46,6 +47,19 @@ from reachy_mini_conversation_app.head_touch_test import (
     HEAD_TEST_PAUSE_S,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+
+
+@pytest.fixture(autouse=True)
+def activity(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> JsonLines:
+    """Keep the activity log in the test's folder."""
+    log = JsonLines(tmp_path / "activity.jsonl")
+    monkeypatch.setattr(activity_log, "ACTIVITY", log)
+    return log
+
+
+def _logged(activity: JsonLines) -> list[tuple[object, ...]]:
+    """Return the activity entries, oldest first, without their time."""
+    return [tuple(value for key, value in entry.items() if key != "at") for entry in reversed(activity.recent())]
 
 
 @pytest.mark.parametrize(
@@ -790,7 +804,9 @@ def test_other_picture_requests_are_not_the_photo_command(text: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(photos: list[str]) -> None:
+async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(
+    photos: list[str], activity: JsonLines
+) -> None:
     """Three spoken beats, then the photo goes to the screen and to the WhatsApp group: "Sent!"."""
     display = _Display()
     runner, deps = _photo_runner(photos, display=display)
@@ -809,6 +825,7 @@ async def test_a_picture_counts_down_then_is_shown_and_sent_to_the_group(photos:
     assert [call.args for call in deps.movement_manager.frame_faces.call_args_list] == [(True,), (False,)]
     assert display.shown == [photographer.PHOTO_ON_SCREEN_S]
     assert [chat for chat, _ in deps.whatsapp.sent] == [GROUP]
+    assert _logged(activity) == [("photo", photographer.PHOTOS_GROUP, "sent")]
 
 
 @pytest.mark.asyncio
@@ -824,13 +841,14 @@ async def test_a_photo_that_is_not_sent_says_so(photos: list[str], result: SendR
 
 
 @pytest.mark.asyncio
-async def test_no_picture_from_the_camera_sends_nothing(photos: list[str]) -> None:
+async def test_no_picture_from_the_camera_sends_nothing(photos: list[str], activity: JsonLines) -> None:
     """The camera gave nothing: Reachy says so and nothing goes to WhatsApp."""
     runner, deps = _photo_runner(photos, jpeg=b"")
     reply = await runner.handle("take a picture")
     assert reply is not None and reply.after is not None
     assert await reply.after() == PHOTO_NO_PICTURE["en"]
     assert deps.whatsapp.sent == []
+    assert _logged(activity) == [("photo", photographer.PHOTOS_GROUP, "no_picture")]
 
 
 @pytest.mark.asyncio
@@ -1000,7 +1018,9 @@ def test_messages_for_maribel_stay_hers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_message_is_recorded_after_the_prompt_and_sent_as_a_voice_note(family: list[str]) -> None:
+async def test_a_message_is_recorded_after_the_prompt_and_sent_as_a_voice_note(
+    family: list[str], activity: JsonLines
+) -> None:
     """The prompt names him, the recording runs with the antennas perked, and the voice note goes to his group."""
     runner, deps, _ = _family_runner(family)
 
@@ -1014,6 +1034,7 @@ async def test_a_message_is_recorded_after_the_prompt_and_sent_as_a_voice_note(f
     assert family == ["record"]
     assert [chat for chat, _ in deps.whatsapp.voice_notes] == [SERGIO_GROUP]
     assert deps.whatsapp.voice_notes[0][1].startswith(b"OggS")
+    assert _logged(activity) == [("voice_note", "Tío Sergio", "sent")]
     calls = [call.args for call in deps.movement_manager.set_listening.call_args_list]
     assert calls == [(True,), (False,)]
     # Held still with the speech wobble off, so a touch on his head can end it.
@@ -1039,16 +1060,19 @@ async def test_nothing_said_sends_nothing(family: list[str]) -> None:
 @pytest.mark.parametrize(
     ("result", "said"), [(SendResult.FAILED, MESSAGE_NOT_SENT["en"]), (SendResult.UNSURE, MESSAGE_UNSURE["en"])]
 )
-async def test_a_message_that_is_not_sent_says_so(family: list[str], result: SendResult, said: str) -> None:
+async def test_a_message_that_is_not_sent_says_so(
+    family: list[str], activity: JsonLines, result: SendResult, said: str
+) -> None:
     """A refused send and one that may still arrive have their own lines."""
     runner, _, _ = _family_runner(family, result=result)
     reply = await runner.handle("send a message to Sergio")
     assert reply is not None and reply.after is not None
     assert await reply.after() == said
+    assert _logged(activity) == [("voice_note", "Tío Sergio", result.value)]
 
 
 @pytest.mark.asyncio
-async def test_a_picture_for_sergio_goes_to_his_group(family: list[str]) -> None:
+async def test_a_picture_for_sergio_goes_to_his_group(family: list[str], activity: JsonLines) -> None:
     """The photo countdown, then the photo in his group, not the photos group."""
     runner, deps, _ = _family_runner(family)
     reply = await runner.handle("send a picture to Sergio")
@@ -1056,6 +1080,7 @@ async def test_a_picture_for_sergio_goes_to_his_group(family: list[str]) -> None
     assert reply.after is not None
     assert await reply.after() == SENT_TO["en"].format(name="Tío Sergio")
     assert [chat for chat, _ in deps.whatsapp.sent] == [SERGIO_GROUP]
+    assert _logged(activity) == [("photo", "Tío Sergio", "sent")]
 
 
 @pytest.mark.asyncio
@@ -1273,9 +1298,10 @@ class _Faces:
 class _Link:
     """A call that was answered (or not) and then ended."""
 
-    def __init__(self, connected: bool, reason: str) -> None:
+    def __init__(self, connected: bool, reason: str, connected_s: float | None = None) -> None:
         self.connected = connected
         self.reason = reason
+        self.connected_s = connected_s
         self.closed = False
 
     async def close(self) -> None:
@@ -1338,15 +1364,16 @@ def test_call_requests_are_recognized(text: str, language: str, to: str) -> None
 
 @pytest.mark.asyncio
 async def test_a_parent_calls_an_approved_person_through_reachy(
-    callees: None, monkeypatch: pytest.MonkeyPatch
+    callees: None, monkeypatch: pytest.MonkeyPatch, activity: JsonLines
 ) -> None:
     """Eduardo in front of the camera: "Calling Eduardo!", the call streams, then "Call ended."."""
-    link = _Link(connected=True, reason="hung_up")
+    link = _Link(connected=True, reason="hung_up", connected_s=42.4)
     runner, streamed, opened = _call_runner(monkeypatch, "eduardo", link=link)
     reply = await runner.handle("llama a papá")
     assert reply is not None and reply.text == "¡Llamando a Eduardo!" and reply.after is not None
     assert await reply.after() == "Llamada terminada."
     assert opened == ["Eduardo:secret"] and streamed == [link] and link.closed
+    assert _logged(activity) == [("call_out", "Eduardo", "hung_up", 42)]
 
 
 @pytest.fixture
@@ -1391,8 +1418,10 @@ async def test_calling_someone_not_approved_is_left_to_the_conversation(
 
 
 @pytest.mark.asyncio
-async def test_an_unanswered_or_failed_call_says_so(callees: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No answer, and a service that cannot be reached, each get their own reply."""
+async def test_an_unanswered_or_failed_call_says_so(
+    callees: None, monkeypatch: pytest.MonkeyPatch, activity: JsonLines
+) -> None:
+    """No answer, and a service that cannot be reached, each get their own reply (and no call time)."""
     runner, _, _ = _call_runner(monkeypatch, "adriana", link=_Link(False, "no_answer"))
     reply = await runner.handle("call Eduardo")
     assert reply is not None and reply.after is not None
@@ -1401,6 +1430,7 @@ async def test_an_unanswered_or_failed_call_says_so(callees: None, monkeypatch: 
     reply = await runner.handle("call Eduardo")
     assert reply is not None and reply.after is not None
     assert await reply.after() == "I couldn't call Eduardo."
+    assert _logged(activity) == [("call_out", "Eduardo", "no_answer"), ("call_out", "Eduardo", "failed")]
 
 
 @pytest.mark.asyncio

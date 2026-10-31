@@ -615,6 +615,15 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --ui
 ```
 
+### Phone admin app
+
+`reachy-admin` serves a phone web app (installable on the home screen) for the household: people Reachy can
+message, call and recognize; a live camera view that turns his head (lifting it while he sleeps); a privacy
+switch that cuts the mic and camera; status, activity, settings and notifications. It listens on
+`127.0.0.1:7870` only and is reached through Tailscale Serve, by the logins in `ADMIN_ALLOWED_LOGINS` only.
+The app itself serves a loopback control API for it on `APP_CONTROL_PORT` (7861). `QUIET_HOURS` stops him
+listening at night. Setup and the security model: [docs/features/phone-admin-app.md](docs/features/phone-admin-app.md).
+
 ## LLM tools exposed to the assistant
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.

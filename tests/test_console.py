@@ -1866,6 +1866,35 @@ async def test_record_loop_forwards_ordered_frames_and_polls_empty_capture() -> 
 
 
 @pytest.mark.asyncio
+async def test_record_loop_drops_microphone_audio_while_privacy_or_quiet_hours_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """While listening is not allowed no frame reaches the conversation, wake word or calls."""
+    monkeypatch.setattr(console_mod, "listening_allowed", lambda: False)
+    pending_frames = [np.array([1, 2], dtype=np.int16), np.array([3, 4], dtype=np.int16)]
+    handler = MagicMock()
+    handler.receive = AsyncMock()
+    stream = LocalStream(handler, MagicMock())
+
+    def get_audio_sample() -> np.ndarray | None:
+        if pending_frames:
+            return pending_frames.pop(0)
+        stream._stop_event.set()
+        return None
+
+    stream._robot = SimpleNamespace(
+        media=SimpleNamespace(
+            get_input_audio_samplerate=MagicMock(return_value=16_000), get_audio_sample=get_audio_sample
+        )
+    )
+
+    await asyncio.wait_for(stream.record_loop(), timeout=1.0)
+
+    assert not pending_frames
+    handler.receive.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_record_loop_does_not_poll_microphone_without_media() -> None:
     """A no_media robot has no audio system, so capture must not poll the SDK."""
     media = SimpleNamespace(

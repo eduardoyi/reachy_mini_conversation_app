@@ -2,15 +2,37 @@
 
 import json
 import asyncio
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Callable
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from websockets.asyncio.server import serve
 
-from reachy_mini_conversation_app.whatsapp_calls import CallLink, call_pcm, load_callees
+from reachy_mini_conversation_app import activity_log, whatsapp_calls
+from reachy_mini_conversation_app.json_lines import JsonLines
+from reachy_mini_conversation_app.whatsapp_calls import CallLink, CallManager, call_pcm, load_callees
 from reachy_mini_conversation_app.whatsapp_contacts import find_contact
+
+
+@pytest.fixture(autouse=True)
+def activity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> JsonLines:
+    """Keep the activity log in the test's folder."""
+    log = JsonLines(tmp_path / "activity.jsonl")
+    monkeypatch.setattr(activity_log, "ACTIVITY", log)
+    return log
+
+
+def _logged(activity: JsonLines) -> list[tuple[object, ...]]:
+    """Return the activity entries, oldest first, without their time."""
+    return [tuple(value for key, value in entry.items() if key != "at") for entry in reversed(activity.recent())]
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    while not condition():
+        await asyncio.sleep(0.01)
 
 
 def test_callees_are_names_only_and_match_what_is_said(tmp_path: Path) -> None:
@@ -198,7 +220,7 @@ async def test_it_rings_until_answered_then_plays_the_other_side() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_incoming_call_rings_then_is_answered_without_a_ringback() -> None:
+async def test_an_incoming_call_rings_then_is_answered_without_a_ringback(activity: JsonLines) -> None:
     """The events socket reports the caller; answering opens /call for that call id and plays no ringback."""
     import threading
 
@@ -237,10 +259,12 @@ async def test_an_incoming_call_rings_then_is_answered_without_a_ringback() -> N
     assert requests == [{"op": "answer", "call_id": "C1"}]
     assert [chunk.size for chunk in chunks] == [960]  # the caller's audio only, no ringback
     assert not calls.on_a_call and not calls.busy
+    (entry,) = _logged(activity)  # answered, so not also missed
+    assert entry[:3] == ("call_in", "Test Person", "ended") and len(entry) == 4  # with its seconds
 
 
 @pytest.mark.asyncio
-async def test_a_declined_or_abandoned_incoming_call_stops_ringing() -> None:
+async def test_a_declined_or_abandoned_incoming_call_stops_ringing(activity: JsonLines) -> None:
     """Declining sends the call id back on the events socket; the caller hanging up clears the ringing too."""
     import threading
 
@@ -272,6 +296,7 @@ async def test_a_declined_or_abandoned_incoming_call_stops_ringing() -> None:
         server.close()
         await server.wait_closed()
     assert declines == [{"op": "decline", "call_id": "C1"}]
+    assert _logged(activity) == [("call_in", "Test Person", "declined"), ("call_in", "Test Person", "missed")]
 
 
 @pytest.mark.asyncio
@@ -334,3 +359,114 @@ async def test_quiet_counts_from_the_last_audible_chunk_played() -> None:
     link._played(np.full(960, 2000, dtype=np.int16))
     assert link.quiet_for() < 1.0
     await link.close()
+
+
+class _FedSocket:
+    """A call socket whose service events the test sends."""
+
+    def __init__(self) -> None:
+        self.events: asyncio.Queue[str] = asyncio.Queue()
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> str:
+        return await self.events.get()
+
+    async def send(self, _data: Any) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answered", "reason", "logged"),
+    [
+        (True, "ended", ("call_out", "Test Person", "ended", 42)),
+        (False, "no_answer", ("call_out", "Test Person", "no_answer")),
+    ],
+)
+async def test_a_placed_call_is_logged_with_how_long_it_was_connected(
+    monkeypatch: pytest.MonkeyPatch, activity: JsonLines, answered: bool, reason: str, logged: tuple[object, ...]
+) -> None:
+    """Connected 42 s: the entry has its seconds; never answered: none."""
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(whatsapp_calls, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    socket = _FedSocket()
+
+    async def open_call(_url: str, _token: str, _name: str) -> CallLink:
+        return CallLink(socket, ringback=False)
+
+    monkeypatch.setattr(CallLink, "open", open_call)
+    calls = CallManager("ws://127.0.0.1:9/call", "secret")
+    link = await calls.place("Test Person")
+    if answered:
+        socket.events.put_nowait(json.dumps({"event": "connected"}))
+        await asyncio.wait_for(_until(lambda: link.connected), 1)
+        clock.now = 142.4
+    socket.events.put_nowait(json.dumps({"event": "ended", "reason": reason}))
+    await asyncio.wait_for(_until(lambda: link.reason is not None), 1)
+    clock.now = 500.0  # closing the link later adds nothing
+    await link.close()
+    calls.finished(link)
+    assert link.connected_s == (pytest.approx(42.4) if answered else None)
+    assert _logged(activity) == [logged]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("privacy", "quiet", "outcome"), [(True, False, "declined_privacy"), (False, True, "declined_quiet_hours")]
+)
+async def test_calls_are_declined_at_once_while_privacy_is_on_or_in_quiet_hours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activity: JsonLines, privacy: bool, quiet: bool, outcome: str
+) -> None:
+    """No card, no ring, the conversation left alone: the call is declined and logged why."""
+    from reachy_mini_conversation_app import main
+    from reachy_mini_conversation_app.config import config
+
+    declines: list[Any] = []
+
+    async def service(socket: Any) -> None:
+        await socket.send(json.dumps({"event": "incoming", "call_id": "C1", "name": "Test Person"}))
+        declines.append(json.loads(await socket.recv()))
+        await socket.wait_closed()
+
+    server, url = await _with_service(service)
+    token = tmp_path / "token"
+    token.write_text("secret")
+    monkeypatch.setattr(config, "WHATSAPP_CALLS_TOKEN_FILE", str(token))
+    monkeypatch.setattr(config, "WHATSAPP_CALLS_URL", url)
+    monkeypatch.setattr(main, "PRIVACY", SimpleNamespace(on=privacy))
+    monkeypatch.setattr(main, "quiet_now", lambda: quiet)
+    deps, runtime = MagicMock(), MagicMock(asleep=False)
+    try:
+        calls = main._start_calls(deps, runtime, MagicMock(), None)
+        await asyncio.wait_for(_until(lambda: bool(declines)), 3)
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert declines == [{"op": "decline", "call_id": "C1"}] and calls.ringing is None
+    assert _logged(activity) == [("call_in", "Test Person", outcome)]
+    deps.display.show.assert_not_called()
+    runtime.request_close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_linked_while_the_event_socket_is_connected() -> None:
+    """The admin app's status: linked once the event socket is open, not after the service goes away."""
+
+    async def service(socket: Any) -> None:
+        await socket.wait_closed()
+
+    server, url = await _with_service(service)
+    calls = CallManager(url, "secret")
+    assert not calls.linked
+    calls.start()
+    try:
+        await asyncio.wait_for(_until(lambda: calls.linked), 3)
+    finally:
+        server.close()
+        await server.wait_closed()
+    await asyncio.wait_for(_until(lambda: not calls.linked), 3)

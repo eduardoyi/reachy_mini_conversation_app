@@ -838,3 +838,32 @@ async def test_a_slow_caption_answer_gets_a_second_request(tmp_path: Path, monke
     slow = _FakeLessonModels(_lesson_sheet(), _CAPTIONS, caption_delays_s=[5.0, 5.0])
     panels = await _display(tmp_path / "slow", slow).lesson("a cat", "Cómo dibujar un gato")
     assert [caption for caption, _ in panels] == [""] * 4
+
+
+def test_a_resting_card_replaces_the_home_screen_until_it_is_cleared(tmp_path: Path) -> None:
+    """The privacy card is what every screen idles back to while privacy is on; clearing it brings Reachy's back."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    home = display.current()
+    privacy_card = render_text(["Privacy on"])
+
+    display.set_resting_card(privacy_card)
+    assert display.current().png == privacy_card and display.owner() == "home"
+    display.show(render_text(["hola"]))
+    clock.now += IDLE_AFTER_S + 1
+    assert display.current().png == privacy_card
+
+    display.set_resting_card(None)
+    assert display.current().png == home.png
+    assert not (display.spool / f"{home.filename}.png").exists() or display.current().filename == home.filename
+    assert len(list(display.spool.glob("reachy-000000-*.png"))) == 1
+
+
+def test_a_check_in_keeps_the_battery_voltage(tmp_path: Path) -> None:
+    """The admin app's status page reads the last reported battery voltage from the device file."""
+    server = _server(_display(tmp_path))
+    server.record_battery("4.12345")
+    server.record_battery(None)
+    server.record_battery("not a number")
+    server.server_close()
+    assert read_json(server.spool / eink_server.DEVICE)["battery_v"] == 4.12

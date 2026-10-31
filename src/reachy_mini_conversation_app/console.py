@@ -10,7 +10,6 @@ import json
 import math
 import time
 import queue
-import base64
 import asyncio
 import logging
 import ipaddress
@@ -53,8 +52,10 @@ from reachy_mini_conversation_app.config import (
     refresh_runtime_config_from_env,
     get_realtime_missing_config_message,
 )
+from reachy_mini_conversation_app.privacy import listening_allowed
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16, resample_audio, audio_to_float32
+from reachy_mini_conversation_app.face_routes import register_face_routes
 from reachy_mini_conversation_app.hybrid_runtime import RuntimeMode, HybridRuntime
 from reachy_mini_conversation_app.household_memory import (
     MemoryStoreError,
@@ -1127,154 +1128,6 @@ class LocalStream:
             "hybrid_metrics": counters,
         }
 
-    def _register_face_routes(
-        self, settings_app: FastAPI, local_access_denied: Callable[..., Response | None]
-    ) -> None:
-        """Faces settings: list, view photos, enroll from the live camera, and delete (same computer only)."""
-        no_store = {"Cache-Control": "no-store"}
-
-        def _denied(request: Request, *, mutation: bool = False) -> Response | None:
-            denied: Response | None = local_access_denied(request, mutation=mutation)
-            if denied is not None:
-                return denied
-            if self._face_recognition is None:
-                return Response(status_code=404, headers=no_store)
-            return None
-
-        async def _small_json(
-            request: Request, keys: set[str], *, max_bytes: int = 1_024, string_keys: set[str] | None = None
-        ) -> dict[str, Any] | Response:
-            """Read a JSON object with exactly ``keys``; ``string_keys`` (default: all) must be strings."""
-            if request.headers.get("content-type", "").split(";")[0] != "application/json":
-                return Response(status_code=415, headers=no_store)
-            body = bytearray()
-            async for chunk in request.stream():
-                body.extend(chunk)
-                if len(body) > max_bytes:
-                    return Response(status_code=413, headers=no_store)
-            try:
-                payload: object = json.loads(body)
-            except (ValueError, UnicodeError):
-                return Response(status_code=400, headers=no_store)
-            if (
-                not isinstance(payload, dict)
-                or set(payload) != keys
-                or not all(isinstance(payload[k], str) for k in (keys if string_keys is None else string_keys))
-            ):
-                return Response(status_code=400, headers=no_store)
-            return payload
-
-        def _person_json(person: Any) -> dict[str, Any]:
-            return {
-                "id": person.person_id,
-                "name": person.name,
-                "samples": person.sample_count,
-                "photos": list(person.photos),
-                "updated_at": person.updated_at,
-            }
-
-        @settings_app.get("/api/faces")
-        async def _faces_list(request: Request) -> Response:
-            denied = _denied(request)
-            if denied is not None:
-                return denied
-            try:
-                people = await asyncio.to_thread(self._face_recognition.registry.people)
-            except (OSError, ValueError):
-                logger.warning("Face list unavailable")
-                return JSONResponse({"error": "Saved faces are unavailable."}, status_code=503, headers=no_store)
-            return JSONResponse({"people": [_person_json(p) for p in people]}, headers=no_store)
-
-        @settings_app.get("/api/faces/photo")
-        async def _faces_photo(request: Request, person_id: str, photo: str) -> Response:
-            denied = _denied(request)
-            if denied is not None:
-                return denied
-            path = self._face_recognition.registry.photo_path(person_id, photo)
-            if path is None:
-                return Response(status_code=404, headers=no_store)
-            return FileResponse(str(path), media_type="image/jpeg", headers=no_store)
-
-        @settings_app.post("/api/faces/enroll")
-        async def _faces_enroll(request: Request) -> Response:
-            denied = _denied(request, mutation=True)
-            if denied is not None:
-                return denied
-            payload = await _small_json(request, {"name"})
-            if isinstance(payload, Response):
-                return payload
-            try:
-                result = await asyncio.to_thread(
-                    self._face_recognition.enroll_from_camera, payload["name"], trust_name=True
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.warning("Face enrollment unavailable")
-                return JSONResponse({"error": "The camera is unavailable."}, status_code=503, headers=no_store)
-            if result.person is None:
-                return JSONResponse({"error": result.error}, status_code=422, headers=no_store)
-            return JSONResponse({"person": _person_json(result.person)}, headers=no_store)
-
-        @settings_app.post("/api/faces/upload")
-        async def _faces_upload(request: Request) -> Response:
-            """Enroll from photos: ``{"name": str, "photos": [base64 JPEG/PNG, ...]}``, at most 12 MB."""
-            denied = _denied(request, mutation=True)
-            if denied is not None:
-                return denied
-            payload = await _small_json(request, {"name", "photos"}, max_bytes=12 * 1024 * 1024, string_keys={"name"})
-            if isinstance(payload, Response):
-                return payload
-            photos = payload["photos"]
-            if not isinstance(photos, list) or not all(isinstance(photo, str) for photo in photos):
-                return Response(status_code=400, headers=no_store)
-            try:
-                decoded = [base64.b64decode(photo, validate=True) for photo in photos]
-            except ValueError:
-                return Response(status_code=400, headers=no_store)
-            try:
-                result = await asyncio.to_thread(
-                    self._face_recognition.enroll_from_photos, payload["name"], decoded, trust_name=True
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.warning("Face photo enrollment unavailable")
-                return JSONResponse({"error": "Photos could not be processed."}, status_code=503, headers=no_store)
-            if result.person is None:
-                return JSONResponse(
-                    {"error": result.error, "skipped": list(result.skipped)}, status_code=422, headers=no_store
-                )
-            return JSONResponse(
-                {"person": _person_json(result.person), "skipped": list(result.skipped)}, headers=no_store
-            )
-
-        @settings_app.post("/api/faces/forget-photo")
-        async def _faces_forget_photo(request: Request) -> Response:
-            """Delete one photo and its fingerprint; the person goes too if it was their last."""
-            denied = _denied(request, mutation=True)
-            if denied is not None:
-                return denied
-            payload = await _small_json(request, {"person_id", "photo"})
-            if isinstance(payload, Response):
-                return payload
-            found, person = await asyncio.to_thread(
-                self._face_recognition.registry.forget_photo, payload["person_id"], payload["photo"]
-            )
-            if not found:
-                return Response(status_code=404, headers=no_store)
-            return JSONResponse({"person": _person_json(person) if person is not None else None}, headers=no_store)
-
-        @settings_app.post("/api/faces/forget")
-        async def _faces_forget(request: Request) -> Response:
-            denied = _denied(request, mutation=True)
-            if denied is not None:
-                return denied
-            payload = await _small_json(request, {"person_id"})
-            if isinstance(payload, Response):
-                return payload
-            try:
-                removed = await asyncio.to_thread(self._face_recognition.registry.forget, payload["person_id"])
-            except (OSError, ValueError):
-                return Response(status_code=400, headers=no_store)
-            return JSONResponse({"removed": removed is not None}, headers=no_store)
-
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
 
@@ -1502,7 +1355,7 @@ class LocalStream:
                     operation.cancel()
             return JSONResponse({"removed": removed}, headers={"Cache-Control": "no-store"})
 
-        self._register_face_routes(settings_app, _local_access_denied)
+        register_face_routes(settings_app, self._face_recognition, _local_access_denied)
 
         @settings_app.get("/api/usage")
         async def _usage_summary(request: Request) -> Response:
@@ -2073,7 +1926,7 @@ class LocalStream:
                 if not logged_sample_rate:
                     logger.debug("Audio recording started at %s Hz", input_sample_rate)
                     logged_sample_rate = True
-                if not self._mic_muted:
+                if not self._mic_muted and listening_allowed():
                     frame = (input_sample_rate, audio_frame)
                     forward_started = time.monotonic()
                     if self._hybrid_runtime is not None:

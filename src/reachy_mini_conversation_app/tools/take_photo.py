@@ -4,7 +4,7 @@ from typing import Any
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.whatsapp import SendResult
-from reachy_mini_conversation_app.photographer import take_and_share
+from reachy_mini_conversation_app.photographer import PHOTOS_GROUP, take_and_share
 from reachy_mini_conversation_app.quick_commands import normalize
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.whatsapp_contacts import find_contact, load_contacts
@@ -39,7 +39,7 @@ class TakePhoto(Tool):
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Wait out the spoken countdown, take the photo, show it and send it to the group."""
         to = str(kwargs.get("to") or "").strip()
-        chat = config.WHATSAPP_PHOTOS_CHAT
+        chat, who = config.WHATSAPP_PHOTOS_CHAT, PHOTOS_GROUP
         if to:
             contacts = load_contacts(config.WHATSAPP_CONTACTS_FILE, normalize)
             contact = find_contact(normalize(to), contacts)
@@ -49,7 +49,7 @@ class TakePhoto(Tool):
                     "error": f"There is no family group for that name. Photos can go to: {names}.",
                     "instruction": "Ask who it is for, or offer those names. Never guess; no photo was taken.",
                 }
-            chat = contact.chat
+            chat, who = contact.chat, contact.name
         if deps.whatsapp is None or not chat:
             return {"error": "Sending photos to WhatsApp is not set up."}
         if not deps.camera_enabled:
@@ -58,7 +58,7 @@ class TakePhoto(Tool):
         deps.movement_manager.frame_faces(True)
         try:
             await asyncio.sleep(CAMERA_COUNTDOWN_S)
-            result = await take_and_share(deps, chat)
+            result = await take_and_share(deps, chat, who)
         finally:
             deps.movement_manager.frame_faces(False)
         if result is None:

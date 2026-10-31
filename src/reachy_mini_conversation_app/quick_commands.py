@@ -21,11 +21,19 @@ from datetime import datetime
 from dataclasses import field, replace, dataclass
 from collections.abc import Awaitable
 
+from reachy_mini_conversation_app import activity_log
 from reachy_mini_conversation_app.maribel import RETRY_PAUSE_S, POST_TIMEOUT_S, FIRST_REPLY_WAIT_S
 from reachy_mini_conversation_app.weather import Place, WeatherError, WeatherService, describe
 from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
 from reachy_mini_conversation_app.voice_notes import encode_voice_note
-from reachy_mini_conversation_app.photographer import FACES, SHARE_TIMEOUT_S, FaceFinder, take_photo, take_and_share
+from reachy_mini_conversation_app.photographer import (
+    FACES,
+    PHOTOS_GROUP,
+    SHARE_TIMEOUT_S,
+    FaceFinder,
+    take_photo,
+    take_and_share,
+)
 from reachy_mini_conversation_app.head_touch_test import (
     HEAD_TEST_DIR,
     HEAD_TEST_CUES,
@@ -1363,6 +1371,7 @@ class QuickCommands:
             if ogg is None:
                 return MESSAGE_NOT_SENT[language]
             result = await whatsapp.send_audio(contact.chat, ogg)
+            activity_log.record("voice_note", contact.name, result.value)
             if result is SendResult.SENT:
                 return SENT_TO[language].format(name=contact.name)
             return MESSAGE_UNSURE[language] if result is SendResult.UNSURE else MESSAGE_NOT_SENT[language]
@@ -1506,6 +1515,7 @@ class QuickCommands:
         from reachy_mini_conversation_app.config import config
 
         chat = contact.chat if contact is not None else config.WHATSAPP_PHOTOS_CHAT
+        who = contact.name if contact is not None else PHOTOS_GROUP
         sent = SENT_TO[language].format(name=contact.name) if contact is not None else PHOTO_SENT[language]
         if self._deps.whatsapp is None or not chat or not self._deps.camera_enabled:
             return None  # the conversation still has the camera and the screen
@@ -1515,7 +1525,7 @@ class QuickCommands:
         async def take_and_send() -> str:
             try:
                 await asyncio.sleep(PHOTO_SETTLE_S)
-                result = await take_and_share(self._deps, chat, faces=self._faces, take=self._photographer)
+                result = await take_and_share(self._deps, chat, who, faces=self._faces, take=self._photographer)
             finally:
                 movement.frame_faces(False)
             if result is None:

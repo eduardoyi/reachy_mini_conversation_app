@@ -42,6 +42,7 @@ from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE, INIT_ANTENNAS_JOINT_POSITIONS, SLEEP_ANTENNAS_JOINT_POSITIONS
 from reachy_mini.utils.interpolation import compose_world_offset, linear_pose_interpolation
+from reachy_mini_conversation_app.privacy import PRIVACY
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, DanceQueueMove, EmotionQueueMove
 
 
@@ -378,6 +379,11 @@ class HeadTouchDetector:
 
 SLEEP_TRANSITION_S = 2.0
 WAKE_TRANSITION_S = 1.5
+SLEEP_ANTENNAS = (float(SLEEP_ANTENNAS_JOINT_POSITIONS[0]), float(SLEEP_ANTENNAS_JOINT_POSITIONS[1]))
+# A peek (the admin app's camera view) lifts the sleeping head to look around, within these limits.
+PEEK_TRANSITION_S = 1.5
+PEEK_MAX_YAW_DEG = 60.0
+PEEK_MAX_PITCH_DEG = 30.0
 
 
 class PoseTransitionMove(Move):  # type: ignore
@@ -421,8 +427,7 @@ class PoseTransitionMove(Move):  # type: ignore
 
 def sleep_move() -> PoseTransitionMove:
     """Lower into the SDK's sleep pose and stay there until woken."""
-    sleep_antennas = (float(SLEEP_ANTENNAS_JOINT_POSITIONS[0]), float(SLEEP_ANTENNAS_JOINT_POSITIONS[1]))
-    return PoseTransitionMove(SLEEP_HEAD_POSE, sleep_antennas, transition_s=SLEEP_TRANSITION_S, hold=True)
+    return PoseTransitionMove(SLEEP_HEAD_POSE, SLEEP_ANTENNAS, transition_s=SLEEP_TRANSITION_S, hold=True)
 
 
 def wake_move() -> PoseTransitionMove:
@@ -534,6 +539,8 @@ class MovementManager:
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
         self._sleeping = False
         self._sleep_hold: PoseTransitionMove | None = None
+        # Peeking while asleep: the head looks up until then, then lowers into the sleep pose again.
+        self._peek_until: float | None = None
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -614,6 +621,20 @@ class MovementManager:
     def wake_up(self) -> None:
         """Rise from the sleep pose if asleep; thread-safe."""
         self._command_queue.put(("wake_up", None))
+
+    def peek(self, yaw_deg: float, pitch_deg: float, hold_s: float) -> None:
+        """While asleep, look toward yaw/pitch (degrees; +yaw left, -pitch up) for ``hold_s``, then lower; thread-safe."""
+        if not all(math.isfinite(value) for value in (yaw_deg, pitch_deg, hold_s)):
+            logger.warning("Ignored peek with a non-finite value")
+            return
+        yaw = float(np.clip(yaw_deg, -PEEK_MAX_YAW_DEG, PEEK_MAX_YAW_DEG))
+        pitch = float(np.clip(pitch_deg, -PEEK_MAX_PITCH_DEG, PEEK_MAX_PITCH_DEG))
+        self._command_queue.put(("peek", (yaw, pitch, float(hold_s))))
+
+    @property
+    def sleeping(self) -> bool:
+        """Return whether Reachy is asleep, peeking included; thread-safe."""
+        return self._sleeping
 
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
@@ -836,6 +857,8 @@ class MovementManager:
             self._fall_asleep()
         elif command == "wake_up":
             pass  # already awake
+        elif command == "peek":
+            logger.debug("Awake; ignoring peek")
         elif command == "set_speaking":
             if payload:
                 self._attentive_until = None  # answering: drop the alert antennas
@@ -878,6 +901,19 @@ class MovementManager:
         if command == "set_conversation_active":
             self._tracking_auto = False  # tracking already stopped when he fell asleep; stay facing forward
             return True
+        if command == "peek":
+            yaw_deg, pitch_deg, hold_s = payload
+            head = create_head_pose(0, 0, 0, 0, pitch_deg, yaw_deg, degrees=True)
+            # The antennas keep their sleep targets: the touch detector compares them with the measured ones.
+            self._hold_sleeping_pose(
+                PoseTransitionMove(head, SLEEP_ANTENNAS, transition_s=PEEK_TRANSITION_S, hold=True)
+            )
+            self._peek_until = self._now() + hold_s
+            logger.debug("Peeking at %.0f deg yaw, %.0f deg pitch", yaw_deg, pitch_deg)
+            return True
+        if command == "go_to_sleep" and self._peek_until is not None:
+            self._peek_until = self._now()  # the next tick lowers the head
+            return True
         if command in ("queue_move", "turn_toward_speaker", "set_listening", "set_head_tracking", "go_to_sleep"):
             logger.debug("Asleep; ignoring %s", command)
             return True
@@ -887,24 +923,29 @@ class MovementManager:
         """Stop tracking and other moves, then lower into the sleep pose (worker thread only)."""
         self._tracking_auto = False
         self._set_head_tracking(False)
-        self.move_queue.clear()
-        self._end_move(self.state.current_move)
-        self.state.current_move = None
-        self.state.move_start_time = None
         self._breathing_active = False
         self._is_listening = False
         self._attentive_until = None
         self._gaze_yaw = 0.0
         self._sleeping = True
-        self._sleep_hold = sleep_move()
-        self.move_queue.append(self._sleep_hold)
-        self.state.update_activity()
+        self._hold_sleeping_pose(sleep_move())
         logger.info("Going to sleep until someone says my name")
+
+    def _hold_sleeping_pose(self, move: PoseTransitionMove) -> None:
+        """Replace the current and queued moves with ``move``, held while asleep (worker thread only)."""
+        self._sleep_hold = move
+        self.move_queue.clear()
+        self._end_move(self.state.current_move)
+        self.state.current_move = None
+        self.state.move_start_time = None
+        self.move_queue.append(move)
+        self.state.update_activity()
 
     def _wake(self) -> None:
         """Leave the sleep pose for the neutral pose (worker thread only)."""
         self._sleeping = False
         self._sleep_hold = None
+        self._peek_until = None
         self.move_queue.clear()
         self._end_move(self.state.current_move)
         self.state.current_move = None
@@ -916,6 +957,9 @@ class MovementManager:
     def _set_head_tracking(self, enabled: bool) -> None:
         """Start or stop daemon face tracking (worker thread only)."""
         if self._head_tracking == enabled:
+            return
+        if enabled and PRIVACY.on:
+            logger.info("Head tracking not started: privacy is on")
             return
         self._head_tracking = enabled
         self._track_anchor = None
@@ -1137,6 +1181,10 @@ class MovementManager:
 
     def _update_primary_motion(self, current_time: float) -> None:
         """Advance queue state and idle behaviours for this tick."""
+        if self._peek_until is not None and current_time >= self._peek_until:
+            self._peek_until = None
+            self._hold_sleeping_pose(sleep_move())
+            logger.info("Done peeking; back to sleep")
         self._manage_move_queue(current_time)
         self._manage_breathing(current_time)
 

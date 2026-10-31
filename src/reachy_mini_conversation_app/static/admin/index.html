@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Reachy">
+  <title>Reachy</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/admin/icon-192.png">
+  <link rel="icon" href="/static/admin/icon-192.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+</head>
+<body>
+  <header class="top">
+    <h1 id="title">Reachy</h1>
+    <button id="privacy" class="privacy" type="button" aria-pressed="false">Privacy off</button>
+  </header>
+
+  <main>
+    <section id="view-people" class="view" hidden>
+      <div class="row-head">
+        <h2>People</h2>
+        <button id="add-person" class="small" type="button">Add</button>
+      </div>
+      <p id="shared-names" class="warn" hidden></p>
+      <ul id="people" class="cards"></ul>
+    </section>
+
+    <section id="view-camera" class="view" hidden>
+      <div class="camera">
+        <img id="camera" alt="Reachy's camera">
+        <p id="camera-note" class="camera-note" hidden></p>
+      </div>
+      <div class="pad" aria-label="Turn the head">
+        <button data-head="up" type="button" aria-label="Look up">▲</button>
+        <button data-head="left" type="button" aria-label="Look left">◀</button>
+        <button data-head="center" type="button" aria-label="Look ahead">●</button>
+        <button data-head="right" type="button" aria-label="Look right">▶</button>
+        <button data-head="down" type="button" aria-label="Look down">▼</button>
+      </div>
+      <button id="look-up" class="wide" type="button">Lift his head (stays asleep)</button>
+    </section>
+
+    <section id="view-status" class="view" hidden>
+      <h2>Status</h2>
+      <ul id="status" class="status"></ul>
+      <div class="buttons">
+        <button id="wake" type="button">Wake up</button>
+        <button id="sleep" type="button">Go to sleep</button>
+        <button id="restart" class="danger" type="button">Restart Reachy</button>
+      </div>
+      <h3>Notifications</h3>
+      <p class="hint" id="push-hint">Missed calls, WhatsApp unlinked, Reachy stopped, privacy left on.</p>
+      <div class="buttons">
+        <button id="push-on" type="button">Turn on notifications</button>
+        <button id="push-test" type="button" hidden>Send a test</button>
+      </div>
+    </section>
+
+    <section id="view-activity" class="view" hidden>
+      <h2>Activity</h2>
+      <ul id="activity" class="log"></ul>
+      <h3>Changes</h3>
+      <ul id="changes" class="log"></ul>
+      <h3>AI costs</h3>
+      <div id="usage" class="hint"></div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <h2>Settings</h2>
+      <p class="hint">Saved settings apply when Reachy restarts.</p>
+      <form id="settings" class="settings"></form>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <a href="#people" data-tab="people">People</a>
+    <a href="#camera" data-tab="camera">Camera</a>
+    <a href="#status" data-tab="status">Status</a>
+    <a href="#activity" data-tab="activity">Activity</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+  </nav>
+
+  <dialog id="person-dialog">
+    <form id="person-form" method="dialog">
+      <h2 id="person-heading">Person</h2>
+      <label>Name Reachy uses<input name="name" required maxlength="60" autocomplete="off"></label>
+      <label>Other names people say (comma separated)<input name="say" maxlength="400" autocomplete="off"></label>
+      <label>WhatsApp group for voice notes and photos
+        <select name="chat"><option value="">None</option></select>
+      </label>
+      <label>Phone for calls (with country code)<input name="phone" type="tel" maxlength="24" placeholder="+34 600 000 000"></label>
+      <fieldset id="face-box">
+        <legend>Face</legend>
+        <div id="face-photos" class="photos"></div>
+        <div class="buttons">
+          <label class="button">Add photos<input id="face-upload" type="file" accept="image/*" multiple hidden></label>
+          <button id="face-enroll" type="button">From Reachy's camera</button>
+        </div>
+      </fieldset>
+      <p id="person-error" class="error" hidden></p>
+      <div class="buttons end">
+        <button id="person-delete" class="danger" type="button">Remove</button>
+        <button value="cancel" type="button" id="person-cancel">Cancel</button>
+        <button id="person-save" class="primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/static/admin/admin.js"></script>
+</body>
+</html>

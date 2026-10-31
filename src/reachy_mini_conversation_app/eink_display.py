@@ -540,12 +540,7 @@ class EInkDisplay:
         # newer one shares its <name>-<id>. Shown screens therefore share one id and differ by time, so
         # each replaces the last in the device's small flash instead of piling up for a day. The resting
         # card keeps its name while it is unchanged, so a restart does not redraw it.
-        home_png = render_home()
-        home = read_json(self.spool / CURRENT).get("home")
-        if not isinstance(home, str) or self._read(home) != home_png:
-            home = f"reachy-000000-{int(clock())}"
-            (self.spool / f"{home}.png").write_bytes(home_png)
-            self._update(home=home)
+        self.set_resting_card(None)
 
     def show(self, png: bytes, owner: str = "requested", *, expires_after_s: float | None = None) -> None:
         """Make ``png`` the screen the TRMNL fetches at its next check-in.
@@ -567,6 +562,18 @@ class EInkDisplay:
             self._update(
                 screen=filename, shown_at=now, owner=owner, expires_at=expires_at, private=expires_after_s is not None
             )
+
+    def set_resting_card(self, png: bytes | None) -> None:
+        """Make ``png`` the resting card every screen idles back to (None: Reachy's own card)."""
+        resting = render_home() if png is None else png
+        with self._lock:
+            previous = read_json(self.spool / CURRENT).get("home")
+            if not isinstance(previous, str) or self._read(previous) != resting:
+                home = f"reachy-000000-{int(self._clock())}"
+                (self.spool / f"{home}.png").write_bytes(resting)
+                self._update(home=home)
+                if isinstance(previous, str) and previous != home:
+                    (self.spool / f"{previous}.png").unlink(missing_ok=True)
 
     def show_home(self) -> None:
         """Go back to the resting card."""

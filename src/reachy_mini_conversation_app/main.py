@@ -21,7 +21,10 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     log_connection_troubleshooting,
 )
+from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now, listening_allowed
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder, wake_clips_directory
+from reachy_mini_conversation_app.control_api import ControlApi, load_or_create_token, start_control_server
+from reachy_mini_conversation_app.eink_display import render_text
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 
 
@@ -189,7 +192,7 @@ def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
 
     The antennas flutter and the screen shows who is calling. Awake: "Te llama Eduardo" (again after 15 and
     30 s) and a yes answers. Asleep: no voice. A pat on his head (held still while it rings) answers either
-    way. A conversation open when a call comes in closes.
+    way. A conversation open when a call comes in closes. While privacy is on or in quiet hours it is declined.
     """
     from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.incoming_calls import IncomingRinger
@@ -211,6 +214,11 @@ def _start_calls(deps: Any, runtime: Any, movement: Any, quick: Any) -> Any:
     ringer = IncomingRinger(calls, runtime, movement, deps.reachy_mini, quick, language)
 
     def on_incoming(incoming: Incoming) -> None:
+        if PRIVACY.on or quiet_now():
+            outcome = "declined_privacy" if PRIVACY.on else "declined_quiet_hours"
+            calls.decline(outcome)
+            logger.info("Incoming call %s", outcome)
+            return
         display = deps.display
         if display is not None:
             from reachy_mini_conversation_app.eink_display import render_word
@@ -758,7 +766,10 @@ def run(
         calls = _start_calls(deps, hybrid_runtime, movement_manager, quick)
 
         def antenna_touched() -> None:
-            """Wake him, unless a call rings or is on (a pat on his head answers and hangs up)."""
+            """Wake him, unless privacy or quiet hours hold, or a call rings or is on (a pat answers and hangs up)."""
+            if not listening_allowed():
+                logging.getLogger(__name__).info("Antenna touched during privacy or quiet hours; ignored")
+                return
             if calls is not None and calls.busy:
                 logging.getLogger(__name__).info("Antenna touched during a call; ignored")
                 return
@@ -937,6 +948,22 @@ def run(
         threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
         logger.info("Web UI available at http://localhost:7860")
 
+    control = ControlApi(deps, hybrid_runtime, load_or_create_token(Path(config.APP_CONTROL_TOKEN_FILE)))
+    control_server = start_control_server(control, config.APP_CONTROL_PORT)
+
+    def privacy_changed(on: bool) -> None:
+        """Privacy on: asleep, any conversation closed, the e-ink card says so; off: his own card again."""
+        if on:
+            control.go_to_sleep()
+        if deps.display is not None:
+            deps.display.set_resting_card(render_text(["Privacy on"]) if on else None)
+            if on:
+                deps.display.show_home()
+
+    PRIVACY.add_listener(privacy_changed)
+    if PRIVACY.on:
+        privacy_changed(True)
+
     try:
         app_lifecycle.initialize_tools_with_default_fallback(instance_path, logger)
     except Exception as e:
@@ -997,6 +1024,7 @@ def run(
     finally:
         if own_ui_server is not None:
             own_ui_server.should_exit = True
+        control_server.should_exit = True
 
         # Stop the motion writes without changing the robot's posture. If
         # the shutdown came from the voice go_to_sleep tool the robot is
