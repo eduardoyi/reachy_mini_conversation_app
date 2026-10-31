@@ -13,8 +13,8 @@ Eduardo and Adriana manage Reachy from a web app installed on their phones' home
 | People | A tile per person, including anyone Reachy only knows by face. A bottom sheet edits the name, face photos (from the phone or Reachy's camera, or link a face Reachy already knows: "Martin" onto "Abuelo Martín"), the WhatsApp call number, the group for voice notes and photos (by name; "New group with …" creates one with Reachy and that number; Reachy's own number is shown to add him to any other group) and other names people say (chips). Warns when two people answer to the same spoken name. |
 | Camera | A live view from Reachy's camera (about 5 frames a second, 640 px, never recorded). A pad turns his head; while he sleeps it lifts his head without waking him, and "Lift his head" looks straight ahead. The head lowers again two minutes after the last turn. |
 | Gallery | Photos Reachy took (kept since 2026-10-31), his drawings (older styles marked), drawing lessons with their steps and pictures from the web (with where they came from), by day in a square grid. Search (title, who, lesson steps; accents ignored) and filter chips with counts. A full-screen viewer swipes between them and shares (Android share sheet), saves or deletes. |
-| Activity | Calls in, out and missed (with minutes), voice notes and photos sent, by day; who changed what in the admin app; AI costs today, this week, this month. |
-| Settings (gear in the header) | Quiet hours (switch and two times), languages, who may start calls (face chips), wake sensitivity (a slider), face recognition, speaker following, the song on the e-ink screen, keeping photos for the gallery. A save bar appears on a change; saving restarts Reachy. |
+| Activity | Calls in, out and missed (with minutes), voice notes and photos sent, by day; who changed what in the admin app; AI costs today, this week, this month. Tapping the costs opens a breakdown for today (by hour), 7 or 30 days (by day): the total against the period before, a bar chart (tap a bar for its amount), where it goes by feature with counts, what a conversation pays for (reading its instructions and memories, hearing, seeing, speaking, thinking, writing; split by each token kind's price so the parts add up), and by model. |
+| Settings (gear in the header) | Personality (his instructions as editable sections, each marked Edited or New with Undo, a new section, back to the original; used from his next conversation), quiet hours (switch and two times), languages, who may start calls (face chips), wake sensitivity (a slider), face recognition, speaker following, the song on the e-ink screen, keeping photos for the gallery. A save bar appears on a change; saving restarts Reachy. |
 
 The **privacy switch** sits at the top of every tab. On: the microphone audio is dropped before anything
 hears it (wake word, local speech, the cloud conversation, calls, voice notes), the camera is not read (face
@@ -86,6 +86,8 @@ flowchart LR
 | `admin/web_push.py` | RFC 8291 aes128gcm encryption and RFC 8292 VAPID with `cryptography`; checked against the RFC 8291 example. |
 | `static/admin/` | `index.html` (icons as an inline SVG sprite, Reachy as inline SVG whose pose follows `data-state`), `admin.js`, `admin.css` (light and dark tokens; Unbounded and Figtree from Google Fonts), `manifest.webmanifest`, `sw.js`, icons. Plain JS, no build step. |
 | `admin/gallery.py` | `Gallery.items/path/thumbnail/delete` over `PHOTO_ARCHIVE_DIR` and the display cache (`drawings-v3`, older `drawings-v2`/`drawings`, `lessons`, `pictures`; never album art); ids are `<folder>/<file>` and nothing else opens. Routes `GET /api/gallery`, `GET /api/gallery/file?id=&thumb=1`, `POST /api/gallery/delete` (audited). |
+| `admin/costs.py` | `breakdown(entries, now, days)` over the usage ledger; route `GET /api/costs?days=1\|7\|30`. |
+| `admin/personality.py` | `read_personality`, `write_personality(text, version)`: edits go to `PERSONALITY_DIR/<profile>.md`, never the profile in the repository (an update cannot overwrite them); saving the original removes the file. Routes `GET/PUT /api/personality` (audited). `prompts.get_session_instructions` uses the edited text when present. |
 | `photo_archive.py` | `keep(jpeg, who, outcome)`: `<time>.jpg` and `<time>.json` (who, outcome, time), owner-only; called by `photographer.take_and_share` after sending. |
 | `whatsapp.py` | `WhatsAppLink.groups` (names and ids), `create_group` (GOWA `POST /group`), `ServerStatus.number` (Reachy's own number). |
 | `control_api.py` | `ControlApi` (status, privacy, camera, head, look-up, sleep, wake, faces), `load_or_create_token`, `start_control_server`. |
@@ -131,6 +133,7 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 | `QUIET_HOURS` | (none) | `HH:MM-HH:MM`, may cross midnight. |
 | `PHOTO_ARCHIVE_ENABLED` | 1 | Keep photos Reachy takes for the gallery. |
 | `PHOTO_ARCHIVE_DIR` | `~/.local/share/reachy/photos` | Where they are kept. |
+| `PERSONALITY_DIR` | `~/.local/share/reachy/personality` | Instructions edited in the app, one file per profile. |
 
 ## Setting it up on the Mac mini
 

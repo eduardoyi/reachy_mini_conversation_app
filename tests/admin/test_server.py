@@ -880,3 +880,33 @@ def test_the_gallery_lists_serves_and_deletes_pictures(admin: Admin) -> None:
         assert missing.status_code == 404
     assert not (folder / "duck.png").exists()
     assert [(e["action"], e["target"]) for e in admin.audit()] == [("picture deleted", "drawings-v3")]
+
+
+# Costs and personality -----------------------------------------------------------------------------
+
+
+def test_costs_by_period_and_only_known_periods(admin: Admin) -> None:
+    """The breakdown answers for 1, 7 and 30 days and refuses any other period."""
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    get_ledger().path.write_text(json.dumps({"ts": now, "feature": "conversation", "cost_usd": 0.25}) + "\n")
+    with admin.client() as client:
+        week = client.get("/api/costs", params={"days": 7}).json()
+        assert client.get("/api/costs", params={"days": 3}).status_code == 400
+    assert week["total"] == 0.25 and week["features"] == [{"name": "conversation", "cost": 0.25, "count": 1}]
+
+
+def test_personality_saves_are_audited_and_stale_ones_refused(
+    admin: Admin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A save is audited as a change; one based on an older version is a 409."""
+    monkeypatch.setattr(server.config, "PERSONALITY_DIR", str(tmp_path / "personality"))
+    with admin.client() as client:
+        current = client.get("/api/personality").json()
+        saved = client.put(
+            "/api/personality",
+            headers=SAME_ORIGIN,
+            json={"text": current["text"] + " Be brief.", "version": current["version"]},
+        )
+        stale = client.put("/api/personality", headers=SAME_ORIGIN, json={"text": "x", "version": current["version"]})
+    assert saved.json()["edited"] is True and stale.status_code == 409
+    assert [(e["action"], e["target"]) for e in admin.audit()] == [("personality changed", "default")]

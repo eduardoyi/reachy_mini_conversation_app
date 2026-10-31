@@ -856,6 +856,8 @@ class Config:
     # Photos Reachy takes, kept for the admin app's gallery (photo_archive.py); 0 sends them without keeping them.
     PHOTO_ARCHIVE_ENABLED = _env_flag("PHOTO_ARCHIVE_ENABLED", default=True)
     PHOTO_ARCHIVE_DIR = os.path.expanduser(os.getenv("PHOTO_ARCHIVE_DIR") or "~/.local/share/reachy/photos")
+    # Instructions edited in the admin app, one file per profile (``<profile>.md``), used instead of the profile's own.
+    PERSONALITY_DIR = os.path.expanduser(os.getenv("PERSONALITY_DIR") or "~/.local/share/reachy/personality")
     # Quiet hours, "21:30-07:00" local time: no wake and incoming calls declined. Empty for none.
     QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     # Offer rarely used tools as skills (one menu line each) instead of full declarations every turn.
@@ -1091,6 +1093,7 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.PHOTO_ARCHIVE_ENABLED = _env_flag("PHOTO_ARCHIVE_ENABLED", default=True)
     config.PHOTO_ARCHIVE_DIR = os.path.expanduser(os.getenv("PHOTO_ARCHIVE_DIR") or "~/.local/share/reachy/photos")
+    config.PERSONALITY_DIR = os.path.expanduser(os.getenv("PERSONALITY_DIR") or "~/.local/share/reachy/personality")
     config.QUIET_HOURS = _quiet_hours(os.getenv("QUIET_HOURS"))
     config.SKILL_TOOLS_ENABLED = _env_flag("SKILL_TOOLS_ENABLED", default=True)
     config.TRMNL_PORT = _bounded_int("TRMNL_PORT", 8090, 1024, 65535)

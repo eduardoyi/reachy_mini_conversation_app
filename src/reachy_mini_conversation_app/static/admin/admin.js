@@ -147,6 +147,7 @@ function showTab() {
   if (tab !== "camera") closeCamera();
   if ($("#person-sheet").open) $("#person-sheet").close();
   if ($("#viewer").open) $("#viewer").close();
+  for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet")) if (sheet.open) sheet.close();
   $("#save-bar").hidden = true;
   window.scrollTo(0, 0);
   views[tab]();
@@ -881,6 +882,8 @@ const CHANGES = {
   "face enrolled from the camera": (t) => (t ? `added ${t}'s face from the camera` : "added a face from the camera"),
   "face photo deleted": () => "deleted a face photo",
   "face forgotten": (t) => (t ? `made Reachy forget ${t}` : "made Reachy forget a face"),
+  "personality changed": () => "changed Reachy's personality",
+  "personality reset": () => "put Reachy's personality back to the original",
   "picture deleted": (t) => (t === "photos" ? "deleted a photo" : "deleted a picture"),
 };
 
@@ -935,8 +938,11 @@ function renderActivity() {
   const usage = $("#usage");
   usage.hidden = state.log !== "activity" || totals.today === undefined;
   if (!usage.hidden) {
-    const cost = (value, label) => el("div", {}, [el("b", {}, `$${Number(value || 0).toFixed(2)}`), el("span", {}, label)]);
-    usage.replaceChildren(cost(totals.today, "AI today"), cost(totals.last_7_days, "This week"), cost(totals.last_30_days, "This month"));
+    const cost = (value, label) => el("div", { className: "cost" }, [el("b", {}, `$${Number(value || 0).toFixed(2)}`), el("span", {}, label)]);
+    usage.replaceChildren(
+      el("div", { className: "cost-row" }, [cost(totals.today, "AI today"), cost(totals.last_7_days, "This week"), cost(totals.last_30_days, "This month")]),
+      el("span", { className: "more" }, ["See where it goes", icon("chevron")]),
+    );
   }
   if (state.log === "activity") renderLog(payload.activity, describeActivity, "Calls, voice notes and photos show up here.");
   else renderLog(payload.changes, describeChange, "Changes made in this app show up here.");
@@ -1149,6 +1155,288 @@ $("#viewer-delete").addEventListener("click", async (event) => {
   });
 });
 
+// Costs -----------------------------------------------------------------------------------------
+
+const FEATURES = {
+  conversation: ["Conversations", "Talking with him"],
+  memory_capture: ["Remembering", "Noting what's worth keeping"],
+  memory_review: ["Tidying memories", ""],
+  quick_reply_speech: ["Quick replies", "Short spoken answers"],
+  addressee_check: ["Was that for him?", "Checking who was spoken to"],
+  display_drawing: ["Drawings", "For the e-ink screen"],
+  display_photo_edit: ["Photo edits", "Pirates, astronauts and friends"],
+  display_picture_search: ["Picture search", "Finding pictures on the web"],
+  display_picture_check: ["Picture checks", "Making sure pictures are OK for kids"],
+  display_lesson: ["Drawing lessons", ""],
+  display_lesson_captions: ["Lesson captions", ""],
+};
+const PARTS = {
+  input_text: ["Reading", "His instructions, memories and what was said"],
+  input_audio: ["Hearing", "Listening to the room"],
+  input_image: ["Seeing", "Camera frames"],
+  output_audio: ["Speaking", "His voice"],
+  output_text: ["Writing", "Text he produced"],
+  thinking: ["Thinking", "Working things out"],
+};
+const costs = { days: 7, data: null, picked: null };
+
+function money(value) {
+  if (!value) return "$0";
+  return value < 0.01 ? "<$0.01" : `$${value.toFixed(2)}`;
+}
+
+function openCosts() {
+  $("#costs-sheet").showModal();
+  loadCosts();
+}
+
+async function loadCosts() {
+  for (const button of document.querySelectorAll("[data-days]")) button.setAttribute("aria-selected", String(Number(button.dataset.days) === costs.days));
+  const data = await run(null, () => api(`/api/costs?days=${costs.days}`));
+  if (!data) return;
+  costs.data = data;
+  costs.picked = null;
+  renderCosts();
+}
+
+for (const button of document.querySelectorAll("[data-days]")) {
+  button.addEventListener("click", () => {
+    costs.days = Number(button.dataset.days);
+    loadCosts();
+  });
+}
+
+function share(fraction) {
+  const percent = Math.round(fraction * 100);
+  return fraction > 0 && percent === 0 ? "<1%" : `${percent}%`;
+}
+
+function breakdownList(rows) {
+  const top = Math.max(...rows.map((row) => row.cost), 0.0001);
+  const total = rows.reduce((sum, row) => sum + row.cost, 0) || 1;
+  return el("ul", { className: "breakdown" }, rows.map((row) => {
+    const meter = el("span", { className: "meter" }, el("i"));
+    meter.firstChild.style.width = `${Math.max(1, (row.cost / top) * 100)}%`;
+    return el("li", {}, [
+      el("span", { className: "what" }, [row.label, row.detail ? el("small", {}, row.detail) : null]),
+      el("span", { className: "amount" }, [money(row.cost), el("small", {}, share(row.cost / total))]),
+      meter,
+    ]);
+  }));
+}
+
+function chart(data) {
+  const series = data.series;
+  const top = Math.max(...series.map((point) => point.cost), 0);
+  const box = el("div", { className: "chart" });
+  const tip = el("span", { className: "tip", hidden: true });
+  const label = (point) => {
+    if (data.days === 1) return `${Number(point.label)}:00`;
+    return new Date(`${point.label}T12:00`).toLocaleDateString(undefined, { weekday: data.days <= 7 ? "short" : undefined, day: "numeric", month: "short" });
+  };
+  const bars = el("div", { className: "bars", role: "list" }, series.map((point, index) => {
+    const bar = el("button", { className: `bar ${point.cost ? "" : "zero"}`, type: "button", role: "listitem", ariaLabel: `${label(point)}: ${money(point.cost)}` }, el("i"));
+    bar.firstChild.style.height = top ? `${Math.max(2, (point.cost / top) * 100)}%` : "2px";
+    const show = () => {
+      for (const other of bars.children) other.removeAttribute("aria-pressed");
+      bar.setAttribute("aria-pressed", "true");
+      tip.textContent = `${label(point)}: ${money(point.cost)}`;
+      tip.hidden = false;
+      tip.style.left = `${Math.min(85, Math.max(15, ((index + 0.5) / series.length) * 100))}%`;
+    };
+    bar.addEventListener("click", show);
+    bar.addEventListener("mouseenter", show);
+    return bar;
+  }));
+  bars.addEventListener("mouseleave", () => {
+    tip.hidden = true;
+    for (const other of bars.children) other.removeAttribute("aria-pressed");
+  });
+  const first = series[0];
+  const last = series[series.length - 1];
+  box.append(
+    el("span", { className: "grid-label" }, money(top)),
+    el("span", { className: "grid-line" }),
+    tip,
+    bars,
+    el("div", { className: "axis" }, [el("span", {}, data.days === 1 ? "Midnight" : label(first)), el("span", {}, data.days === 1 ? "11 pm" : label(last))]),
+  );
+  return box;
+}
+
+function renderCosts() {
+  const data = costs.data;
+  const box = $("#costs");
+  const period = { 1: "today", 7: "the last 7 days", 30: "the last 30 days" }[data.days];
+  const before = { 1: "yesterday", 7: "the 7 days before", 30: "the 30 days before" }[data.days];
+  let comparison = `Nothing ${before}.`;
+  if (data.previous) {
+    const change = Math.round(((data.total - data.previous) / data.previous) * 100);
+    comparison = change === 0 ? `Same as ${before}.` : `${change > 0 ? "Up" : "Down"} ${Math.abs(change)}% on ${before} (${money(data.previous)}).`;
+  }
+  const parts = [
+    el("div", { className: "hero" }, [el("b", {}, money(data.total)), el("span", {}, `Spent ${period}. ${comparison}`)]),
+    chart(data),
+  ];
+  if (data.features.length) {
+    parts.push(el("h3", { className: "section-title" }, "Where it goes"));
+    parts.push(breakdownList(data.features.map((feature) => {
+      const [label, detail] = FEATURES[feature.name] || [feature.name.replace(/_/g, " "), ""];
+      const count = feature.name === "conversation" ? `${feature.count} conversation${feature.count === 1 ? "" : "s"}` : `${feature.count} time${feature.count === 1 ? "" : "s"}`;
+      return { label, detail: detail ? `${detail}, ${count}` : count, cost: feature.cost };
+    })));
+  }
+  const talk = data.conversations;
+  if (talk.count) {
+    const each = money(talk.cost / talk.count);
+    parts.push(el("h3", { className: "section-title" }, "Inside a conversation"));
+    parts.push(el("p", { className: "hint lead" }, `${talk.count} conversations, ${Math.round(talk.minutes)} minutes in all, about ${each} each.`));
+    parts.push(breakdownList(talk.parts.map((part) => {
+      const [label, detail] = PARTS[part.name] || [part.name.replace(/_/g, " "), ""];
+      return { label, detail, cost: part.cost };
+    })));
+  }
+  if (data.models.length) {
+    parts.push(el("details", {}, [
+      el("summary", {}, "By AI model"),
+      breakdownList(data.models.map((model) => ({ label: model.name, detail: "", cost: model.cost }))),
+    ]));
+  }
+  if (!data.total && !data.features.length) parts.push(el("div", { className: "empty" }, [icon("spark"), el("p", {}, `Nothing spent ${period}.`)]));
+  const unpriced = data.unpriced ? ` ${data.unpriced} use${data.unpriced === 1 ? " has" : "s have"} no price and ${data.unpriced === 1 ? "isn't" : "aren't"} counted.` : "";
+  parts.push(el("p", { className: "footnote" }, `Estimated from usage at list prices; the bills can differ a little.${unpriced}`));
+  box.replaceChildren(...parts);
+}
+
+$("#usage").addEventListener("click", openCosts);
+
+// Personality -----------------------------------------------------------------------------------
+
+const personality = { data: null, sections: [] };
+
+function splitSections(text) {
+  const sections = [];
+  let current = { title: "", body: [] };
+  for (const line of text.split("\n")) {
+    const heading = line.match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      if (current.title || current.body.join("").trim()) sections.push(current);
+      current = { title: heading[1], body: [] };
+    } else {
+      current.body.push(line);
+    }
+  }
+  if (current.title || current.body.join("").trim()) sections.push(current);
+  return sections.map((section) => ({ title: section.title, body: section.body.join("\n").trim() }));
+}
+
+function joinSections(sections) {
+  return sections.filter((s) => s.title || s.body.trim())
+    .map((s) => (s.title ? `## ${s.title}\n${s.body.trim()}` : s.body.trim())).join("\n\n");
+}
+
+function sectionName(title) {
+  if (!title) return "Opening";
+  const lower = title.toLowerCase();
+  return lower[0].toUpperCase() + lower.slice(1);
+}
+
+function grow(area) {
+  area.style.height = "auto";
+  area.style.height = `${area.scrollHeight + 4}px`;
+}
+
+async function openPersonality() {
+  const data = await run(null, () => api("/api/personality"));
+  if (!data) return;
+  personality.data = data;
+  personality.sections = splitSections(data.text);
+  $("#personality-error").hidden = true;
+  renderPersonality();
+  $("#personality-sheet").showModal();
+  $("#personality-sheet .sheet-body").scrollTop = 0;
+  for (const area of document.querySelectorAll(".prompt-section textarea")) grow(area);
+}
+
+function renderPersonality() {
+  const original = new Map(splitSections(personality.data.original).map((s) => [s.title, s.body]));
+  const edited = joinSections(personality.sections) !== personality.data.original;
+  const notice = $("#personality-edited");
+  notice.hidden = !edited;
+  if (edited) {
+    const undo = el("button", { className: "copy", type: "button" }, "Go back to the original");
+    undo.addEventListener("click", async () => {
+      if (!(await ask({ title: "Go back to the original?", body: "All the changes to his personality are undone when you save.", yes: "Go back" }))) return;
+      personality.sections = splitSections(personality.data.original);
+      renderPersonality();
+      for (const area of document.querySelectorAll(".prompt-section textarea")) grow(area);
+    });
+    notice.replaceChildren(icon("pencil"), el("span", {}, ["This has been changed from the original. ", undo]));
+  }
+  $("#personality-sections").replaceChildren(...personality.sections.map((section, index) => {
+    const changed = original.get(section.title) !== section.body;
+    const area = el("textarea", { value: section.body, ariaLabel: sectionName(section.title), spellcheck: true });
+    area.addEventListener("input", () => {
+      section.body = area.value;
+      grow(area);
+      const nowChanged = original.get(section.title) !== section.body;
+      if (nowChanged !== changed) {
+        renderPersonality();
+        const again = document.querySelectorAll(".prompt-section textarea")[index];
+        again.focus();
+        again.setSelectionRange(area.selectionStart, area.selectionEnd);
+        for (const each of document.querySelectorAll(".prompt-section textarea")) grow(each);
+      }
+    });
+    const header = [el("h4", {}, sectionName(section.title))];
+    if (changed) {
+      header.push(el("span", { className: "badge-edited" }, original.has(section.title) ? "Edited" : "New"));
+      const undo = el("button", { className: "text-button", type: "button" }, original.has(section.title) ? "Undo" : "Remove");
+      undo.addEventListener("click", () => {
+        if (original.has(section.title)) section.body = original.get(section.title);
+        else personality.sections.splice(index, 1);
+        renderPersonality();
+        for (const each of document.querySelectorAll(".prompt-section textarea")) grow(each);
+      });
+      header.push(undo);
+    }
+    return el("section", { className: "prompt-section" }, [el("header", {}, header), area]);
+  }));
+}
+
+$("#new-section-add").addEventListener("click", () => {
+  const input = $("#new-section-name");
+  const title = input.value.trim().replace(/^#+\s*/, "");
+  if (!title) {
+    input.focus();
+    return;
+  }
+  personality.sections.push({ title: title.toUpperCase(), body: "" });
+  input.value = "";
+  renderPersonality();
+  const areas = document.querySelectorAll(".prompt-section textarea");
+  areas[areas.length - 1].focus();
+});
+
+$("#personality-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = joinSections(personality.sections);
+  run($("#personality-save"), async () => {
+    try {
+      personality.data = await api("/api/personality", { method: "PUT", body: { text, version: personality.data.version } });
+      $("#personality-sheet").close();
+      toast(personality.data.edited ? "Saved. He'll use it next time he wakes up." : "Back to the original.");
+    } catch (problem) {
+      $("#personality-error").textContent = problem.message;
+      $("#personality-error").hidden = false;
+    }
+  });
+});
+
+for (const button of document.querySelectorAll("[data-close]")) {
+  button.addEventListener("click", () => button.closest("dialog").close());
+}
+
 // Settings --------------------------------------------------------------------------------------
 
 const LANGUAGES = { auto: "Detect automatically", es: "Español", en: "English", it: "Italiano", pt: "Português" };
@@ -1206,6 +1494,13 @@ function renderSettings() {
   const { draft, meta } = state.settings;
   const form = $("#settings");
   const panels = [];
+  const open = el("button", { className: "row open-row", type: "button" }, [
+    icon("spark"),
+    el("span", { className: "row-text" }, [el("span", { className: "row-label" }, "Personality"), el("span", { className: "row-sub" }, "How he talks and behaves")]),
+    icon("chevron"),
+  ]);
+  open.addEventListener("click", () => openPersonality());
+  panels.push(el("div", { className: "panel" }, open));
 
   if (meta.QUIET_HOURS) {
     const [from, to] = (draft.QUIET_HOURS || "21:30-07:00").split("-");

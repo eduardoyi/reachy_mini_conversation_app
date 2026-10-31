@@ -234,3 +234,7 @@ security model); README and architecture diagram updated; this plan and the inde
   search, filters, a swiping viewer with share, save and delete. Settings moved to a gear in the header to keep five
   tabs. The TRMNL had been checking in normally but stayed on an error screen after a failed download during a
   server restart; the device server now resends the screen under a new name after a reported failure.
+- 2026-10-31: Notifications: Google's push service answered 410 to the first push, the app forgot the phone while the
+  phone still showed them on; the page now re-registers on open and a test replaces an expired subscription. Eduardo
+  confirmed a test arrived. Added an AI cost breakdown (from the Activity costs) and a personality editor in Settings
+  (edits kept in `PERSONALITY_DIR`, per profile, outside the repository).

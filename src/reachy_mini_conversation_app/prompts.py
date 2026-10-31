@@ -10,6 +10,7 @@ from reachy_mini_conversation_app.profile_store import (
     ProfileDefinition,
     ProfileFormatError,
     read_profile,
+    canonical_profile_name,
     read_packaged_default_profile,
 )
 
@@ -41,16 +42,30 @@ def _active_profile() -> ProfileDefinition:
     return read_profile(config.REACHY_MINI_CUSTOM_PROFILE)
 
 
+def personality_path(profile: str | None) -> Path:
+    """Return where the admin app keeps edited instructions for ``profile``."""
+    return Path(config.PERSONALITY_DIR) / f"{canonical_profile_name(profile)}.md"
+
+
+def edited_instructions(profile: str | None) -> str | None:
+    """Return the admin app's edited instructions for ``profile``, or None when they were never edited."""
+    try:
+        text = personality_path(profile).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
 def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Return instructions for the active profile with memory context."""
     selected_profile = config.REACHY_MINI_CUSTOM_PROFILE
     profile_name = selected_profile or DEFAULT_PROFILE_NAME
     try:
         profile = _active_profile()
-        instructions = profile.instructions.strip()
+        instructions = edited_instructions(selected_profile) or profile.instructions.strip()
     except (FileNotFoundError, ProfileFormatError) as exc:
         logger.warning("Failed to load profile %r: %s", profile_name, exc)
-        instructions = ""
+        instructions = edited_instructions(selected_profile) or ""
 
     if not instructions and selected_profile and selected_profile != DEFAULT_PROFILE_NAME:
         logger.warning("Using bundled default instructions because profile %r is incomplete", selected_profile)

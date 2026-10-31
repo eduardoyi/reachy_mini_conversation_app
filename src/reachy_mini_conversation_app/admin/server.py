@@ -35,6 +35,7 @@ from starlette.staticfiles import StaticFiles
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.whatsapp import WhatsAppLink
 from reachy_mini_conversation_app.json_lines import JsonLines
+from reachy_mini_conversation_app.admin.costs import PERIODS, breakdown
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.admin.people import (
     PeopleFiles,
@@ -48,6 +49,7 @@ from reachy_mini_conversation_app.admin.records import RecordError, StaleVersion
 from reachy_mini_conversation_app.admin.app_link import AppLink, AppUnavailable
 from reachy_mini_conversation_app.admin.notifier import Watch, Notifier
 from reachy_mini_conversation_app.admin.settings import SETTINGS, SettingError, read_settings, write_settings
+from reachy_mini_conversation_app.admin.personality import read_personality, write_personality
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ NAME_HEADER: Final[str] = "tailscale-user-name"
 MAX_BODY_BYTES: Final[int] = 64 * 1024
 MAX_PHOTOS_BYTES: Final[int] = 12 * 1024 * 1024
 MAX_GROUP_TITLE_CHARS: Final[int] = 100
+MAX_PERSONALITY_BYTES: Final[int] = 256 * 1024
 MAX_GROUP_PHONES: Final[int] = 20
 # The TRMNL counts as checking in when it did so within this long.
 DISPLAY_RECENT_S: Final[float] = 15 * 60
@@ -527,6 +530,42 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
                 "usage": {"totals": summary.get("totals"), "by_feature": summary.get("by_feature")},
             }
         )
+
+    @app.get("/api/costs")
+    async def _costs(days: int = 7) -> Response:
+        if days not in PERIODS:
+            return _error(f"days must be one of {', '.join(map(str, PERIODS))}", 400)
+        entries = await asyncio.to_thread(get_ledger().entries)
+        return JSONResponse(breakdown(entries, datetime.now().astimezone(), days))
+
+    # Personality -------------------------------------------------------------------------------------
+
+    @app.get("/api/personality")
+    async def _personality() -> Response:
+        try:
+            return JSONResponse(await asyncio.to_thread(read_personality))
+        except RecordError as error:
+            return _error(str(error), 503)
+
+    @app.put("/api/personality")
+    async def _save_personality(request: Request) -> Response:
+        payload = await _json_body(request, MAX_PERSONALITY_BYTES)
+        if isinstance(payload, Response):
+            return payload
+        text, version = payload.get("text"), payload.get("version")
+        if not isinstance(text, str) or not isinstance(version, str):
+            return _error("text and version are required", 400)
+        try:
+            saved = await asyncio.to_thread(write_personality, text, version)
+        except StaleVersion:
+            return _error("Someone else changed the personality meanwhile. Reload and try again.", 409)
+        except ValueError as error:
+            return _error(str(error).capitalize() + ".", 422)
+        except (RecordError, OSError):
+            return _error("The personality could not be saved.", 503)
+        action = "personality changed" if saved["edited"] else "personality reset"
+        audit.append({"who": _who(request), "action": action, "target": saved["profile"]})
+        return JSONResponse(saved)
 
     # Settings ---------------------------------------------------------------------------------------
 
