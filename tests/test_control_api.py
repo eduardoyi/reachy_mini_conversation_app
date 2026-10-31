@@ -7,6 +7,7 @@ from typing import Any
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 from reachy_mini_conversation_app import control_api, camera_frames
 from reachy_mini_conversation_app.privacy import PrivacySwitch
 from reachy_mini_conversation_app.control_api import PEEK_YAW_STEP, PEEK_PITCH_STEP, ControlApi, load_or_create_token
+from reachy_mini_conversation_app.wake_learning.store import WakeLearningStore
 
 
 TOKEN = "secret-token"
@@ -83,6 +85,7 @@ def test_status_reports_mode_sleep_privacy_and_calls(switch: PrivacySwitch) -> N
     assert status["sleeping"] is True
     assert status["privacy"] == {"on": False, "since": None}
     assert status["calls_linked"] is True
+    assert status["in_call"] is False
 
 
 def test_privacy_switches_and_the_camera_is_refused_while_it_is_on(switch: PrivacySwitch) -> None:
@@ -203,3 +206,64 @@ def test_the_token_is_created_once_owner_only(tmp_path: Path) -> None:
     assert load_or_create_token(path) == token
     if sys.platform != "win32":
         assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_missed_call_is_marked_for_whoever_tapped_it_unless_privacy_is_on(switch: PrivacySwitch) -> None:
+    """The phone's "He missed me" keeps the minute before now; with the microphone off there is nothing to keep."""
+    api, _, runtime = _api()
+    runtime.mark_missed.return_value = True
+    client = _client(api)
+
+    response = client.post("/wake/missed", json={"who": "adriana@example.com"}, headers=AUTH)
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    runtime.mark_missed.assert_called_once_with(by="app", who="adriana@example.com")
+
+    switch.set(True)
+    assert client.post("/wake/missed", json={"who": ""}, headers=AUTH).status_code == 409
+    assert runtime.mark_missed.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("samples", "expected"),
+    [
+        (np.concatenate([np.full(8000, 2), np.full(8000, 3000), np.full(16000, 2)]), {"ok": True, "reason": None}),
+        (np.full(32000, 2), {"ok": False, "reason": "quiet"}),
+        (np.concatenate([np.full(8000, 2), np.full(128000, 3000)]), {"ok": False, "reason": "too_long"}),
+    ],
+)
+def test_a_recording_of_the_name_keeps_only_the_voice(
+    switch: PrivacySwitch, tmp_path: Path, samples: Any, expected: dict[str, Any]
+) -> None:
+    """A take is cut to the voice and kept for the person; silence or a long speech is not kept."""
+    api, _, runtime = _api()
+    store = WakeLearningStore(tmp_path / "learning", clips=tmp_path / "clips")
+    api._wake_store = store
+
+    async def record_name() -> tuple[int, Any]:
+        return 16000, samples.astype(np.int16)
+
+    runtime.record_name = record_name
+    response = _client(api).post("/wake/take", json={"person": "Lucía", "prompt": "from the kitchen"}, headers=AUTH)
+
+    assert response.status_code == 200
+    assert {key: response.json()[key] for key in expected} == expected
+    kept = store.all_recordings()
+    assert len(kept) == int(expected["ok"])
+    if kept:
+        assert kept[0]["person"] == "Lucía" and kept[0]["prompt"] == "from the kitchen"
+        assert 0.5 < kept[0]["seconds"] <= 1.05  # the voice and a quarter second either side
+
+
+def test_a_recording_is_refused_when_he_cannot_listen(switch: PrivacySwitch, tmp_path: Path) -> None:
+    """In a conversation (or without wake learning) there is no take; a bad request is refused before trying."""
+    api, _, runtime = _api()
+    api._wake_store = WakeLearningStore(tmp_path / "learning", clips=tmp_path / "clips")
+
+    async def record_name() -> None:
+        return None
+
+    runtime.record_name = record_name
+    client = _client(api)
+
+    assert client.post("/wake/take", json={"person": "Lucía", "prompt": ""}, headers=AUTH).status_code == 409
+    assert client.post("/wake/take", json={"person": " ", "prompt": ""}, headers=AUTH).status_code == 400

@@ -768,6 +768,10 @@ class Config:
     # Save short local clips around wake events to retrain the wake word; deleted after the keep period.
     WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
     WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)
+    # Wake learning (needs wake clips): log the wake model's input features all day, run the household head the
+    # nightly job made live and its shadow head (docs/features/wake-learning.md).
+    WAKE_LEARNING_ENABLED = _env_flag("WAKE_LEARNING_ENABLED", default=False)
+    WAKE_FEATURES_KEEP_DAYS = _bounded_int("WAKE_FEATURES_KEEP_DAYS", 30, 1, 365)
     # Bending an antenna wakes Reachy as his name does (hybrid runtime only).
     ANTENNA_TOUCH_WAKE = _env_flag("ANTENNA_TOUCH_WAKE", default=True)
     LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
@@ -1023,6 +1027,8 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_ACOUSTIC_WAKE_THRESHOLD = resolve_local_acoustic_wake_threshold()
     config.WAKE_CLIPS_ENABLED = _env_flag("WAKE_CLIPS_ENABLED", default=False)
     config.WAKE_CLIPS_KEEP_DAYS = _bounded_int("WAKE_CLIPS_KEEP_DAYS", 14, 1, 365)
+    config.WAKE_LEARNING_ENABLED = _env_flag("WAKE_LEARNING_ENABLED", default=False)
+    config.WAKE_FEATURES_KEEP_DAYS = _bounded_int("WAKE_FEATURES_KEEP_DAYS", 30, 1, 365)
     config.ANTENNA_TOUCH_WAKE = _env_flag("ANTENNA_TOUCH_WAKE", default=True)
     config.LOCAL_WAKE_WORD = (os.getenv(LOCAL_WAKE_WORD_ENV) or "").strip() or DEFAULT_LOCAL_WAKE_WORD
     config.LOCAL_WAKE_COOLDOWN_SECONDS = resolve_local_processing_seconds(

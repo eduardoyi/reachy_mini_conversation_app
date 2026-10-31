@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.local_processing import (
     NullLocalProcessingBackend,
 )
 from reachy_mini_conversation_app.local_intent_router import LocalIntent, LocalIntentRouter, IntentDecisionReason
+from reachy_mini_conversation_app.wake_learning.takes import take_finished
 from reachy_mini_conversation_app.conversation_handler import (
     AudioFrame,
     TrafficKind,
@@ -453,6 +454,12 @@ class HybridRuntime:
     _VOICE_RUN_S = 0.25
     _VOICE_OVER_FLOOR = 4.0
     _VOICE_MIN_RMS = 300.0
+    # Frames arrive every 20-80 ms; a longer pause means local listening stopped (a conversation).
+    _LISTENING_GAP_S = 1.0
+    # A rejected wake pauses the wake model for its name check; within this it carries on where it was.
+    _ACOUSTIC_RESUME_S = 1.5
+    _NAME_TAKE_POLL_S = 0.1
+    _NAME_TAKE_MAX_S = 4.0
     # While music plays (it was playing at the wake, or Reachy started it), close the conversation once
     # Reachy has answered the user's latest turn and the user stays quiet this long. Gemini hears music as
     # ongoing speech, so the usual idle rule never fires while music plays.
@@ -569,6 +576,14 @@ class HybridRuntime:
         self._wake_window_rate = 0
         self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
         self._wake_score: float | None = None  # the wake model's score for that audio
+        self._wake_event: str | None = None  # that fire's id in the wake clip record
+        # When the wake model last scored a frame and the clip recorder was last fed: a short pause (a rejected
+        # wake) carries on where it was, a longer one (a conversation) starts over.
+        self._acoustic_scored_at: float | None = None
+        self._clips_fed_at: float | None = None
+        self._activated_at: float | None = None  # when the current activation began
+        # While a recording of the name is taken for the household's voices, hearing it wakes nobody.
+        self._holding_wakes = False
         self._intent_router = intent_router
         self._action_executor = action_executor
         self._quick_commands = quick_commands
@@ -1063,6 +1078,8 @@ class HybridRuntime:
             self._acoustic_epoch += 1
             generation = self._generation
             self._output_wakeup_event.set()
+        if new_mode is RuntimeMode.CLOUD_CONVERSATION and self._wake_clips is not None:
+            self._wake_clips.flush()  # nothing more is heard locally until the conversation ends
         logger.info(
             "Runtime transition old=%s new=%s reason=%s generation=%d",
             old_mode.value,
@@ -1160,18 +1177,24 @@ class HybridRuntime:
         if detection is None:
             return
         detector.consume_detection()
+        if self._holding_wakes:
+            return
+        name_event = None
         if self._wake_clips is not None and self._acoustic_wake_detector is not None:
             # Still listening locally, so the wake model missed a name that local STT heard.
-            self._wake_clips.save_name_heard(segment.ended_at - segment.started_at)
+            name_event = self._wake_clips.save_name_heard(segment.ended_at - segment.started_at)
         strict = self._strict_wake
         if strict is not None and self._acoustic_wake_detector is not None and strict():
             logger.info("TV on; ignoring the name in the room transcript")
+            self._note_wake(name_event, outcome="ignored", why="tv")
             return
         with self._lifecycle_lock:
             asleep = self._asleep
         if asleep and not (detection.wake_word_is_first_word or _name_leads(segment.text)):
             logger.info("Asleep; ignoring the name mentioned mid-sentence")
+            self._note_wake(name_event, outcome="ignored", why="asleep_mid_sentence")
             return
+        self._note_wake(name_event, outcome="woke")
         followup_waiter: asyncio.Future[TranscriptSegment] | None = None
         if not detection.remaining_text:
             try:
@@ -1275,6 +1298,7 @@ class HybridRuntime:
                         return self._mode is RuntimeMode.CLOUD_CONVERSATION and not self._closed
                     self._generation += 1
                     generation = self._generation
+                    self._activated_at = self._clock()
                     self._local_output.clear()
                     barrier_provider = self._capture_barrier_provider
                     self._activation_capture_barrier = barrier_provider() if barrier_provider is not None else None
@@ -1317,19 +1341,25 @@ class HybridRuntime:
                     # The audio the wake model fired on: Whisper checks the name in it before Reachy reacts.
                     wake_audio = self._wake_name_audio if reason == "acoustic_wake" else None
                     wake_score = self._wake_score if wake_audio is not None else None
+                    wake_event = self._wake_event if reason == "acoustic_wake" else None
                     self._wake_name_audio = None
                     self._wake_score = None
+                    self._wake_event = None
                     # Without that audio, asleep, an acoustic wake counts once the transcript has the name first.
                     confirm_wake = asleep and transcribe_request and wake_audio is None and reason == "acoustic_wake"
                     if asleep and not confirm_wake and wake_audio is None:
                         self._asleep = False
                 self._transition(RuntimeMode.LOCAL_COMMAND, reason)
+            if reason == "antenna_touch" and self._wake_clips is not None:
+                # Someone bent an antenna, maybe after calling him: the seconds before it are kept to look for a call.
+                self._wake_clips.record("antenna")
             # Recording starts now, so the request is kept while the name is checked; the cue waits for it.
             clip_task = (
                 asyncio.create_task(
                     self._transcribe_request_clip(
                         generation,
                         lead_in=wake_audio,
+                        wake_event=wake_event,
                         start_s=self._ANSWER_START_S if reason == "awaited_answer" else self._REQUEST_CLIP_START_S,
                     ),
                     name=f"hybrid-request-clip-{generation}",
@@ -1341,10 +1371,12 @@ class HybridRuntime:
             # request shows it was for him. On 2026-10-29 a TV programme opened two conversations this way.
             trusted_unnamed = False
             if wake_audio is not None:
-                if not await self._name_in_wake_audio(wake_audio, asleep=asleep):
-                    if not self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep):
-                        return await self._drop_unconfirmed_wake(generation, asleep=asleep)
-                    trusted_unnamed = True
+                heard = await self._name_in_wake_audio(wake_audio, asleep=asleep)
+                trusted_unnamed = not heard and self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep)
+                self._note_wake(wake_event, heard=heard, trusted=trusted_unnamed)
+                if not heard and not trusted_unnamed:
+                    self._note_wake(wake_event, outcome="rejected")
+                    return await self._drop_unconfirmed_wake(generation, asleep=asleep)
                 with self._lifecycle_lock:
                     self._asleep = False
             if not confirm_wake and not trusted_unnamed:
@@ -1524,7 +1556,9 @@ class HybridRuntime:
             if trusted_unnamed:
                 if not name_in_request:
                     logger.info("Sure wake without the name, and neither a name nor a command followed; dropped")
+                    self._note_wake(wake_event, outcome="rejected")
                     return await self._drop_unconfirmed_wake(generation, asleep=False)
+                self._note_wake(wake_event, outcome="woke")
                 self._notify_listening(True)
                 listening_notified = True
                 await self._invoke_acknowledgement(reason)
@@ -1678,6 +1712,7 @@ class HybridRuntime:
         *,
         lead_in: tuple[int, NDArray[np.int16]] | None = None,
         start_s: float = _REQUEST_CLIP_START_S,
+        wake_event: str | None = None,
     ) -> str:
         """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip.
 
@@ -1717,6 +1752,7 @@ class HybridRuntime:
             now = loop.time()
             if speech_started_at is None:
                 if now - started_at > start_s:
+                    self._note_wake(wake_event, request_chars=0)  # nothing said after the wake
                     return ""
                 continue
             if silence_s >= self._REQUEST_CLIP_SILENCE_S:
@@ -1741,6 +1777,7 @@ class HybridRuntime:
         )
         if config.QUICK_COMMANDS_LOG_TEXT:
             logger.info("Request clip text: %r", text)
+        self._note_wake(wake_event, request_chars=len(text.strip()), cut_off=self._request_clip_cut_off)
         return text if isinstance(text, str) else ""
 
     async def _transcribe_segment_accurately(self, sequence: int) -> str:
@@ -1844,6 +1881,57 @@ class HybridRuntime:
         trusted = run_s >= self._VOICE_RUN_S
         logger.info("Wake trusted without the name: %s score=%.2f loud_run=%.2fs", trusted, score, run_s)
         return trusted
+
+    def _note_wake(self, event: str | None, **details: object) -> None:
+        """Add what came of a wake event to its record (flags and counts, never words)."""
+        if event is not None and self._wake_clips is not None:
+            self._wake_clips.note(event, **details)
+
+    def mark_missed(self, *, by: str, who: str = "") -> bool:
+        """Keep the minute before the current wake (or before now) as a call he missed; False when he can't.
+
+        Said after the wake ("you didn't hear me"), the call came before it; from the phone, it came just now.
+        """
+        clips = self._wake_clips
+        with self._lifecycle_lock:
+            mode, activated_at = self._mode, self._activated_at
+        if clips is None or self._closed:
+            return False
+        ended_ago = self._clock() - activated_at if mode is not RuntimeMode.LOCAL_AMBIENT and activated_at else 0.0
+        clips.record("missed", ended_ago_s=max(0.0, ended_ago), by=by, who=who)
+        logger.info("Missed call marked by=%s", by)
+        return True
+
+    async def record_name(self, *, wait_s: float = 6.0) -> tuple[int, NDArray[np.int16]] | None:
+        """Record someone calling Reachy, for the household's voices; hearing it wakes nobody meanwhile.
+
+        Waits up to ``wait_s`` for a voice and stops after a short pause; None when he isn't waiting for his
+        name (a conversation, or no microphone audio) or another recording is under way.
+        """
+        clips = self._wake_clips
+        if clips is None or self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT or self._holding_wakes:
+            return None
+        self._holding_wakes = True
+        clips.begin_capture()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        rate: int | None = None
+        audio = np.zeros(0, dtype=np.int16)
+        try:
+            while True:
+                await asyncio.sleep(self._NAME_TAKE_POLL_S)
+                rate, pcm = clips.captured()
+                audio = np.frombuffer(pcm, dtype="<i2")
+                if rate is not None and take_finished(audio, rate):
+                    break
+                if loop.time() - started > wait_s + self._NAME_TAKE_MAX_S:
+                    break
+                if self._mode is not RuntimeMode.LOCAL_AMBIENT:
+                    break
+        finally:
+            clips.end_capture()
+            self._holding_wakes = False
+        return None if rate is None else (rate, audio.copy())
 
     async def _drop_unconfirmed_wake(self, generation: int, *, asleep: bool) -> bool:
         """Drop an acoustic wake whose name Whisper did not hear, without moving or opening the cloud."""
@@ -2903,21 +2991,33 @@ class HybridRuntime:
 
     async def _observe_acoustic_frame(self, frame: AudioFrame, epoch: int) -> None:
         detector = self._acoustic_wake_detector
-        if detector is None or self._closed or self._mode is not RuntimeMode.LOCAL_AMBIENT:
+        mode = self._mode
+        if detector is None or self._closed or mode not in (RuntimeMode.LOCAL_AMBIENT, RuntimeMode.LOCAL_COMMAND):
             return
         if epoch != self._acoustic_epoch:
             return
+        pcm = audio_to_mono_int16(frame[1]).astype("<i2", copy=False).tobytes()
+        now = self._clock()
+        if self._wake_clips is not None:
+            # Clips keep what was said after a fire (the request) too; a conversation in between starts them over.
+            if self._clips_fed_at is None or now - self._clips_fed_at > self._LISTENING_GAP_S:
+                self._wake_clips.clear()
+            self._clips_fed_at = now
+            self._wake_clips.feed(pcm, frame[0], ambient=mode is RuntimeMode.LOCAL_AMBIENT)
+        if mode is not RuntimeMode.LOCAL_AMBIENT:
+            return
         try:
             if self._acoustic_stream_epoch != epoch:
-                await asyncio.to_thread(detector.reset)
-                if self._wake_clips is not None:
-                    self._wake_clips.clear()
-                self._wake_window.clear()
+                if self._acoustic_scored_at is not None and now - self._acoustic_scored_at <= self._ACOUSTIC_RESUME_S:
+                    # Back from a rejected wake: a reset would leave it deaf for ~1.3 s and its cooldown would
+                    # swallow a repeated call, so it carries on and may fire again at once.
+                    detector.rearm()
+                else:
+                    await asyncio.to_thread(detector.reset)
+                    self._wake_window.clear()
                 self._acoustic_stream_epoch = epoch
-            pcm = audio_to_mono_int16(frame[1]).astype("<i2", copy=False).tobytes()
+            self._acoustic_scored_at = now
             self._keep_wake_window(pcm, frame[0])
-            if self._wake_clips is not None:
-                self._wake_clips.feed(pcm, frame[0])
             detection = await asyncio.to_thread(detector.process_audio, pcm, frame[0])
         except asyncio.CancelledError:
             raise
@@ -2934,6 +3034,24 @@ class HybridRuntime:
             and self._mode is RuntimeMode.LOCAL_AMBIENT
             and epoch == self._acoustic_epoch
         ):
+            if self._holding_wakes:
+                logger.info("Wake model fired during a recording of the name; not waking")
+                return
+            strict = self._strict_wake
+            wake_event = (
+                self._wake_clips.record(
+                    "wake",
+                    score=round(detection.score or 0.0, 4),
+                    head=detection.head,
+                    scores=dict(detection.head_scores),
+                    asleep=self._asleep,
+                    tv=bool(strict is not None and strict()),
+                )
+                if self._wake_clips is not None
+                else None
+            )
+            with self._lifecycle_lock:
+                self._wake_event = wake_event
             if self._request_transcriber is not None:
                 with self._lifecycle_lock:
                     self._request_clip_queued = []

@@ -66,6 +66,7 @@ wake-benchmark = "reachy_mini_conversation_app.sherpa_wake_benchmark:main"
 reachy-mic-levels = "reachy_mini_conversation_app.mic_level_probe:main"
 reachy-wake-calibrate = "reachy_mini_conversation_app.wake_calibration:main"
 reachy-admin = "reachy_mini_conversation_app.admin.server:main"
+reachy-wake-nightly = "reachy_mini_conversation_app.wake_learning.nightly:main"
 
 [tool.uv]
 exclude-newer = "7 days"

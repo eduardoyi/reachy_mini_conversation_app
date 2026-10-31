@@ -1,7 +1,8 @@
 """The app's control API for the phone admin app (admin/): loopback only, behind a token both processes share.
 
 It turns privacy on and off, streams the camera as MJPEG, turns the head (lifting it while he sleeps, without
-waking him), puts him to sleep or wakes him, and manages enrolled faces.
+waking him), puts him to sleep or wakes him, manages enrolled faces, marks a call he missed and records someone
+calling him for the wake word to learn their voice.
 """
 
 import io
@@ -27,6 +28,8 @@ from reachy_mini_conversation_app.memory_routes import register_memory_routes
 from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
 from reachy_mini_conversation_app.tools.move_head import MoveHead
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.wake_learning.store import WakeLearningStore
+from reachy_mini_conversation_app.wake_learning.takes import MAX_VOICE_S, level_db, voiced_span
 
 
 logger = logging.getLogger(__name__)
@@ -75,10 +78,12 @@ class ControlApi:
         deps: ToolDependencies,
         runtime: HybridRuntime | None,
         token: str,
+        wake_store: WakeLearningStore | None = None,
     ) -> None:
-        """Serve ``deps``' robot, movement, faces and call service, and the hybrid ``runtime``."""
+        """Serve ``deps``' robot, movement, faces and call service, the hybrid ``runtime`` and wake learning."""
         self._deps = deps
         self._runtime = runtime
+        self._wake_store = wake_store
         self._token = token
         self._peek = (0.0, 0.0)
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -119,6 +124,8 @@ class ControlApi:
             "privacy": {"on": PRIVACY.on, "since": PRIVACY.since},
             "quiet_hours": quiet_now(),
             "calls_linked": self._deps.calls.linked if self._deps.calls is not None else None,
+            # A call ringing or under way: the admin app waits for it to end before restarting him.
+            "in_call": bool(getattr(self._deps.calls, "busy", False)),
             "faces": self._deps.face_recognition is not None,
             "camera": self._deps.camera_enabled,
         }
@@ -208,6 +215,59 @@ class ControlApi:
                 return JSONResponse({"error": "He is awake."}, status_code=409, headers=_NO_STORE)
             self.peek_toward("center")
             return JSONResponse({"status": "peeking"}, headers=_NO_STORE)
+
+        @app.post("/wake/missed")
+        async def _missed(request: Request) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await self._json_body(request)
+            if isinstance(payload, Response):
+                return payload
+            who = payload.get("who", "")
+            if not isinstance(who, str) or len(who) > 200:
+                return Response(status_code=400, headers=_NO_STORE)
+            if PRIVACY.on or quiet_now() or self._runtime is None or not self._runtime.mark_missed(by="app", who=who):
+                return JSONResponse({"error": "He isn't listening now."}, status_code=409, headers=_NO_STORE)
+            return JSONResponse({"ok": True}, headers=_NO_STORE)
+
+        @app.post("/wake/take")
+        async def _take(request: Request) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await self._json_body(request)
+            if isinstance(payload, Response):
+                return payload
+            person, prompt = payload.get("person"), payload.get("prompt", "")
+            if not isinstance(person, str) or not person.strip() or len(person) > 80:
+                return Response(status_code=400, headers=_NO_STORE)
+            if not isinstance(prompt, str) or len(prompt) > 200:
+                return Response(status_code=400, headers=_NO_STORE)
+            store, runtime = self._wake_store, self._runtime
+            take = None
+            if store is not None and runtime is not None and not PRIVACY.on and not quiet_now():
+                take = await runtime.record_name()
+            if take is None or store is None:
+                return JSONResponse({"error": "He can't record now."}, status_code=409, headers=_NO_STORE)
+            rate, audio = take
+            span = voiced_span(audio, rate)
+            if span is None:
+                return JSONResponse(
+                    {"ok": False, "reason": "quiet", "seconds": 0.0, "level_db": None}, headers=_NO_STORE
+                )
+            voice = audio[span[0] : span[1]]
+            seconds = voice.size / rate
+            loudness = round(level_db(voice), 1)
+            if seconds > MAX_VOICE_S + 1.0:
+                return JSONResponse(
+                    {"ok": False, "reason": "too_long", "seconds": round(seconds, 2), "level_db": loudness},
+                    headers=_NO_STORE,
+                )
+            await asyncio.to_thread(store.save_recording, person.strip(), prompt, rate, voice.astype("<i2").tobytes())
+            return JSONResponse(
+                {"ok": True, "reason": None, "seconds": round(seconds, 2), "level_db": loudness}, headers=_NO_STORE
+            )
 
         @app.get("/camera")
         async def _camera(request: Request) -> Response:

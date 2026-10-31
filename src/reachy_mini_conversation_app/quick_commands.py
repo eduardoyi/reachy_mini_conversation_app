@@ -187,6 +187,13 @@ _SLEEP = {
     "it": r"(?:vai a dormire|a nanna|buonanotte|buona notte|vai a nanna)",
     "pt": r"(?:vai dormir|boa noite|vai para a cama)",
 }
+# "You didn't hear me", said once he finally woke: the call before it was missed (it is kept to learn from).
+_MISSED = {
+    "en": r"(?:you didnt hear me|you did not hear me|you missed me|you didnt hear me the first time)",
+    "es": r"(?:no me escuchaste|no me oiste|no me hiciste caso|no me escuchaste la primera vez)",
+    "it": r"(?:non mi hai sentito|non mi hai ascoltato)",
+    "pt": r"(?:voce nao me ouviu|nao me ouviste|nao me escutaste|nao me escutou)",
+}
 _CANCEL = {
     "en": r"(?:never mind|nevermind|nothing|cancel|forget it|no thanks|nothing thanks|not you|sorry|my bad|"
     r"i wasnt talking to you|wrong robot)",
@@ -439,6 +446,7 @@ _DATE_RE = {language: _full(pattern) for language, pattern in _DATE.items()}
 _WEATHER_RE = {language: [_full(pattern) for pattern in patterns] for language, patterns in _WEATHER.items()}
 _RAIN_RE = {language: _full(pattern) for language, pattern in _RAIN.items()}
 _SLEEP_RE = {language: _full(pattern) for language, pattern in _SLEEP.items()}
+_MISSED_RE = {language: _full(pattern) for language, pattern in _MISSED.items()}
 _CANCEL_RE = {language: _full(pattern) for language, pattern in _CANCEL.items()}
 _PAUSE_RE = {language: _full(pattern) for language, pattern in _PAUSE.items()}
 _STOP_RE = {language: _full(pattern) for language, pattern in _STOP.items()}
@@ -580,6 +588,9 @@ def _parse(text: str) -> QuickCommand | None:
     found = _first_match(_CANCEL_RE, command)
     if found:
         return QuickCommand("cancel", _language(found[0], command))
+    found = _first_match(_MISSED_RE, command)  # before negations: "no me escuchaste"
+    if found:
+        return QuickCommand("missed", found[0])
     if _WRITE.match(command):
         written = _writing_text(text)
         return QuickCommand("write", "es", {"text": written}) if written else None
@@ -1005,6 +1016,12 @@ _PARTLY = {
     "pt": "Feito, mas {names} não respondeu.",
 }
 _GOOD_NIGHT = {"en": "Good night!", "es": "¡Buenas noches!", "it": "Buonanotte!", "pt": "Boa noite!"}
+_MISSED_SORRY = {
+    "en": "Sorry about that. I'll learn from it.",
+    "es": "Perdona. Voy a aprender de esa.",
+    "it": "Scusa. Imparerò da questa.",
+    "pt": "Desculpa. Vou aprender com essa.",
+}
 MARIBEL_ASKING: Final[dict[str, str]] = {
     "en": "Asking Maribel.",
     "es": "Le pregunto a Maribel.",
@@ -1271,6 +1288,11 @@ class QuickCommands:
         kind = command.kind
         if kind == "cancel":
             return QuickReply(None, language, kind)
+        if kind == "missed":
+            mark = self._deps.mark_missed
+            if mark is None or not mark(by="voice"):
+                return None
+            return QuickReply(_MISSED_SORRY[language], language, kind)
         if kind == "sleep":
 
             async def fall_asleep() -> str | None:

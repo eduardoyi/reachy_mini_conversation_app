@@ -141,6 +141,9 @@ const titles = { people: "People", camera: "Camera", gallery: "Gallery", activit
 let currentTab = "";
 
 function showTab() {
+  // The home-screen shortcut opens #missed and a wake-word notification opens #wake: each acts once, on Home.
+  const asked = location.hash.slice(1);
+  if (asked === "missed" || asked === "wake") history.replaceState(null, "", "#home");
   const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : "home";
   currentTab = tab;
   for (const view of document.querySelectorAll(".view")) view.hidden = view.id !== `view-${tab}`;
@@ -154,10 +157,12 @@ function showTab() {
   if (tab !== "camera") closeCamera();
   if ($("#person-sheet").open) $("#person-sheet").close();
   if ($("#viewer").open) $("#viewer").close();
-  for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet, #memory-sheet")) if (sheet.open) sheet.close();
+  for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet, #memory-sheet, #wake-sheet")) if (sheet.open) sheet.close();
   $("#save-bar").hidden = true;
   window.scrollTo(0, 0);
   views[tab]();
+  if (asked === "missed") markMissed(null);
+  if (asked === "wake") openWake();
 }
 
 function showTitle() {
@@ -272,6 +277,7 @@ function healthCells(status) {
 }
 
 async function loadHome() {
+  loadWake();
   const status = await run(null, () => api("/api/status"));
   if (!status) return;
   state.status = status;
@@ -304,6 +310,555 @@ $("#restart").addEventListener("click", (event) => restart(event.currentTarget))
 setInterval(() => {
   if (currentTab === "home" && !document.hidden) loadHome();
 }, 8000);
+
+// Wake word -------------------------------------------------------------------------------------
+
+const CONDITIONS = { tv: "TV on", music: "Music playing", quiet: "Quiet room", kitchen: "Kitchen" };
+const PROMPTS = [
+  ["sofa", "Stand by the sofa. Call him like you normally do."],
+  ["kitchen", "Now from the kitchen."],
+  ["loud", "Louder, from across the room."],
+  ["quiet", "Quietly, from close by."],
+  ["sentence", "In a sentence: “Richi, apaga la luz” or “Reachy, lights off”."],
+  ["hallway", "From the hallway."],
+  ["tv", "With the TV or music on."],
+  ["again", "Again, as if he didn't hear you the first time."],
+];
+const TAKES = 20;
+const WAVE_BARS = 44;
+const wake = { data: null, mode: "main", items: [], index: 0, checked: 0, clips: new Map(), audio: null, teach: null };
+
+function plural(count, one) {
+  return `${count} ${count === 1 ? one : `${one}s`}`;
+}
+
+async function loadWake() {
+  let data;
+  try {
+    data = await api("/api/wake");
+  } catch (error) {
+    return; // Home shows the card again with the next refresh
+  }
+  const changed = JSON.stringify(data) !== JSON.stringify(wake.data);
+  wake.data = data;
+  renderWakeCard();
+  if (changed && wake.mode === "main" && $("#wake-sheet").open) renderWake();
+}
+
+function weekScore(board) {
+  if (!board || !board.made) return ["Learning starts tonight", "Each night he learns from the day's calls."];
+  const week = board.week || {};
+  const targets = board.targets || { first_time: 0.95, false_wakes_per_day: 1 };
+  const perDay = Number(week.false_wakes_per_day || 0).toFixed(1);
+  const calls = week.calls ? `${week.first_time} of ${plural(week.calls, "call")} answered first time` : "No calls this week yet";
+  return [
+    `${calls} · ${perDay} false wake${perDay === "1.0" ? "" : "s"} a day`,
+    `Goal: ${Math.round(targets.first_time * 100)}% first time, at most ${targets.false_wakes_per_day} false wake a day`,
+  ];
+}
+
+function renderWakeCard() {
+  const data = wake.data;
+  const [score, goal] = weekScore(data.scoreboard);
+  $("#wake-score").textContent = score;
+  $("#wake-goal").textContent = goal;
+  const waiting = [];
+  if (data.to_check) waiting.push(plural(data.to_check, "clip"));
+  if (data.proposal && !data.proposal.declined) waiting.push("new model");
+  $("#wake-badge").textContent = waiting.join(" · ");
+  $("#wake-badge").hidden = !waiting.length;
+  $("#wake-card").hidden = false;
+}
+
+async function markMissed(button) {
+  await run(button, async () => {
+    await api("/api/wake/missed", { method: "POST" });
+    toast("Got it, he'll learn from it tonight.");
+  });
+}
+
+$("#missed").addEventListener("click", (event) => markMissed(event.currentTarget));
+$("#wake-open").addEventListener("click", () => openWake());
+
+async function openWake() {
+  wake.mode = "main";
+  if (!$("#wake-sheet").open) $("#wake-sheet").showModal();
+  if (wake.data) renderWake();
+  else $("#wake-body").replaceChildren(el("p", { className: "hint" }, "Loading…"));
+  const [data] = await Promise.all([
+    run(null, () => api("/api/wake")),
+    state.people.length ? null : api("/api/people").then(takePeople).catch(() => {}),
+  ]);
+  if (!data) return;
+  wake.data = data;
+  renderWakeCard();
+  if (wake.mode === "main") renderWake();
+}
+
+function renderWake() {
+  $("#wake-back").textContent = wake.mode === "main" ? "Close" : "Done";
+  if (wake.mode === "check") renderCheck();
+  else if (wake.mode === "teach") renderTeach();
+  else $("#wake-body").replaceChildren(...wakeMain(wake.data));
+}
+
+function leaveWakeMode() {
+  stopClip();
+  const teach = wake.mode === "teach" ? wake.teach : null;
+  if (teach && teach.done) toast(`Thanks! ${plural(teach.done, "call")} recorded for ${teach.person}.`);
+  wake.mode = "main";
+  wake.clips.clear();
+  renderWake();
+  $("#wake-body").scrollTop = 0;
+  loadWake();
+}
+
+$("#wake-back").addEventListener("click", () => (wake.mode === "main" ? $("#wake-sheet").close() : leaveWakeMode()));
+$("#wake-sheet").addEventListener("cancel", (event) => {
+  if (wake.mode === "main") return;
+  event.preventDefault();
+  leaveWakeMode();
+});
+$("#wake-sheet").addEventListener("close", () => {
+  stopClip();
+  wake.mode = "main";
+  wake.clips.clear();
+});
+
+function todoCard(iconName, title, text, buttons, extra = null) {
+  return el("section", { className: "todo" }, [
+    el("div", { className: "todo-head" }, [icon(iconName), el("h4", {}, title)]),
+    text ? el("p", {}, text) : null,
+    extra,
+    buttons.length ? el("div", { className: "buttons-row" }, buttons) : null,
+  ]);
+}
+
+function wakeAction(button, path, done) {
+  return run(button, async () => {
+    const result = await api(path, { method: "POST" });
+    toast(result.message || done);
+    await loadWake();
+  });
+}
+
+function wakeMain(data) {
+  const parts = [];
+  if (!data.to_check && !data.proposal) parts.push(el("p", { className: "hint lead" }, "Nothing to check today."));
+  if (data.to_check) {
+    const go = el("button", { className: "pill sun small", type: "button" }, "Check now");
+    go.addEventListener("click", () => startCheck(go));
+    parts.push(todoCard("ear", `${plural(data.to_check, "clip")} to check`, "About a minute: was someone calling Reachy, or not?", [go]));
+  }
+  if (data.proposal) {
+    const s = data.proposal.summary || {};
+    const row = (label, before, after) => el("li", {}, [el("span", { className: "label" }, label), el("span", { className: "before" }, before), icon("right"), el("b", {}, after)]);
+    const compare = el("ul", { className: "compare" }, [
+      row("Calls caught", `${s.live_caught} of ${s.calls}`, `${s.shadow_caught} of ${s.calls}`),
+      row("False fires a day", Number(s.live_fires_per_day || 0).toFixed(1), Number(s.shadow_fires_per_day || 0).toFixed(1)),
+    ]);
+    const keep = el("button", { className: "pill ghost small", type: "button" }, "Keep current");
+    keep.addEventListener("click", () => wakeAction(keep, "/api/wake/keep", "Kept the current model."));
+    const go = el("button", { className: "pill sun small", type: "button" }, "Switch");
+    go.addEventListener("click", () => wakeAction(go, "/api/wake/switch", "Switched."));
+    const declined = Boolean(data.proposal.declined);
+    parts.push(todoCard(
+      "spark",
+      declined ? "You kept the current model" : "A better wake model is ready",
+      declined
+        ? "The new one keeps listening quietly and asks again if it gets better."
+        : `${s.days === 1 ? "Yesterday's" : `The last ${s.days} days'`} calls, with the current model and the new one:`,
+      declined ? [go] : [keep, go],
+      compare,
+    ));
+  }
+  if (data.undo) {
+    const undo = el("button", { className: "pill soft small", type: "button" }, "Undo");
+    undo.addEventListener("click", () => wakeAction(undo, "/api/wake/undo", "Switched back."));
+    parts.push(todoCard(
+      "refresh",
+      `${personFor(data.undo.who)} switched to a new model ${ago(data.undo.at)}`,
+      `If he hears you worse, undo it until ${shortDate(data.undo.until)}.`,
+      [undo],
+    ));
+  }
+
+  const recorded = Object.entries(data.recordings || {});
+  const teach = el("button", { className: "pill soft small", type: "button" }, [icon("mic"), "Start"]);
+  teach.addEventListener("click", () => startTeach());
+  parts.push(todoCard(
+    "mic",
+    "Teach Reachy your voice",
+    recorded.length
+      ? recorded.map(([name, made]) => `${name}: ${plural(made.count, "call")}, ${ago(made.last)}`).join(" · ")
+      : "Each person calls him about 20 times around the room. Two minutes each.",
+    [teach],
+  ));
+
+  parts.push(...wakeScore(data));
+  parts.push(el("h3", { className: "section-title" }, "Reminder"), reminderSetting(data.reminder));
+  return parts;
+}
+
+function rates(rows, target) {
+  return el("ul", { className: "breakdown rates" }, rows.map((row) => {
+    const meter = el("span", { className: "meter" }, [el("i"), el("b")]);
+    meter.firstChild.style.width = `${row.calls ? (row.first / row.calls) * 100 : 0}%`;
+    meter.lastChild.style.left = `${target * 100}%`;
+    return el("li", {}, [
+      el("span", { className: "what" }, [row.label, row.detail ? el("small", {}, row.detail) : null]),
+      el("span", { className: "amount" }, [
+        row.calls ? `${row.first} of ${row.calls}` : "No calls",
+        row.calls ? el("small", {}, `${Math.round((row.first / row.calls) * 100)}% first time`) : null,
+      ]),
+      meter,
+    ]);
+  }));
+}
+
+function wakeScore(data) {
+  const board = data.scoreboard || {};
+  const parts = [el("h3", { className: "section-title" }, "This week")];
+  const [score, goal] = weekScore(board);
+  parts.push(el("div", { className: "wake-week" }, [el("b", {}, score), el("span", {}, board.made ? goal : "The first score comes in the morning.")]));
+  const target = (board.targets || {}).first_time || 0.95;
+  const conditions = Object.entries(board.by_condition || {}).filter(([, counts]) => counts.calls);
+  if (conditions.length) {
+    parts.push(el("h3", { className: "section-title" }, "By what was going on"));
+    parts.push(rates(conditions.map(([key, counts]) => ({ label: CONDITIONS[key] || key, first: counts.first_time, calls: counts.calls })), target));
+  }
+  const days = (board.days || []).slice(-7).reverse();
+  if (days.length) {
+    parts.push(el("h3", { className: "section-title" }, "By day"));
+    parts.push(rates(days.map((day) => ({
+      label: dayLabel(new Date(`${day.day}T12:00`)),
+      detail: plural(day.false_wakes, "false wake"),
+      first: day.first_time,
+      calls: day.calls,
+    })), target));
+  }
+
+  const model = (role, detail, numbers, record) => {
+    const named = numbers || record;
+    if (!named) return null;
+    return el("li", {}, [
+      el("span", { className: "what" }, [role, el("small", {}, `${named.name}. ${detail}`)]),
+      el("span", { className: "amount" }, numbers && numbers.calls !== undefined
+        ? [`${numbers.calls_caught} of ${numbers.calls} calls`, el("small", {}, `${Number(numbers.fires_per_day || 0).toFixed(1)} fires a day`)]
+        : el("small", {}, "No numbers yet")),
+    ]);
+  };
+  const models = [
+    model("Live", "Wakes him.", board.live, data.live),
+    model("Shadow", "Only listens, never wakes him.", board.shadow, data.shadow),
+  ].filter(Boolean);
+  if (models.length) parts.push(el("h3", { className: "section-title" }, "Models"), el("ul", { className: "breakdown" }, models));
+
+  if ((data.history || []).length) {
+    parts.push(el("h3", { className: "section-title" }, "Switches"));
+    parts.push(el("ul", { className: "events" }, data.history.map((entry) => el("li", { className: "event" }, [
+      el("span", { className: "badge" }, icon(entry.undo ? "refresh" : "spark")),
+      el("span", { className: "event-text" }, [
+        el("b", {}, entry.undo ? "Went back to the previous model" : "Switched to a new model"),
+        el("span", {}, `${personFor(entry.who)}, ${(entry.to || {}).name || ""}`),
+      ]),
+      el("time", { dateTime: entry.at }, shortDate(entry.at)),
+    ]))));
+  }
+  return parts;
+}
+
+function reminderSetting(value) {
+  const on = value !== "off";
+  const toggle = el("button", { className: "switch", type: "button", role: "switch", ariaLabel: "Daily reminder" });
+  toggle.setAttribute("aria-checked", String(on));
+  const time = el("input", { type: "time", value: on ? value : "19:30", required: true, ariaLabel: "Reminder time" });
+  const save = (next) => run(toggle, async () => {
+    await api("/api/settings", { method: "PUT", body: { changes: { WAKE_REMINDER_TIME: next } } });
+    wake.data.reminder = next;
+    renderWake();
+    toast(next === "off" ? "No more wake word reminders." : `Reminder at ${next}, when something's waiting.`);
+  });
+  toggle.addEventListener("click", () => save(on ? "off" : time.value || "19:30"));
+  time.addEventListener("change", () => time.value && save(time.value));
+  return el("div", { className: "wake-reminder" }, settingRow({
+    iconName: "bell", label: "Daily reminder", sub: "Only when something's waiting, never in quiet hours", control: toggle,
+    body: on ? time : null,
+  }));
+}
+
+// Checking clips: one card at a time, played as it comes in; swipe right for a call, left for not, down to skip.
+
+async function startCheck(button) {
+  const payload = await run(button, () => api("/api/wake/queue"));
+  if (!payload) return;
+  Object.assign(wake, { mode: "check", items: payload.items, index: 0, checked: 0 });
+  renderWake();
+}
+
+function clipBuffer(item) {
+  if (!wake.clips.has(item.id)) {
+    wake.clips.set(item.id, fetch(`/api/wake/clip?item=${encodeURIComponent(item.id)}`).then((response) => {
+      if (!response.ok) throw new Error("That clip is gone.");
+      return response.arrayBuffer();
+    }));
+  }
+  return wake.clips.get(item.id);
+}
+
+// The loudest sample in each slice of a 16-bit WAV, scaled to the loudest slice: shows where in the clip the voice is.
+function peaks(buffer, count) {
+  const view = new DataView(buffer);
+  let offset = 12;
+  let channels = 1;
+  while (offset + 8 <= view.byteLength) {
+    const id = String.fromCharCode(...new Uint8Array(buffer, offset, 4));
+    const size = view.getUint32(offset + 4, true);
+    if (id === "fmt ") channels = view.getUint16(offset + 10, true) || 1;
+    if (id === "data") {
+      const samples = Math.floor(Math.min(size, view.byteLength - offset - 8) / 2);
+      const slice = Math.max(1, Math.floor(samples / count));
+      const levels = Array.from({ length: count }, (_, bar) => {
+        let top = 0;
+        for (let i = bar * slice; i < Math.min(samples, (bar + 1) * slice); i += channels) {
+          top = Math.max(top, Math.abs(view.getInt16(offset + 8 + i * 2, true)));
+        }
+        return top;
+      });
+      const loudest = Math.max(...levels, 1);
+      return levels.map((level) => Math.max(0.08, level / loudest));
+    }
+    offset += 8 + size + (size % 2);
+  }
+  return [];
+}
+
+function stopClip() {
+  const playing = wake.audio;
+  wake.audio = null;
+  if (!playing) return;
+  playing.element.pause();
+  cancelAnimationFrame(playing.frame);
+  URL.revokeObjectURL(playing.url);
+}
+
+async function playClip(item, bars) {
+  stopClip();
+  let buffer;
+  try {
+    buffer = await clipBuffer(item);
+  } catch (error) {
+    toast(error.message, "bad");
+    return;
+  }
+  if (wake.mode !== "check" || wake.items[wake.index] !== item) return;
+  const heights = peaks(buffer, bars.length);
+  bars.forEach((bar, index) => bar.style.setProperty("--h", heights[index] ?? 0.08));
+  // Played from memory and never saved: the clip leaves no copy on the phone.
+  const url = URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+  const element = new Audio(url);
+  const playing = { element, url, frame: 0 };
+  wake.audio = playing;
+  const draw = () => {
+    const played = element.duration ? element.currentTime / element.duration : 0;
+    bars.forEach((bar, index) => bar.classList.toggle("on", (index + 0.5) / bars.length <= played));
+    if (!element.paused && wake.audio === playing) playing.frame = requestAnimationFrame(draw);
+  };
+  element.addEventListener("play", () => (playing.frame = requestAnimationFrame(draw)));
+  element.addEventListener("ended", () => bars.forEach((bar) => bar.classList.add("on")));
+  element.play().catch(() => toast("Tap the play button to hear it.", "bad"));
+}
+
+function renderCheck() {
+  stopClip();
+  const body = $("#wake-body");
+  const item = wake.items[wake.index];
+  if (!item) {
+    const back = el("button", { className: "pill sun", type: "button" }, "Back");
+    back.addEventListener("click", () => leaveWakeMode());
+    body.replaceChildren(el("div", { className: "clip-done" }, [
+      el("span", { className: "done-tick" }, icon("check")),
+      el("h2", {}, `Done: ${wake.checked} checked.`),
+      el("p", {}, "Reachy learns from these tonight."),
+      back,
+    ]));
+    return;
+  }
+  const bars = Array.from({ length: WAVE_BARS }, () => el("i"));
+  const replay = el("button", { className: "round soft", type: "button", ariaLabel: "Play again" }, icon("replay"));
+  replay.addEventListener("click", () => playClip(item, bars));
+  const card = el("div", { className: "clip-card" }, [
+    el("span", { className: "swipe-tag yes" }, "Called"),
+    el("span", { className: "swipe-tag no" }, "Didn't"),
+    el("p", { className: "clip-count" }, `${wake.index + 1} of ${wake.items.length}`),
+    el("h2", { className: "clip-question" }, item.question),
+    el("div", { className: "wave", ariaHidden: "true" }, bars),
+    el("div", { className: "clip-tools" }, [el("span", {}, `${item.seconds} s`), replay]),
+  ]);
+  swipeable(card);
+  const answer = (label, className, value) => {
+    const button = el("button", { className, type: "button" }, label);
+    button.addEventListener("click", () => answerClip(value));
+    return button;
+  };
+  body.replaceChildren(el("div", { className: "clip-stage" }, [
+    card,
+    el("div", { className: "clip-answers" }, [answer("Didn't", "pill soft big", "not_call"), answer("Called Reachy", "pill sun big", "call")]),
+    answer("Not sure", "text-button unsure", "unsure"),
+    el("p", { className: "hint center" }, "Swipe right if he was called, left if not."),
+  ]));
+  playClip(item, bars);
+  const next = wake.items[wake.index + 1];
+  if (next) clipBuffer(next).catch(() => {});
+}
+
+function answerClip(answer) {
+  const item = wake.items[wake.index];
+  const card = $(".clip-card");
+  if (!item || !card || card.classList.contains("gone")) return;
+  stopClip();
+  card.classList.add("gone", { call: "out-right", not_call: "out-left", unsure: "out-down" }[answer]);
+  if (answer !== "unsure") wake.checked += 1;
+  wake.clips.delete(item.id);
+  api("/api/wake/answer", { method: "POST", body: { item: item.id, answer } }).catch((error) => toast(error.message, "bad"));
+  setTimeout(() => {
+    wake.index += 1;
+    if (wake.mode === "check") renderCheck();
+  }, 220);
+}
+
+function swipeable(card) {
+  let start = null;
+  const settle = () => {
+    start = null;
+    card.classList.remove("dragging");
+    card.style.transform = "";
+    card.style.setProperty("--yes", 0);
+    card.style.setProperty("--no", 0);
+  };
+  card.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    start = { x: event.clientX, y: event.clientY };
+    card.classList.add("dragging");
+    card.setPointerCapture(event.pointerId);
+  });
+  card.addEventListener("pointermove", (event) => {
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = Math.max(0, event.clientY - start.y);
+    card.style.transform = `translate(${dx}px, ${dy * 0.5}px) rotate(${dx / 18}deg)`;
+    card.style.setProperty("--yes", Math.min(1, Math.max(0, dx / 90)));
+    card.style.setProperty("--no", Math.min(1, Math.max(0, -dx / 90)));
+  });
+  card.addEventListener("pointerup", (event) => {
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    settle();
+    if (dx > 90) answerClip("call");
+    else if (dx < -90) answerClip("not_call");
+    else if (dy > 110 && Math.abs(dx) < 60) answerClip("unsure");
+  });
+  card.addEventListener("pointercancel", settle);
+}
+
+$("#wake-sheet").addEventListener("keydown", (event) => {
+  const answer = { ArrowRight: "call", ArrowLeft: "not_call", ArrowDown: "unsure" }[event.key];
+  if (wake.mode !== "check" || !answer || event.target.closest("input")) return;
+  event.preventDefault();
+  answerClip(answer);
+});
+
+// Teaching his name: Reachy records each call on his own microphones while the phone shows what to do.
+
+function startTeach() {
+  wake.mode = "teach";
+  wake.teach = { person: "", other: false, started: false, done: 0, step: 0, note: "", tone: "", level: null, busy: false };
+  renderWake();
+}
+
+function renderTeach() {
+  const teach = wake.teach;
+  const body = $("#wake-body");
+  if (!teach.started) {
+    const start = el("button", { className: "pill sun big wide", type: "button", disabled: !teach.person.trim() }, "Start");
+    start.addEventListener("click", () => {
+      teach.person = teach.person.trim();
+      teach.started = true;
+      renderTeach();
+    });
+    const chip = (label, picked, pick) => {
+      const button = el("button", { className: `chip ${picked ? "on" : ""}`, type: "button" }, label);
+      button.setAttribute("aria-pressed", String(picked));
+      button.addEventListener("click", () => {
+        pick();
+        renderTeach();
+        $("#teach-name")?.focus();
+      });
+      return button;
+    };
+    const names = [...new Set(state.people.map((person) => person.name))];
+    const name = el("input", { id: "teach-name", className: "teach-name", maxLength: 60, placeholder: "Their name", autocomplete: "off", ariaLabel: "Their name", value: teach.other ? teach.person : "" });
+    name.addEventListener("input", () => {
+      teach.person = name.value;
+      start.disabled = !teach.person.trim();
+    });
+    body.replaceChildren(
+      el("h2", { className: "teach-title" }, "Who's calling him?"),
+      el("div", { className: "chips" }, [
+        ...names.map((each) => chip(each, !teach.other && teach.person === each, () => Object.assign(teach, { person: each, other: false }))),
+        chip("Someone else", teach.other, () => Object.assign(teach, { person: "", other: true })),
+      ]),
+      teach.other ? name : null,
+      el("p", { className: "hint" }, "Reachy records on his own microphones, not the phone's. Kids too: hold the phone for them."),
+      start,
+    );
+    return;
+  }
+  const [key, prompt] = PROMPTS[teach.step % PROMPTS.length];
+  const enough = teach.done >= TAKES;
+  const ready = el("button", { className: "pill sun big wide", type: "button", disabled: teach.busy }, teach.busy ? "Listening…" : enough ? "One more" : "Ready");
+  ready.addEventListener("click", () => takeOne(key));
+  const level = el("div", { className: "level", role: "img", ariaLabel: "How loud he heard it" }, el("i"));
+  level.firstChild.style.width = teach.level === null ? "0%" : `${Math.max(4, Math.min(100, ((teach.level + 60) / 60) * 100))}%`;
+  const finished = el("button", { className: "pill ghost wide", type: "button" }, "Done");
+  finished.addEventListener("click", () => leaveWakeMode());
+  const note = teach.busy ? "Listening… call him now." : teach.note;
+  body.replaceChildren(
+    el("div", { className: `take ${teach.busy ? "listening" : ""}` }, [
+      el("p", { className: "take-count" }, `${teach.person} · ${teach.done} of ${TAKES}`),
+      el("h2", { className: "take-prompt" }, enough ? "That's 20. Thank you!" : prompt),
+      level,
+      el("p", { className: `take-note ${teach.busy ? "" : teach.tone}`, role: "status" }, [teach.tone === "good" && !teach.busy ? icon("check") : null, note]),
+      ready,
+    ]),
+    el("p", { className: "hint center" }, "Tap Ready, then call him. He won't answer while he records."),
+    finished,
+  );
+}
+
+async function takeOne(key) {
+  const teach = wake.teach;
+  teach.busy = true;
+  renderTeach();
+  try {
+    const result = await api("/api/wake/take", { method: "POST", body: { person: teach.person, prompt: key } });
+    teach.level = typeof result.level_db === "number" ? result.level_db : null;
+    if (result.ok) {
+      teach.done += 1;
+      teach.step += 1;
+      Object.assign(teach, { note: `${teach.done} of ${TAKES}`, tone: "good" });
+    } else {
+      const note = result.reason === "too_long" ? "That ran long. Again, just the call?" : "Didn't catch that. Again, a bit louder?";
+      Object.assign(teach, { note, tone: "bad" });
+    }
+  } catch (error) {
+    Object.assign(teach, { note: error.message, tone: "bad" });
+  } finally {
+    teach.busy = false;
+    if (wake.mode === "teach" && wake.teach === teach) renderTeach();
+  }
+}
 
 // Notifications ---------------------------------------------------------------------------------
 
@@ -1102,6 +1657,12 @@ const CHANGES = {
   "memory corrected": (t) => (t ? `corrected something Reachy remembers about ${subjectName(t)}` : "corrected a memory"),
   "memory forgotten": (t) => (t ? `made Reachy forget something about ${subjectName(t)}` : "made Reachy forget something"),
   "picture deleted": (t) => (t === "photos" ? "deleted a photo" : "deleted a picture"),
+  "wake clip checked": () => "checked a wake word clip",
+  "wake miss marked": () => "said Reachy missed a call",
+  "wake call recorded": (t) => (t ? `recorded ${t} calling Reachy` : "recorded a call to Reachy"),
+  "wake model switched": () => "switched Reachy's wake model",
+  "wake model kept": () => "kept Reachy's wake model",
+  "wake model switch undone": () => "undid the wake model switch",
 };
 
 function describeChange(entry) {

@@ -34,6 +34,7 @@ from starlette.staticfiles import StaticFiles
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.whatsapp import WhatsAppLink
+from reachy_mini_conversation_app.admin.wake import WakeWord, WakeReminder
 from reachy_mini_conversation_app.json_lines import JsonLines
 from reachy_mini_conversation_app.admin.costs import PERIODS, breakdown
 from reachy_mini_conversation_app.usage_costs import get_ledger
@@ -50,6 +51,7 @@ from reachy_mini_conversation_app.admin.app_link import AppLink, AppUnavailable
 from reachy_mini_conversation_app.admin.notifier import Watch, Notifier
 from reachy_mini_conversation_app.admin.settings import SETTINGS, SettingError, read_settings, write_settings
 from reachy_mini_conversation_app.admin.personality import read_personality, write_personality
+from reachy_mini_conversation_app.wake_learning.store import WakeLearningStore, wake_learning_directory
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,8 @@ MAX_PHOTOS_BYTES: Final[int] = 12 * 1024 * 1024
 MAX_GROUP_TITLE_CHARS: Final[int] = 100
 MAX_PERSONALITY_BYTES: Final[int] = 256 * 1024
 MAX_GROUP_PHONES: Final[int] = 20
+MAX_WAKE_NAME_CHARS: Final[int] = 60
+MAX_WAKE_PROMPT_CHARS: Final[int] = 200
 # The TRMNL counts as checking in when it did so within this long.
 DISPLAY_RECENT_S: Final[float] = 15 * 60
 STATIC_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "admin"
@@ -188,8 +192,13 @@ def _relay(response: httpx.Response) -> Response:
     )
 
 
-def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: Notifier | None = None) -> FastAPI:
-    """Return the admin app for ``settings``; ``link`` and ``notifier`` are injectable for tests."""
+def create_app(
+    settings: AdminSettings,
+    link: AppLink | None = None,
+    notifier: Notifier | None = None,
+    wake_store: WakeLearningStore | None = None,
+) -> FastAPI:
+    """Return the admin app for ``settings``; ``link``, ``notifier`` and ``wake_store`` are injectable for tests."""
     link = link or AppLink(settings.control_url, settings.control_token_file)
     people_files = PeopleFiles(settings.contacts_file, settings.calls_file)
     audit = JsonLines(settings.data_dir / "audit.jsonl")
@@ -204,6 +213,19 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
     gallery = Gallery(settings.photos_dir or Path(config.PHOTO_ARCHIVE_DIR), settings.display_dir.parent)
     restarts: set[asyncio.Task[None]] = set()
     restarted_at: list[float] = []
+
+    def start_restart() -> bool:  # False when a restart is already running
+        if restarts:
+            return False
+        restarted_at.append(time.monotonic())
+        task = asyncio.create_task(restart_app(settings.app_service))
+        restarts.add(task)
+        task.add_done_callback(restarts.discard)
+        return True
+
+    can_restart = bool(settings.app_service) and sys.platform == "darwin"
+    wake_store = wake_store or WakeLearningStore(wake_learning_directory())
+    wake = WakeWord(wake_store, link, settings.env_file, start_restart if can_restart else None)
 
     async def faces() -> list[dict[str, Any]] | None:
         try:
@@ -257,10 +279,11 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
             },
             "volume": volume,
             "disk_free_gb": round(free / 1e9, 1),
-            "can_restart": bool(settings.app_service) and sys.platform == "darwin",
+            "can_restart": can_restart,
         }
 
-    watch = Watch(notifier, health, activity)
+    reminder = WakeReminder(wake_store, notifier, settings.env_file, settings.data_dir / "wake-reminder.json")
+    watch = Watch(notifier, health, activity, reminder=reminder.check)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -517,14 +540,10 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
 
     @app.post("/api/restart")
     async def _restart(request: Request) -> Response:
-        if not settings.app_service or sys.platform != "darwin":
+        if not can_restart:
             return _error("Restarting is not set up (ADMIN_APP_SERVICE).", 404)
-        if restarts:
+        if not start_restart():
             return _error("Reachy is already restarting.", 409)
-        restarted_at.append(time.monotonic())
-        task = asyncio.create_task(restart_app(settings.app_service))
-        restarts.add(task)
-        task.add_done_callback(restarts.discard)
         audit.append({"who": _who(request), "action": "restarted Reachy"})
         return JSONResponse({"restarted": True})
 
@@ -578,6 +597,90 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
     @app.post("/api/memory/forget")
     async def _memory_forget(request: Request) -> Response:
         return await memory_change(request, "/memory/forget", "memory forgotten")
+
+    # Wake word -------------------------------------------------------------------------------------
+
+    @app.get("/api/wake")
+    async def _wake_summary() -> JSONResponse:
+        return JSONResponse(await asyncio.to_thread(wake.summary))
+
+    @app.get("/api/wake/queue")
+    async def _wake_queue() -> JSONResponse:
+        return JSONResponse({"items": await asyncio.to_thread(wake.to_check)})
+
+    @app.get("/api/wake/clip")
+    async def _wake_clip(item: str) -> Response:
+        try:
+            audio = await asyncio.to_thread(wake.clip, item)
+        except LookupError:
+            return _error("That clip is gone.", 404)
+        return Response(audio, media_type="audio/wav", headers=_NO_STORE)
+
+    @app.post("/api/wake/answer")
+    async def _wake_answer(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        item, answer = str(payload.get("item") or ""), str(payload.get("answer"))
+        try:
+            await asyncio.to_thread(wake.answer, item, answer, _who(request))
+        except ValueError:
+            return _error("answer must be call, not_call or unsure", 400)
+        except LookupError:
+            return _error("That clip was already checked.", 404)
+        audit.append({"who": _who(request), "action": "wake clip checked", "target": answer})
+        return JSONResponse({"answered": True})
+
+    @app.post("/api/wake/missed")
+    async def _wake_missed(request: Request) -> Response:
+        return await control(request, "/wake/missed", "wake miss marked", {"who": _who(request)})
+
+    @app.post("/api/wake/take")
+    async def _wake_take(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        person, prompt = payload.get("person"), payload.get("prompt")
+        if not isinstance(person, str) or not 0 < len(person.strip()) <= MAX_WAKE_NAME_CHARS:
+            return _error(f"Say who is calling him, in 1 to {MAX_WAKE_NAME_CHARS} characters.", 400)
+        if not isinstance(prompt, str) or len(prompt) > MAX_WAKE_PROMPT_CHARS:
+            return _error(f"prompt must be text of at most {MAX_WAKE_PROMPT_CHARS} characters", 400)
+        if re.search(r"[\x00-\x1f\x7f]", person + prompt):
+            return _error("person and prompt must be one line each", 400)
+        try:
+            response = await link.request("POST", "/wake/take", json={"person": person.strip(), "prompt": prompt})
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+        if response.status_code == 200 and response.json().get("ok"):
+            audit.append({"who": _who(request), "action": "wake call recorded", "target": person.strip()})
+        return _relay(response)
+
+    @app.post("/api/wake/switch")
+    async def _wake_switch(request: Request) -> Response:
+        try:
+            switched = await wake.switch(_who(request))
+        except ValueError:
+            return _error("There's no new model to switch to.", 409)
+        audit.append({"who": _who(request), "action": "wake model switched", "target": switched["head"]})
+        return JSONResponse(switched)
+
+    @app.post("/api/wake/keep")
+    async def _wake_keep(request: Request) -> Response:
+        try:
+            head = await asyncio.to_thread(wake.keep, _who(request))
+        except ValueError:
+            return _error("There's no new model to keep or switch to.", 409)
+        audit.append({"who": _who(request), "action": "wake model kept", "target": head})
+        return JSONResponse({"kept": head})
+
+    @app.post("/api/wake/undo")
+    async def _wake_undo(request: Request) -> Response:
+        try:
+            restored = await wake.undo(_who(request))
+        except ValueError:
+            return _error("There's no switch to undo.", 409)
+        audit.append({"who": _who(request), "action": "wake model switch undone", "target": restored["head"]})
+        return JSONResponse(restored)
 
     # Personality -------------------------------------------------------------------------------------
 

@@ -329,19 +329,45 @@ def test_logs_detection_scores_and_near_miss_peaks(caplog: pytest.LogCaptureFixt
     ]
 
 
-def test_event_observer_gets_each_detection_at_once_and_each_near_miss_when_it_ends() -> None:
-    """The observer sees what the log sees: the near miss's peak once it falls back, the wake score at once."""
+def test_event_observer_gets_each_near_miss_when_it_ends_and_detections_return() -> None:
+    """The observer sees each near miss's peak once it falls back; a wake comes back as the detection."""
     scores = [0.1, 0.3, 0.45, 0.25, 0.05, 0.4, 0.8, 0.6]
-    events: list[tuple[float, bool]] = []
-    detector = acoustic_wake_word.OpenWakeWordDetector(
-        FakeWakeModel(scores=scores), event_observer=lambda score, detected: events.append((score, detected))
-    )
+    events: list[acoustic_wake_word.WakeScoreEvent] = []
+    detector = acoustic_wake_word.OpenWakeWordDetector(FakeWakeModel(scores=scores), event_observer=events.append)
     frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
 
-    for _ in scores:
-        detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0)
+    detections = [detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) for _ in scores]
 
-    assert events == [(0.45, False), (0.8, True)]
+    assert [(event.kind, event.score, event.head) for event in events] == [("near_miss", 0.45, "reachy")]
+    assert events[0].scores == {"reachy": 0.45}
+    [detection] = [found for found in detections if found is not None]
+    assert (detection.score, detection.head, detection.head_scores) == (0.8, "reachy", (("reachy", 0.8),))
+
+
+def test_rearming_lets_a_repeated_call_wake_inside_the_cooldown() -> None:
+    """After a rejected wake the next fire counts at once, without waiting out the 3 s or a fresh stream."""
+    detector = acoustic_wake_word.OpenWakeWordDetector(FakeWakeModel(scores=[0.9, 0.1, 0.9, 0.1, 0.9]))
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) is not None
+    detector.process_audio(frame, SAMPLE_RATE, observed_at=1.1)
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=1.2) is None  # still cooling down
+    detector.process_audio(frame, SAMPLE_RATE, observed_at=1.3)
+    detector.rearm()
+    assert detector.process_audio(frame, SAMPLE_RATE, observed_at=1.4) is not None
+
+
+def test_frames_of_features_reach_the_observer_every_80_ms() -> None:
+    """Each scored chunk hands the model's newest input features to the feature log."""
+    frames: list[NDArray[np.float32]] = []
+    newest = np.arange(96, dtype=np.float32)
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        FakeWakeModel(), frame_source=lambda: newest, frame_observer=frames.append
+    )
+
+    detector.process_audio(_pcm16(np.zeros(FRAME_SAMPLES * 3, dtype=np.int16)), SAMPLE_RATE)
+
+    assert len(frames) == 3 and frames[0] is newest
 
 
 class TwoHeadWakeModel:
@@ -409,6 +435,22 @@ def test_a_second_output_without_a_configured_head_is_rejected() -> None:
         detector.process_audio(_pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16)), SAMPLE_RATE)
 
 
+def test_a_shadow_head_reports_its_fires_but_never_wakes() -> None:
+    """A shadow head over its own threshold is logged once per cooldown; only the waking heads wake."""
+    events: list[acoustic_wake_word.WakeScoreEvent] = []
+    detector = acoustic_wake_word.OpenWakeWordDetector(
+        TwoHeadWakeModel([(0.0, 0.95), (0.0, 0.97), (0.0, 0.1)]),
+        threshold=0.3,
+        shadow_heads={"reachy-richi": 0.9},
+        event_observer=events.append,
+    )
+    frame = _pcm16(np.zeros(FRAME_SAMPLES, dtype=np.int16))
+
+    assert [detector.process_audio(frame, SAMPLE_RATE, observed_at=1.0) for _ in range(3)] == [None, None, None]
+    assert [(event.kind, event.score, event.head) for event in events] == [("shadow", 0.95, "reachy-richi")]
+    assert events[0].scores == {"reachy-official33": 0.0, "reachy-richi": 0.95}
+
+
 def test_a_missing_extra_head_fails_before_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A configured extra head that is not there stops startup with a clear error, before any import."""
     for name in acoustic_wake_word.OFFICIAL33_ASSETS:
@@ -423,3 +465,36 @@ def test_a_missing_extra_head_fails_before_loading(tmp_path: Path, monkeypatch: 
     with pytest.raises(ValueError, match="Missing extra wake head"):
         acoustic_wake_word.OpenWakeWordDetector.from_directory(tmp_path, extra_head=tmp_path / "reachy-richi.onnx")
     assert imported == []
+
+
+def test_a_shadow_head_loads_after_the_extra_head_and_a_reused_head_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shadow head is one more model on the stream; the same file cannot be both live and shadow."""
+    for name in acoustic_wake_word.OFFICIAL33_ASSETS:
+        (tmp_path / name).write_bytes(b"x")
+    for name in ("live.onnx", "shadow.onnx"):
+        (tmp_path / name).write_bytes(b"head")
+    monkeypatch.setattr(acoustic_wake_word, "OFFICIAL33_ASSETS", {"reachy-official33.onnx": "same"})
+    monkeypatch.setattr(
+        acoustic_wake_word.hashlib, "sha256", lambda payload: SimpleNamespace(hexdigest=lambda: "same")
+    )
+    loaded: list[object] = []
+
+    def construct_model(**kwargs: object) -> TwoHeadWakeModel:
+        loaded.append(kwargs["wakeword_models"])
+        return TwoHeadWakeModel([])
+
+    monkeypatch.setattr(
+        acoustic_wake_word.importlib, "import_module", lambda name: SimpleNamespace(Model=construct_model)
+    )
+
+    acoustic_wake_word.OpenWakeWordDetector.from_directory(
+        tmp_path, extra_head=tmp_path / "live.onnx", shadow_head=tmp_path / "shadow.onnx"
+    )
+    assert loaded == [[str(tmp_path / name) for name in ("reachy-official33.onnx", "live.onnx", "shadow.onnx")]]
+
+    with pytest.raises(ValueError, match="already loaded"):
+        acoustic_wake_word.OpenWakeWordDetector.from_directory(
+            tmp_path, extra_head=tmp_path / "live.onnx", shadow_head=tmp_path / "live.onnx"
+        )

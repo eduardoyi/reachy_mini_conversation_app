@@ -75,6 +75,9 @@ class ToolDependencies:
     calls: Any = None
     # Hybrid runtime only: after the current quick reply, listen once without the name and pass what is said on.
     expect_answer: Callable[[Callable[[str], Awaitable[Any]]], None] | None = None
+    # Hybrid runtime with wake clips only: keep the minute before this wake as a call he missed
+    # (HybridRuntime.mark_missed); False when it could not.
+    mark_missed: Callable[..., bool] | None = None
     # Hybrid runtime with the e-ink screen only: writing practice, one letter at a time (writing_mode.py).
     writing: Any = None
 

@@ -1057,3 +1057,30 @@ A full post-activation queue drops its oldest frames with one warning each time 
 when it is cleared (`_postactivation_drop_burst`): long local commands overflow it frame after frame, and
 the 90 s head test on 2026-10-29 had logged 6,912 warnings. Test:
 `test_a_full_postactivation_queue_warns_once_and_reports_the_total_when_cleared`.
+
+### Wake learning: no deafness after a rejected wake, records, missed calls, recordings — 2026-10-31
+
+- **No deafness after a rejected wake.** After the name check rejects a fire, the wake model carries on where it
+  was (`OpenWakeWordDetector.rearm`) when it was paused for at most 1.5 s (`_ACOUSTIC_RESUME_S`).
+  - Before, the epoch change reset it, which left it deaf for about 1.3 s while its window refilled.
+  - Its 3 s cooldown also swallowed a repeated call.
+  - Longer pauses (a local command, a conversation) still reset it.
+- **Records.** The clip recorder is fed in `LOCAL_COMMAND` too, so fire clips keep 1.5 s after the fire. It starts
+  over after a gap of more than 1 s (a conversation), and waiting clips are written when a conversation starts.
+- **Fires are recorded with what came of them.** Each acoustic fire is recorded with its head and scores. Notes
+  follow under its id: the name check (`heard`, `trusted`), `outcome` `rejected`/`woke`, and `request_chars`
+  (0 when nothing was said). A transcript wake notes `woke` or `ignored` (TV, asleep mid-sentence). An antenna
+  touch records the 15 s before it.
+- **Missed calls.** `mark_missed(by=, who=)` keeps the minute before the current activation (or before now).
+  - It is used by the `missed` quick command ("you didn't hear me", "no me escuchaste") and by the control API's
+    `POST /wake/missed`.
+  - `record_name(wait_s=)` collects what is heard (through the recorder's capture) until a voice has stopped for
+    0.7 s, and holds wakes meanwhile (acoustic and transcript). It is used by `POST /wake/take` for the household's
+    recordings.
+- **Docs.** See [wake-learning.md](wake-learning.md).
+- **Tests:**
+  - `test_a_rejected_wake_keeps_listening_without_a_reset_and_its_record_says_why`;
+  - `test_a_confirmed_wake_records_its_name_check`;
+  - `test_missed_calls_are_marked_from_now_and_need_wake_clips`;
+  - `test_a_recording_of_the_name_holds_wakes_and_returns_the_voice`.
+

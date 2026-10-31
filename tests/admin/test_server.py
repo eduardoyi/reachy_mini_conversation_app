@@ -22,6 +22,7 @@ from reachy_mini_conversation_app.admin.server import AdminSettings, create_app
 from reachy_mini_conversation_app.admin.records import read_json
 from reachy_mini_conversation_app.admin.app_link import AppLink
 from reachy_mini_conversation_app.admin.notifier import SUBSCRIPTIONS_FILE, Notifier
+from reachy_mini_conversation_app.wake_learning.store import WakeLearningStore
 
 
 HOST = "reachy.example.ts.net"
@@ -111,6 +112,7 @@ class Admin:
     control: ControlAPI
     push: PushService
     notifier: Notifier
+    wake_store: WakeLearningStore
 
     @contextmanager
     def client(
@@ -126,7 +128,7 @@ class Admin:
             self.settings.control_token_file,
             client=httpx.AsyncClient(transport=httpx.MockTransport(self.control)),
         )
-        app = create_app(settings or self.settings, link=link, notifier=self.notifier)
+        app = create_app(settings or self.settings, link=link, notifier=self.notifier, wake_store=self.wake_store)
         with TestClient(app, base_url=base_url, client=peer, headers=EDUARDO if headers is None else headers) as c:
             yield c
 
@@ -159,7 +161,8 @@ def admin(tmp_path: Path) -> Admin:
     )
     push = PushService()
     notifier = Notifier(settings.data_dir, client=httpx.AsyncClient(transport=httpx.MockTransport(push)))
-    return Admin(settings, ControlAPI(), push, notifier)
+    wake_store = WakeLearningStore(tmp_path / "wake-learning", clips=tmp_path / "wake-clips")
+    return Admin(settings, ControlAPI(), push, notifier, wake_store)
 
 
 def _write(path: Path, document: object) -> None:

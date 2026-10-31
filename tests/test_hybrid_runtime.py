@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 from typing import Any
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from collections.abc import Callable, Awaitable
 
@@ -35,6 +36,7 @@ from reachy_mini_conversation_app.ambient_context import (
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
 from reachy_mini_conversation_app.local_intent_router import LocalIntentRouter, IntentDecisionReason
+from reachy_mini_conversation_app.wake_learning.store import WakeLearningStore
 from reachy_mini_conversation_app.conversation_handler import AudioFrame, HandlerOutput, ConversationHandler
 
 
@@ -2607,7 +2609,7 @@ async def test_wake_clips_hold_only_audio_heard_while_listening_locally(tmp_path
     handler = FakeHandler()
     runtime = HybridRuntime(
         lambda: handler,
-        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel(), event_observer=clips.save_wake_event),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel(), event_observer=clips.save_score_event),
         wake_clips=clips,
     )
     runtime.set_capture_barrier_provider(lambda: 3)
@@ -2620,7 +2622,7 @@ async def test_wake_clips_hold_only_audio_heard_while_listening_locally(tmp_path
     clips.save_name_heard(1.0)
 
     saved = sorted(tmp_path.glob("*/*.wav"))
-    assert sorted(path.name.split("-", 1)[1] for path in saved) == ["name_heard.wav", "wake-1.00.wav"]
+    assert sorted(path.name.split("-", 1)[1] for path in saved) == ["name_heard.wav", "wake.wav"]
     for path in saved:
         samples = set(np.frombuffer(wave_frames(path), dtype="<i2").tolist())
         assert samples == {111, 222}
@@ -5194,3 +5196,143 @@ async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes() -
     await wait_until(lambda: seen == ["llama a Eduardo"], attempts=500)
     assert not runtime.request_after_close("Reachy, llama a Eduardo")  # no conversation is open now
     await runtime.close()
+
+
+def _wake_events(clips_dir: Path) -> list[dict[str, Any]]:
+    store = WakeLearningStore(clips_dir / "learning", clips=clips_dir)
+    return [event for day in store.days() for event in store.events(day)]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_wake_keeps_listening_without_a_reset_and_its_record_says_why(tmp_path: Path) -> None:
+    """After the name check rejects a fire the wake model carries on: no 1.3 s refill, and a repeated call is heard."""
+
+    async def fast(_audio: AudioFrame) -> str:
+        return "so"
+
+    async def accurate(_audio: AudioFrame) -> str:
+        return ""
+
+    model = AcousticScoreModel()
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(model),
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+    )
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime._ACOUSTIC_RESUME_S = 60.0  # a loaded test machine must not turn the short pause into a long one
+    runtime.set_capture_barrier_provider(lambda: 2)
+
+    async def settled() -> None:
+        for _ in range(200):
+            if runtime.mode is RuntimeMode.LOCAL_AMBIENT and not runtime._local_event_tasks:
+                return
+            await asyncio.sleep(0.01)
+
+    try:
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+        await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+        await asyncio.sleep(0.01)
+        await settled()
+        resets = model.resets
+
+        await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=3)
+        for _ in range(200):
+            if sum(event["kind"] == "wake" for event in _wake_events(tmp_path)) == 2:
+                break
+            await asyncio.sleep(0.01)
+        await settled()
+
+        assert model.resets == resets
+        first = _wake_events(tmp_path)[0]
+        assert (first["heard"], first["trusted"], first["outcome"]) == (False, False, "rejected")
+        assert first["score"] == 1.0 and first["head"] == "reachy" and first["asleep"] is False
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_wake_records_its_name_check(tmp_path: Path) -> None:
+    """The fire's record joins its name check: heard, not merely trusted."""
+
+    async def fast(_audio: AudioFrame) -> str:
+        return "Richie."
+
+    async def accurate(_audio: AudioFrame) -> str:
+        return ""
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        request_transcriber=accurate,
+        name_check_transcriber=fast,
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+    )
+    runtime._REQUEST_CLIP_START_S = 0.1
+    runtime.set_capture_barrier_provider(lambda: 2)
+    try:
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+        await runtime.handle_frame((16000, np.full(1280, 222, dtype=np.int16)), capture_sequence=2)
+        await asyncio.wait_for(handler.started.wait(), timeout=3.0)
+
+        [wake] = [event for event in _wake_events(tmp_path) if event["kind"] == "wake"]
+        assert (wake["heard"], wake["trusted"]) == (True, False)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_missed_calls_are_marked_from_now_and_need_wake_clips(tmp_path: Path) -> None:
+    """From the phone, the minute before now is kept as a missed call; without wake clips nothing can be."""
+    runtime = HybridRuntime(
+        lambda: FakeHandler(),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+    )
+    bare = HybridRuntime(lambda: FakeHandler())
+    runtime.set_capture_barrier_provider(lambda: 1)
+    try:
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=1)
+
+        assert runtime.mark_missed(by="app", who="eduardo@example.com")
+        assert not bare.mark_missed(by="app")
+
+        [missed] = _wake_events(tmp_path)
+        assert (missed["kind"], missed["by"], missed["who"]) == ("missed", "app", "eduardo@example.com")
+        assert missed["clip"] is not None
+    finally:
+        await runtime.close()
+        await bare.close()
+
+
+@pytest.mark.asyncio
+async def test_a_recording_of_the_name_holds_wakes_and_returns_the_voice(tmp_path: Path) -> None:
+    """While someone records their call, hearing the name wakes nobody; the take ends after a short pause."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+    )
+    runtime._NAME_TAKE_POLL_S = 0.01
+    runtime.set_capture_barrier_provider(lambda: 1)
+    try:
+        await runtime.handle_frame((16000, np.full(1280, 1, dtype=np.int16)), capture_sequence=1)
+        take = asyncio.create_task(runtime.record_name(wait_s=2.0))
+        await asyncio.sleep(0.02)
+        for value, frames in ((1, 5), (222, 8), (1, 12)):
+            for _ in range(frames):
+                await runtime.handle_frame((16000, np.full(1280, value, dtype=np.int16)), capture_sequence=1)
+        recorded = await asyncio.wait_for(take, timeout=3.0)
+
+        assert recorded is not None and recorded[0] == 16000
+        assert 222 in set(recorded[1].tolist())
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT and not handler.started.is_set()
+        assert await runtime.record_name(wait_s=0.0) is not None  # held wakes are released afterwards
+    finally:
+        await runtime.close()

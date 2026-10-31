@@ -26,6 +26,12 @@ from reachy_mini_conversation_app.wake_clips import WakeClipRecorder, wake_clips
 from reachy_mini_conversation_app.control_api import ControlApi, load_or_create_token, start_control_server
 from reachy_mini_conversation_app.eink_display import render_text
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
+from reachy_mini_conversation_app.wake_learning.store import (
+    WakeLearningStore,
+    wake_features_directory,
+    wake_learning_directory,
+)
+from reachy_mini_conversation_app.wake_learning.feature_log import WakeFeatureLog
 
 
 if TYPE_CHECKING:
@@ -430,6 +436,7 @@ def run(
 
     acoustic_wake_detector: OpenWakeWordDetector | None = None
     wake_clips: WakeClipRecorder | None = None
+    wake_store: WakeLearningStore | None = None
     if config.LOCAL_ACOUSTIC_WAKE_ENABLED:
         if not config.HYBRID_RUNTIME_ENABLED:
             raise ValueError("Acoustic wake requires HYBRID_RUNTIME_ENABLED=1")
@@ -438,14 +445,42 @@ def run(
         if config.WAKE_CLIPS_ENABLED:
             wake_clips = WakeClipRecorder(wake_clips_directory(), keep_days=config.WAKE_CLIPS_KEEP_DAYS)
             logger.info("Wake clips enabled: saving locally for %d days", config.WAKE_CLIPS_KEEP_DAYS)
+        extra_head = (
+            Path(config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD).expanduser() if config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD else None
+        )
+        extra_threshold = config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD
+        shadow_head: Path | None = None
+        shadow_threshold = 0.8
+        feature_log: WakeFeatureLog | None = None
+        if config.WAKE_LEARNING_ENABLED and wake_clips is not None:
+            # The nightly job's live head replaces the configured extra head; a missing file never stops Reachy.
+            wake_store = WakeLearningStore(wake_learning_directory())
+            live, shadow = wake_store.live(), wake_store.shadow()
+            if live is not None and wake_store.head_path(live).is_file():
+                extra_head, extra_threshold = wake_store.head_path(live), live.threshold
+            if (
+                shadow is not None
+                and wake_store.head_path(shadow).is_file()
+                and (live is None or shadow.name != live.name)
+            ):
+                shadow_head, shadow_threshold = wake_store.head_path(shadow), shadow.threshold
+            feature_log = WakeFeatureLog(wake_features_directory(), keep_days=config.WAKE_FEATURES_KEEP_DAYS)
+            logger.info(
+                "Wake learning enabled: live head %s, shadow head %s",
+                extra_head.stem if extra_head else "none",
+                shadow_head.stem if shadow_head else "none",
+            )
+        elif config.WAKE_LEARNING_ENABLED:
+            logger.warning("WAKE_LEARNING_ENABLED needs WAKE_CLIPS_ENABLED=1; wake learning is off")
         acoustic_wake_detector = OpenWakeWordDetector.from_directory(
             Path(config.LOCAL_ACOUSTIC_WAKE_MODEL_DIR).expanduser(),
             threshold=config.LOCAL_ACOUSTIC_WAKE_THRESHOLD,
-            event_observer=wake_clips.save_wake_event if wake_clips is not None else None,
-            extra_head=Path(config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD).expanduser()
-            if config.LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD
-            else None,
-            extra_threshold=config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD,
+            event_observer=wake_clips.save_score_event if wake_clips is not None else None,
+            extra_head=extra_head,
+            extra_threshold=extra_threshold,
+            shadow_head=shadow_head,
+            shadow_threshold=shadow_threshold,
+            frame_observer=feature_log.add if feature_log is not None else None,
         )
         logger.info(
             "Supervised official33 acoustic wake enabled; threshold=%.2f cooldown=3s",
@@ -762,6 +797,8 @@ def run(
             hybrid_runtime.set_strict_wake(lambda: bool(tv.reported_on))
         deps.expect_answer = hybrid_runtime.expect_answer
         deps.record_message = hybrid_runtime.record_message
+        if wake_clips is not None:
+            deps.mark_missed = hybrid_runtime.mark_missed
         deps.stream_call = hybrid_runtime.stream_call
         calls = _start_calls(deps, hybrid_runtime, movement_manager, quick)
 
@@ -948,7 +985,9 @@ def run(
         threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
         logger.info("Web UI available at http://localhost:7860")
 
-    control = ControlApi(deps, hybrid_runtime, load_or_create_token(Path(config.APP_CONTROL_TOKEN_FILE)))
+    control = ControlApi(
+        deps, hybrid_runtime, load_or_create_token(Path(config.APP_CONTROL_TOKEN_FILE)), wake_store=wake_store
+    )
     control_server = start_control_server(control, config.APP_CONTROL_PORT)
 
     def privacy_changed(on: bool) -> None:

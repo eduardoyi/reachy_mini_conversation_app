@@ -32,6 +32,8 @@ class WakeWordDetection:
     detected_at: float
     latency_seconds: float | None
     score: float | None = None  # the acoustic model's score at the detection; None for a transcript wake
+    head: str | None = None  # the acoustic head that fired
+    head_scores: tuple[tuple[str, float], ...] = ()  # every head's raw score at the detection
 
     @property
     def command_text(self) -> str:
@@ -91,6 +93,9 @@ class AcousticWakeWordDetector(Protocol):
 
     def reset(self) -> None:
         """Reset detector state."""
+
+    def rearm(self) -> None:
+        """Allow the next detection at once, keeping the stream (after a wake that was rejected)."""
 
     def metrics_snapshot(self) -> WakeWordMetricsSnapshot:
         """Return transcript-free counters for benchmark reporting."""

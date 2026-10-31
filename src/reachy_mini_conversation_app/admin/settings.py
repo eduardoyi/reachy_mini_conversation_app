@@ -15,7 +15,7 @@ from reachy_mini_conversation_app.admin.records import write_atomic
 
 @dataclass(frozen=True)
 class Setting:
-    """One editable ``.env`` key: its label, kind (choice, flag, number, hours, names), allowed values and default."""
+    """One editable ``.env`` key: label, kind (choice, flag, number, hours, time, names), allowed values and default."""
 
     label: str
     kind: str
@@ -38,9 +38,11 @@ SETTINGS: Final[dict[str, Setting]] = {
     "SPEAKER_FOLLOWING_ENABLED": Setting("Turn toward whoever speaks", "flag", default="1"),
     "DISPLAY_NOW_PLAYING": Setting("Show the song on the e-ink screen", "flag", default="1"),
     "PHOTO_ARCHIVE_ENABLED": Setting("Keep photos in the gallery", "flag", default="1"),
+    "WAKE_REMINDER_TIME": Setting("Wake word reminder", "time", default="19:30"),
 }
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$")
 _NAMES = re.compile(r"[a-z0-9_-]+(?:,[a-z0-9_-]+)*")
+_TIME = re.compile(r"(\d{1,2}):(\d{2})")
 
 
 class SettingError(ValueError):
@@ -90,6 +92,11 @@ def check(key: str, value: str) -> str:
             raise SettingError(f"{setting.label}: between {setting.low} and {setting.high}")
     if setting.kind == "hours" and _quiet_hours(value) is None:
         raise SettingError(f"{setting.label}: like 21:30-07:00")
+    if setting.kind == "time" and value != "off":
+        match = _TIME.fullmatch(value)
+        if match is None or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+            raise SettingError(f"{setting.label}: like 19:30, or off")
+        value = f"{int(match.group(1)):02d}:{match.group(2)}"
     if setting.kind == "names":
         value = ",".join(part.strip().lower() for part in value.split(",") if part.strip())
         if not _NAMES.fullmatch(value):

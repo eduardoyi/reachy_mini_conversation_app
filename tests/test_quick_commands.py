@@ -450,6 +450,27 @@ async def test_sleep_lowers_the_head_after_good_night() -> None:
     deps.movement_manager.go_to_sleep.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("said", "sorry"),
+    [
+        ("No me escuchaste", "Perdona. Voy a aprender de esa."),
+        ("you didn't hear me the first time", "Sorry about that. I'll learn from it."),
+    ],
+)
+@pytest.mark.asyncio
+async def test_you_didnt_hear_me_marks_the_call_before_this_wake(said: str, sorry: str) -> None:
+    """Said once he finally woke, it keeps the call he missed and apologizes; without wake clips it is not his."""
+    runner, _, deps = _runner()
+    marks: list[str] = []
+    deps.mark_missed = lambda *, by: marks.append(by) or True
+
+    reply = await runner.handle(said)
+
+    assert reply is not None and reply.text == sorry and marks == ["voice"]
+    deps.mark_missed = None
+    assert await runner.handle(said) is None
+
+
 class _Weather:
     def __init__(self) -> None:
         self.places: list[Any] = []

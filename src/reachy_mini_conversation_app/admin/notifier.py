@@ -1,7 +1,8 @@
 """Push notifications to the installed admin app: subscriptions, and a watch on Reachy that sends them.
 
 Every minute the watch looks at the app, WhatsApp, the call service, the privacy switch and new missed calls,
-and notifies each subscribed phone when something changes for the worse.
+and notifies each subscribed phone when something changes for the worse; then it runs the daily wake-word
+reminder.
 """
 
 import json
@@ -82,8 +83,16 @@ class Notifier:
             entries, version = self._subscriptions()
             write_json(self._file, {"subscriptions": [e for e in entries if e.get("endpoint") != endpoint]}, version)
 
-    async def notify(self, title: str, body: str) -> int:
+    async def notify(
+        self, title: str, body: str, *, actions: list[dict[str, str]] | None = None, url: str | None = None
+    ) -> int:
         """Send to every subscribed phone; returns how many accepted it. Dropped subscriptions are forgotten."""
+        # Android shows the actions as buttons (iPhone ignores them); a tap on the notification opens the url.
+        message: dict[str, object] = {"title": title, "body": body}
+        if actions:
+            message["actions"] = actions
+        if url:
+            message["url"] = url
         async with self._lock:
             try:
                 entries, version = self._subscriptions()
@@ -93,7 +102,7 @@ class Notifier:
             delivered, gone = 0, set()
             for entry in entries:
                 try:
-                    status = await send(self._client, entry, {"title": title, "body": body}, self._key,
+                    status = await send(self._client, entry, message, self._key,
                                         str(entry.get("subject") or "mailto:reachy@localhost"))  # fmt: skip
                 except ValueError as error:  # a damaged subscription must not block the other phones
                     logger.warning("Push subscription skipped: %s", error)
@@ -123,12 +132,14 @@ class Watch:
         health: Callable[[], Awaitable[dict[str, Any]]],
         activity: JsonLines,
         clock: Callable[[], float] = time.time,
+        reminder: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        """Notify through ``notifier`` from ``health()`` checks and new entries in ``activity``."""
+        """Notify through ``notifier`` from ``health()`` checks and new entries in ``activity``; run ``reminder`` too."""
         self._notifier = notifier
         self._health = health
         self._activity = activity
         self._clock = clock
+        self._reminder = reminder
         self._last: dict[str, Any] | None = None
         self._seen_activity: set[str] | None = None
         self._reminded_privacy: str | None = None
@@ -143,6 +154,8 @@ class Watch:
         for entry in self._new_activity():
             if entry.get("kind") == "call_in" and entry.get("outcome") == "missed":
                 await self._notifier.notify("Missed call", f"{entry.get('who') or 'Someone'} called Reachy.")
+        if self._reminder is not None:
+            await self._reminder()
 
     def _changes(self, last: dict[str, Any] | None, now: dict[str, Any]) -> list[tuple[str, str]]:
         changes = []

@@ -113,7 +113,7 @@ def vapid_authorization(endpoint: str, key: ec.EllipticCurvePrivateKey, subject:
 async def send(
     client: httpx.AsyncClient,
     subscription: dict[str, object],
-    message: dict[str, str],
+    message: dict[str, object],
     key: ec.EllipticCurvePrivateKey,
     subject: str,
 ) -> int:

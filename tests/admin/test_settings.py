@@ -124,6 +124,9 @@ def test_write_with_invalid_value_changes_nothing(env_file: Path) -> None:
         ("WHATSAPP_CALLERS", " Ana , BEN,, eduardo_yi ", "ana,ben,eduardo_yi"),
         ("WHATSAPP_CALLERS", "adriana-y", "adriana-y"),
         ("QUIET_HOURS", "", ""),
+        ("WAKE_REMINDER_TIME", "19:30", "19:30"),
+        ("WAKE_REMINDER_TIME", " 7:05 ", "07:05"),
+        ("WAKE_REMINDER_TIME", "off", "off"),
     ],
 )
 def test_check_accepts_and_cleans_valid_values(key: str, value: str, cleaned: str) -> None:
@@ -154,6 +157,11 @@ def test_check_accepts_and_cleans_valid_values(key: str, value: str, cleaned: st
         ("WHATSAPP_CALLERS", "ana,b=n"),
         ("WHATSAPP_CALLERS", ", ,"),
         ("WHATSAPP_CALLERS", "ana\nGEMINI_API_KEY=x"),
+        ("WAKE_REMINDER_TIME", "24:00"),
+        ("WAKE_REMINDER_TIME", "19:60"),
+        ("WAKE_REMINDER_TIME", "OFF"),
+        ("WAKE_REMINDER_TIME", "evening"),
+        ("WAKE_REMINDER_TIME", "19:30\nGEMINI_API_KEY=x"),
     ],
 )
 def test_check_rejects_unknown_keys_and_invalid_values(key: str, value: str) -> None:

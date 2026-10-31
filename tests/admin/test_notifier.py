@@ -222,6 +222,23 @@ async def test_notify_sends_the_title_and_body_only_the_phone_can_read(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_notify_carries_android_actions_and_the_url_a_tap_opens(tmp_path: Path) -> None:
+    """A wake-word push adds its buttons and the page to open; the phone reads them after decrypting."""
+    service = PushService()
+    notifier = _notifier(tmp_path, service)
+    await notifier.subscribe(_subscription("https://push.example.com/1"), "e@example.com", SUBJECT)
+    actions = [{"action": "switch", "title": "Switch"}, {"action": "later", "title": "Not now"}]
+    await notifier.notify("Wake word", "A better wake model is ready.", actions=actions, url="/#wake")
+    (request,) = service.requests
+    assert _decrypt(request.content) == {
+        "title": "Wake word",
+        "body": "A better wake model is ready.",
+        "actions": actions,
+        "url": "/#wake",
+    }
+
+
+@pytest.mark.asyncio
 async def test_notify_with_unreadable_subscriptions_sends_nothing(tmp_path: Path) -> None:
     """A corrupt subscriptions file is reported, not raised."""
     service = PushService()
@@ -435,6 +452,22 @@ async def test_only_missed_incoming_calls_are_notified_oldest_first(tmp_path: Pa
         activity.append({"at": f"2026-10-30T10:0{minute}:00+00:00", "kind": kind, "who": who, "outcome": outcome})
     await watch.check()
     assert fake.sent == [("Missed call", "Ana called Reachy."), ("Missed call", "Someone called Reachy.")]
+
+
+@pytest.mark.asyncio
+async def test_each_check_also_runs_the_reminder(tmp_path: Path) -> None:
+    """The wake-word reminder rides on the watch's minute, after the health notifications."""
+    fake = FakeNotifier()
+    runs: list[int] = []
+
+    async def reminder() -> None:
+        runs.append(len(fake.sent))
+
+    watch = Watch(
+        fake, _sequence(_health(), _health(running=False)), JsonLines(tmp_path / "a.jsonl"), reminder=reminder
+    )
+    await _run_checks(watch, 2)
+    assert runs == [0, 1]
 
 
 @pytest.mark.asyncio

@@ -25,8 +25,35 @@ becomes "Privacy on". Only the admin app turns it off; voice cannot (the mic is 
 **Quiet hours** (`QUIET_HOURS=21:30-07:00`): Reachy does not listen, an antenna bend does nothing, and
 incoming calls are declined. The camera stays available to the admin app.
 
-**Notifications** (Web Push to the installed app): Reachy stopped, WhatsApp unlinked, call service
-disconnected, a missed call, privacy still on after four hours.
+**Notifications** (Web Push to the installed app):
+- Reachy stopped, WhatsApp unlinked, the call service disconnected, a missed call, privacy still on after four
+  hours.
+- **The daily wake-word reminder** (below).
+
+**Wake word** ([wake-learning.md](wake-learning.md)):
+- **Home card.** It shows this week's score ("47 of 49 calls answered first time · 0.6 false wakes a day", with
+  the goal), a badge for what's waiting ("6 clips · new model"), and a big "He missed me" button that keeps the
+  minute before now as a call he missed. The same button is an Android home-screen shortcut (long-press the
+  icon → `/#missed`).
+- **The sheet** (tap the card, or `/#wake`), with what to do first:
+  - **Check clips:** a card stack. Each clip plays by itself; answer "Called Reachy" (swipe right), "Didn't"
+    (swipe left) or "Not sure". At most 10 a day.
+  - **New model:** the proposal's before → after numbers, with Switch / Keep current. Undo is shown for 7 days.
+  - **Teach Reachy your voice:** pick a person, then about 20 short prompts ("by the sofa", "from the kitchen",
+    "louder", "quietly", "in a sentence", "from the hallway", "with the TV on", "as if he didn't hear"). Reachy
+    records each on his own microphones; a quiet or too-long take asks again.
+  - **Then:** the score by TV on or off and by day, the live and shadow heads with their numbers, the switch
+    history, and the reminder time.
+- **The reminder.** One push a day at `WAKE_REMINDER_TIME` (default 19:30, `off` to stop), never in quiet hours
+  (a time inside them fires at the first minute after), and only when something waits. It bundles three things:
+  - a new model, with Android buttons Switch / Not now ("Switch" switches without opening the app; "Not now"
+    only closes it);
+  - clips to check ("Check now");
+  - at most monthly, a voice refresh for anyone who hasn't recorded in 30 days.
+
+  The day it was sent is kept in `wake-reminder.json`.
+- **Switch and undo** restart Reachy at once if he is waiting for his name and not in a call. Otherwise they check
+  every minute for up to 30 minutes; if he isn't running, the head loads when he next starts.
 
 ## Who can reach it
 
@@ -85,6 +112,7 @@ flowchart LR
 | `admin/notifier.py` | `Notifier` (subscriptions in `push.json`, VAPID key `vapid.pem`), `Watch` (checks every minute). |
 | `admin/web_push.py` | RFC 8291 aes128gcm encryption and RFC 8292 VAPID with `cryptography`; checked against the RFC 8291 example. |
 | `static/admin/` | `index.html` (icons as an inline SVG sprite, Reachy as inline SVG whose pose follows `data-state`), `admin.js`, `admin.css` (light and dark tokens; Unbounded and Figtree from Google Fonts), `manifest.webmanifest`, `sw.js`, icons. Plain JS, no build step. |
+| `admin/wake.py` | `WakeWord` (summary, clips to check and their audio, answers, keep, switch and undo with a restart once he is idle) and `WakeReminder` (the daily push) over `wake_learning.store.WakeLearningStore`. Routes in `server.py`: `GET /api/wake`, `GET /api/wake/queue`, `GET /api/wake/clip?item=`, `POST /api/wake/answer`, `/missed`, `/take`, `/switch`, `/keep`, `/undo`; audited as `wake clip checked`, `wake miss marked`, `wake call recorded`, `wake model switched`, `wake model kept`, `wake model switch undone` (never what was said). |
 | `admin/gallery.py` | `Gallery.items/path/thumbnail/delete` over `PHOTO_ARCHIVE_DIR` and the display cache (`drawings-v3`, older `drawings-v2`/`drawings`, `lessons`, `pictures`; never album art); ids are `<folder>/<file>` and nothing else opens. Routes `GET /api/gallery`, `GET /api/gallery/file?id=&thumb=1`, `POST /api/gallery/delete` (audited). |
 | `memory_routes.py` | `register_memory_routes`: `GET /memory`, `POST /memory/update`, `POST /memory/forget` on the control API (the app owns the memory file and writes it constantly, so changes go through its process). The admin app relays them as `/api/memory...` and audits who changed whose memory, never the text. |
 | `admin/costs.py` | `breakdown(entries, now, days)` over the usage ledger; route `GET /api/costs?days=1\|7\|30`. |
@@ -109,13 +137,15 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 
 | Route | Body | Result |
 |-------|------|--------|
-| `GET /status` | | `mode`, `sleeping`, `privacy {on, since}`, `quiet_hours`, `calls_linked`, `faces`, `camera` |
+| `GET /status` | | `mode`, `sleeping`, `privacy {on, since}`, `quiet_hours`, `calls_linked`, `in_call`, `faces`, `camera`, `game` |
 | `POST /privacy` | `{"on": bool}` | status |
 | `POST /sleep`, `POST /wake` | | status; wake is 409 while private |
 | `POST /head` | `{"direction": "left"\|"right"\|"up"\|"down"\|"center"}` | asleep: a peek step (20° yaw, 15° pitch; ±60°/±30°); awake: the `move_head` tool |
 | `POST /look-up` | | asleep: peek straight ahead for 120 s; awake: 409 |
 | `GET /camera` | | `multipart/x-mixed-replace` JPEG frames; 409 while private; ends when privacy comes on |
 | `/api/faces...` | as the settings page | list, photo, enroll, upload, forget-photo, forget |
+| `POST /wake/missed` | `{"who": login}` | `{"ok": true}`; 409 when he isn't listening (privacy, quiet hours, no wake clips) |
+| `POST /wake/take` | `{"person", "prompt"}` | after the person has spoken (up to about 10 s): `{"ok", "seconds", "level_db", "reason": null\|"quiet"\|"too_long"}`; 409 when he can't record now |
 
 ## Configuration
 
@@ -123,7 +153,8 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 |----------|---------|---------|
 | `ADMIN_ALLOWED_LOGINS` | (none: all refused) | Tailscale logins allowed in, comma separated. |
 | `ADMIN_PORT` | 7870 | The admin app's loopback port. |
-| `ADMIN_DATA_DIR` | `~/.local/share/reachy-admin` | Audit log, push subscriptions, VAPID key. |
+| `ADMIN_DATA_DIR` | `~/.local/share/reachy-admin` | Audit log, push subscriptions, VAPID key, `wake-reminder.json`. |
+| `WAKE_REMINDER_TIME` | `19:30` | The daily wake-word push (`HH:MM`, or `off`); read from `.env` on each check and set from the Wake word sheet without restarting Reachy. |
 | `ADMIN_ENV_FILE` | the app's `.env` | The file Settings edits. |
 | `ADMIN_APP_SERVICE` | (none: no restart) | The app's LaunchAgent label. Restart sends the app SIGINT, waits up to 2 minutes for it and any `start-reachy` launcher to exit (the launcher may stop the daemon on its way out), then runs `launchctl kickstart -k`; nothing is started if something is still running. No "Reachy stopped" notification for 5 minutes after. |
 | `REACHY_DAEMON_URL` | `http://127.0.0.1:8000` | For the volume. |
@@ -175,5 +206,6 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 | `tests/test_eink_display.py` | Resting card swap, battery voltage. |
 | `tests/test_whatsapp_calls.py`, `tests/test_quick_commands.py`, `tests/tools/test_take_photo.py` | Activity entries for calls (with seconds, missed, declined), voice notes, photos; incoming calls declined during privacy and quiet hours; `CallManager.linked`. |
 | `tests/admin/` | Records, people (round trip through the app's own loaders), settings, Web Push (RFC 8291 vector, VAPID signature), notifier and watch, app link, the server's guard and every route. |
+| `tests/admin/test_wake.py` | The wake summary, clips to check and their audio, answers (bad, unknown, already answered), missed and takes relayed, switch/keep/undo with the restart now, when free or on start; the reminder bundled, once a day, after quiet hours, nothing when nothing waits, the proposal marked only when delivered, the voice refresh, the payload's actions. |
 
 Commands run and results are recorded in the plan's progress log.
