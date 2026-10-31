@@ -49,11 +49,11 @@ _MENU: Final[dict[str, str]] = {
     "es": "¿A qué jugamos? Puedo jugar {titles}.",
     "en": "What shall we play? I know {titles}.",
 }
-_NOT_NOW: Final[dict[str, str]] = {"es": "Vale, otro día.", "en": "Okay, another time."}
+_NOT_NOW: Final[dict[str, str]] = {"es": "Bueno, otro día.", "en": "Okay, another time."}
 _PAUSED_ASK: Final[dict[str, str]] = {"es": "Pausa. ¿Seguimos o terminamos?", "en": "Paused. Keep playing, or stop?"}
 _PAUSED: Final[dict[str, str]] = {"es": "Pausa.", "en": "Paused."}
 _RESUMED: Final[dict[str, str]] = {"es": "¡Seguimos!", "en": "Let's keep going!"}
-_ENDED: Final[dict[str, str]] = {"es": "Vale, se acabó el juego.", "en": "Okay, game over."}
+_ENDED: Final[dict[str, str]] = {"es": "Listo, se acabó el juego.", "en": "Okay, game over."}
 _END_FOR: Final[dict[str, str]] = {"es": "Estamos jugando {title}. ¿Lo terminamos?", "en": "We're playing {title}. Shall we stop?"}  # fmt: skip
 
 

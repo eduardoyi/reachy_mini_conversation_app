@@ -114,7 +114,40 @@ TREASURE_HUNT: Final[GameInfo] = GameInfo(
     ),
 )
 
-GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT)}
+SIMON_SAYS: Final[GameInfo] = GameInfo(
+    key="simon",
+    names=frozenset(
+        {
+            "simon dice",
+            "simon",
+            "el simon dice",
+            "el juego de simon dice",
+            "simon dices",
+            "simone dice",
+            "reachy dice",
+            "richie dice",
+            "ritchie dice",
+            "simon says",
+            "simon said",
+            "the simon says game",
+            "reachy says",
+            "richie says",
+        }
+    ),  # fmt: skip
+    title={"es": "a Simón dice", "en": "Simon says"},
+    pitch={
+        "es": "Yo te digo una pose, tú la haces y te quedas quieto.",
+        "en": "I tell you a pose, you do it and hold still.",
+    },
+    rules=(
+        "Reachy says 'Simón dice: ¡tócate la nariz!' (or another still pose: arms up, cover your eyes, thumbs up, "
+        "bunny ears, crouch down...) and shows a drawing of it; the children do it and hold still while his camera "
+        "checks. A star for each pose done, eight poses a game; nobody loses. Whole-body poses come after 'da un "
+        "paso hacia atrás'. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
+GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS)}
 
 
 @dataclass(frozen=True)
@@ -146,15 +179,18 @@ _NAME_EDGES: Final[re.Pattern[str]] = re.compile(r"^(?:a |al |el |la |los |las |
 
 # Answers and commands, each a whole transcript (normalized, politeness stripped).
 YES_WORDS: Final[frozenset[str]] = frozenset(
-    {"si", "si si", "vale", "dale", "claro", "bueno", "venga", "vamos", "si vamos", "si quiero", "si porfa",
+    {"si", "si si", "vale", "dale", "claro", "bueno", "venga", "vamos", "si vamos", "si quiero", "si porfa", "listo",
+     "chevere", "si va", "dale pues", "fino", "va pues",
      "yes", "yeah", "yep", "sure", "ok", "okay", "yes please", "lets go", "lets play", "sure lets play"}
 )  # fmt: skip
 NO_WORDS: Final[frozenset[str]] = frozenset(
-    {"no", "no gracias", "ahora no", "luego", "mas tarde", "otro dia", "no quiero", "nope", "no thanks",
+    {"no", "no gracias", "ahora no", "ahorita no", "luego", "despues", "mas tarde", "otro dia", "no quiero", "nope",
+     "no thanks",
      "not now", "later", "maybe later"}
 )  # fmt: skip
 PAUSE_WORDS: Final[frozenset[str]] = frozenset(
-    {"pausa", "pausa el juego", "espera", "esperate", "un momento", "para el juego", "pause", "pause the game",
+    {"pausa", "pausa el juego", "espera", "esperate", "un momento", "un momentico", "ya va", "para el juego",
+     "pause", "pause the game",
      "wait", "hold on", "time out"}
 )  # fmt: skip
 RESUME_WORDS: Final[frozenset[str]] = frozenset(

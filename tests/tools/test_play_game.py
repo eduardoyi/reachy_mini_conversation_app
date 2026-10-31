@@ -57,7 +57,7 @@ async def test_unknown_games_and_no_host() -> None:
     """An unknown game lists the games; without the game host nothing starts."""
     tool = PlayGame()
     unknown = await tool(_deps(_Host()), game="chess", action="rules")
-    assert unknown["games"] == ["colors", "treasure"]
+    assert unknown["games"] == ["colors", "treasure", "simon"]
     missing = await tool(_deps(None), game="colors", action="rules")
     assert "not available" in missing["error"]
 

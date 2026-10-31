@@ -101,7 +101,7 @@ async def test_a_word_is_written_one_letter_per_pat(tmp_path: Path) -> None:
     await room.pat()
 
     assert not room.writing.active
-    assert room.said[-1] == "¡Muy bien! Has escrito papá."
+    assert room.said[-1] == "¡Muy bien! Escribiste papá."
     assert room.display.owner() == "requested"  # the finished word follows the usual screen rules
     assert room.quiet[-1] is False
 
@@ -124,7 +124,7 @@ async def test_words_heard_in_the_room_step_go_back_and_end(tmp_path: Path) -> N
 
     assert room.writing.hear("Ya terminé")
     assert not room.writing.active
-    assert room.said[-1] == "Vale, lo dejamos aquí."
+    assert room.said[-1] == "Listo, lo dejamos aquí."
     assert room.display.owner() == "requested"
     await asyncio.sleep(0.15)
     assert room.quiet[-1] is False

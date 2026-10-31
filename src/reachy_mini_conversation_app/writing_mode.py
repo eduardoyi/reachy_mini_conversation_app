@@ -34,7 +34,7 @@ _LETTER_NAMES: Final[dict[str, str]] = {
     "A": "la a", "B": "la be", "C": "la ce", "D": "la de", "E": "la e", "F": "la efe", "G": "la ge",
     "H": "la hache", "I": "la i", "J": "la jota", "K": "la ka", "L": "la ele", "M": "la eme", "N": "la ene",
     "Ñ": "la eñe", "O": "la o", "P": "la pe", "Q": "la cu", "R": "la erre", "S": "la ese", "T": "la te",
-    "U": "la u", "V": "la uve", "W": "la uve doble", "X": "la equis", "Y": "la i griega", "Z": "la zeta",
+    "U": "la u", "V": "la ve", "W": "la doble ve", "X": "la equis", "Y": "la i griega", "Z": "la zeta",
     "Á": "la a con tilde", "É": "la e con tilde", "Í": "la i con tilde", "Ó": "la o con tilde",
     "Ú": "la u con tilde", "Ü": "la u con diéresis",
     "0": "el número cero", "1": "el número uno", "2": "el número dos", "3": "el número tres",
@@ -67,7 +67,7 @@ _END_WORDS: Final[frozenset[str]] = frozenset(
     {"ya termine", "termine", "he terminado", "se acabo", "ya no quiero", "no quiero mas", "basta", "fin", "para",
      "para ya"}
 )  # fmt: skip
-_STOPPED: Final[str] = "Vale, lo dejamos aquí."
+_STOPPED: Final[str] = "Listo, lo dejamos aquí."
 
 
 def writing_letters(text: str) -> list[str] | None:
@@ -221,7 +221,7 @@ class WritingMode:
         letters, text = self._letters, self._text
         self._end()
         self._display.show(render_writing(letters, len(letters)))
-        self._say(f"¡Muy bien! Has escrito {text.lower()}.", "es")
+        self._say(f"¡Muy bien! Escribiste {text.lower()}.", "es")
 
     def _back(self) -> None:
         if self._clock() - self._stepped_at < STEP_COOLDOWN_S:

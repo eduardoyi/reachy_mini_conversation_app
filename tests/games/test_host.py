@@ -79,7 +79,7 @@ async def test_no_or_another_answer_starts_nothing(room) -> None:
     reachy, host, made = room
     host.offer(GameRequest(COLOR_HUNT, "es"))
     reply = await host._start_answer("no")
-    assert reply.text == "Vale, otro día." and host.state is GameState.IDLE
+    assert reply.text == "Bueno, otro día." and host.state is GameState.IDLE
     host.offer(GameRequest(COLOR_HUNT, "en"))
     reply = await host._start_answer("what time is it")
     assert reply.text is None and host.state is GameState.IDLE and made == []
@@ -138,7 +138,7 @@ async def test_a_bare_para_is_left_alone_and_quit_words_end_the_game(room) -> No
     assert host.heard("se acabó el juego")
     await ticks(0.05)
     assert host.state is GameState.IDLE and reachy.restored == 1
-    assert reachy.said[-1] == "Vale, se acabó el juego."
+    assert reachy.said[-1] == "Listo, se acabó el juego."
 
 
 @pytest.mark.asyncio
@@ -155,7 +155,7 @@ async def test_his_name_alone_pauses_and_asks_whether_to_go_on(room) -> None:
     reply = await host.addressed("")
     await reply.after()
     ended = await reachy.expected[-1]("terminamos")
-    assert ended.text == "Vale, se acabó el juego." and host.state is GameState.IDLE
+    assert ended.text == "Listo, se acabó el juego." and host.state is GameState.IDLE
 
 
 @pytest.mark.asyncio
@@ -193,7 +193,7 @@ async def test_quit_and_pause_said_with_the_name(room) -> None:
     paused = await host.addressed("pausa")
     assert paused.text == "Pausa." and host.state is GameState.PAUSED
     ended = await host.addressed("se acabó el juego")
-    assert ended.text == "Vale, se acabó el juego." and host.state is GameState.IDLE
+    assert ended.text == "Listo, se acabó el juego." and host.state is GameState.IDLE
     assert await host.addressed("enciende la luz") is None  # no game: the request goes its usual way
 
 
@@ -228,7 +228,7 @@ async def test_a_call_pauses_and_quiet_or_a_long_pause_ends(room) -> None:
     await _playing(reachy, host)
     reachy.now += host_module.IDLE_END_S
     await ticks()
-    assert host.state is GameState.IDLE and reachy.said[-1] == "Vale, se acabó el juego."
+    assert host.state is GameState.IDLE and reachy.said[-1] == "Listo, se acabó el juego."
 
 
 @pytest.mark.asyncio

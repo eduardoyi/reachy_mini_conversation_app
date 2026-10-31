@@ -488,7 +488,8 @@ def render_game_picture(picture: Image.Image, word: str, stars: int, total: int,
     lines = _wrapped(word, font, width, 3)
     middle = 230 - len(lines) * int(font.size * 1.2) / 2
     _draw_lines(draw, lines, font, left=left, width=width, top=int(middle), centered=True)
-    size, gap = 40, 12
+    gap = 12
+    size = min(40, (width - (total - 1) * gap) // max(total, 1))  # eight or ten stars still fit the column
     first = left + (width - total * size - (total - 1) * gap) / 2
     for index in range(total):
         _draw_star(draw, first + index * (size + gap) + size / 2, HEIGHT - 70, size / 2, filled=index < stars)

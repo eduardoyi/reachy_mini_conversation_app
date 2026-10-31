@@ -24,7 +24,7 @@ TARGETS: Final[dict[str, tuple[str, str, frozenset[str]]]] = {
     "green": ("verde", "green", frozenset({"green"})),
     "blue": ("azul", "blue", frozenset({"blue", "purple"})),
     "purple": ("morado", "purple", frozenset({"purple", "pink", "blue"})),
-    "pink": ("rosa", "pink", frozenset({"pink", "red", "orange"})),
+    "pink": ("rosado", "pink", frozenset({"pink", "red", "orange"})),
     "brown": ("marrón", "brown", frozenset({"brown", "orange", "black"})),
     "white": ("blanco", "white", frozenset({"white", "gray"})),
     "black": ("negro", "black", frozenset({"black", "gray", "brown"})),

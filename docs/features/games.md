@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-10-31 (treasure hunt and wider colors added)
+- Last updated: 2026-10-31 (treasure hunt, wider colors, Simón dice, Venezuelan Spanish)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -11,13 +11,19 @@ end the same way. A game runs on the Mac mini with no Gemini session open: the r
 locally, the lines are cached by the reply voice, and only narrow judgments go to the cloud (Jev on a camera
 frame, a small fraction of a cent).
 
-Two games so far, both finding games on one engine (`games/hunt.py`):
+Three games so far. The Spanish is Venezuelan (2026-10-31): "listo", "bueno", "una media", "un carrito",
+"rosado", "cachetes"; "ya va" pauses, and "listo", "chévere", "dale" say yes.
+
+Two finding games on one engine (`games/hunt.py`):
 
 - the **color hunt** ("juguemos a los colores", "let's play color hunt"): Reachy names a color, a tune speeds
   up for 30 seconds, and the children show him something of that color;
 - the **treasure hunt** ("juguemos a buscar tesoros", "let's play treasure hunt"): Reachy names something
   from around the house (a ball, a shoe, a Lego, an animal, something round), the screen shows a drawing of
   it, and they have 60 seconds to find it and show it.
+
+And **Simón dice** ("juguemos a Simón dice", "let's play Simon says"): Reachy names a still pose ("Simón dice:
+¡tócate la nariz!"), the screen shows a child doing it, and the camera checks they do it and hold still.
 
 Out of scope for now: flashing the room lights in the game's color (the light systems do not report a lamp's
 current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
@@ -28,7 +34,7 @@ practice on the host, and every other game from the 2026-10-30 brainstorm.
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's
   play color hunt" / "play the color game". Reachy asks first, with a one-line pitch: "¿Jugamos a los
   colores? Yo digo un color y tú me traes algo de ese color." "Sí", "vale", "dale", "yes", "ok", or a pat on
-  his head starts it; "no" gets "Vale, otro día."; silence or anything else (30 s) starts nothing. The yes
+  his head starts it; "no" gets "Bueno, otro día."; silence or anything else (30 s) starts nothing. The yes
   guards against starts from the TV or chatter. "Juguemos" alone asks "¿A qué jugamos? Puedo jugar a los
   colores."; answering with a game's name starts it. "Play Coldplay" stays music.
 - **Starting through Gemini:** the `play_game` tool is always offered. Gemini must read a game's rules
@@ -45,7 +51,7 @@ practice on the host, and every other game from the 2026-10-30 brainstorm.
   head is held still so a pat resumes. "Seguimos", "continue", "sí" or a pat plays on. 10 minutes paused ends
   the game. An incoming WhatsApp call pauses it.
 - **Quit:** "se acabó el juego", "terminamos", "ya no quiero jugar", "stop the game", "game over" (with or
-  without the name), or End in the admin app: "Vale, se acabó el juego." A bare "para" or "stop" does not
+  without the name), or End in the admin app: "Listo, se acabó el juego." A bare "para" or "stop" does not
   count (children shout it in games).
 - **Other requests mid-game:** "Richie, enciende la luz" gets "Estamos jugando a los colores. ¿Lo
   terminamos?". Yes ends the game and then turns the light on (as if just asked: quick command or Gemini); no,
@@ -73,8 +79,8 @@ practice on the host, and every other game from the 2026-10-30 brainstorm.
 
 ### The treasure hunt
 
-- Things at home: una pelota, un zapato, un calcetín, un libro, un peluche, un coche de juguete, una cuchara,
-  un vaso, un gorro, una muñeca, un Lego, una pintura o un lápiz. Groups: un animal, una fruta, algo con
+- Things at home: una pelota, un zapato, una media, un libro, un peluche, un carrito, una cuchara, un vaso,
+  una gorra, una muñeca, un Lego, un creyón o un lápiz. Groups: un animal, una fruta, algo con
   ruedas, algo redondo, algo cuadrado, algo blando, algo con letras, algo más pequeño que tu mano. No letters
   ("algo que empieza con P") and no combinations ("algo verde y redondo") yet. No repeats within five rounds.
 - The screen shows a drawing of the thing on the left (for the 2-year-old) and its name on the right. The
@@ -85,6 +91,23 @@ practice on the host, and every other game from the 2026-10-30 brainstorm.
   up surely (≥ 0.7) and surely not it (≤ 0.15): "Mmm, eso no. ¡Busca una pelota!", at most every 5 s. These two
   thresholds were not tested on real frames.
 - Rounds last 60 s with the same tune speeding up; "¡Se acabó el tiempo! Era una pelota." when nothing is found.
+
+### Simón dice
+
+- 47 still poses Jev judges from one frame (no sounds or movement, chosen 2026-10-31): face and head (tócate
+  la nariz, tápate los ojos, pon cara de bravo, saca la lengua, mira hacia arriba…), arms (levanta los brazos,
+  haz el avión, saca músculos, brazos de zombi…), hands and fingers (pulgar arriba, un corazón con las manos,
+  cachos de toro, enséñame dos dedos, orejas de conejo…) and the whole body (agáchate, siéntate en el piso,
+  párate en un pie, voltéate de espaldas, haz una estrella…). `games/simon_says.py` `POSES` has each one's words,
+  what Jev is asked ("Is a person in `frame` touching their nose with a finger?") and its drawing.
+- Eight poses a game, random, close-up ones first; before the first whole-body pose "¡Da un paso hacia
+  atrás!", after the last "¡Ahora acércate!". For "mira hacia arriba" and "mira hacia un lado" Reachy turns his
+  head too, and back after.
+- Each pose: "Simón dice: ¡tócate la nariz!", the screen shows a drawing of a child doing it (for the
+  2-year-old; the 47 drawings are made once like the treasure ones) beside short words, then 8 s of play for
+  two of the last three checked frames to show it (≥ 0.6, untested on real frames). Done: a cheer ("¡Muy
+  bien!", "¡Eso!", "¡Chévere!", "¡Perfecto!"), a happy move, a star. Not done: "¡Así! Mira la pantalla." and on.
+  Nobody loses; "¡Ocho estrellas!" and "¿Otra vez?" at the end. No trick rounds (without "Simón dice") yet.
 
 ## Current architecture
 
@@ -125,6 +148,7 @@ flowchart LR
 | Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext`, `Game` (`phrases`, `play`, `heard`, `paused`) |
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line, "¿Otra vez?"), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
+| Simón dice | `games/simon_says.py` | `SimonSays`, `POSES` (words, Jev question, drawing, whole body, head gesture), `pose_drawings()`, `simon_says_phrases()` |
 | Treasure hunt | `games/treasure_hunt.py` | `TreasureHunt`, `TREASURES` (names, what Jev is asked, drawing subject), `treasure_drawings()`, `treasure_hunt_phrases()` |
 | Jev client | `jev.py` | `ask(client, api_key, model, state, questions, images, feature)`, `sized_jpeg`, `JevError` |
 | Tool | `tools/play_game.py` | `play_game(game, action=rules|start, language)`; direct (not a skill); added with `games_configured()` |

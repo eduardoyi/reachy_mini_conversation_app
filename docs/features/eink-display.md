@@ -117,8 +117,8 @@ Spanish spelling). The child copies it on paper, then:
 
 - a pat on Reachy's head, or a room transcript that is only "ya", "listo", "siguiente"… (no name needed), or
   "Richie, siguiente" → the next letter, at most one step every 2 s (a pat with a "¡ya!" is one step);
-- "otra vez" / "atrás" → the previous letter; "ya terminé" → "Vale, lo dejamos aquí.";
-- after the last letter: the whole word with "¡Muy bien!" and "¡Muy bien! Has escrito papá.";
+- "otra vez" / "atrás" → the previous letter; "ya terminé" → "Listo, lo dejamos aquí.";
+- after the last letter: the whole word with "¡Muy bien!" and "¡Muy bien! Escribiste papá.";
 - 10 minutes without a step, or any other request to Reachy (quick command or conversation), ends it.
 
 How it stays cheap: the start is a quick command ("enséñame / ayúdame / quiero / vamos a escribir X") with no

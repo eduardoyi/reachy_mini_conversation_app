@@ -40,6 +40,7 @@ class FakeReachy:
         self.questions: list[dict[str, Any]] = []
         self.pictures: dict[str, Any] = {}
         self.drawn: list[list[str]] = []
+        self.gestures: list[str] = []
         self.jev_answer: Callable[[], dict[str, dict[str, Any]]] | None = None
         self.services = GameServices(
             speak=self._speak,
@@ -58,6 +59,7 @@ class FakeReachy:
             call_busy=lambda: self.busy,
             picture=self.pictures.get,
             draw_pictures=self._draw_pictures,
+            gesture=self._gesture,
             clock=time.monotonic if real_clock else (lambda: self.now),
         )
 
@@ -73,6 +75,9 @@ class FakeReachy:
     async def _draw_pictures(self, subjects: list[str]) -> None:
         self.drawn.append(subjects)
 
+    async def _gesture(self, direction: str) -> None:
+        self.gestures.append(direction)
+
     async def _pause_music(self) -> None:
         self.music_paused += 1
 
@@ -83,7 +88,7 @@ class FakeReachy:
 
     async def _jev(self, state: dict[str, Any], questions: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
         self.jev_calls += 1
-        assert "frame" in images and "held" in questions
+        assert "frame" in images
         self.questions.append(questions)
         assert self.jev_answer is not None
         return self.jev_answer()
