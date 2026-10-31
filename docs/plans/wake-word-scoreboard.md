@@ -1,6 +1,6 @@
 # Plan: Measure the wake word, then improve it every night
 
-- Status: `in-progress` (build steps 1–4 built on branch `worktree-wake-word-loop` 2026-10-31; not yet deployed)
+- Status: `in-progress` (build steps 1–4 live on the Mac mini since 2026-10-31 17:58; first night 2026-11-01 02:15)
 - Last updated: 2026-10-31
 - Feature docs: [Wake learning](../features/wake-learning.md), [Wake word](../features/wake-word.md),
   [Hybrid runtime](../features/hybrid-runtime.md),
@@ -394,3 +394,4 @@ Every variant fit the false-fire budget at its lowest threshold (0.2), so the bu
 | 2026-10-31 | Cadence set to nightly training with shadow mode and swaps Eduardo approves. Everything people do (missed me, clip check, enrolment, approving swaps) is designed into the admin app with one daily reminder push. |
 | 2026-10-31 | Round 2: an official33 fine-tune catches 23 of 36 calls only the transcript caught (at 0.5), but fires on 3–15% of random room samples where the live pair fired on none; not switched in. The continuous feature log moves into build step 1. |
 | 2026-10-31 | Built steps 1–4 on their own branch (another session was editing `hybrid_runtime.py` in the main checkout): one record per fire (`events.jsonl`) with clips of 10 s before and 1.5 s after, no deafness after a rejected wake (`rearm`), the feature log, shadow heads, "missed me" (voice, phone, antenna), recordings of the name (`/wake/take`), the nightly job (`reachy-wake-nightly`) with the trainer script, and the admin app's card, clip check, switch/undo and daily reminder. See [wake-learning.md](../features/wake-learning.md). |
+| 2026-10-31 | Deployed (`3a6795d`, then `9db7b37` for owner-only folders) after merging main's game host: all 2,853 tests, ruff and mypy green. On the mini: `WAKE_LEARNING_ENABLED=1`, `WAKE_TRAINER_PYTHON` set to the retrain venv, `WAKE_REMINDER_TIME=19:30`, LaunchAgent `com.eduardo.reachy-wake-nightly` at 02:15. A manual night seeded the live head (`reachy-richi`, 0.9). After the restart the log shows "Wake learning enabled: live head reachy-richi, shadow head none", feature files are written (`0700` folders), events are recorded, and the control API (`in_call`, `/wake/take`, `/wake/missed`) and the admin app's `/api/wake` answer. Not yet seen: a real night with labelled days, training (needs two days of the feature log), a clip check or push on a phone. |

@@ -1,6 +1,6 @@
 # Feature: Wake learning
 
-- Status: `in-progress` (built 2026-10-31; first nights on the Mac mini pending)
+- Status: `in-progress` (live on the Mac mini since 2026-10-31; first nights pending)
 - Last updated: 2026-10-31
 - Plan: [wake-word-scoreboard.md](../plans/wake-word-scoreboard.md)
 - Related: [Wake word](wake-word.md), [Wake clip capture](wake-clip-capture.md), [Phone admin app](phone-admin-app.md)
