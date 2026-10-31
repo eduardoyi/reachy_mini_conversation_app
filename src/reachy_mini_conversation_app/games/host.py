@@ -11,7 +11,7 @@ before the game comes back when it ends.
 import enum
 import asyncio
 import logging
-from typing import Any, Final, Callable, Awaitable
+from typing import Any, Final, Callable, Iterable, Awaitable
 
 from reachy_mini_conversation_app.games.base import Game, GameContext, GameServices
 from reachy_mini_conversation_app.eink_display import render_game_paused
@@ -66,8 +66,9 @@ class GameState(enum.Enum):
     PAUSED = "paused"
 
 
-def _titles(language: str) -> str:
-    titles = [game.title[language] for game in GAMES.values()]
+def _titles(language: str, keys: Iterable[str] = GAMES) -> str:
+    """Name the games ``keys`` for the "which game?" question: "a los colores y a buscar tesoros"."""
+    titles = [GAMES[key].title[language] for key in keys if key in GAMES]
     joiner = " y " if language == "es" else " and "
     return titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + joiner + titles[-1]
 
@@ -142,13 +143,13 @@ class GameHost:
         self._offered, self._language, self._asked_at = game, language, self._services.clock()
         self._set_state(GameState.ASKING)
         if game is None:
-            text = _MENU[language].format(titles=_titles(language))
+            text = _MENU[language].format(titles=_titles(language, self._factories))
         else:
             text = _ASK[language].format(title=game.title[language], pitch=game.pitch[language])
         logger.info("Game offered: %s", game.key if game is not None else "which game")
 
         async def listen() -> str | None:
-            self._services.expect_answer(self._start_answer)
+            self._services.expect_answer(self._start_answer, language)
             return None
 
         return QuickReply(text, language, "game", after=listen)
@@ -266,7 +267,7 @@ class GameHost:
 
     def _question(self, text: str, answer: Callable[[str], Awaitable[object]]) -> QuickReply:
         async def listen() -> str | None:
-            self._services.expect_answer(answer)
+            self._services.expect_answer(answer, self._language)
             return None
 
         return QuickReply(text, self._language, "game", after=listen)

@@ -109,20 +109,21 @@ class OpenAICompatibleLocalSTT:
         self.max_audio_seconds = max_audio_seconds
         self._transport = transport
 
-    async def transcribe_request(self, audio: AudioFrame) -> str:
-        """Transcribe a request addressed to Reachy with the accurate model, when one is set."""
-        return await self.transcribe(audio, model=self.request_model)
+    async def transcribe_request(self, audio: AudioFrame, *, language: str = "") -> str:
+        """Transcribe a request addressed to Reachy with the accurate model, when one is set, in ``language`` if given."""
+        return await self.transcribe(audio, model=self.request_model, language=language)
 
-    async def transcribe(self, audio: AudioFrame, *, model: str | None = None) -> str:
-        """Send a bounded in-memory WAV request and return derived text only."""
+    async def transcribe(self, audio: AudioFrame, *, model: str | None = None, language: str = "") -> str:
+        """Send a bounded in-memory WAV request and return derived text only; ``language`` overrides the hint."""
         wav_payload = _encode_wav(
             audio,
             target_sample_rate=self.target_sample_rate,
             max_audio_seconds=self.max_audio_seconds,
         )
         request_data = {"model": model or self.model}
-        if self.language is not None:
-            request_data["language"] = self.language
+        hint = _normalize_language(language) or self.language
+        if hint is not None:
+            request_data["language"] = hint
         request_files = {"file": ("audio.wav", wav_payload, "audio/wav")}
 
         client = httpx.AsyncClient(transport=self._transport, timeout=self.timeout_seconds, trust_env=False)

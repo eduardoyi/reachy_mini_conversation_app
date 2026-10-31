@@ -37,11 +37,14 @@ class FakeReachy:
         self.frames: deque[bytes] = deque()
         self.last_frame: bytes | None = None
         self.jev_calls = 0
+        self.questions: list[dict[str, Any]] = []
+        self.pictures: dict[str, Any] = {}
+        self.drawn: list[list[str]] = []
         self.jev_answer: Callable[[], dict[str, dict[str, Any]]] | None = None
         self.services = GameServices(
             speak=self._speak,
             ask=lambda text, language, answer: (self.said.append(text), self.asked.append((text, answer))),
-            expect_answer=self.expected.append,
+            expect_answer=lambda answer, language: self.expected.append(answer),
             play_audio=lambda rate, samples: self.audio.append(samples) is None,
             show=self.screens.append,
             save_screen=self._save_screen,
@@ -53,6 +56,8 @@ class FakeReachy:
             jev=self._jev,
             emotion=self.emotions.append,
             call_busy=lambda: self.busy,
+            picture=self.pictures.get,
+            draw_pictures=self._draw_pictures,
             clock=time.monotonic if real_clock else (lambda: self.now),
         )
 
@@ -65,6 +70,9 @@ class FakeReachy:
 
         return restore
 
+    async def _draw_pictures(self, subjects: list[str]) -> None:
+        self.drawn.append(subjects)
+
     async def _pause_music(self) -> None:
         self.music_paused += 1
 
@@ -75,7 +83,8 @@ class FakeReachy:
 
     async def _jev(self, state: dict[str, Any], questions: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
         self.jev_calls += 1
-        assert "frame" in images and set(questions) == {"held", "color"}
+        assert "frame" in images and "held" in questions
+        self.questions.append(questions)
         assert self.jev_answer is not None
         return self.jev_answer()
 

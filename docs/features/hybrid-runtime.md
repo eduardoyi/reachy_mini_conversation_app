@@ -1039,6 +1039,14 @@ countdown and skips `after`. Used by [Photos to WhatsApp](whatsapp-photos.md); t
 `test_no_answer_after_a_question_goes_back_to_listening_for_the_name`,
 `test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer`.
 
+`expect_answer(handler, language)` takes the language the question was asked in (send-to, Maribel's
+questions, games and announcements pass it). Qwen picks any language on its own, and on short answers it
+can pick the wrong one: on 2026-10-31 "Familia Yi" came back as "फैमिलिया जी" three times, so the photo
+never went. An answer whose text is not mostly Latin script (`is_mostly_latin`) is transcribed once more
+with that language forced (`RequestTranscriber`, `transcribe_request(audio, language=…)`), logged as
+"Request clip not in Latin script; transcribing again in es". Test:
+`test_an_answer_heard_in_another_script_is_transcribed_again_in_the_question_language`.
+
 ### Voice messages — 2026-10-29
 
 `record_message(touches)` runs inside a quick command's `after` step: it plays `local_speech.beep()` through

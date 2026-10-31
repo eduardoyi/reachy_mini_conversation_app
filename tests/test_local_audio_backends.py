@@ -388,3 +388,15 @@ async def test_request_transcription_names_the_accurate_model() -> None:
     await client.transcribe(_frame(np.ones(160, dtype=np.int16)))
     body = await transport.request.aread()
     assert b"whisper-small" in body and b"turbo" not in body
+
+
+@pytest.mark.asyncio
+async def test_a_request_can_be_transcribed_in_one_language() -> None:
+    """An answer Reachy expects in Spanish asks the server for Spanish instead of letting it pick."""
+    transport = RecordingTransport()
+    client = OpenAICompatibleLocalSTT("http://127.0.0.1:8765", request_model="turbo", transport=transport)
+    await client.transcribe_request(_frame(np.ones(160, dtype=np.int16)), language="es")
+    assert transport.request is not None
+    assert b'name="language"\r\n\r\nes\r\n' in await transport.request.aread()
+    await client.transcribe_request(_frame(np.ones(160, dtype=np.int16)))
+    assert b'name="language"' not in await transport.request.aread()
