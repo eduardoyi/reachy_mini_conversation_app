@@ -118,7 +118,7 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
 | `ADMIN_PORT` | 7870 | The admin app's loopback port. |
 | `ADMIN_DATA_DIR` | `~/.local/share/reachy-admin` | Audit log, push subscriptions, VAPID key. |
 | `ADMIN_ENV_FILE` | the app's `.env` | The file Settings edits. |
-| `ADMIN_APP_SERVICE` | (none: no restart) | The app's LaunchAgent label, for `launchctl kickstart -k`. |
+| `ADMIN_APP_SERVICE` | (none: no restart) | The app's LaunchAgent label. Restart sends the app SIGINT, waits up to 2 minutes for it and any `start-reachy` launcher to exit (the launcher may stop the daemon on its way out), then runs `launchctl kickstart -k`; nothing is started if something is still running. No "Reachy stopped" notification for 5 minutes after. |
 | `REACHY_DAEMON_URL` | `http://127.0.0.1:8000` | For the volume. |
 | `APP_CONTROL_PORT` | 7861 | The app's control API. |
 | `APP_CONTROL_TOKEN_FILE` | `~/.local/share/reachy/control-token` | Shared token. |

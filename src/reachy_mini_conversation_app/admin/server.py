@@ -10,6 +10,7 @@ header (a Funnel request, or another program on this computer). Changes must com
 import os
 import sys
 import json
+import time
 import shutil
 import asyncio
 import logging
@@ -57,6 +58,13 @@ MAX_PHOTOS_BYTES: Final[int] = 12 * 1024 * 1024
 DISPLAY_RECENT_S: Final[float] = 15 * 60
 STATIC_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "admin"
 _NO_STORE: Final[dict[str, str]] = {"Cache-Control": "no-store"}
+# A restart stops the conversation app with SIGINT (its clean shutdown) and waits for it and its launcher
+# scripts (which may stop the robot daemon on their way out) before its LaunchAgent starts it again.
+APP_PROCESS: Final[str] = "bin/reachy-mini-conversation-app"
+LAUNCHER_PROCESS: Final[str] = "start-reachy"
+RESTART_STOP_S: Final[float] = 120
+# No "Reachy stopped" notification this long after a restart from the app.
+RESTART_QUIET_S: Final[float] = 300
 
 
 @dataclass(frozen=True)
@@ -138,6 +146,29 @@ async def _json_body(request: Request, max_bytes: int = MAX_BODY_BYTES) -> dict[
     return payload if isinstance(payload, dict) else Response(status_code=400, headers=_NO_STORE)
 
 
+async def run_command(*args: str) -> tuple[int, str]:
+    """Run ``args`` and return its exit code and error output."""
+    process = await asyncio.create_subprocess_exec(
+        *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await process.communicate()
+    return process.returncode or 0, stderr.decode(errors="replace").strip()
+
+
+async def restart_app(service: str) -> None:
+    """Stop the conversation app, wait for it and its launcher to finish, then start its LaunchAgent."""
+    await run_command("pkill", "-INT", "-f", APP_PROCESS)
+    deadline = asyncio.get_running_loop().time() + RESTART_STOP_S
+    while (await run_command("pgrep", "-f", f"{APP_PROCESS}|{LAUNCHER_PROCESS}"))[0] == 0:
+        if asyncio.get_running_loop().time() > deadline:
+            logger.warning("Restart skipped: Reachy or its launcher still running after %.0fs", RESTART_STOP_S)
+            return
+        await asyncio.sleep(1)
+    code, error = await run_command("launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{service}")
+    if code != 0:
+        logger.warning("Restart failed: launchctl exited %s: %s", code, error)
+
+
 def _relay(response: httpx.Response) -> Response:
     """Pass the control API's JSON answer through."""
     return Response(
@@ -161,6 +192,8 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
         else None
     )
     http = httpx.AsyncClient(timeout=5.0)
+    restarts: set[asyncio.Task[None]] = set()
+    restarted_at: list[float] = []
 
     async def faces() -> list[dict[str, Any]] | None:
         try:
@@ -198,7 +231,11 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
             pass
         free = shutil.disk_usage(Path.home()).free
         return {
-            "app": {"running": app_status is not None, **(app_status or {})},
+            "app": {
+                "running": app_status is not None,
+                "restarting": bool(restarted_at) and time.monotonic() - restarted_at[-1] < RESTART_QUIET_S,
+                **(app_status or {}),
+            },
             "privacy": privacy,
             "whatsapp": whatsapp_state,
             "calls": {"ok": calls_linked, "detail": "" if calls_linked else "Call service not connected"},
@@ -434,14 +471,12 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
     async def _restart(request: Request) -> Response:
         if not settings.app_service or sys.platform != "darwin":
             return _error("Restarting is not set up (ADMIN_APP_SERVICE).", 404)
-        target = f"gui/{os.getuid()}/{settings.app_service}"
-        process = await asyncio.create_subprocess_exec(
-            "launchctl", "kickstart", "-k", target, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await process.communicate()
-        if process.returncode != 0:
-            logger.warning("Restart failed: launchctl exited %s", process.returncode)
-            return _error(stderr.decode(errors="replace").strip() or "Restart failed.", 502)
+        if restarts:
+            return _error("Reachy is already restarting.", 409)
+        restarted_at.append(time.monotonic())
+        task = asyncio.create_task(restart_app(settings.app_service))
+        restarts.add(task)
+        task.add_done_callback(restarts.discard)
         audit.append({"who": _who(request), "action": "restarted Reachy"})
         return JSONResponse({"restarted": True})
 

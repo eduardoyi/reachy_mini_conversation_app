@@ -319,6 +319,16 @@ async def test_app_stopping_is_notified_once(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_app_stopping_during_a_restart_from_the_app_is_not_notified(tmp_path: Path) -> None:
+    """A restart started from the admin app takes Reachy down on purpose; that is not news."""
+    restarting = _health(running=False)
+    restarting["app"]["restarting"] = True
+    watch, fake, _ = _watch(tmp_path, _health(), restarting, _health())
+    await _run_checks(watch, 3)
+    assert fake.sent == []
+
+
+@pytest.mark.asyncio
 async def test_whatsapp_unlinking_is_notified_with_its_detail(tmp_path: Path) -> None:
     """WhatsApp going from linked to not linked is notified, with the server's message when there is one."""
     watch, fake, _ = _watch(

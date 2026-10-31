@@ -1,5 +1,6 @@
 """The household admin app's server: the Tailscale guard and each page's API, against a fake control API."""
 
+import sys
 import json
 from typing import Any
 from pathlib import Path
@@ -12,6 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from reachy_mini_conversation_app.admin import server
 from reachy_mini_conversation_app.json_lines import JsonLines
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.admin.server import AdminSettings, create_app
@@ -515,6 +517,65 @@ def test_restart_is_not_available_without_a_service(admin: Admin) -> None:
     assert admin.audit() == []
 
 
+def test_restart_runs_in_the_background_and_quiets_the_stopped_notice(
+    admin: Admin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a service, restart answers at once, is audited, and status says Reachy is restarting."""
+    started: list[str] = []
+
+    async def restart_app(service: str) -> None:
+        started.append(service)
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(server, "restart_app", restart_app)
+    with_service = AdminSettings(**{**admin.settings.__dict__, "app_service": "com.example.reachy"})
+    with admin.client(settings=with_service) as client:
+        assert client.post("/api/restart", headers=SAME_ORIGIN).json() == {"restarted": True}
+        assert client.get("/api/status").json()["app"]["restarting"] is True
+    assert started == ["com.example.reachy"]
+    assert [entry["action"] for entry in admin.audit()] == ["restarted Reachy"]
+
+
+@pytest.mark.asyncio
+async def test_restart_stops_the_app_waits_for_it_then_starts_the_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SIGINT to the app, wait while it or its launcher still runs, then kickstart the LaunchAgent."""
+    commands: list[tuple[str, ...]] = []
+    still_running = [0, 0, 1]  # pgrep finds something twice, then nothing
+
+    async def run_command(*args: str) -> tuple[int, str]:
+        commands.append(args)
+        return (still_running.pop(0), "") if args[0] == "pgrep" else (0, "")
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(server, "run_command", run_command)
+    monkeypatch.setattr(server.asyncio, "sleep", no_wait)
+    await server.restart_app("com.example.reachy")
+    assert commands[0] == ("pkill", "-INT", "-f", "bin/reachy-mini-conversation-app")
+    assert [c[0] for c in commands] == ["pkill", "pgrep", "pgrep", "pgrep", "launchctl"]
+    assert commands[-1][:3] == ("launchctl", "kickstart", "-k") and commands[-1][3].endswith("/com.example.reachy")
+
+
+@pytest.mark.asyncio
+async def test_restart_gives_up_when_the_app_does_not_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Something still running after the wait: nothing is started (a second Reachy would fight the first)."""
+    commands: list[str] = []
+
+    async def run_command(*args: str) -> tuple[int, str]:
+        commands.append(args[0])
+        return 0, ""
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(server, "run_command", run_command)
+    monkeypatch.setattr(server.asyncio, "sleep", no_wait)
+    monkeypatch.setattr(server, "RESTART_STOP_S", -1)
+    await server.restart_app("com.example.reachy")
+    assert "launchctl" not in commands
+
+
 @pytest.mark.parametrize("level", [-1, 101, 50.5, True, "50", None])
 def test_volume_level_must_be_0_to_100(admin: Admin, level: object) -> None:
     """Only whole numbers 0 to 100 are accepted."""
@@ -569,7 +630,7 @@ def test_status_while_the_app_is_down(admin: Admin) -> None:
     admin.control.down = True
     with admin.client() as client:
         payload = client.get("/api/status").json()
-    assert payload["app"] == {"running": False}
+    assert payload["app"] == {"running": False, "restarting": False}
     assert payload["privacy"] == {"on": False, "since": None}
     assert payload["calls"]["ok"] is None
 

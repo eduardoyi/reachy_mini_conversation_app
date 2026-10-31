@@ -144,7 +144,7 @@ class Watch:
     def _changes(self, last: dict[str, Any] | None, now: dict[str, Any]) -> list[tuple[str, str]]:
         changes = []
         if last is not None:
-            if last["app"]["running"] and not now["app"]["running"]:
+            if last["app"]["running"] and not now["app"]["running"] and not now["app"].get("restarting"):
                 changes.append(("Reachy stopped", "The conversation app is not running."))
             if last["whatsapp"]["ok"] and now["whatsapp"]["ok"] is False:
                 changes.append(("WhatsApp unlinked", now["whatsapp"]["detail"] or "Reachy's WhatsApp is not linked."))
