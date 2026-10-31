@@ -414,6 +414,16 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
     async def _face_upload(request: Request) -> Response:
         return await face_change(request, "/api/faces/upload", "face photos added", MAX_PHOTOS_BYTES)
 
+    @app.post("/api/faces/check")
+    async def _face_check(request: Request) -> Response:
+        payload = await _json_body(request, MAX_PHOTOS_BYTES)
+        if isinstance(payload, Response):
+            return payload
+        try:
+            return _relay(await link.request("POST", "/api/faces/check", json=payload))
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+
     @app.post("/api/faces/enroll")
     async def _face_enroll(request: Request) -> Response:
         return await face_change(request, "/api/faces/enroll", "face enrolled from the camera")

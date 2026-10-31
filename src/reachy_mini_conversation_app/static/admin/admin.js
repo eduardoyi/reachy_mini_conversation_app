@@ -57,9 +57,16 @@ function toast(message, tone = "good") {
   const box = $("#toast");
   box.replaceChildren(icon(tone === "bad" ? "alert" : "check"), el("span", {}, message));
   box.dataset.tone = tone;
-  box.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (box.hidden = true), tone === "bad" ? 5000 : 3000);
+  // A popover sits in the top layer, so the message shows above an open sheet too; reopening keeps it on top.
+  if (box.showPopover) {
+    if (box.matches(":popover-open")) box.hidePopover();
+    box.showPopover();
+    toast.timer = setTimeout(() => box.hidePopover(), tone === "bad" ? 5000 : 3000);
+  } else {
+    box.hidden = false;
+    toast.timer = setTimeout(() => (box.hidden = true), tone === "bad" ? 5000 : 3000);
+  }
 }
 
 async function run(button, action) {
@@ -459,6 +466,7 @@ function openPerson(index) {
   $("#person-delete").hidden = index === null;
   $("#person-delete").querySelector("span").textContent = index === null ? "Remove" : `Remove ${person.name}`;
   $("#person-error").hidden = true;
+  $("#face-note").hidden = true;
   renderDraft();
   showPersonMemories(person);
   $("#person-sheet").showModal();
@@ -537,7 +545,7 @@ function faceName() {
 }
 
 // Cropping: the box is kept as fractions of the photo, so it maps straight onto the full-size image.
-const crop = { box: null, resolve: null, drag: null };
+const crop = { box: null, resolve: null, drag: null, url: null, anyway: false };
 const CROP_MIN = 0.08;
 
 function placeCropBox() {
@@ -546,10 +554,11 @@ function placeCropBox() {
   Object.assign(box.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
 }
 
-function cropPhoto(file, index, total) {
+function loadCropImage(file) {
   return new Promise((resolve, reject) => {
     const image = $("#crop-image");
-    const url = URL.createObjectURL(file);
+    if (crop.url) URL.revokeObjectURL(crop.url);
+    crop.url = URL.createObjectURL(file);
     image.onload = () => {
       // A centred square a little over half the shorter side, as a starting point around one face.
       const side = 0.6 * Math.min(image.naturalWidth, image.naturalHeight);
@@ -557,24 +566,90 @@ function cropPhoto(file, index, total) {
       const h = side / image.naturalHeight;
       crop.box = { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
       placeCropBox();
+      resolve();
     };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("That photo couldn't be read."));
-    };
-    image.src = url;
+    image.onerror = () => reject(new Error("That photo couldn't be read."));
+    image.src = crop.url;
+  });
+}
+
+function showCropProblem(text) {
+  const problem = $("#crop-problem");
+  problem.textContent = text || "";
+  problem.hidden = !text;
+  $("#crop-use").textContent = crop.anyway ? "Use anyway" : "Use this";
+}
+
+// Shows one photo to crop; resolves with its JPEG once Reachy says it would work, or with "skip" or "cancel".
+function cropPhoto(file, index, total, name) {
+  return new Promise((resolve, reject) => {
+    crop.anyway = false;
+    showCropProblem("");
     $("#crop-title").textContent = total > 1 ? `Photo ${index + 1} of ${total}` : "";
-    crop.resolve = (choice) => {
-      crop.resolve = null;
-      resolve(choice === "skip" || choice === "cancel" ? choice : cropToJpeg(image, choice === "whole" ? null : crop.box));
-      URL.revokeObjectURL(url);
+    loadCropImage(file).catch(() => showCropProblem("This photo couldn't be read. Pick another one."));
+    crop.resolve = async (choice) => {
+      if (choice === "skip" || choice === "cancel") {
+        crop.resolve = null;
+        resolve(choice);
+        return;
+      }
+      if (!$("#crop-image").naturalWidth) return;
+      const jpeg = cropToJpeg($("#crop-image"), choice === "whole" ? null : crop.box);
+      const verdict = crop.anyway ? { ok: true } : await checkFacePhoto(name, jpeg);
+      if (verdict.ok) {
+        crop.resolve = null;
+        resolve(jpeg);
+        return;
+      }
+      crop.anyway = verdict.problem === "someone_else";
+      showCropProblem(CROP_PROBLEMS[verdict.problem]?.(verdict.detail, name) || "Reachy can't use this one. Try another photo.");
     };
     if (!$("#crop-sheet").open) $("#crop-sheet").showModal();
   });
 }
 
+const CROP_PROBLEMS = {
+  no_face: () => "Reachy can't see a whole face here. Make the box bigger, or pick another photo.",
+  several_faces: () => "There's more than one face in the box. Make it smaller, around just them.",
+  unreadable: () => "This photo couldn't be read. Pick another one.",
+  someone_else: (other, name) => `This looks like ${other}, not ${name}. Move the box, or use it anyway.`,
+};
+
+async function checkFacePhoto(name, jpeg) {
+  const button = $("#crop-use");
+  const label = button.textContent;
+  for (const each of document.querySelectorAll(".crop-actions button")) each.disabled = true;
+  button.textContent = "Checking…";
+  try {
+    return await api("/api/faces/check", { method: "POST", body: { name, photo: jpeg } });
+  } catch (error) {
+    return { ok: true }; // can't check now: the upload checks again
+  } finally {
+    for (const each of document.querySelectorAll(".crop-actions button")) each.disabled = false;
+    button.textContent = label;
+  }
+}
+
+$("#crop-replace").addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  event.target.value = "";
+  if (!file) return;
+  crop.anyway = false;
+  showCropProblem("");
+  loadCropImage(file).catch(() => showCropProblem("This photo couldn't be read. Pick another one."));
+});
+$("#crop-another").addEventListener("click", () => $("#crop-replace").click());
+
+// Reachy refuses a face that touches the photo's edge, so a box drawn tight around a face gets some room added.
+const CROP_ROOM = 0.15;
+
 function cropToJpeg(image, box) {
-  const area = box || { x: 0, y: 0, w: 1, h: 1 };
+  let area = { x: 0, y: 0, w: 1, h: 1 };
+  if (box) {
+    const x = Math.max(0, box.x - box.w * CROP_ROOM);
+    const y = Math.max(0, box.y - box.h * CROP_ROOM);
+    area = { x, y, w: Math.min(1, box.x + box.w * (1 + CROP_ROOM)) - x, h: Math.min(1, box.y + box.h * (1 + CROP_ROOM)) - y };
+  }
   const sx = area.x * image.naturalWidth;
   const sy = area.y * image.naturalHeight;
   const sw = area.w * image.naturalWidth;
@@ -628,6 +703,10 @@ $("#crop-frame").addEventListener("pointermove", (event) => {
   }
   crop.box = { x, y, w, h };
   placeCropBox();
+  if (crop.anyway) {
+    crop.anyway = false;
+    showCropProblem("");
+  }
 });
 
 for (const name of ["pointerup", "pointercancel"]) {
@@ -654,7 +733,7 @@ $("#face-upload").addEventListener("change", (event) => {
     const photos = [];
     try {
       for (const [index, file] of files.entries()) {
-        const choice = await cropPhoto(file, index, files.length);
+        const choice = await cropPhoto(file, index, files.length, name);
         if (choice === "cancel") return;
         if (choice !== "skip") photos.push(choice);
       }
@@ -662,14 +741,46 @@ $("#face-upload").addEventListener("change", (event) => {
       $("#crop-sheet").close();
     }
     if (!photos.length) return;
-    toast("Adding photos…");
-    const result = await api("/api/faces/upload", { method: "POST", body: { name, photos } });
+    const note = $("#face-note");
+    note.hidden = true;
+    toast(photos.length > 1 ? `Adding ${photos.length} photos…` : "Adding the photo…");
+    let result;
+    try {
+      result = await api("/api/faces/upload", { method: "POST", body: { name, photos } });
+    } catch (error) {
+      note.className = "face-note bad";
+      note.replaceChildren(faceProblem(error.message, photos.length));
+      note.hidden = false;
+      $("#toast").hidePopover?.();
+      return;
+    }
     state.draft.face = result.person.id;
     await refreshFaces();
-    const skipped = (result.skipped || []).length;
-    toast(skipped ? `Added. ${skipped} photo${skipped > 1 ? "s" : ""} had no clear face.` : "Photos added.");
+    const skipped = result.skipped || [];
+    const added = photos.length - skipped.length;
+    toast(added === 1 ? "Photo added." : `${added} photos added.`);
+    if (skipped.length) {
+      note.className = "face-note";
+      note.replaceChildren(skipped.map((reason) => faceProblem(reason, photos.length)).join(" "));
+      note.hidden = false;
+    }
   });
 });
+
+// Reachy's reasons, said the way a person would ("photo 2 has more than one face" and so on).
+function faceProblem(reason, total) {
+  const text = String(reason || "");
+  if (/; /.test(text)) return text.split("; ").map((part) => faceProblem(part, total)).join(" ");
+  const photo = text.match(/photo (\d+)/i);
+  const which = photo && total > 1 ? `Photo ${photo[1]}` : "The photo";
+  if (/uncropped|no clear/i.test(text)) return `${which} wasn't added: Reachy couldn't see a whole face. Give their head a bit more room.`;
+  if (/more than one face/i.test(text)) return `${which} wasn't added: it shows more than one face. Crop to just them.`;
+  if (/same person/i.test(text)) return `${which} wasn't added: it doesn't look like the same person.`;
+  if (/different people/i.test(text)) return "Nothing was added: the photos seem to show different people.";
+  if (/already enrolled as/i.test(text)) return `Nothing was added: this face already belongs to ${text.split("as ").pop()}.`;
+  if (/could not be read/i.test(text)) return `${which} couldn't be read.`;
+  return `Nothing was added: ${text}`;
+}
 
 function enrollFromCamera(button) {
   run(button, async () => {

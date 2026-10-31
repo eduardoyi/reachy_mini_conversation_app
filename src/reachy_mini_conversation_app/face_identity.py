@@ -666,17 +666,12 @@ class FaceRecognitionService:
         candidates: list[tuple[int, NDArray[np.float32], bytes | None]] = []
         skipped: list[str] = []
         for number, data in enumerate(photos, start=1):
-            image = self._decode_image(data)
-            if image is None:
-                skipped.append(f"photo {number} could not be read")
+            face, problem = self._single_face(data)
+            if face is None:
+                skipped.append(f"photo {number} {problem}")
                 continue
-            faces = self._analyzer.analyze(image, min_face_px=MIN_ENROLL_FACE_PX, whole_faces_only=True)
-            if len(faces) != 1:
-                reason = "no clear, uncropped face" if not faces else "more than one face"
-                skipped.append(f"photo {number} has {reason}")
-                continue
-            jpeg = self._encode_jpeg(faces[0].photo) if self._encode_jpeg is not None else None
-            candidates.append((number, faces[0].embedding, jpeg))
+            jpeg = self._encode_jpeg(face.photo) if self._encode_jpeg is not None else None
+            candidates.append((number, face.embedding, jpeg))
         if not candidates:
             return EnrollResult(None, "; ".join(skipped) or "no usable photos", skipped=tuple(skipped))
         # Keep the largest group of photos that look like the same person; an odd one out is skipped.
@@ -694,6 +689,40 @@ class FaceRecognitionService:
         skipped.sort(key=lambda reason: int(reason.split()[1]))
         result = self._save_samples(name, [(embedding, jpeg) for _, embedding, jpeg in group], trust_name=trust_name)
         return EnrollResult(result.person, result.error, skipped=tuple(skipped))
+
+    def _single_face(self, data: bytes) -> tuple[Any, str]:
+        """Return the photo's one whole face, or None and why not ("could not be read", "has ...")."""
+        assert self._decode_image is not None
+        image = self._decode_image(data)
+        if image is None:
+            return None, "could not be read"
+        faces = self._analyzer.analyze(image, min_face_px=MIN_ENROLL_FACE_PX, whole_faces_only=True)
+        if len(faces) != 1:
+            return None, "has no clear, uncropped face" if not faces else "has more than one face"
+        return faces[0], ""
+
+    def check_photo(self, name: str, data: bytes) -> tuple[str, str]:
+        """Say whether one photo would enroll ``name``: ("", "") when it would, else a problem code and its detail.
+
+        Codes: ``unavailable``, ``unreadable``, ``no_face`` (none, too small, or cut off by the edge), ``several_faces``
+        and ``someone_else`` (the face is enrolled under another name, given as the detail). Blocking.
+        """
+        if self._decode_image is None:
+            return "unavailable", ""
+        face, problem = self._single_face(data)
+        if face is None:
+            code = {"could not be read": "unreadable", "has more than one face": "several_faces"}.get(
+                problem, "no_face"
+            )
+            return code, ""
+        known = self._registry.match(face.embedding)
+        try:
+            wanted = person_id_for(name)
+        except FaceStoreError:
+            wanted = ""
+        if known is not None and known.person_id != wanted:
+            return "someone_else", known.name
+        return "", ""
 
     def _save_samples(
         self, name: str, samples: list[tuple[NDArray[np.float32], bytes | None]], *, trust_name: bool = False

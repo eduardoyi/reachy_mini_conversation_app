@@ -124,6 +124,26 @@ def register_face_routes(
             )
         return JSONResponse({"person": _person_json(result.person), "skipped": list(result.skipped)}, headers=no_store)
 
+    @app.post("/api/faces/check")
+    async def _faces_check(request: Request) -> Response:
+        """Say whether one photo (``{"name": str, "photo": base64}``) would enroll ``name``, without enrolling."""
+        denied = access_denied(request, mutation=True)
+        if denied is not None:
+            return denied
+        payload = await _small_json(request, {"name", "photo"}, max_bytes=4 * 1024 * 1024)
+        if isinstance(payload, Response):
+            return payload
+        try:
+            photo = base64.b64decode(payload["photo"], validate=True)
+        except ValueError:
+            return Response(status_code=400, headers=no_store)
+        try:
+            problem, detail = await asyncio.to_thread(service.check_photo, payload["name"], photo)
+        except (OSError, ValueError, RuntimeError):
+            logger.warning("Face photo check unavailable")
+            return JSONResponse({"error": "Photos could not be checked."}, status_code=503, headers=no_store)
+        return JSONResponse({"ok": not problem, "problem": problem, "detail": detail}, headers=no_store)
+
     @app.post("/api/faces/forget-photo")
     async def _faces_forget_photo(request: Request) -> Response:
         """Delete one photo and its fingerprint; the person goes too if it was their last."""

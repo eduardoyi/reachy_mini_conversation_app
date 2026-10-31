@@ -342,6 +342,11 @@ dialog { color: var(--ink); }
 }
 .add-face .icon { width: 22px; height: 22px; }
 
+.face-note {
+  margin: 10px 0 0; padding: 10px 14px; border-radius: 14px; font-size: 14px;
+  background: color-mix(in srgb, var(--sun) 22%, transparent);
+}
+.face-note.bad { background: color-mix(in srgb, var(--coral) 14%, transparent); color: var(--coral); font-weight: 600; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border-radius: 999px;
@@ -454,6 +459,12 @@ dialog { color: var(--ink); }
 /* Crop ---------------------------------------------------------------------------------------- */
 
 .crop-hint { margin: 0 0 8px; text-align: center; color: #a4a8c4; font-size: 15px; }
+.crop-problem {
+  margin: 0 16px 10px; padding: 10px 14px; border-radius: 14px; text-align: center; font-size: 15px; font-weight: 600;
+  background: rgba(255, 109, 113, .16); color: #ffb3b5;
+}
+.crop-actions { flex-wrap: wrap; }
+.crop-actions #crop-use { flex-basis: 100%; margin-top: 4px; }
 .crop-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 16px; }
 .crop-frame { position: relative; overflow: hidden; touch-action: none; line-height: 0; max-width: 100%; max-height: 100%; }
 .crop-frame img { display: block; max-width: calc(100vw - 32px); max-height: calc(100dvh - 230px); user-select: none; -webkit-user-drag: none; }
@@ -692,7 +703,8 @@ dialog { color: var(--ink); }
 .tabs a[aria-current="page"] .icon { background: color-mix(in srgb, var(--sun) 40%, transparent); }
 
 .toast {
-  position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 20;
+  position: fixed; inset: auto; margin: 0; border: 0; overflow: visible;
+  left: 50%; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 20;
   transform: translateX(-50%); max-width: min(480px, calc(100vw - 32px)); width: max-content;
   display: flex; align-items: center; gap: 10px;
   background: var(--ink); color: var(--paper); padding: 12px 18px; border-radius: 18px; font-weight: 600; font-size: 15px;
@@ -700,4 +712,4 @@ dialog { color: var(--ink); }
 }
 .toast .icon { width: 20px; height: 20px; color: var(--sun); }
 .toast[data-tone="bad"] .icon { color: var(--coral); }
-@media (prefers-reduced-motion: no-preference) { .toast:not([hidden]) { animation: pop .2s ease-out; } }
+.toast[popover]:not(:popover-open) { display: none; }

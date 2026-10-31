@@ -221,6 +221,7 @@
             <p class="hint">Already known to Reachy?</p>
             <div id="face-link-chips" class="chips"></div>
           </div>
+          <p id="face-note" class="face-note" role="alert" hidden></p>
           <p id="face-off" class="hint" hidden>Faces need Reachy running.</p>
           <input id="face-upload" type="file" accept="image/*" multiple hidden>
         </section>
@@ -344,7 +345,8 @@
       <button id="crop-cancel" class="round" type="button" aria-label="Stop adding photos"><svg class="icon"><use href="#i-x"/></svg></button>
       <span id="crop-title" class="viewer-count"></span>
     </div>
-    <p class="crop-hint">Drag the box onto their face.</p>
+    <p class="crop-hint">Put the box around their head.</p>
+    <p id="crop-problem" class="crop-problem" role="alert" hidden></p>
     <div class="crop-stage">
       <div id="crop-frame" class="crop-frame">
         <img id="crop-image" alt="">
@@ -356,6 +358,8 @@
     </div>
     <div class="crop-actions">
       <button id="crop-skip" class="pill ghost small" type="button">Skip</button>
+      <button id="crop-another" class="pill ghost small" type="button">Another photo</button>
+      <input id="crop-replace" type="file" accept="image/*" hidden>
       <button id="crop-whole" class="pill ghost small" type="button">Whole photo</button>
       <button id="crop-use" class="pill sun" type="button">Use this</button>
     </div>
@@ -372,7 +376,7 @@
     </form>
   </dialog>
 
-  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="toast" class="toast" role="status" popover="manual"></div>
   <script src="/static/admin/admin.js"></script>
 </body>
 </html>

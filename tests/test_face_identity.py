@@ -343,6 +343,18 @@ def test_enroll_from_photos_refuses_mixed_people_and_unusable_uploads(tmp_path: 
     assert mixed.registry.people() == unusable.registry.people() == []
 
 
+def test_check_photo_says_what_is_wrong_with_one_photo(tmp_path: Path) -> None:
+    """One photo is checked without enrolling: fine, unreadable, no face, several faces, or someone else's face."""
+    service = _service(tmp_path, [[ANA], [], [ANA, BEN], [BEN], [BEN]])
+    assert service.check_photo("Ana", b"p1") == ("", "")
+    assert service.check_photo("Ana", b"broken") == ("unreadable", "")
+    assert service.check_photo("Ana", b"p3") == ("no_face", "")
+    assert service.check_photo("Ana", b"p4") == ("several_faces", "")
+    assert service.registry.people() == []
+    service.enroll_from_photos("Ben", [b"p5"])
+    assert service.check_photo("Ana", b"p6") == ("someone_else", "Ben")
+
+
 def test_enroll_from_photos_refuses_a_face_known_under_another_name(tmp_path: Path) -> None:
     """A photo of an enrolled person cannot enroll them under a different name."""
     service = _service(tmp_path, [[ANA]])
