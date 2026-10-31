@@ -121,7 +121,47 @@ class ControlApi:
             "calls_linked": self._deps.calls.linked if self._deps.calls is not None else None,
             "faces": self._deps.face_recognition is not None,
             "camera": self._deps.camera_enabled,
+            "game": games.status() if (games := getattr(self._deps, "games", None)) is not None else None,
         }
+
+    async def game_action(self, payload: dict[str, object]) -> tuple[str, int] | None:
+        """Start, pause, resume or end a game from the phone; return (why not, status code) when refused.
+
+        A game started here needs no spoken yes: the tap is the yes. He wakes up for it.
+        """
+        host = getattr(self._deps, "games", None)
+        loop = self._runtime.loop if self._runtime is not None else None
+        if host is None or loop is None:
+            return "Games are not available.", 404
+        action = payload.get("action")
+        if action not in {"start", "pause", "resume", "end"}:
+            return "action must be start, pause, resume or end.", 400
+        if action == "start" and PRIVACY.on:
+            return "Privacy is on.", 409
+        game = str(payload.get("game") or "")
+        language = "en" if payload.get("language") == "en" else "es"
+
+        def act() -> str | None:
+            if action == "start":
+                if self._deps.movement_manager.sleeping:
+                    self._deps.movement_manager.wake_up()
+                    if self._runtime is not None:
+                        self._runtime.set_asleep(False)
+                problem: str | None = host.start(game, language)
+                return problem
+            if action == "pause":
+                host.pause()
+            elif action == "resume":
+                host.resume(say=True)
+            else:
+                host.end("admin app")
+            return None
+
+        async def on_runtime_loop() -> str | None:
+            return act()
+
+        problem = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(on_runtime_loop(), loop))
+        return (problem, 400) if problem is not None else None
 
     def go_to_sleep(self) -> None:
         """Sleep pose, any conversation closed after its reply; his name or an antenna wakes him."""
@@ -198,6 +238,20 @@ class ControlApi:
             result = await MoveHead()(self._deps, direction="front" if direction == "center" else direction)
             status_code = 503 if "error" in result else 200
             return JSONResponse(result, status_code=status_code, headers=_NO_STORE)
+
+        @app.post("/game")
+        async def _game(request: Request) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await self._json_body(request)
+            if isinstance(payload, Response):
+                return payload
+            problem = await self.game_action(payload)
+            if problem is not None:
+                message, status_code = problem
+                return JSONResponse({"error": message}, status_code=status_code, headers=_NO_STORE)
+            return JSONResponse(self.status(), headers=_NO_STORE)
 
         @app.post("/look-up")
         async def _look_up(request: Request) -> Response:

@@ -476,6 +476,15 @@ def create_app(settings: AdminSettings, link: AppLink | None = None, notifier: N
             return payload
         return await control(request, "/head", "", {"direction": payload.get("direction")})
 
+    @app.post("/api/game")
+    async def _game(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        action, game = payload.get("action"), payload.get("game")
+        body = {"action": action, "game": game, "language": payload.get("language")}
+        return await control(request, "/game", f"game {action}" + (f" {game}" if action == "start" else ""), body)
+
     @app.post("/api/look-up")
     async def _look_up(request: Request) -> Response:
         return await control(request, "/look-up", "")

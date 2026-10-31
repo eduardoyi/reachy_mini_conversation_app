@@ -130,6 +130,118 @@ def _prepare_photos(link: Any, faces: Any, speech: Any) -> None:
         logger.info("WhatsApp server ready for photos")
 
 
+def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any) -> Any:
+    """Build the game host (games/host.py) over the hybrid runtime, or None when games are not set up."""
+    from reachy_mini_conversation_app.tools.core_tools import games_configured
+
+    if not games_configured():
+        return None
+    import httpx
+
+    from reachy_mini_conversation_app import jev
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.games.base import SPEAK_TIMEOUT_S, Game, GameServices
+    from reachy_mini_conversation_app.games.host import GameHost
+    from reachy_mini_conversation_app.camera_frames import capture_jpeg
+    from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
+    from reachy_mini_conversation_app.games.color_hunt import ColorHunt
+    from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
+    from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
+
+    log = logging.getLogger(__name__)
+    display = deps.display
+    client = httpx.AsyncClient(timeout=5.0)
+
+    async def speak(text: str, language: str) -> None:
+        heard = asyncio.get_running_loop().create_future()
+
+        def spoken() -> None:
+            if not heard.done():
+                heard.set_result(None)
+
+        runtime.request_announcement(text, language, on_spoken=spoken, game=True)
+        try:
+            await asyncio.wait_for(heard, SPEAK_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            log.info("Game line not heard in time; going on")
+
+    def ask(text: str, language: str, answer: Callable[[str], Awaitable[object]]) -> None:
+        runtime.request_announcement(text, language, answer=answer, game=True)
+
+    def show(png: bytes) -> None:
+        if display is not None:
+            display.show(png, owner="game")
+
+    def save_screen() -> Callable[[], None]:
+        if display is None:
+            return lambda: None
+        owner, screen = display.owner(), display.current().png
+
+        def restore() -> None:
+            if owner == "home" or not screen:
+                display.show_home()
+            else:
+                display.show(screen, owner="music" if owner == "music" else "requested")
+
+        return restore
+
+    def quiet_head(quiet: bool) -> None:
+        """Hold the head still with the speech wobble off, so a pat shows; or let it move again."""
+        movement.hold_still(quiet)
+        if quiet:
+            switch_wobble(robot, on=False)
+        else:
+            restore_wobble(robot)
+
+    async def pause_music() -> None:
+        spotify = SpotifyControl()
+        status = await spotify(deps, action="status")
+        if status.get("status") == "playing":
+            await spotify(deps, action="pause")
+
+    def camera() -> bytes | None:
+        return capture_jpeg(deps.reachy_mini.media) if deps.camera_enabled else None
+
+    async def ask_jev(
+        state: dict[str, Any], questions: dict[str, dict[str, Any]], images: dict[str, bytes]
+    ) -> dict[str, dict[str, Any]]:
+        return await jev.ask(
+            client,
+            api_key=str(config.TYPESAFE_API_KEY),
+            model=config.DISPLAY_CHECK_MODEL,
+            state=state,
+            questions=questions,
+            images=images,
+            feature="game_color_check",
+        )
+
+    def emotion(intent: str) -> None:
+        threading.Thread(target=queue_intent_move, args=(movement, intent), name="game-emotion", daemon=True).start()
+
+    services = GameServices(
+        speak=speak,
+        ask=ask,
+        expect_answer=runtime.expect_answer,
+        play_audio=runtime.play_ambient_audio,
+        show=show,
+        save_screen=save_screen,
+        quiet_head=quiet_head,
+        touches=movement.head_touches,
+        pause_music=pause_music,
+        hand_over=runtime.request_when_free,
+        camera=camera,
+        jev=ask_jev,
+        emotion=emotion,
+        call_busy=(lambda: bool(calls.busy)) if calls is not None else (lambda: False),
+    )
+    games: dict[str, Callable[[], Game]] = {"colors": ColorHunt} if deps.camera_enabled else {}
+    host = GameHost(services, games)
+    runtime.set_cloud_gate(host.addressed)
+    runtime.set_announcement_hold(host.holding)
+    log.info("Games enabled: %s", ", ".join(games) or "none (no camera)")
+    return host
+
+
 def _build_display() -> Any:
     """Return the TRMNL e-ink display, or None when TRMNL_ENABLED is off."""
     from reachy_mini_conversation_app.config import config
@@ -251,10 +363,12 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     if not config.QUICK_COMMANDS_ENABLED:
         return None, None
     from reachy_mini_conversation_app.weather import Place, WeatherService
+    from reachy_mini_conversation_app.games.host import host_phrases
     from reachy_mini_conversation_app.local_speech import LocalSpeech
     from reachy_mini_conversation_app.photographer import FACES
     from reachy_mini_conversation_app.writing_mode import WRITING_PHRASES
     from reachy_mini_conversation_app.quick_commands import FIXED_PHRASES, QuickCommands
+    from reachy_mini_conversation_app.games.color_hunt import color_hunt_phrases
 
     home = None
     if config.HOME_LOCATION and config.HOME_LATITUDE is not None and config.HOME_LONGITUDE is not None:
@@ -264,7 +378,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
         (config.GEMINI_API_KEY or "").strip() or None,
         config.GEMINI_VOICE,
         model=config.LOCAL_SPEECH_MODEL,
-        cacheable=FIXED_PHRASES | WRITING_PHRASES,
+        cacheable=FIXED_PHRASES | WRITING_PHRASES | host_phrases() | color_hunt_phrases(),
     )
     logging.getLogger(__name__).info(
         "Quick commands enabled (lights, music, TV, time, weather%s)", "" if weather else "; no HOME_LOCATION"
@@ -794,7 +908,15 @@ def run(
                 quiet_head=quiet_head,
                 touches=movement_manager.head_touches,
             )
-            hybrid_runtime.set_room_listener(deps.writing.hear)
+        deps.games = _build_games(deps, hybrid_runtime, movement_manager, robot, calls)
+        if deps.games is not None or deps.writing is not None:
+            games, writing = deps.games, deps.writing
+
+            def room_heard(text: str) -> bool:
+                """Offer a room transcript to the game, then writing practice ("pausa", "¡ya!", heard without the name)."""
+                return (games is not None and games.heard(text)) or (writing is not None and writing.hear(text))
+
+            hybrid_runtime.set_room_listener(room_heard)
         if deps.maribel is not None:
             from reachy_mini_conversation_app.maribel import MaribelReply
             from reachy_mini_conversation_app.quick_commands import guess_language

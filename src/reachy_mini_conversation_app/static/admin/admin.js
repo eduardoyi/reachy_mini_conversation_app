@@ -247,8 +247,49 @@ function renderHome(status) {
     setFill(slider);
   }
 
+  renderGames(status.app.running ? status.app.game : null, mood);
   $("#health").replaceChildren(...healthCells(status));
   $("#restart").hidden = !status.can_restart || mood === "off";
+}
+
+// Games: start one from here (the tap is the yes), or pause and end the one he is playing.
+function renderGames(game, mood) {
+  const show = Boolean(game && game.games && game.games.length) && mood !== "private";
+  $("#games").hidden = $("#games-title").hidden = !show;
+  if (!show) return;
+  const on = game.state === "playing" || game.state === "paused";
+  const pill = (label, className, action) => {
+    const button = el("button", { className: `pill small ${className}`, type: "button" }, label);
+    button.onclick = () => run(button, action);
+    return button;
+  };
+  const act = async (action, key) => {
+    await api("/api/game", { method: "POST", body: { action, game: key } });
+    await loadHome();
+  };
+  $("#games").replaceChildren(
+    ...game.games.map((each) => {
+      const name = each.title.en.charAt(0).toUpperCase() + each.title.en.slice(1);
+      const current = on && game.game === each.key;
+      const detail = !current
+        ? `"Juguemos ${each.title.es}"`
+        : game.state === "paused"
+          ? `Paused${game.progress ? ` · ${game.progress}` : ""}`
+          : game.progress || "Playing";
+      const buttons = current
+        ? [
+            game.state === "paused" ? pill("Resume", "sun", () => act("resume")) : pill("Pause", "soft", () => act("pause")),
+            pill("End", "ghost", () => act("end")),
+          ]
+        : [pill("Play", "sun", () => act("start", each.key))];
+      if (!current && on) buttons[0].disabled = true;
+      return el("div", { className: "row" }, [
+        icon("game"),
+        el("div", { className: "row-text" }, [el("span", { className: "row-label" }, name), el("span", { className: "row-sub" }, detail)]),
+        ...buttons,
+      ]);
+    })
+  );
 }
 
 function healthCells(status) {
@@ -1386,6 +1427,7 @@ const FEATURES = {
   display_picture_check: ["Picture checks", "Making sure pictures are OK for kids"],
   display_lesson: ["Drawing lessons", ""],
   display_lesson_captions: ["Lesson captions", ""],
+  game_color_check: ["Color hunt", "Checking the colors shown to his camera"],
 };
 const PARTS = {
   input_text: ["Reading", "His instructions, memories and what was said"],

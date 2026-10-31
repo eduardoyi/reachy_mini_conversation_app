@@ -189,6 +189,9 @@ class HomeLights(Tool):
             return {"error": "No lights are set up."}
         action = kwargs.get("action")
         logger.info("Tool call: home_lights action=%s", action)
+        games = getattr(deps, "games", None)
+        if action != "status" and getattr(games, "active", False) is True:
+            return {"error": "A game is on; the lights wait until it ends ('se acabó el juego')."}
         try:
             if action == "status":
                 return await self._status(home)

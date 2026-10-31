@@ -422,6 +422,9 @@ class SpotifyControl(Tool):
             "volume",
         }:
             return {"error": "Choose search, play, queue, resume, pause, next, status, or volume."}
+        games = getattr(deps, "games", None)
+        if action in ("play", "queue", "resume") and getattr(games, "active", False) is True:
+            return {"error": "A game is on; music waits until it ends ('se acabó el juego')."}
         volume_percent = kwargs.get("volume_percent")
         if action == "volume" and (
             not isinstance(volume_percent, int) or isinstance(volume_percent, bool) or not 0 <= volume_percent <= 100

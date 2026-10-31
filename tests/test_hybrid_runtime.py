@@ -5194,3 +5194,97 @@ async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes() -
     await wait_until(lambda: seen == ["llama a Eduardo"], attempts=500)
     assert not runtime.request_after_close("Reachy, llama a Eduardo")  # no conversation is open now
     await runtime.close()
+
+
+# Games (games/host.py) ---------------------------------------------------------------------------
+
+
+def _game_runtime(spoken: list[str], quick: Callable[[str], Any] | None = None) -> tuple[HybridRuntime, FakeHandler]:
+    handler = FakeHandler()
+
+    async def speak(text: str, _language: str):  # type: ignore[no-untyped-def]
+        spoken.append(text)
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(lambda: handler, quick_commands=quick, reply_speaker=speak)
+    runtime.set_capture_barrier_provider(lambda: 0)
+    return runtime, handler
+
+
+@pytest.mark.asyncio
+async def test_a_game_tune_plays_only_while_reachy_waits_for_his_name() -> None:
+    """Ambient audio is queued for playback while idle and refused once the runtime is closed."""
+    runtime, _handler = _game_runtime([])
+    runtime._assert_owner_loop()
+    note = np.ones(240, dtype=np.int16)
+    try:
+        assert runtime.play_ambient_audio(24_000, note)
+        output = await runtime.emit()
+        assert isinstance(output, tuple) and output[1] is note
+    finally:
+        await runtime.close()
+    assert not runtime.play_ambient_audio(24_000, note)
+
+
+@pytest.mark.asyncio
+async def test_other_announcements_wait_while_a_game_plays_and_its_own_lines_do_not() -> None:
+    """With the hold on, Maribel's reply waits and the game's line is spoken (then reports it was heard)."""
+    spoken: list[str] = []
+    runtime, _handler = _game_runtime(spoken)
+    runtime._assert_owner_loop()
+    holding = [True]
+    heard: list[str] = []
+    runtime.set_announcement_hold(lambda: holding[0])
+    try:
+        runtime.request_announcement("Maribel says hi.", "en")
+        runtime.request_announcement("¡Busca algo ROJO!", "es", game=True, on_spoken=lambda: heard.append("red"))
+        await _eventually(lambda: spoken == ["¡Busca algo ROJO!"])
+        await _eventually(lambda: heard == ["red"])
+        await asyncio.sleep(0.3)
+        assert spoken == ["¡Busca algo ROJO!"]
+        holding[0] = False
+        await _eventually(lambda: spoken == ["¡Busca algo ROJO!", "Maribel says hi."])
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_the_cloud_gate_answers_a_wake_no_quick_command_took() -> None:
+    """During a game, a request quick commands leave to the conversation reaches the game host instead."""
+    spoken: list[str] = []
+    gated: list[str] = []
+
+    async def quick(_text: str) -> None:
+        return None
+
+    async def gate(text: str) -> _QuickReply:
+        gated.append(text)
+        return _QuickReply("Estamos jugando a los colores. ¿Lo terminamos?")
+
+    runtime, handler = _game_runtime(spoken, quick)
+    runtime.set_cloud_gate(gate)
+    try:
+        assert await runtime.activate("keyboard", addressed_text="tell me a story")
+        assert gated == ["tell me a story"]
+        assert spoken == ["Estamos jugando a los colores. ¿Lo terminamos?"]
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_handed_over_request_runs_once_reachy_is_free() -> None:
+    """After a game ends for "enciende la luz", the request runs as a quick command when Reachy is free."""
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply:
+        seen.append(text)
+        return _QuickReply(None)
+
+    runtime, _handler = _game_runtime([], quick)
+    runtime._assert_owner_loop()
+    try:
+        runtime.request_when_free("enciende la luz")
+        await _eventually(lambda: seen == ["enciende la luz"])
+    finally:
+        await runtime.close()

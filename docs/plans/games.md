@@ -1,10 +1,10 @@
 # Plan: Games on Reachy (a shared game mode, the color hunt first)
 
-- Status: `approved` (designed with the household 2026-10-30; nothing built)
+- Status: `in-progress` (host, color hunt, `play_game` and the admin Games panel built and tested 2026-10-31; not deployed; lights flash and writing practice on the host not built)
 - Owner: Eduardo
 - Created: 2026-10-30
 - Last updated: 2026-10-31
-- Feature doc: to be written as `docs/features/games.md` with the first game
+- Feature doc: [Games](../features/games.md)
 
 ## Goal
 
@@ -104,13 +104,15 @@ flowchart LR
 6. Tests, feature doc `docs/features/games.md`, quick-commands doc, README tool row, profile sentence for
    `play_game`.
 7. Deploy to the Mac mini; play with the kids.
+8. Admin app (added 2026-10-31 at the household's request): a Games panel on Home to start, pause, resume and
+   end a game from the phone (the tap is the yes); control API `POST /game`, admin `POST /api/game`.
 
 ## Acceptance criteria
 
-- [ ] "Juguemos a los colores", "vamos a jugar a los colores", "let's play color hunt" and "can we play the
+- [x] "Juguemos a los colores", "vamos a jugar a los colores", "let's play color hunt" and "can we play the
       color game" all ask the start question; "juguemos" alone asks which game.
-- [ ] Nothing starts without a yes (voice or pat); "no" and 8 s of silence start nothing.
-- [ ] Through Gemini: `start` without `rules` first is refused; with it, the game starts and the conversation ends.
+- [x] Nothing starts without a yes (voice or pat); "no" and silence start nothing (unit-tested; the question stays open 30 s, the runtime listens 15 s).
+- [x] Through Gemini: `start` without `rules` first is refused; with it, the game starts and the conversation ends.
 - [ ] While playing, "Richie, enciende la luz" asks whether to end; yes ends and the light turns on; no resumes.
 - [ ] "Pausa", the name alone and an antenna bend pause; "seguimos" or a pat resumes; quit words end it;
       a bare "para" does not.
@@ -119,7 +121,7 @@ flowchart LR
 - [ ] Color hunt: a red toy held up is found within ~2 s on the Mac mini; an empty room makes no Jev calls;
       a wrong color is named.
 - [ ] Writing practice asks before starting and pauses and quits like the games.
-- [ ] Full gate passes.
+- [x] Full gate passes.
 - [ ] On the Mac mini: five rounds played with the kids without a false start, false find or stuck game.
 
 ## Risks
@@ -151,3 +153,4 @@ the gate, the spike's recorded frames as a fixture, and a live game on the Mac m
 |------|--------|
 | 2026-10-30 | Brainstormed 18 games with the household; the color hunt chosen first on a shared game host. Designed: names in es/en, confirmation before every start, Gemini through `play_game` (rules, then start), games own lights/music/screen, pause and quit by voice, name or antenna, mid-game requests offer to end the game. Plan approved; nothing built. |
 | 2026-10-31 | Jev spike on the Mac mini: 258 frames from Reachy's camera (640x360, admin camera stream, every 0.5 s) while Reachy spoke the steps; labelled by eye. Jev median 0.16 s (max 0.31 s), ~1,120 input tokens per frame (~$0.00005). Held up: 0.78–0.98 for objects at arm's length; an object shoved right into the lens 0.35–0.71; empty room, walking past, standing, empty hand ≤ 0.28; an object 3 m away ≤ 0.41; frames while lowering the object 0.5–0.76 (the object is still in hand, harmless). Colors, every frame right: blue (12/12), yellow (11/11), green (11/11), white car (10/10), phone with a colorful sticker as black (9/9), pale pink bottle (5/5). Wrong: red car read as orange (5/5 at arm's length, 7/8 up close, red second at 0.08–0.46); hot pink block read as orange or red (10/12). A gray-world color correction did not change this. Decisions: rojo accepts red or orange; naranja, morado, marrón dropped; held ≥ 0.5 in two of the last three frames. Frames and scripts kept on the Mac mini in `~/game-spike` (household images, not committed). An early test frame showed a pink bottle standing in front of the camera read as held (0.64–0.70), hence the "already in view" rule. |
+| 2026-10-31 | Built: `jev.py` (shared with web pictures), `games/` (catalog, host, base, color hunt), `play_game` (direct tool, rules before start, valid 5 min), the runtime hooks (cloud gate, announcement hold and `on_spoken`, ambient audio for the tune, `request_when_free`, `loop`), quick-command routing, the `game` screen owner, `home_lights` / `spotify_control` refusing during a game, the PAUSA and prompt screens, and a Games panel in the admin app (control API `POST /game`, audited). Deviations: the lights flash is not built (DIRIGERA and Tuya report only on/off and brightness, so a colored lamp could not be put back as it was); camera games do not pause when nobody is in view (five timed-out rounds end the game anyway); writing practice is not on the host yet; the start question stays open 30 s. Full gate: ruff, format and mypy clean; 2,760 passed, 4 skipped. Not deployed; nothing tried on the robot. |

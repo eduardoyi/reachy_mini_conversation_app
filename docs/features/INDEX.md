@@ -13,6 +13,7 @@ the implementation.
 | Household memory | [household-memory.md](household-memory.md) | M1–M2 user accepted; M3 daily tidy-up default off; synthetic Luna review passed; live follow-up pending |
 | Gemini Live provider | [gemini-live-provider.md](gemini-live-provider.md) | in-progress |
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
+| Games | [games.md](games.md) | in-progress: game host and color hunt built and tested; not yet played on the robot |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
 | Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |
 | Simulator speaker output bypass | [simulator-speaker-output.md](simulator-speaker-output.md) | in-progress |

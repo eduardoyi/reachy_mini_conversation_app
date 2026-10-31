@@ -32,6 +32,7 @@ from reachy_mini_conversation_app.quick_commands import (
     PHOTO_NO_PICTURE,
     MARIBEL_PASSED_ON,
     MARIBEL_UNREACHABLE,
+    QuickReply,
     QuickCommands,
     parse,
     say_date,
@@ -1575,3 +1576,42 @@ async def test_yes_answers_the_announced_call_and_no_declines_it() -> None:
     runner, calls, _ = _ringing_runner()
     reply = await runner.answer_incoming("no")
     assert reply is not None and reply.text == "Vale, no contesto." and calls.declined
+
+
+class _Games:
+    """A stand-in game host: it records offers and answers requests while a game is on."""
+
+    def __init__(self, active: bool = False) -> None:
+        self.active = active
+        self.offered: list[Any] = []
+        self.addressed_texts: list[str] = []
+
+    async def addressed(self, text: str) -> QuickReply | None:
+        self.addressed_texts.append(text)
+        return QuickReply("Estamos jugando a los colores. ¿Lo terminamos?", "es", "game") if self.active else None
+
+    def offer(self, request: Any) -> QuickReply:
+        self.offered.append(request)
+        return QuickReply("¿Jugamos a los colores?", request.language, "game")
+
+
+@pytest.mark.asyncio
+async def test_lets_play_a_game_asks_first_instead_of_playing_music() -> None:
+    """Saying "Play the color game" is a game offer (asked first), not a Spotify search; "play Coldplay" stays music."""
+    runner, tools, deps = _runner()
+    deps.games = _Games()
+    reply = await runner.handle("Play the color game")
+    assert reply is not None and reply.text == "¿Jugamos a los colores?"
+    assert [request.game.key for request in deps.games.offered] == ["colors"]
+    assert await runner.handle("juguemos a los colores") is not None and len(deps.games.offered) == 2
+
+
+@pytest.mark.asyncio
+async def test_during_a_game_every_request_reaches_the_game_host_first() -> None:
+    """While a game is on, "apaga las luces" does not touch the lights: the host asks whether to end the game."""
+    runner, tools, deps = _runner()
+    deps.games = _Games(active=True)
+    reply = await runner.handle("apaga las luces")
+    assert reply is not None and reply.text == "Estamos jugando a los colores. ¿Lo terminamos?"
+    assert deps.games.addressed_texts == ["apaga las luces"]
+    assert tools["lights"].calls == []
