@@ -8,18 +8,43 @@ const state = {
 
 // Basics ----------------------------------------------------------------------------------------
 
+// A request that hangs (the phone woke up, Tailscale reconnected) gives up instead of freezing the screen.
+const GET_TIMEOUT_MS = 20000;
+const CHANGE_TIMEOUT_MS = 45000;
+const SLOW_TIMEOUT_MS = { "/api/restart": 180000 };
+
+async function send(path, options, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(path, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function api(path, { method = "GET", body } = {}) {
   const options = { method, headers: {} };
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
+  const timeout = SLOW_TIMEOUT_MS[path] || (method === "GET" ? GET_TIMEOUT_MS : CHANGE_TIMEOUT_MS);
   let response;
   try {
-    response = await fetch(path, options);
+    response = await send(path, options, timeout);
+    // Tailscale can drop the login for a moment while it reconnects; a look is asked again once.
+    if (response.status === 403 && method === "GET") {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      response = await send(path, options, timeout);
+    }
   } catch (error) {
-    throw new Error("Can't reach Reachy. Is Tailscale on?");
+    const timedOut = error.name === "AbortError";
+    report(timedOut ? "timeout" : "offline", `${method} ${path.split("?")[0]}`);
+    throw new Error(timedOut ? "Reachy didn't answer in time. Try again." : "Can't reach Reachy. Is Tailscale on?");
   }
+  if (response.status === 403) throw new Error("Tailscale didn't say who you are. Try again in a moment.");
+  if (response.status >= 500) report("failed", `${method} ${path.split("?")[0]} ${response.status}`);
   let payload = {};
   try {
     payload = await response.json();
@@ -29,6 +54,24 @@ async function api(path, { method = "GET", body } = {}) {
   if (!response.ok) throw new Error(payload.error || `Something went wrong (${response.status}).`);
   return payload;
 }
+
+// What goes wrong here is written to the admin log on the Mac mini, a few times per visit at most.
+const reported = new Set();
+
+function report(kind, message) {
+  const key = `${kind} ${message}`;
+  if (reported.has(key) || reported.size >= 15) return;
+  reported.add(key);
+  fetch("/api/client-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, message: String(message).slice(0, 300), screen: location.hash.slice(1) || "home" }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+window.addEventListener("error", (event) => report("error", `${event.message} at ${(event.filename || "").split("/").pop()}:${event.lineno}`));
+window.addEventListener("unhandledrejection", (event) => report("error", (event.reason && (event.reason.stack || event.reason.message)) || String(event.reason)));
 
 function icon(name, className = "icon") {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -317,7 +360,16 @@ function healthCells(status) {
   ];
 }
 
+let homeLoading = null;
+
 async function loadHome() {
+  // One look at a time: the 8-second refresh never stacks up behind a slow answer, and a change waits for it.
+  if (homeLoading) return homeLoading.then(() => (homeLoading ? homeLoading : loadHome()));
+  homeLoading = showHome().finally(() => { homeLoading = null; });
+  return homeLoading;
+}
+
+async function showHome() {
   loadWake();
   const status = await run(null, () => api("/api/status"));
   if (!status) return;
@@ -2681,6 +2733,7 @@ $("#settings").addEventListener("submit", (event) => {
 
 // Start -----------------------------------------------------------------------------------------
 
+sessionStorage.removeItem("reachy-retry");  // loaded: a refused load starts counting again from zero
 window.addEventListener("hashchange", showTab);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 api("/api/me").then((me) => {

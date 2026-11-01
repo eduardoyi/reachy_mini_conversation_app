@@ -197,6 +197,16 @@ Activity is recorded in `CallManager` (`place`, `answer`, `decline`, `finished`,
   5 frames a second each frame waits for at most one other capture.
 - iOS shows notifications only for the installed app (iOS 16.4+), after the permission prompt from a tap.
 - The peek pose is neutral height with the antennas folded; how it looks on the robot is unverified.
+- Getting stuck (2026-11-01): requests had no timeout, so after the phone slept or Tailscale reconnected a
+  hung request kept a button disabled and Home frozen until the app was reopened; and Tailscale can send a
+  request without `Tailscale-User-Login` while it reconnects, which refused `admin.js` and left a dead page.
+  Now `api()` gives up after 20 s (changes 45 s, restart 180 s), a refused look is asked again once after
+  1.5 s, Home's 8-second refresh never stacks, a refused `admin.js` or page reloads up to three times
+  (`reloadSoon` in `index.html`, `RETRY_PAGE` for a navigation with no login), and refusals are logged with
+  their reason (`refusal_reason`).
+- The phone reports what goes wrong (script errors, timeouts, unreachable, 5xx answers) to
+  `POST /api/client-log`, logged in `admin.log` as `Phone <login> <kind>: <message> (screen=…)`: one line
+  each, control characters removed, at most 15 a visit and 20 a minute, bodies up to 2 KB.
 
 ## Tests
 

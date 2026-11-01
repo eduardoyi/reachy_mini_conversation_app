@@ -410,6 +410,15 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" popover="manual"></div>
-  <script src="/static/admin/admin.js"></script>
+  <script>
+    // The app's code was refused or cut off (Tailscale reconnecting): reload a few times rather than sit dead.
+    function reloadSoon() {
+      var tries = Number(sessionStorage.getItem("reachy-retry") || 0);
+      if (tries >= 3) return void sessionStorage.removeItem("reachy-retry");
+      sessionStorage.setItem("reachy-retry", tries + 1);
+      setTimeout(function () { location.reload(); }, 1500 * (tries + 1));
+    }
+  </script>
+  <script src="/static/admin/admin.js" onerror="reloadSoon()"></script>
 </body>
 </html>

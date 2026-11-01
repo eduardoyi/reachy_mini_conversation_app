@@ -20,6 +20,7 @@ from typing import Any, Final
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from collections import deque
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 from collections.abc import AsyncIterator
@@ -65,6 +66,10 @@ MAX_PERSONALITY_BYTES: Final[int] = 256 * 1024
 MAX_GROUP_PHONES: Final[int] = 20
 MAX_WAKE_NAME_CHARS: Final[int] = 60
 MAX_WAKE_PROMPT_CHARS: Final[int] = 200
+# What the phone may report about its own errors: small, and at most this many a minute.
+MAX_CLIENT_LOG_BYTES: Final[int] = 2 * 1024
+MAX_CLIENT_LOGS_PER_MINUTE: Final[int] = 20
+_CONTROL: Final[re.Pattern[str]] = re.compile(r"[\x00-\x1f\x7f]")
 # The TRMNL counts as checking in when it did so within this long.
 DISPLAY_RECENT_S: Final[float] = 15 * 60
 STATIC_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "admin"
@@ -127,21 +132,48 @@ def _who(request: Request) -> str:
     return request.headers.get(LOGIN_HEADER, "").strip().lower()
 
 
-def refusal(request: Request, allowed: frozenset[str]) -> Response | None:
-    """Return a 403 unless Tailscale Serve brought it from an allowed login (a change: from the app's own page)."""
+def refusal_reason(request: Request, allowed: frozenset[str]) -> str:
+    """Return why the request is refused ("" when it may pass): only Tailscale Serve, from an allowed login."""
     client_host = request.client.host if request.client is not None else ""
     try:
         local = ipaddress.ip_address(client_host).is_loopback
     except ValueError:
         local = False
-    if not local or _who(request) not in allowed:
-        return Response(status_code=403, headers=_NO_STORE)
+    if not local:
+        return "not through Tailscale Serve"
+    who = _who(request)
+    if not who:
+        return "no Tailscale login"
+    if who not in allowed:
+        return f"login not allowed ({who[:80]})"
     if request.method not in {"GET", "HEAD"}:
         origin = urlsplit(request.headers.get("origin", "")).netloc
         hosts = {request.headers.get("host", ""), request.headers.get("x-forwarded-host", "")} - {""}
         if not origin or origin not in hosts:
-            return Response(status_code=403, headers=_NO_STORE)
-    return None
+            return "not from the app's own page"
+    return ""
+
+
+# Shown when the page itself is refused: Tailscale can send a request without the login while it reconnects,
+# so the page tries again a few times on its own. It holds nothing but this text.
+RETRY_PAGE: Final[bytes] = b"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Reachy</title><body style="font:16px system-ui;padding:24px;background:#0f1b2d;color:#f4f1e8">
+<p id="m">Connecting to Reachy&#8230;</p><script>
+var n=Number(sessionStorage.getItem("reachy-retry")||0);
+if(n<3){sessionStorage.setItem("reachy-retry",n+1);setTimeout(function(){location.reload()},1500*(n+1))}
+else{sessionStorage.removeItem("reachy-retry");document.getElementById("m").textContent=
+"Tailscale didn't say who you are. Open Tailscale, check you're signed in, then reload."}
+</script>"""
+
+
+def refusal(request: Request, allowed: frozenset[str]) -> Response | None:
+    """Return a 403 unless Tailscale Serve brought it from an allowed login (a change: from the app's own page)."""
+    reason = refusal_reason(request, allowed)
+    if not reason:
+        return None
+    if reason == "no Tailscale login" and request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+        return Response(RETRY_PAGE, status_code=403, media_type="text/html", headers=_NO_STORE)
+    return Response(status_code=403, headers=_NO_STORE)
 
 
 async def _json_body(request: Request, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any] | Response:
@@ -304,7 +336,8 @@ def create_app(
     async def _guard(request: Request, call_next: Any) -> Response:
         refused = refusal(request, settings.allowed_logins)
         if refused is not None:
-            logger.warning("Admin request refused path=%s", request.url.path)
+            reason = refusal_reason(request, settings.allowed_logins)
+            logger.warning("Admin request refused path=%s reason=%s", request.url.path, reason)
             return refused
         response: Response = await call_next(request)
         if request.url.path.startswith("/api/"):
@@ -812,6 +845,30 @@ def create_app(
             return payload
         await notifier.unsubscribe(str(payload.get("endpoint") or ""))
         return JSONResponse({"subscribed": False})
+
+    phone_reports: deque[float] = deque()
+
+    @app.post("/api/client-log")
+    async def _client_log(request: Request) -> Response:
+        """Record what went wrong on the phone (an error, a request that failed or timed out) in this log."""
+        payload = await _json_body(request, MAX_CLIENT_LOG_BYTES)
+        if isinstance(payload, Response):
+            return payload
+        now = time.monotonic()
+        while phone_reports and now - phone_reports[0] > 60:
+            phone_reports.popleft()
+        if len(phone_reports) >= MAX_CLIENT_LOGS_PER_MINUTE:
+            return Response(status_code=429, headers=_NO_STORE)
+        phone_reports.append(now)
+
+        def clean(key: str, limit: int) -> str:
+            return " ".join(_CONTROL.sub(" ", str(payload.get(key) or "")).split())[:limit]
+
+        logger.warning(
+            "Phone %s %s: %s (screen=%s)", _who(request), clean("kind", 20) or "error", clean("message", 300),
+            clean("screen", 20),
+        )  # fmt: skip
+        return Response(status_code=204, headers=_NO_STORE)
 
     @app.post("/api/push/test")
     async def _push_test(request: Request) -> Response:

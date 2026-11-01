@@ -181,6 +181,49 @@ def test_requests_without_a_tailscale_login_are_refused(admin: Admin, path: str)
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_a_refused_page_load_tries_again_and_the_log_says_why(admin: Admin, caplog: pytest.LogCaptureFixture) -> None:
+    """Tailscale reconnecting can drop the login: the page retries on its own, and the log names the reason."""
+    with admin.client(headers={"Accept": "text/html"}) as client:
+        page = client.get("/")
+        script = client.get("/static/admin/admin.js", headers={"Accept": "*/*"})
+    with admin.client(headers={"Tailscale-User-Login": "guest@example.com", "Accept": "text/html"}) as client:
+        guest = client.get("/")
+    assert page.status_code == 403 and b"location.reload" in page.content and b"Reachy" in page.content
+    assert script.status_code == 403 and script.content == b""
+    assert guest.status_code == 403 and guest.content == b""  # only a missing login is worth retrying
+    refusals = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    assert refusals == [
+        "Admin request refused path=/ reason=no Tailscale login",
+        "Admin request refused path=/static/admin/admin.js reason=no Tailscale login",
+        "Admin request refused path=/ reason=login not allowed (guest@example.com)",
+    ]
+
+
+def test_the_phone_reports_its_errors_to_the_log(admin: Admin, caplog: pytest.LogCaptureFixture) -> None:
+    """What went wrong on the phone lands in the admin log on one line, from the app's own page only."""
+    with admin.client() as client:
+        reported = client.post(
+            "/api/client-log",
+            json={"kind": "timeout", "message": "GET /api/status\nforged line", "screen": "home"},
+            headers=SAME_ORIGIN,
+        )
+        forged = client.post("/api/client-log", json={"message": "hi"}, headers={"Origin": "http://evil.example"})
+    assert reported.status_code == 204 and forged.status_code == 403
+    phone = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Phone ")]
+    assert phone == ["Phone eduardo@example.com timeout: GET /api/status forged line (screen=home)"]
+
+
+def test_phone_reports_are_limited(admin: Admin) -> None:
+    """A page stuck in an error loop cannot fill the disk: after 20 a minute, reports are turned away."""
+    with admin.client() as client:
+        codes = [
+            client.post("/api/client-log", json={"message": f"e{n}"}, headers=SAME_ORIGIN).status_code
+            for n in range(22)
+        ]
+        too_big = client.post("/api/client-log", json={"message": "x" * 4000}, headers=SAME_ORIGIN)
+    assert codes == [204] * 20 + [429] * 2 and too_big.status_code == 413
+
+
 @pytest.mark.parametrize("path", ["/", "/static/admin/admin.js", "/manifest.webmanifest", "/sw.js"])
 def test_an_allowed_login_gets_the_app(admin: Admin, path: str) -> None:
     """The installed app's files are served to household logins."""
