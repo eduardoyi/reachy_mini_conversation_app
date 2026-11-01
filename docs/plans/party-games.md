@@ -94,16 +94,63 @@ the fun.
 
 ### Big Brain
 
-- Board: 5 categories × 4 squares worth 1 to 4 stars on the screen. The player in control picks a square on
-  their phone, Richie reads the question, phones buzz, and the first buzzer answers aloud (or types). Right
-  gives stars and control; wrong lets others buzz.
-- Questions are plain questions. Picture questions use the screen: country outlines, landmarks, animals and
-  paintings as line drawings, close-ups. Not flags (unreadable in grey).
+- The e-ink screen is the shared board: five category names across the top, four rows of 1 to 4 stars
+  below, used squares blank, the scores along the bottom. When a square is picked the screen switches to
+  that clue in large type (or its picture) while Richie reads it, then back to the board. Two redraws per
+  clue suit the e-ink's one to two seconds.
+- The phones mirror the board for the player in control, who taps a square; everyone's phone is their
+  buzzer and score, and shows the clue text once Richie has read it (a help for whoever plays in their
+  second language).
+- Clues are statements that point at the answer ("This Swedish-born actress retired in 1941…"); players
+  answer with the plain answer ("Greta Garbo"). No "who is / what is" phrasing: that is the show's signature
+  rule, and Big Brain keeps its own format (decided 2026-11-01).
+- Richie reads the clue, phones buzz, and the first buzzer answers aloud (or types). Right gives stars and
+  control; wrong lets others buzz.
+- Picture clues use the screen: country outlines, landmarks, animals and paintings as line drawings,
+  close-ups. Not flags (unreadable in grey).
 - Hidden squares: double or nothing; steal (take a star from another team); everyone answers secretly on the
   phone and everyone right scores.
 - Final round: everyone bets in secret on the phone, answers on the phone, and Richie reveals them one by one
   with a drumroll and the lights down.
-- Kids mode: the filter favors easy questions and picture questions; optionally three choices on the phone.
+- Kids mode: the filter favors easy clues, kids versions and picture clues; optionally three choices on the
+  phone.
+
+#### Judging answers
+
+Every clue stores its answer in both languages plus every other accepted form (original title, the titles
+used in Spain and in Latin America, a surname alone, short forms), and an answer counts whatever language the
+game is in. Judging is predictable:
+
+1. Code: after ignoring case, accents, articles and punctuation, a match with any accepted form (allowing
+   small spelling or hearing slips) is right at once.
+2. Jev for the rest, with fixed rules: a surname alone is fine for a person, slips are fine, a different thing
+   is wrong, and too broad an answer ("un barco" for the Titanic) gets "¿Puedes ser más específico?" once, as
+   a host would. Each ruling is stored per clue and answer, so the same answer always gets the same ruling.
+3. The room can overrule Richie: a "¡Eso vale!" button on the phones; a majority makes it count.
+
+#### Host, sounds and music
+
+- **A host voice for Richie in this game**, made with ElevenLabs Voice Design from a description (warm,
+  quick, playful game-show host, a little theatrical; bilingual with a Latin American Spanish accent). It is
+  an original voice, imitating no real host. One voice for both languages if its Spanish holds up; otherwise
+  two designed voices with the same character.
+- **Fixed lines with many variations**, generated once and cached: welcome, category reveal, "pick a
+  square", right (plain, on a streak, on a hard clue), wrong, nobody buzzed, time up, hidden square, steal,
+  lead change, comeback, final round, winner, goodbye; eight to twelve takes each, in both languages, with
+  players' names where it fits. Eleven v3, whose audio tags allow laughs and excitement.
+- **Banter now and then**: about one event in four, a text model writes a short line about the moment (a
+  streak, a tight score, a player's name), spoken with the faster Flash model so it never holds up the game.
+- **Clue audio** is generated for the whole board while players join and cached per clue for later games.
+- **Our own sound and music**, generated with ElevenLabs sound effects (and its music model if our plan has
+  it) and used at the same kinds of moments as a TV quiz, never imitating a show's theme: an intro theme, the
+  board reveal, picking a square, a buzz sound per team, right, wrong, time up, a hidden-square sting,
+  30 seconds of thinking music for the final round, a drumroll for the reveal, a winner's fanfare and an
+  outro. Several takes each; Eduardo picks.
+- Richie's body joins in: antennas and head with the lines, team colors on the lights at a buzz, a dance for
+  the winner.
+- Rough cost at third-party rates (to check against our ElevenLabs plan): about $0.024–0.048 per 1,000
+  characters and about $0.02 per sound effect, so a few dollars once for the fixed lines and sounds and
+  roughly $0.20–0.40 a game for clues and banter.
 
 ### Sheeple
 
@@ -153,6 +200,70 @@ games, and nothing is published.
   model rewrites the best (about 10,000) as new questions in our own words, in English and in Spanish
   separately, plus easier kids versions; a second pass checks every answer. The clue's value gives the
   difficulty. Cost measured on 1,000 clues before the whole set.
+- Script: `scripts/trivia_bank.py` (tags with Jev, rewrites with `gemini-3.8-flash`, checks by having
+  `gpt-5.6-luna` answer each new question blind and Jev judge the match; each stage cached as JSON lines;
+  writes `report.md` and `review.csv`).
+- Sample result (1,000 random clues, 2026-11-01, 2 min 54 s, $0.39):
+  - Jev said yes to: US-centric 305, English wordplay 205, picture/broadcast-only 69, out of date 19,
+    adult content 93 (kept for adults), kids could answer 185. Appeal (0–4) mostly 2; 438 under 2.
+  - 359 passed (us, wordplay, media and dated under 0.5, appeal at least 2); the writer refused 3 (two
+    clues with wrong facts, one pointless); 356 kept, 354 with Spanish, 91 with a kids version.
+  - Blind check: English 356 of 356 agree, Spanish 348 of 354. The six disagreements were mostly the blind
+    answerer's slips, but one caught a weak question (lip fillers are now hyaluronic acid, not collagen).
+  - Cost: Jev $0.044 (1,710 requests, about $0.000026 each), rewriting $0.33 (about $0.0009 a question),
+    blind checks $0.017.
+  - Spot checks: the US tag is right on the clear cases, and the 0.3–0.5 band is still US pop culture
+    (Mariah Carey's mother, Shaft, a Dow Jones company, Tony Hawk); the wordplay tag has some false
+    positives (a proverb, a turntable's "wow"), which costs nothing given the supply.
+  - Problems seen: the writer rates difficulty low (110 one-star, 202 two, 44 three, no four) and only weakly
+    follows the clue's value; 49 Spanish questions quote an English or foreign title, a few in a way that
+    needs English ("conocida en inglés como 'riding to hounds'"); film titles differ between Spain and Latin
+    America ("Eduardo Manostijeras" / "El joven manos de tijera"), which the accept list and Jev's judge
+    handled.
+- Second sample (same 1,000 clues, 2026-11-01, $0.46), after Eduardo's decisions: US pop culture known
+  worldwide is fine (Mariah Carey, Tony Hawk), so the US tag became "known only in the US"; clues are
+  statements; answers in both languages plus every accepted form, whatever the game's language; the writer
+  never needs English in Spanish and lists Spain and Latin America titles; the clue's value is passed as a
+  difficulty hint. Results: US-local 211, wordplay 201, media 71, dated 17; 384 passed, 383 kept (382 with
+  Spanish, 98 kids versions); blind check 380 of 383 English, 377 of 382 Spanish. 163 per 1,000 have appeal
+  at least 2.5, about 35,000 in the archive. Still to fix: some clues give the answer away (a gorilla
+  "striking its torso" for chest-beating), so the check stage should ask Jev whether the clue names the
+  answer; difficulty still never reaches 4.
+- Why only about 38% survive (second sample): 172 of 1,000 fail on appeal alone, 214 only on a filter
+  (wordplay 104, US-local 69, broadcast picture 26, out of date 4, a few on two), 226 on both. The appeal
+  cut-off (2.0) sits near the median (2.12): many clues are fine facts but niche for this audience. Lowering
+  it to 1.8 would add about 7%; with about 35,000 good clues available it is not needed.
+- Giveaway check (2026-11-01): the check stage asks Jev whether a clue contains its answer's words or a
+  direct translation. A first wording flagged 209 of 383 (it read "easy" as "gives it away"); the narrower
+  wording flags 49, mostly real ("named after the Italian city of Taranto" for tarantula, "an aircraft with
+  rotating blades" for helicopter parents), a few not (sheep, kilt). Flagged clues are dropped; the supply
+  allows it. The sample leaves 330 clues in the bank file (`bank.jsonl`: our clues, answers and tags only).
+- Boards are built from single clues, not the show's columns: each clue has one of our 14 broad categories,
+  a specific topic in both languages ("Ríos del mundo", "Películas de los 80"; added 2026-11-01) and a
+  difficulty. A game picks 5 columns, a topic when it has four good clues of different difficulty and the
+  broad category otherwise, and orders each column's clues by the writer's rating and the original value
+  (later by how often players get them right). Dropping a clue never breaks a board. Topics are free text, so
+  similar ones ("earthquakes", "earthquakes and seismology") are merged in a pass after the run.
+- Full run started 2026-11-01 (stopped after 59,292 tags to add topics, then restarted reusing them): the whole archive tagged, the best 12,000 by appeal rewritten (at most two
+  clues per answer), into `~/.local/share/reachy/game-data/trivia-bank/` (source CSV in
+  `game-data/sources/`, off the repo). The laptop's disk filled up mid-run (other projects), so the run moved
+  to the Mac mini with all 216,930 tags and the first 4,905 rewrites; it runs there detached, from
+  `game-data/trivia_bank.py`. Expected cost about $25. Difficulty from the clue's value and the
+  writer's rating now, calibrated later by how often players get each clue right.
+- Full run result (finished on the Mac mini 2026-11-01): Jev said yes to wordplay 48,615, US-local 42,481,
+  broadcast picture 12,763, out of date 4,250 (adult 17,116, kids 41,487); 92,437 under appeal 2.0; 80,155
+  passed and 33,597 of them have appeal at least 2.5. The best 12,000 by appeal (two per answer at most)
+  were rewritten: the writer refused 49, 13 came back malformed, 11,938 kept (11,922 in Spanish, 5,587 with a
+  kids version). The blind check agreed on 11,865 English and 11,763 Spanish; 1,413 give the answer away.
+  **10,377 clues are in the bank** (`game-data/trivia-bank/bank.jsonl` on the mini), 1,248 of them adult-only
+  and 4,786 with a kids version. Topics: 4,242 different, 591 with at least four clues (491 of them with
+  mixed difficulty); most common Greek mythology 126, human anatomy 119, classic literature 110.
+  Cost about $22 (tags about $9, rewrites about $12, checks about $1; estimated from the samples' per-request
+  costs, since the run was restarted twice and each restart only counts its own requests).
+- Still to do on the bank: the best-by-appeal pick is easy (difficulty 7,659 one-star, 4,151 two-star, 128
+  three-star, none four-star), so harder rows need a second batch from the 33,597 good clues weighted toward
+  high values; merge near-duplicate topics; strip Markdown the writer sometimes adds to titles
+  (*El silencio de los inocentes*) before speech and the screen.
 - Supplement: the Open Trivia Database (CC BY-SA 4.0, about 4,000 verified, English, mostly multiple choice)
   rewritten into open questions; Spanish and Venezuelan categories written directly.
 
@@ -243,3 +354,11 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-01: designed in conversation (names, the one-voice rule, bilingual, adults by default with a kids
   filter, phones as buzzers without microphones); looked at both data sources and counted them. Nothing
   built.
+- 2026-11-01: `scripts/trivia_bank.py` run on 1,000 random trivia clues (results under "Trivia" above):
+  356 bilingual questions for $0.39; full-run cut-offs proposed, waiting on Eduardo's read of the examples.
+- 2026-11-01: Big Brain decisions: statement clues (no "who is" phrasing), answers in both languages always
+  count, predictable judging with a room override, an ElevenLabs host voice with line variations and banter,
+  our own sounds and music, the board on the e-ink and a mirror on the phones. Second sample run with the
+  new prompts (383 clues for $0.46).
+- 2026-11-01: giveaway check and topics added; the full run moved to the Mac mini after the laptop's disk
+  filled, and finished with 10,377 clues in the bank for about $22.
