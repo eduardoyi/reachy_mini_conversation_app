@@ -38,8 +38,9 @@ incoming calls are declined. The camera stays available to the admin app.
   - **Woke for nothing** marks his latest wake (in the last ten minutes) as one nobody meant, and ends its
     conversation if it is still going.
 - **The sheet** (tap the card, or `/#wake`), with what to do first:
-  - **Check clips:** a card stack. Each clip plays by itself; answer "Called Reachy" (swipe right), "Didn't"
-    (swipe left) or "Not sure". At most 10 a day.
+  - **Check clips:** a card stack. Each clip plays by itself: "Did someone say his name?" Yes (swipe right) then
+    asks "To him or about him?"; No (swipe left) and Not sure (swipe down) answer at once. "Is this the call
+    he missed?" is just Yes or No. At most 10 a day.
   - **New model:** the proposal's before → after numbers, with Switch / Keep current. Undo is shown for 7 days.
   - **Teach Reachy your voice:** pick a person, then about 20 short prompts ("by the sofa", "from the kitchen",
     "louder", "quietly", "in a sentence", "from the hallway", "with the TV on", "as if he didn't hear"). Reachy

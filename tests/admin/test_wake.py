@@ -170,7 +170,8 @@ def _queue(store: WakeLearningStore, count: int = 2) -> None:
             clip.setsampwidth(2)
             clip.setframerate(16000)
             clip.writeframes(b"\x10\x00" * 64000)
-        items.append(ReviewItem(f"c{index}", f"2026-10-31/clip-{index}.wav", 1.0, 3.0, QUESTION))
+        clip = f"2026-10-31/clip-{index}.wav"
+        items.append(ReviewItem(f"c{index}", clip, 1.0, 3.0, QUESTION, follow_up=index == 1))
     store.write_queue(items)
 
 
@@ -251,8 +252,8 @@ def test_clips_to_check_are_listed_and_played_without_being_cached(wake: Wake) -
         (wake.store.clips / "2026-10-31" / "clip-0.wav").unlink()
         gone = client.get("/api/wake/clip", params={"item": "c0"})
     assert items == [
-        {"id": "c0", "question": QUESTION, "seconds": 2.0},
-        {"id": "c1", "question": QUESTION, "seconds": 2.0},
+        {"id": "c0", "question": QUESTION, "follow_up": False, "seconds": 2.0},
+        {"id": "c1", "question": QUESTION, "follow_up": True, "seconds": 2.0},
     ]
     assert clip.status_code == 200 and clip.headers["content-type"] == "audio/wav"
     assert clip.headers["cache-control"] == "no-store"
@@ -267,11 +268,13 @@ def test_an_answer_is_kept_with_who_gave_it_and_audited(wake: Wake) -> None:
     with wake.client(headers={"Tailscale-User-Login": "adriana@example.com"}) as client:
         response = client.post("/api/wake/answer", headers=SAME_ORIGIN, json={"item": "c0", "answer": "not_call"})
         left = client.get("/api/wake/queue").json()["items"]
-    assert response.json() == {"answered": True}
-    assert wake.store.answers() == {"c0": "not_call"}
+        about = client.post("/api/wake/answer", headers=SAME_ORIGIN, json={"item": "c1", "answer": "mention"})
+    assert response.json() == {"answered": True} and about.json() == {"answered": True}
+    assert wake.store.answers() == {"c0": "not_call", "c1": "mention"}
     assert [item["id"] for item in left] == ["c1"]
-    (entry,) = wake.audit()
+    about_entry, entry = wake.audit()  # newest first
     assert (entry["who"], entry["action"], entry["target"]) == ("adriana@example.com", "wake clip checked", "not_call")
+    assert about_entry["target"] == "mention"
 
 
 @pytest.mark.parametrize(
@@ -284,7 +287,7 @@ def test_an_answer_is_kept_with_who_gave_it_and_audited(wake: Wake) -> None:
     ],
 )
 def test_bad_answers_and_unknown_clips_are_refused(wake: Wake, body: dict[str, Any], status: int) -> None:
-    """Only call, not_call or unsure, for a clip still waiting; nothing is kept or audited otherwise."""
+    """Only call, mention, not_call or unsure, for a clip still waiting; nothing is kept or audited otherwise."""
     _queue(wake.store)
     with wake.client() as client:
         response = client.post("/api/wake/answer", headers=SAME_ORIGIN, json=body)

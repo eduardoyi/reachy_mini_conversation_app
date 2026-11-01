@@ -21,6 +21,10 @@ Reachy's wake word improves from the household's own audio, measured instead of 
 
 Targets (agreed 2026-10-31): at least 19 of 20 calls answered the first time, at most 1 false wake a day.
 
+Two layers (agreed 2026-11-01): he wakes whenever he hears his name, said to him or about him; once awake he
+decides whether it was for him, and answers only then. The wake model learns the first; the scoreboard counts
+the second as "spoke when you were talking about him". The deciding layer is not built yet.
+
 ## User-visible behavior
 
 - **"You didn't hear me" / "No me escuchaste" / "Non mi hai sentito" / "Você não me ouviu"** said after he wakes:
@@ -30,27 +34,32 @@ Targets (agreed 2026-10-31): at least 19 of 20 calls answered the first time, at
 - **"He missed me" in the phone app** (Home, or long-press the app icon) keeps the minute before now.
 - **"No estábamos hablando contigo" / "nadie te llamó" / "I wasn't talking to you" / "non parlavo con te" /
   "não era contigo"** said after he wakes, with or without his name:
-  - that wake is marked as one nobody meant, so it never counts as a call (or trains the next head as one);
+  - that wake is marked: he shouldn't have answered. When the night finds his name in its clip, you were talking
+    about him, not to him: he was right to wake (his name, for the wake model), it is no false wake, and it is
+    one "spoke when you were talking about him". With no name found, the night can't tell noise from a name it
+    missed, so the clip is asked about;
   - he goes back to waiting for his name without a word (a quick command, never the conversation);
   - said later in a conversation, the conversation's `end_conversation` tool marks it the same way.
 - **"Woke for nothing" in the phone app** (Home, next to "He missed me") marks his latest wake, if it was in the
   last ten minutes, and ends its conversation if it is still going.
 - **Sent to sleep within a minute of waking** ("a dormir", by voice, the conversation or the phone): when the
-  night finds no name in that wake's clip, it counts as a false wake. With the name in it, someone called him to
-  send him to sleep, and it stays a call.
+  night finds no name in that wake's clip, it counts as a false wake for now and the clip is asked about. With
+  the name in it, someone called him to send him to sleep, and it stays a call.
 - **An antenna bend** keeps the 15 s before it; the night looks there for a call that went unheard.
 - **Recording a voice**:
   - a phone flow walks one person through about 20 calls from around the room;
   - Reachy records each on his own microphones and wakes for none of them;
   - a take that was too quiet or too long is not kept.
-- **Clips to check**: up to 10 a day, where the automatic signals are least sure. Each answer ("Called Reachy",
-  "Didn't", "Not sure") overrules the speech model and the logs.
+- **Clips to check**: up to 10 a day, where the automatic signals are least sure. "Did someone say his name?"
+  Yes asks "To him or about him?"; No and Not sure end it there. "Is this the call he missed?" is just yes or
+  no. Each answer overrules the speech model and the logs. Writing an answered clip into a new list asks it
+  again; the old answer counts until the new one.
 - **Switching**:
   - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, one
     push offers it with the numbers;
   - "Switch" makes it live the next time Reachy is idle, and Undo stays for 7 days.
-- **Scoreboard**: this week's calls answered the first time, false wakes a day, by TV on or off, and the live and
-  shadow heads' numbers.
+- **Scoreboard**: this week's calls answered the first time, false wakes a day, by TV on or off, how often he
+  spoke up when you were talking about him, and how many times the live and shadow heads heard his name.
 
 ## Architecture and data flow
 
@@ -82,24 +91,30 @@ flowchart LR
 
 ### What counts as what (`nightly.day_moments`)
 
-- **Call:**
+- **Call** (his name, to him):
   - a fire whose name check passed (or a trusted fire that went on to wake him), or a transcript wake, unless one
-    of the "not a call" or "unknown" rules below applies;
+    of the rules below applies;
   - a name the speech server located in any kept clip (including one found in a fire's 10 s pre-roll more than
     2.5 s before the fire, which is an earlier call he missed);
-  - a household "Called Reachy".
-- **Not a call:**
-  - a fire or shadow fire whose clip holds no name at all;
-  - a wake someone said was not for him (`said: "not_called"`: by voice, in the conversation or from the phone);
-    names located in its clip are dropped too;
-  - a wake sent to sleep within a minute (`slept_after_s`) whose clip holds no name;
-  - a household "Didn't".
+  - a household "To him" (or a yes to "Is this the call he missed?").
+- **Mention** (his name, about him):
+  - a wake someone said was not for him (`said: "not_called"`: by voice, in the conversation or from the
+    phone) whose clip holds his name;
+  - a household "About him".
 
-  An automatic "no name" within 3 s of a call is dropped (the check misses calls), but a person's answer always
-  stands.
+  Calls and mentions are both his name (`DayMoments.named`): the wake model trains on both as yes, and a head is
+  scored on catching both.
+- **Not a call** (nobody said his name):
+  - a fire or shadow fire whose clip holds no name at all;
+  - a household "No".
+
+  An automatic "no name" within 3 s of his name is dropped (the check misses names), but a person's answer
+  always stands.
 - **Unknown:**
   - the minute before a "missed" mark, or the 15 s before an antenna touch, when no name was found there;
-  - a wake where nothing was asked (`request_chars` 0) and no name was found, until someone answers its clip.
+  - a wake told "not for me", sent to sleep within a minute, or where nothing was asked (`request_chars` 0),
+    when the night found no name in its clip: the live check heard one to wake him, so only someone's answer
+    settles it. Its clip is asked about.
 
   Unknown stretches are never used as calls or non-calls.
 
@@ -112,8 +127,9 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
   per day.
 - **Pairing.** A pair is the main head and an extra head scaled onto its threshold, which is what the detector
   does.
-- **Calls caught.** Calls with a window over the threshold between 0.6 s before and 1 s after them.
-- **Fires per day.** Fires (one per 3 s) more than 20 s from any call or unknown stretch, per 16 hours of
+- **Calls caught.** Times his name was said (calls and mentions) with a window over the threshold between 0.6 s
+  before and 1 s after them. The JSON keeps the keys `calls_caught` and `calls`.
+- **Fires per day.** Fires (one per 3 s) more than 20 s from his name or an unknown stretch, per 16 hours of
   listening.
 - **Switch offer.** The shadow pair must catch at least 2 more calls (and 5% more) than the live pair over the days
   since the shadow started, with fires no higher than the live pair's plus 0.5 a day.
@@ -127,7 +143,7 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
 
 | Area | File | Contract |
 |------|------|----------|
-| Records | `wake_learning/store.py` | `WakeLearningStore(root, clips)`: `days`, `events(day)` (notes merged); `write_queue`/`queue`/`answer`/`answers`/`clip_audio`; `write_scoreboard`/`scoreboard`; heads: `live`, `shadow`, `set_live`, `set_shadow`, `head_path`, `propose`, `proposal`, `mark_proposal_notified`, `decline`, `withdraw_proposal`, `switch`, `undoable`, `undo`, `history`; `save_recording`, `recordings_by_person`, `all_recordings`; `wake_features_directory()`, `wake_learning_directory()` |
+| Records | `wake_learning/store.py` | `WakeLearningStore(root, clips)`: `days`, `events(day)` (notes merged); `write_queue`/`queue`/`answer`/`answers`/`clip_audio` (answers `call`, `mention`, `not_call`, `unsure`; `ReviewItem.follow_up` asks "to him or about him?" after a yes; `queue` leaves out clips answered since the list was made); `write_scoreboard`/`scoreboard`; heads: `live`, `shadow`, `set_live`, `set_shadow`, `head_path`, `propose`, `proposal`, `mark_proposal_notified`, `decline`, `withdraw_proposal`, `switch`, `undoable`, `undo`, `history`; `save_recording`, `recordings_by_person`, `all_recordings`; `wake_features_directory()`, `wake_learning_directory()` |
 | Feature log | `wake_learning/feature_log.py` | `WakeFeatureLog(directory, keep_days).add(frame)`; `read_runs(directory, day) -> [FeatureRun]`; `FeatureRun.windows(stride)`, `window_at(indices)` |
 | Takes | `wake_learning/takes.py` | `take_finished`, `voiced_span`, `level_db` |
 | Night | `wake_learning/nightly.py` | `run_night(NightSettings, NameCheck)`; `main()` is `reachy-wake-nightly` |
@@ -189,10 +205,11 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 - **The name's spellings.** The night's name check takes the same name and spellings as the live transcript
   check (`transcript_aliases`). Whisper writes a Spanish "Ri-chi" as "richi" or "ricci" far more often than
   "Reachy", so a check on "Reachy" alone finds almost no calls. Each night logs how many clips had the name.
-- **Scoreboard approximations.** False wakes are woke-but-nothing-asked, sent to sleep at once with no name, "not
-  for me" (voice, conversation or phone), or a household "Didn't". Calls include
-  names the speech server found that may have been people talking about Reachy, until someone answers. The
-  scoreboard is an estimate until the replay scoreboard exists.
+- **Scoreboard approximations.** False wakes are wakes where nobody said his name: a household "No", or
+  woke-but-nothing-asked, sent to sleep at once, or "not for me" with no name found (until someone answers).
+  `mentions` are his name said about him; `spoke_about` the ones he woke for and took as a request
+  (`request_chars` not 0). Calls include names the speech server found that may have been people talking about
+  Reachy, until someone answers. The scoreboard is an estimate until the replay scoreboard exists.
 - **Restarts.** The shadow head loads at startup, so the night restarts Reachy after picking a new one (during
   quiet hours). A switch restarts him when he is idle.
 
@@ -200,10 +217,10 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused); clip cut and confinement; switch, undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
+| `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused, a clip asked again); clip cut and confinement; switch, undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
 | `tests/wake_learning/test_feature_log.py` | Runs split by gaps, start times, windows and `window_at`; pruning |
 | `tests/wake_learning/test_takes.py` | When a take ends; voice span with margins; a far quiet call; level in dB |
-| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
+| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; mentions ("not for me" over his name, "About him") as his name but no call and no false wake, and unknowns asked about; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
 | `tests/test_acoustic_wake_word.py` | Shadow fires reported, never waking; the model's float32 scores written to the records; feature frames; re-arming inside the cooldown; loading a shadow head |
 | `tests/test_hybrid_runtime.py` | A rejected wake keeps the stream (no reset) and hears a repeated call, and can't be marked false; fire records; missed marks; a false-wake mark closes its conversation and a sleep soon after is noted; recording a name holds wakes |
 | `tests/test_control_api.py` | `/wake/missed` (privacy refuses); `/wake/false`; `/wake/take` keeps only the voice, refuses quiet or long takes and when he can't record |

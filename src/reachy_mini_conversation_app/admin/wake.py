@@ -89,9 +89,14 @@ class WakeWord:
         }
 
     def to_check(self) -> list[dict[str, Any]]:
-        """Return the clips waiting to be checked: id, question and length in seconds."""
+        """Return the clips waiting to be checked: id, question, whether a yes asks "to him or about him?", length."""
         return [
-            {"id": item.id, "question": item.question, "seconds": round(item.end - item.start, 1)}
+            {
+                "id": item.id,
+                "question": item.question,
+                "follow_up": item.follow_up,
+                "seconds": round(item.end - item.start, 1),
+            }
             for item in self.store.queue()
         ]
 

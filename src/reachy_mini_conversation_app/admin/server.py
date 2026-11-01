@@ -634,7 +634,7 @@ def create_app(
         try:
             await asyncio.to_thread(wake.answer, item, answer, _who(request))
         except ValueError:
-            return _error("answer must be call, not_call or unsure", 400)
+            return _error("answer must be call, mention, not_call or unsure", 400)
         except LookupError:
             return _error("That clip was already checked.", 404)
         audit.append({"who": _who(request), "action": "wake clip checked", "target": answer})

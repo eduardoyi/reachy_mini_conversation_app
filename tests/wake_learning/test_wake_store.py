@@ -22,6 +22,24 @@ def _head(store: WakeLearningStore, name: str, threshold: float = 0.9) -> HeadRe
     return record
 
 
+def test_a_clip_answered_before_its_list_was_made_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asking again is writing the clip into a new list: the old answer counts until the new one comes."""
+    from reachy_mini_conversation_app.wake_learning import store as store_module
+
+    times = iter(["2026-11-01T08:00:00+00:00", "2026-11-01T09:00:00+00:00", "2026-11-01T09:05:00+00:00"])
+    monkeypatch.setattr(store_module, "_now", lambda: next(times))
+    store = _store(tmp_path)
+    item = ReviewItem("d/a@1.00", "d/x.wav", 0.0, 4.5, "Did someone say his name?", follow_up=True)
+
+    store.answer(item.id, "call", "eduardo")
+    store.write_queue([item])
+    assert store.queue() == [item] and store.answers() == {item.id: "call"}
+    store.answer(item.id, "mention", "eduardo")
+    assert store.queue() == [] and store.answers() == {item.id: "mention"}
+
+
 def test_answered_clips_leave_the_queue_and_the_latest_answer_counts(tmp_path: Path) -> None:
     """The phone sees only clips nobody answered; changing an answer keeps the newest."""
     store = _store(tmp_path)

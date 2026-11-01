@@ -23,7 +23,8 @@ from reachy_mini_conversation_app.wake_clips import EVENTS_FILE, make_private_di
 
 logger = logging.getLogger(__name__)
 
-ANSWERS: Final[frozenset[str]] = frozenset({"call", "not_call", "unsure"})
+# "call": his name, said to him; "mention": his name, said about him; "not_call": nobody said it.
+ANSWERS: Final[frozenset[str]] = frozenset({"call", "mention", "not_call", "unsure"})
 # A switch can be undone for this long.
 UNDO_DAYS: Final[int] = 7
 HISTORY_KEPT: Final[int] = 5
@@ -114,13 +115,17 @@ class HeadRecord:
 
 @dataclass(frozen=True)
 class ReviewItem:
-    """One clip to check on the phone: which file, which seconds of it, and the question."""
+    """One clip to check on the phone: which file, which seconds of it, and the question.
+
+    ``follow_up`` asks "to him or about him?" after a yes.
+    """
 
     id: str
     clip: str
     start: float
     end: float
     question: str
+    follow_up: bool = False
 
 
 class WakeLearningStore:
@@ -160,9 +165,10 @@ class WakeLearningStore:
         )
 
     def queue(self) -> list[ReviewItem]:
-        """Return the clips still to check, in order."""
+        """Return the clips still to check, in order; a clip answered before this list was made is asked again."""
         document = _read_json(self.root / "queue.json") or {}
-        answered = self.answers()
+        made = str(document.get("made", ""))
+        answered = self._latest_answers()
         items = []
         for entry in document.get("items") or []:
             try:
@@ -172,15 +178,16 @@ class WakeLearningStore:
                     start=float(entry["start"]),
                     end=float(entry["end"]),
                     question=str(entry["question"]),
+                    follow_up=entry.get("follow_up") is True,
                 )
             except (KeyError, TypeError, ValueError):
                 continue
-            if item.id not in answered:
+            if item.id not in answered or str(answered[item.id].get("at", "")) < made:
                 items.append(item)
         return items
 
     def answer(self, item_id: str, answer: str, who: str) -> None:
-        """Keep an answer to a clip ("call", "not_call" or "unsure"); a later answer to the same clip wins."""
+        """Keep an answer to a clip (one of ``ANSWERS``); a later answer to the same clip wins."""
         if answer not in ANSWERS:
             raise ValueError("Unknown answer")
         with self._lock:
@@ -188,8 +195,11 @@ class WakeLearningStore:
 
     def answers(self) -> dict[str, str]:
         """Return the latest answer per clip id."""
+        return {item: str(entry["answer"]) for item, entry in self._latest_answers().items()}
+
+    def _latest_answers(self) -> dict[str, dict[str, Any]]:
         return {
-            str(entry["item"]): str(entry["answer"])
+            str(entry["item"]): entry
             for entry in read_lines(self.root / "answers.jsonl")
             if entry.get("answer") in ANSWERS and "item" in entry
         }

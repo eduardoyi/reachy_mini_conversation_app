@@ -75,6 +75,9 @@ LOCATE_WINDOW_S: Final[float] = 1.5
 LOCATE_STEP_S: Final[float] = 0.25
 LABELLED_KINDS: Final[frozenset[str]] = frozenset({"wake", "shadow", "antenna", "missed", "name_heard"})
 MAIN_HEAD: Final[str] = "reachy-official33.onnx"
+# What the phone asks; a yes to any but the missed-call question then asks "to him or about him?".
+NAME_QUESTION: Final[str] = "Did someone say his name?"
+MISSED_QUESTION: Final[str] = "Is this the call he missed?"
 
 
 class NameCheck(Protocol):
@@ -150,11 +153,17 @@ async def label_day(store: WakeLearningStore, day: str, check: NameCheck) -> dic
 # ---- what happened when -------------------------------------------------------------------------------------
 @dataclass
 class DayMoments:
-    """A day's calls (when the name ended), sure non-calls, and spans whose truth is unknown."""
+    """When his name was said to him (calls) or about him (mentions), when it surely wasn't, and unknown spans."""
 
     calls: list[float] = field(default_factory=list)
     not_calls: list[float] = field(default_factory=list)
     unsure: list[tuple[float, float]] = field(default_factory=list)
+    mentions: list[float] = field(default_factory=list)
+
+    @property
+    def named(self) -> list[float]:
+        """Every time his name was said, to him or about him: he should wake for both, so a head should catch both."""
+        return sorted(self.calls + self.mentions)
 
 
 def _woke(event: dict[str, Any]) -> bool:
@@ -173,7 +182,10 @@ def clip_start(event: dict[str, Any]) -> float:
 
 
 def _not_called(event: dict[str, Any]) -> bool:
-    """Whether someone said this wake was not for him ("we weren't talking to you", or from the phone)."""
+    """Whether someone said this wake was not for him ("we weren't talking to you", or from the phone).
+
+    That says he shouldn't have answered, not that nobody said his name: they may have been talking about him.
+    """
     return event.get("said") == "not_called"
 
 
@@ -188,29 +200,32 @@ def _nothing_asked(event: dict[str, Any], located: list[float]) -> bool:
 
 
 def _located(event: dict[str, Any], names: dict[str, list[float]], said_not: list[float]) -> list[float]:
-    """Return when the name ended in the event's clip, leaving out what the household said was no call."""
-    if _not_called(event):
-        return []
+    """Return when the name ended in the event's clip, leaving out where the household said nobody said it."""
     times = (clip_start(event) + offset for offset in names.get(event["id"], []))
     return [time for time in times if not _near(time, said_not, 1.5)]
 
 
-def human_answers(events: list[dict[str, Any]], answers: dict[str, str]) -> tuple[list[float], list[float]]:
-    """Return when the household said there was a call, and when there was none, for this day's clips."""
+def human_answers(
+    events: list[dict[str, Any]], answers: dict[str, str]
+) -> tuple[list[float], list[float], list[float]]:
+    """Return when, in this day's clips, the household said his name was said to him, about him, and not at all."""
     by_id = {event["id"]: event for event in events}
-    calls: list[float] = []
-    not_calls = [float(event["t"]) for event in events if _not_called(event)]
+    said: dict[str, list[float]] = {"call": [], "mention": [], "not_call": []}
     for item_id, answer in answers.items():
         event_id, _, offset = item_id.rpartition("@")
         event = by_id.get(event_id)
-        if event is None:
-            continue
-        at = clip_start(event) + float(offset)
-        if answer == "call":
-            calls.append(at)
-        elif answer == "not_call":
-            not_calls.append(at)
-    return calls, not_calls
+        if event is not None and answer in said:
+            said[answer].append(clip_start(event) + float(offset))
+    return said["call"], said["mention"], said["not_call"]
+
+
+def _told_off_unnamed(event: dict[str, Any], located: list[float]) -> bool:
+    """Whether a wake was told off, sent away or asked nothing, and the night found no name in its clip.
+
+    The live check heard a name to wake him; with the night finding none, it was noise or a name the night
+    missed, so only someone's answer settles it.
+    """
+    return not located and (_not_called(event) or _sent_away(event, located) or _nothing_asked(event, located))
 
 
 def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], answers: dict[str, str]) -> DayMoments:
@@ -218,9 +233,10 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
 
     What the household answered always wins over the speech model and the logs.
     """
-    said_call, said_not = human_answers(events, answers)
+    said_call, said_about, said_not = human_answers(events, answers)
     moments = DayMoments()
     found: list[float] = []
+    about: list[float] = []
     quiet: list[float] = []
     for event in events:
         located = _located(event, names, said_not)
@@ -232,22 +248,22 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
             if not located and not _near(at, said_call, CALL_GAP_S * 3):
                 moments.unsure.append((clip_start(event), at))
         elif _woke(event):
-            if _near(at, said_call + said_not, 1.5):
+            target = about if _not_called(event) else found  # told "not to you" over his name: said about him
+            if _near(at, said_call + said_about + said_not, 1.5):
                 pass  # the household answered for this wake; their answer is added below
-            elif _sent_away(event, located):
-                quiet.append(at)
-            elif _nothing_asked(event, located):
+            elif _told_off_unnamed(event, located):
                 moments.unsure.append((at - 1.5, at + 0.5))
             else:
-                found.append(at)
-            found.extend(time for time in located if time < at - EARLIER_CALL_S)
+                target.append(at)
+            target.extend(time for time in located if time < at - EARLIER_CALL_S)
         elif located:
             found.extend(located)  # the name was there: a call, or someone talking about him
         elif kind in ("wake", "shadow"):
             quiet.append(at)
-    moments.calls = sorted(found + said_call)
-    # A call heard close by outweighs an automatic "no name" (a repeat the check missed); never a person's answer.
-    moments.not_calls = sorted([time for time in quiet if not _near(time, moments.calls, 3.0)] + said_not)
+    moments.calls = sorted([time for time in found if not _near(time, said_about, 1.5)] + said_call)
+    moments.mentions = sorted([time for time in about if not _near(time, said_call, 1.5)] + said_about)
+    # A name heard close by outweighs an automatic "no name" (a repeat the check missed); never a person's answer.
+    moments.not_calls = sorted([time for time in quiet if not _near(time, moments.named, 3.0)] + said_not)
     return moments
 
 
@@ -344,7 +360,10 @@ def caught(
 
 @dataclass(frozen=True)
 class PairResult:
-    """How a main + extra head pair did over some days: calls caught of those covered, and fires per day."""
+    """How a main + extra head pair did over some days: names caught of those covered, and fires per day.
+
+    A name is any time his name was said, to him or about him; the JSON keeps the older "calls" keys.
+    """
 
     caught: int
     calls: int
@@ -362,9 +381,9 @@ def evaluate(days: list[tuple[DayScores, DayMoments]], main: str, main_threshold
     hours = 0.0
     for day, moments in days:
         scores = pair_scores(day, main, extra, main_threshold / extra_threshold)
-        day_hit, day_covered = caught(day.ends, scores, main_threshold, moments.calls)
+        day_hit, day_covered = caught(day.ends, scores, main_threshold, moments.named)
         hit, covered = hit + day_hit, covered + day_covered
-        skip = moments.calls + [time for span in moments.unsure for time in span]
+        skip = moments.named + [time for span in moments.unsure for time in span]
         fires += count_fires(day.ends, scores, main_threshold, skip)
         hours += day.hours
     return PairResult(hit, covered, fires / hours * LISTENING_DAY_H if hours else 0.0)
@@ -392,17 +411,17 @@ def clearly_better(candidate: PairResult, current: PairResult) -> bool:
 # ---- training data -------------------------------------------------------------------------------------------
 def day_examples(day: DayScores, runs: list[FeatureRun], moments: DayMoments, rng: random.Random
                  ) -> tuple[NDArray[np.float16], NDArray[np.float32]]:  # fmt: skip
-    """Return a day's training windows: calls (1), sure non-calls and a sample of everything else (0)."""
+    """Return a day's training windows: his name, to him or about him (1), sure non-calls and a sample of the rest (0)."""
     ends = day.ends
     labels = np.full(len(ends), -1.0, dtype=np.float32)
-    for at in moments.calls:
+    for at in moments.named:
         first, last = np.searchsorted(ends, [at - 0.4, at + 0.25])
         labels[first:last] = 1.0
     for at in moments.not_calls:
         first, last = np.searchsorted(ends, [at - 1.5, at + 0.5])
         labels[first:last][labels[first:last] < 0] = 0.0
     quiet = labels < 0
-    for at in moments.calls:
+    for at in moments.named:
         first, last = np.searchsorted(ends, [at - CALL_GAP_S, at + CALL_GAP_S])
         quiet[first:last] = False
     for start, end in moments.unsure:
@@ -482,35 +501,35 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
     """Pick at most ten clips for the household to check, where the automatic signals are least sure."""
     ranked: list[tuple[int, ReviewItem]] = []
 
-    def offer(rank: int, event: dict[str, Any], at: float, question: str) -> None:
+    def offer(rank: int, event: dict[str, Any], at: float, question: str = NAME_QUESTION) -> None:
         item_id = f"{event['id']}@{at:.2f}"
         if item_id in answers or event["id"] in answers:
             return
-        ranked.append((rank, ReviewItem(item_id, event["clip"], max(0.0, at - 3.0), at + 1.5, question)))
+        clip = ReviewItem(item_id, event["clip"], max(0.0, at - 3.0), at + 1.5, question,
+                          follow_up=question != MISSED_QUESTION)  # fmt: skip
+        ranked.append((rank, clip))
 
     for event in events:
-        if not event.get("clip") or _not_called(event):  # someone already said nobody called him
+        if not event.get("clip"):
             continue
         located = names.get(event["id"], [])
-        if _woke(event) and _sent_away(event, located):
-            continue  # sent to sleep at once with no name in it: already a false wake
         kind, fired_at = event["kind"], float(event.get("event_at") or 0.0)
         if kind == "missed":
             for at in located[-2:]:
-                offer(0, event, at, "Is this the call he missed?")
+                offer(0, event, at, MISSED_QUESTION)
         elif kind == "antenna":
             for at in located[-1:]:
-                offer(1, event, at, "Did someone call Reachy here?")
+                offer(1, event, at, "Did someone say his name here?")
         elif kind == "wake" and event.get("outcome") == "rejected" and located:
-            offer(2, event, located[-1], "Did someone call Reachy?")
-        elif _woke(event) and event.get("request_chars") == 0 and not located:
-            offer(3, event, fired_at, "Did someone call Reachy?")
+            offer(2, event, located[-1])
+        elif _woke(event) and _told_off_unnamed(event, located):
+            offer(3, event, fired_at)  # the live check heard a name, the night none
         elif kind == "shadow" and located:
-            offer(4, event, located[-1], "Did someone call Reachy?")
+            offer(4, event, located[-1])
     rejected = [event for event in events if event["kind"] == "wake" and event.get("outcome") == "rejected"]
     for event in rng.sample(rejected, min(2, len(rejected))):  # a check on the "no name" verdicts
         if event.get("clip") and not names.get(event["id"]):
-            offer(5, event, float(event.get("event_at") or 0.0), "Did someone call Reachy?")
+            offer(5, event, float(event.get("event_at") or 0.0))
     ranked.sort(key=lambda pair: pair[0])
     seen: set[str] = set()
     items = []
@@ -523,18 +542,26 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
 
 # ---- the scoreboard --------------------------------------------------------------------------------------------
 def day_score(events: list[dict[str, Any]], names: dict[str, list[float]], answers: dict[str, str]) -> dict[str, Any]:
-    """Count the day's call episodes, those answered the first time, and false wakes, overall and by TV."""
-    said_call, said_not = human_answers(events, answers)
+    """Count the day's call episodes, those answered the first time, false wakes and mentions, overall and by TV.
+
+    A false wake is one where nobody said his name. Waking for his name said about him is right; answering it
+    is what counts against him, as ``spoke_about``.
+    """
+    said_call, said_about, said_not = human_answers(events, answers)
     seeds: list[tuple[float, str, bool]] = []  # (when, "woke" / "failed" / "missed", TV on)
-    false_wakes = 0
+    false_wakes = spoke_about = 0
+    mentions = len(said_about)
     for event in events:
         at, tv = float(event["t"]), bool(event.get("tv"))
-        located = _located(event, names, said_not)
+        located = [time for time in _located(event, names, said_not) if not _near(time, said_about, 1.5)]
         if _woke(event):
-            unexplained = not _near(at, said_call, 1.5) and (
-                _nothing_asked(event, located) or _sent_away(event, located)
-            )
-            if _near(at, said_not, 1.5) or unexplained:
+            answered_for = _near(at, said_call, 1.5)
+            told_about = _not_called(event) and bool(located) and not answered_for
+            if _near(at, said_about, 1.5) or told_about:
+                mentions += int(told_about)
+                spoke_about += int(event.get("request_chars") != 0)
+                continue
+            if _near(at, said_not, 1.5) or (not answered_for and _told_off_unnamed(event, located)):
                 false_wakes += 1
                 continue
             seeds.append((at, "woke", tv))
@@ -562,7 +589,8 @@ def day_score(events: list[dict[str, Any]], names: dict[str, list[float]], answe
         group["calls"] += 1
         group["first_time"] += int(answered)
         first_time += int(answered)
-    return {"calls": len(episodes), "first_time": first_time, "false_wakes": false_wakes, "by_condition": by_tv}
+    return {"calls": len(episodes), "first_time": first_time, "false_wakes": false_wakes, "mentions": mentions,
+            "spoke_about": spoke_about, "by_condition": by_tv}  # fmt: skip
 
 
 # ---- the night --------------------------------------------------------------------------------------------------
@@ -721,7 +749,8 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
         store.write_queue(review_items(events, names, answers, rng))
     week = [day for day in days if day >= (settings.today - timedelta(days=7)).isoformat()]
     per_day = [{"day": day, **day_score(labelled[day][0], labelled[day][1], answers)} for day in week]
-    totals = {key: sum(day[key] for day in per_day) for key in ("calls", "first_time", "false_wakes")}
+    counted = ("calls", "first_time", "false_wakes", "mentions", "spoke_about")
+    totals = {key: sum(day[key] for day in per_day) for key in counted}
     by_condition = {
         group: {key: sum(day["by_condition"][group][key] for day in per_day) for key in ("calls", "first_time")}
         for group in ("tv", "no_tv")
@@ -729,7 +758,7 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
     store.write_scoreboard({
         "week": {**totals, "days": len(per_day),
                  "false_wakes_per_day": round(totals["false_wakes"] / len(per_day), 1) if per_day else 0.0},
-        "days": [{key: day[key] for key in ("day", "calls", "first_time", "false_wakes")} for day in per_day],
+        "days": [{key: day[key] for key in ("day", *counted)} for day in per_day],
         "by_condition": by_condition,
         "targets": {"first_time": 0.95, "false_wakes_per_day": 1.0},
         "live": {**summary["live"], "threshold": live.threshold} if live else None,

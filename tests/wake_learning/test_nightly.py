@@ -123,7 +123,8 @@ def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_ten() -
     items = review_items(events, names, answers, random.Random(1))
 
     assert len(items) == 10
-    assert items[0].question == "Is this the call he missed?" and items[1].question == "Did someone call Reachy here?"
+    assert items[0].question == "Is this the call he missed?" and items[1].question == "Did someone say his name here?"
+    assert not items[0].follow_up and items[1].follow_up  # only a name question asks "to him or about him?"
     assert all(item.id != f"{events[0]['id']}@8.00" for item in items)
     assert (items[0].start, items[0].end) == (5.0, 9.5)
 
@@ -145,28 +146,33 @@ def test_the_score_counts_episodes_answered_at_once_and_false_wakes() -> None:
     assert score["by_condition"]["no_tv"] == {"calls": 3, "first_time": 1}
 
 
-def test_wakes_nobody_meant_are_false_and_are_not_asked_about() -> None:
-    """A wake someone said wasn't for him, or sent to sleep at once with no name in it, is a false one.
+def test_his_name_said_about_him_is_his_name_but_no_call_and_no_false_wake() -> None:
+    """Told "not to you" over his name, he was right to wake and wrong to answer: a mention, not a false wake.
 
-    Sent to sleep with the name in it, he was called to go to sleep; nothing asked and no name is unknown until
-    someone answers its question.
+    Told off, sent away or asked nothing with no name found, the night can't tell noise from a name it missed:
+    unknown, a false wake for now, and asked about. Sent to sleep with the name in it, he was called to go to
+    sleep. A clip the household said was about him is a mention too, not a missed call.
     """
     told = _event("wake", DAY + 100, heard=True, request_chars=20, said="not_called", by="voice")
+    told_unnamed = _event("wake", DAY + 200, heard=True, request_chars=20, said="not_called", by="app")
     sent_away = _event("wake", DAY + 300, heard=True, request_chars=8, slept_after_s=4.0)
     called_to_sleep = _event("wake", DAY + 500, heard=True, request_chars=8, slept_after_s=3.0)
     empty = _event("wake", DAY + 700, heard=True, request_chars=0)
-    events = [told, sent_away, called_to_sleep, empty]
-    names = {told["id"]: [9.8], called_to_sleep["id"]: [9.8]}
+    talked_about = _event("wake", DAY + 900, heard=False, outcome="rejected")
+    events = [told, told_unnamed, sent_away, called_to_sleep, empty, talked_about]
+    names = {told["id"]: [9.8], called_to_sleep["id"]: [9.8], talked_about["id"]: [9.5]}
+    answers = {f"{talked_about['id']}@9.50": "mention"}
 
-    moments = day_moments(events, names, {})
-    score = day_score(events, names, {})
-    items = review_items(events, names, {}, random.Random(1))
+    moments = day_moments(events, names, answers)
+    score = day_score(events, names, answers)
+    items = review_items(events, names, answers, random.Random(1))
 
-    assert moments.calls == [DAY + 500]
-    assert moments.not_calls == [DAY + 100, DAY + 300]
-    assert moments.unsure == [(DAY + 698.5, DAY + 700.5)]
-    assert (score["calls"], score["false_wakes"]) == (1, 3)
-    assert [item.id.split("@")[0] for item in items] == [empty["id"]]
+    assert (moments.calls, moments.mentions, moments.not_calls) == ([DAY + 500], [DAY + 100, DAY + 899.5], [])
+    assert moments.named == [DAY + 100, DAY + 500, DAY + 899.5]  # what a head should catch
+    assert moments.unsure == [(DAY + 198.5, DAY + 200.5), (DAY + 298.5, DAY + 300.5), (DAY + 698.5, DAY + 700.5)]
+    assert (score["calls"], score["false_wakes"], score["mentions"], score["spoke_about"]) == (1, 3, 2, 1)
+    assert [item.id.split("@")[0] for item in items] == [told_unnamed["id"], sent_away["id"], empty["id"]]
+    assert all(item.follow_up and item.question == "Did someone say his name?" for item in items)
 
 
 class FakeHead:

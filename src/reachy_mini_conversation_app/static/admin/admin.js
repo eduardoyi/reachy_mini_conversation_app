@@ -367,7 +367,7 @@ const PROMPTS = [
 ];
 const TAKES = 20;
 const WAVE_BARS = 44;
-const wake = { data: null, mode: "main", items: [], index: 0, checked: 0, clips: new Map(), audio: null, teach: null };
+const wake = { data: null, mode: "main", items: [], index: 0, checked: 0, asking: false, clips: new Map(), audio: null, teach: null };
 
 function plural(count, one) {
   return `${count} ${count === 1 ? one : `${one}s`}`;
@@ -497,7 +497,7 @@ function wakeMain(data) {
   if (data.to_check) {
     const go = el("button", { className: "pill sun small", type: "button" }, "Check now");
     go.addEventListener("click", () => startCheck(go));
-    parts.push(todoCard("ear", `${plural(data.to_check, "clip")} to check`, "About a minute: was someone calling Reachy, or not?", [go]));
+    parts.push(todoCard("ear", `${plural(data.to_check, "clip")} to check`, "About a minute: did someone say his name, and to him or about him?", [go]));
   }
   if (data.proposal) {
     const s = data.proposal.summary || {};
@@ -570,6 +570,8 @@ function wakeScore(data) {
   const parts = [el("h3", { className: "section-title" }, "This week")];
   const [score, goal] = weekScore(board);
   parts.push(el("div", { className: "wake-week" }, [el("b", {}, score), el("span", {}, board.made ? goal : "The first score comes in the morning.")]));
+  const mentions = (board.week || {}).mentions;
+  if (mentions) parts.push(el("p", { className: "hint" }, `You talked about him ${plural(mentions, "time")}; he spoke up on ${board.week.spoke_about || 0}.`));
   const target = (board.targets || {}).first_time || 0.95;
   const conditions = Object.entries(board.by_condition || {}).filter(([, counts]) => counts.calls);
   if (conditions.length) {
@@ -593,7 +595,7 @@ function wakeScore(data) {
     return el("li", {}, [
       el("span", { className: "what" }, [role, el("small", {}, `${named.name}. ${detail}`)]),
       el("span", { className: "amount" }, numbers && numbers.calls !== undefined
-        ? [`${numbers.calls_caught} of ${numbers.calls} calls`, el("small", {}, `${Number(numbers.fires_per_day || 0).toFixed(1)} fires a day`)]
+        ? [`Heard ${numbers.calls_caught} of ${numbers.calls}`, el("small", {}, `${Number(numbers.fires_per_day || 0).toFixed(1)} fires a day`)]
         : el("small", {}, "No numbers yet")),
     ]);
   };
@@ -636,7 +638,8 @@ function reminderSetting(value) {
   }));
 }
 
-// Checking clips: one card at a time, played as it comes in; swipe right for a call, left for not, down to skip.
+// Checking clips: one card at a time, played as it comes in; swipe right for yes, left for no, down to skip.
+// A yes to "did someone say his name?" then asks whether it was said to him or about him.
 
 async function startCheck(button) {
   const payload = await run(button, () => api("/api/wake/queue"));
@@ -720,6 +723,7 @@ async function playClip(item, bars) {
 
 function renderCheck() {
   stopClip();
+  wake.asking = false;
   const body = $("#wake-body");
   const item = wake.items[wake.index];
   if (!item) {
@@ -737,28 +741,45 @@ function renderCheck() {
   const replay = el("button", { className: "round soft", type: "button", ariaLabel: "Play again" }, icon("replay"));
   replay.addEventListener("click", () => playClip(item, bars));
   const card = el("div", { className: "clip-card" }, [
-    el("span", { className: "swipe-tag yes" }, "Called"),
-    el("span", { className: "swipe-tag no" }, "Didn't"),
+    el("span", { className: "swipe-tag yes" }, "Yes"),
+    el("span", { className: "swipe-tag no" }, "No"),
     el("p", { className: "clip-count" }, `${wake.index + 1} of ${wake.items.length}`),
     el("h2", { className: "clip-question" }, item.question),
     el("div", { className: "wave", ariaHidden: "true" }, bars),
     el("div", { className: "clip-tools" }, [el("span", {}, `${item.seconds} s`), replay]),
   ]);
   swipeable(card);
-  const answer = (label, className, value) => {
-    const button = el("button", { className, type: "button" }, label);
-    button.addEventListener("click", () => answerClip(value));
-    return button;
-  };
+  const yes = el("button", { className: "pill sun big", type: "button" }, "Yes");
+  yes.addEventListener("click", () => sayYes());
   body.replaceChildren(el("div", { className: "clip-stage" }, [
     card,
-    el("div", { className: "clip-answers" }, [answer("Didn't", "pill soft big", "not_call"), answer("Called Reachy", "pill sun big", "call")]),
-    answer("Not sure", "text-button unsure", "unsure"),
-    el("p", { className: "hint center" }, "Swipe right if he was called, left if not."),
+    el("div", { className: "clip-answers" }, [answerButton("No", "pill soft big", "not_call"), yes]),
+    answerButton("Not sure", "text-button unsure", "unsure"),
+    el("p", { className: "hint center clip-hint" }, "Swipe right for yes, left for no."),
   ]));
   playClip(item, bars);
   const next = wake.items[wake.index + 1];
   if (next) clipBuffer(next).catch(() => {});
+}
+
+function answerButton(label, className, value) {
+  const button = el("button", { className, type: "button" }, label);
+  button.addEventListener("click", () => answerClip(value));
+  return button;
+}
+
+// Said to him or about him, his name either way: he should wake for both, and only answer the first.
+function sayYes() {
+  const item = wake.items[wake.index];
+  if (!item || wake.asking) return;
+  if (!item.follow_up) {
+    answerClip("call");
+    return;
+  }
+  wake.asking = true;
+  $(".clip-question").textContent = "To him or about him?";
+  $(".clip-answers").replaceChildren(answerButton("About him", "pill soft big", "mention"), answerButton("To him", "pill sun big", "call"));
+  $(".clip-hint").textContent = "About him: you were talking about Reachy, not to him.";
 }
 
 function answerClip(answer) {
@@ -766,7 +787,7 @@ function answerClip(answer) {
   const card = $(".clip-card");
   if (!item || !card || card.classList.contains("gone")) return;
   stopClip();
-  card.classList.add("gone", { call: "out-right", not_call: "out-left", unsure: "out-down" }[answer]);
+  card.classList.add("gone", { call: "out-right", mention: "out-right", not_call: "out-left", unsure: "out-down" }[answer]);
   if (answer !== "unsure") wake.checked += 1;
   wake.clips.delete(item.id);
   api("/api/wake/answer", { method: "POST", body: { item: item.id, answer } }).catch((error) => toast(error.message, "bad"));
@@ -804,7 +825,8 @@ function swipeable(card) {
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
     settle();
-    if (dx > 90) answerClip("call");
+    if (wake.asking) return;
+    if (dx > 90) sayYes();
     else if (dx < -90) answerClip("not_call");
     else if (dy > 110 && Math.abs(dx) < 60) answerClip("unsure");
   });
@@ -812,10 +834,11 @@ function swipeable(card) {
 }
 
 $("#wake-sheet").addEventListener("keydown", (event) => {
-  const answer = { ArrowRight: "call", ArrowLeft: "not_call", ArrowDown: "unsure" }[event.key];
-  if (wake.mode !== "check" || !answer || event.target.closest("input")) return;
+  const answer = { ArrowRight: "yes", ArrowLeft: "not_call", ArrowDown: "unsure" }[event.key];
+  if (wake.mode !== "check" || wake.asking || !answer || event.target.closest("input")) return;
   event.preventDefault();
-  answerClip(answer);
+  if (answer === "yes") sayYes();
+  else answerClip(answer);
 });
 
 // Teaching his name: Reachy records each call on his own microphones while the phone shows what to do.
