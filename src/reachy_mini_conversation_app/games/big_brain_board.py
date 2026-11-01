@@ -204,6 +204,20 @@ def build_board(
         rows: list[list[dict[str, Any]]] = [[] for _ in POINTS]
         for entry in entries:
             rows[row_of(entry)].append(entry)
+        # A row left empty borrows the nearest clue from a neighbouring row that can spare one, so a small themed
+        # column (an edition's "Hogwarts" with no hard clue left) still plays, easiest to hardest.
+        for row in range(len(rows)):
+            if rows[row]:
+                continue
+            for distance in range(1, len(rows)):
+                spare = [r for r in (row + distance, row - distance) if 0 <= r < len(rows) and len(rows[r]) >= 2]
+                if spare:
+                    donor = rows[spare[0]]
+                    pick = min if spare[0] > row else max
+                    chosen = pick(donor, key=lambda entry: float(entry["hardness"]))
+                    donor.remove(chosen)
+                    rows[row].append(chosen)
+                    break
         return rows
 
     topics: dict[str, list[dict[str, Any]]] = {}

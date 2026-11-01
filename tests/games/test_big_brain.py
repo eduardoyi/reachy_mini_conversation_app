@@ -84,6 +84,21 @@ def test_a_board_has_five_columns_of_four_clues_from_easy_to_hard() -> None:
     assert len(set(board.ids)) == 21
 
 
+def test_a_column_missing_a_row_borrows_from_the_next_row_and_still_goes_easy_to_hard() -> None:
+    """A themed column with no clue in the hardest quarter still plays, its 800 taken from the row above."""
+    bank = _bank()
+    for entry in bank:
+        if entry["column"]["en"] == "Topic 0" and entry["hardness"] >= 3.0:
+            entry["hardness"] = 2.0 + entry["hardness"] / 10  # the hardest quarter starts near 3
+    titles = set()
+    for seed in range(30):
+        board = build_board(bank, "en", rng=random.Random(seed), now=0)
+        titles |= set(board.titles)
+        for column in board.clues:
+            assert [clue.hardness for clue in column] == sorted(clue.hardness for clue in column)
+    assert "Topic 0" in titles
+
+
 def test_kids_mode_uses_kids_clues_and_never_adult_ones() -> None:
     """Kids mode reads the kids versions and leaves adult-tagged clues out."""
     bank = _bank()
@@ -280,6 +295,10 @@ def test_the_qr_code_links_to_the_public_address_when_there_is_one() -> None:
         ("Juguemos Big Brain, edición Harry Potter", "bigbrain_hp"),
         ("juguemos la trivia de Harry Potter", "bigbrain_hp"),
         ("let's play Harry Potter trivia", "bigbrain_hp"),
+        ("Let's play Big Brain, Lord of the Rings", "bigbrain_lotr"),
+        ("Juguemos Big Brain, El Señor de los Anillos", "bigbrain_lotr"),
+        ("juguemos la trivia de la Tierra Media", "bigbrain_lotr"),
+        ("let's play big brain LOTR", "bigbrain_lotr"),
         ("let's play big brain", "bigbrain"),
         ("juguemos trivia", "bigbrain"),
     ],

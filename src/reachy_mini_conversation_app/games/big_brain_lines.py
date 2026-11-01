@@ -578,6 +578,36 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[warmly] Gracias por jugar, brujas y magos. [pause] ¡Nos vemos el próximo curso!",
         ),
     },
+    # The Middle-earth edition's own opening and closing (Edition.key "lotr").
+    "welcome_lotr": {
+        "en": (
+            "[booming] Hobbits, elves, dwarves and men of the living room... [pause] welcome to BIG BRAIN: the "
+            "Middle-earth edition!",
+            "[hushed] One quiz to rule them all... [booming] it's BIG BRAIN, Middle-earth edition!",
+            "[playful] Second breakfast is over, phones are out... [excited] it's BIG BRAIN, Middle-earth edition!",
+            "[dramatic] The beacons are lit! [booming] Welcome to BIG BRAIN: the Middle-earth edition!",
+        ),
+        "es": (
+            "[booming] Hobbits, elfos, enanos y hombres de esta sala... [pause] ¡bienvenidos a BIG BRAIN, edición "
+            "Tierra Media!",
+            "[hushed] Un concurso para gobernarlos a todos... [booming] ¡es BIG BRAIN, edición Tierra Media!",
+            "[playful] Ya pasó el segundo desayuno, teléfonos en mano... [excited] ¡es BIG BRAIN, edición Tierra "
+            "Media!",
+            "[dramatic] ¡Se encendieron las almenaras! [booming] ¡Bienvenidos a BIG BRAIN, edición Tierra Media!",
+        ),
+    },
+    "goodbye_lotr": {
+        "en": (
+            "[warmly] And so our quest ends. [playful] Time for second dinner. Good night!",
+            "[warmly] You were brave, every one of you. [booming] Good night from BIG BRAIN!",
+            "[playful] The road goes ever on... [warmly] but tonight, it goes to bed. Good night!",
+        ),
+        "es": (
+            "[warmly] Y así termina nuestra aventura. [playful] Hora de la segunda cena. ¡Buenas noches!",
+            "[warmly] Fueron valientes, todos y cada uno. [booming] ¡Buenas noches desde BIG BRAIN!",
+            "[playful] El camino sigue y sigue... [warmly] pero esta noche, se va a dormir. ¡Buenas noches!",
+        ),
+    },
     "pause": {
         "en": (
             "[softly] We'll pause here.",

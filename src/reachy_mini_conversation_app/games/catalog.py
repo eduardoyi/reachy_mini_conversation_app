@@ -230,8 +230,37 @@ BIG_BRAIN_HP: Final[GameInfo] = GameInfo(
     ),
 )
 
+BIG_BRAIN_LOTR: Final[GameInfo] = GameInfo(
+    key="bigbrain_lotr",
+    names=_edition_names(
+        (
+            "el senor de los anillos",
+            "senor de los anillos",
+            "lord of the rings",
+            "the lord of the rings",
+            "lotr",
+            "la tierra media",
+            "tierra media",
+            "middle earth",
+            "el senor de los anillo",
+            "lord of the ring",
+        )
+    ),  # fmt: skip
+    title={"es": "Big Brain, edición Tierra Media", "en": "Big Brain, Middle-earth edition"},
+    pitch={
+        "es": "El concurso de Big Brain, todo sobre las películas de El Señor de los Anillos: cada quien juega desde su teléfono.",  # fmt: skip
+        "en": "The Big Brain quiz show, all about the Lord of the Rings films: everyone plays on their phone.",
+    },
+    rules=(
+        "Big Brain's Middle-earth edition: the same team quiz show, with every clue about Peter Jackson's three "
+        "Lord of the Rings films (story, characters, places, battles, the cast and how the films were made). Start "
+        "it when someone asks for Big Brain with the Lord of the Rings or Middle-earth; plain Big Brain is the "
+        "general quiz."
+    ),
+)
+
 GAMES: Final[dict[str, GameInfo]] = {
-    game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP)
+    game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR)
 }
 
 

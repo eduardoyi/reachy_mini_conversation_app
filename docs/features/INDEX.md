@@ -14,7 +14,7 @@ the implementation.
 | Gemini Live provider | [gemini-live-provider.md](gemini-live-provider.md) | in-progress |
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
 | Games | [games.md](games.md) | in-progress: game host and color hunt built and tested; not yet played on the robot |
-| Big Brain (team quiz show) | [big-brain.md](big-brain.md) | in-progress: played twice on 2026-11-01 and fixed after each; Hogwarts edition (Harry Potter films) added |
+| Big Brain (team quiz show) | [big-brain.md](big-brain.md) | in-progress: played twice on 2026-11-01 and fixed after each; Hogwarts (Harry Potter) and Middle-earth (Lord of the Rings) editions |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
 | Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |
 | Simulator speaker output bypass | [simulator-speaker-output.md](simulator-speaker-output.md) | in-progress |

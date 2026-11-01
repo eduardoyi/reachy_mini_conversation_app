@@ -55,12 +55,14 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
 A themed edition is the same show with its own clue bank, title, opening and closing lines and intro tune
 (`Edition` in `games/big_brain.py`, its `GameInfo` in `games/catalog.py`). It is its own game in the catalog, so
 "Richie, let's play Big Brain, Hogwarts", "big brain Harry Potter", "juguemos Big Brain, edición Harry Potter" or
-"la trivia de Harry Potter" start it, while plain "Big Brain" or "trivia" is still the general quiz. It is enabled
+"la trivia de Harry Potter" start it ("Big Brain, Lord of the Rings", "el Señor de los Anillos", "la Tierra Media"
+for Middle-earth), while plain "Big Brain" or "trivia" is still the general quiz. It is enabled
 once `trivia-bank/editions/<folder>/bank.jsonl` exists.
 
 | Edition | Game key | Bank | Lines and tune |
 |---------|----------|------|----------------|
 | Hogwarts (the eight Harry Potter films: story, characters, spells, creatures, the cast, the making) | `bigbrain_hp` | `editions/harry-potter/` | `welcome_hp`, `goodbye_hp`, `intro_hp` |
+| Middle-earth (Peter Jackson's three Lord of the Rings films: story, characters, places, battles, the cast, the making) | `bigbrain_lotr` | `editions/lord-of-the-rings/` | `welcome_lotr`, `goodbye_lotr`, `intro_lotr` |
 
 An edition's clues are written new by `scripts/edition_bank.py` (the archive had 151 Harry Potter clues, mostly
 the books): Gemini with Google Search writes each column in batches; Gemini checks the facts (true, the only
@@ -76,8 +78,13 @@ Mac's voice). So the Hogwarts edition's last 390 fact checks were done by Claude
 check as batches with two briefs (`brief-facts.md`: fact checks with web search; `brief-blind.md`: blind answers
 from the clue alone, no search, as a player would), parallel Claude agents write `verdicts-N.json` and
 `answers-N.json`, and `--claude --import DIR` adds them and runs Jev, which judges the blind answers as it judges
-players in the game and rates each clue. Future editions should also have Claude agents write the clues; the
-script's Gemini and OpenAI paths stay for reference.
+players in the game and rates each clue. Columns without clues get writing tasks too (`brief-write.md`, two
+columns an agent), so an edition can be written, checked and rated with Claude and Jev alone, as Middle-earth was
+on 2026-11-01 (563 written, 457 kept). Jev then picks each clue's best column, and a clue clearly in the wrong
+one moves (at least 90% sure, under 2% for the writer's column; looser cut-offs moved clues between columns that
+overlap, such as the Fellowship and the cast). Up to 4 clues may share an answer, since a franchise's main
+characters answer many; the board keeps each answer to one square a game, and a column missing a difficulty row
+borrows the nearest clue from the next row. The script's Gemini and OpenAI paths stay for reference.
 
 ## Current architecture
 

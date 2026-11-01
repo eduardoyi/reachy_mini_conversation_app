@@ -64,6 +64,11 @@ MUSIC: dict[str, tuple[float, str]] = {
         "Whimsical magical orchestral opening theme for a fantasy quiz show: twinkling celesta, soaring strings and "
         "French horns, mysterious at first then grand, ends with a clear final hit. Instrumental.",
     ),
+    "intro_lotr": (
+        20.0,
+        "Epic orchestral fantasy opening theme for a quiz show: a lone tin whistle melody over soft strings, then "
+        "full choir, horns and drums rising to a grand heroic finish with a clear final hit. Instrumental.",
+    ),
     "outro": (
         20.0,
         "Cheerful closing theme for a quiz show, brassy and warm, celebratory, ends with a final flourish. "
