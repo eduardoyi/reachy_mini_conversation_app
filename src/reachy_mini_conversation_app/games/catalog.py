@@ -147,7 +147,54 @@ SIMON_SAYS: Final[GameInfo] = GameInfo(
     ),
 )
 
-GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS)}
+BIG_BRAIN: Final[GameInfo] = GameInfo(
+    key="bigbrain",
+    names=frozenset(
+        {
+            "big brain",
+            "el big brain",
+            "bigbrain",
+            "big brains",
+            "big brein",
+            "big bren",
+            "big brian",
+            "vic brain",
+            "big rain",
+            "big drain",
+            "the big brain",
+            "big brain game",
+            "trivia",
+            "la trivia",
+            "una trivia",
+            "el juego de preguntas",
+            "juego de preguntas",
+            "preguntas",
+            "las preguntas",
+            "el concurso",
+            "concurso",
+            "quiz",
+            "a quiz",
+            "the quiz",
+            "trivia game",
+            "quiz show",
+        }
+    ),  # fmt: skip
+    title={"es": "Big Brain", "en": "Big Brain"},
+    pitch={
+        "es": "Un concurso de preguntas por equipos: cada quien juega desde su teléfono.",
+        "en": "A team quiz show: everyone plays on their phone.",
+    },
+    rules=(
+        "A quiz show for teams. Players scan the QR code on the e-ink screen with their phones, type a name and pick "
+        "a team (red, blue, green, yellow); phones are buzzers. Five themed columns of clues worth 200 to 800 "
+        "points: the team in control picks a square on a phone, Reachy reads the clue in his game-show host voice, "
+        "the first team to buzz answers out loud. Right wins the points and the next pick; wrong loses them. Hidden "
+        "squares (double or nothing, a steal, everyone answers), then a final round with secret bets. About 30 to "
+        "40 minutes. Spanish or English. Needs phones on the home Wi-Fi. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
+GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN)}
 
 
 @dataclass(frozen=True)

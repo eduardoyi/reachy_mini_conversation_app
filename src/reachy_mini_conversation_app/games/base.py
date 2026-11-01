@@ -20,6 +20,9 @@ from reachy_mini_conversation_app.games.catalog import GameInfo
 SPEAK_TIMEOUT_S = 20.0
 _TICK_S = 0.05
 
+SayAudio = Callable[
+    [int, NDArray[np.int16], str, str, Optional[Callable[[str], Awaitable[object]]]], Coroutine[Any, Any, None]
+]
 JevAsk = Callable[[dict[str, Any], dict[str, dict[str, Any]], dict[str, bytes]], Awaitable[dict[str, dict[str, Any]]]]
 
 
@@ -51,6 +54,9 @@ class GameServices:
     draw_pictures: Optional[Callable[[list[str]], Coroutine[Any, Any, None]]] = None
     # Reachy does a pose too: "up" or "left" with his head, "front" back to looking ahead.
     gesture: Optional[Callable[[str], Awaitable[None]]] = None
+    # Play recorded speech (sample rate, samples, its text for the transcript, language) as Reachy's line once he
+    # is free, and return once it has been heard; with an answer handler, listen for the next thing said.
+    say_audio: Optional[SayAudio] = None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
     clock: Callable[[], float] = time.monotonic

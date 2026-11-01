@@ -5286,6 +5286,35 @@ async def test_other_announcements_wait_while_a_game_plays_and_its_own_lines_do_
 
 
 @pytest.mark.asyncio
+async def test_a_game_announcement_can_play_recorded_speech_instead_of_saying_its_text() -> None:
+    """A host clip plays through the announcement path: the text is not synthesized, the clip's samples are queued."""
+    spoken: list[str] = []
+    runtime, _handler = _game_runtime(spoken)
+    runtime._assert_owner_loop()
+    clip = np.arange(24_000 // 4, dtype=np.int16)
+    heard: list[str] = []
+    played: list[np.ndarray] = []
+    try:
+        runtime.request_announcement(
+            "[excited] ¡Correcto!", "es", game=True, audio=(24_000, clip), on_spoken=lambda: heard.append("ok")
+        )
+
+        async def drain() -> None:
+            while True:
+                output = await runtime.emit()
+                if isinstance(output, tuple):
+                    played.append(output[1])
+
+        draining = asyncio.create_task(drain())
+        await _eventually(lambda: heard == ["ok"])
+        draining.cancel()
+        assert spoken == []
+        assert np.array_equal(np.concatenate(played), clip)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_the_cloud_gate_answers_a_wake_no_quick_command_took() -> None:
     """During a game, a request quick commands leave to the conversation reaches the game host instead."""
     spoken: list[str] = []

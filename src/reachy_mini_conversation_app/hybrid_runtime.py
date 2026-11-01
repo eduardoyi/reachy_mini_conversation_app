@@ -388,6 +388,17 @@ QuickCommandHandler: TypeAlias = Callable[[str], Awaitable[object | None]]
 ReplySpeaker: TypeAlias = Callable[[str, str], AsyncIterator[tuple[int, np.ndarray]]]
 
 
+# Recorded speech is queued in pieces this long, like a speaker's stream.
+_RECORDED_PIECE_S = 0.2
+
+
+async def _recorded(rate: int, samples: NDArray[np.int16]) -> AsyncIterator[tuple[int, np.ndarray]]:
+    """Yield recorded speech in short pieces, as a reply speaker yields synthesized speech."""
+    step = max(1, int(rate * _RECORDED_PIECE_S))
+    for start in range(0, samples.shape[-1], step):
+        yield rate, samples[..., start : start + step]
+
+
 @dataclass(frozen=True)
 class _PendingTurn:
     """Something Reachy does once he is free: speak an announcement, or listen for an awaited answer."""
@@ -401,6 +412,8 @@ class _PendingTurn:
     on_spoken: Callable[[], None] | None = None
     # A game's own line: spoken while other announcements wait for the game (set_announcement_hold).
     game: bool = False
+    # Recorded speech played instead of saying ``text`` (a game host's voice): sample rate and samples.
+    audio: tuple[int, NDArray[np.int16]] | None = None
 
 
 class HybridRuntime:
@@ -1446,7 +1459,7 @@ class HybridRuntime:
                 raise asyncio.CancelledError
             if reason == "announcement":
                 if turn is not None:
-                    await self._speak_locally(turn.text, turn.language, generation)
+                    await self._speak_locally(turn.text, turn.language, generation, audio=turn.audio)
                     if turn.answer is not None:
                         self.expect_answer(turn.answer, turn.language)
                     if turn.on_spoken is not None:
@@ -2347,11 +2360,14 @@ class HybridRuntime:
         answer: QuickCommandHandler | None = None,
         on_spoken: Callable[[], None] | None = None,
         game: bool = False,
+        audio: tuple[int, NDArray[np.int16]] | None = None,
     ) -> None:
         """Say ``text`` once Reachy is free (no conversation or command), then await ``answer`` if given.
 
         ``on_spoken`` runs on the runtime's loop once it has been heard; ``game`` marks a game's own line, said
-        while other announcements are held. Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
+        while other announcements are held; ``audio`` (sample rate, samples) is played instead of saying ``text``,
+        which then only goes to the transcript. Thread-safe; dropped if he stays busy for
+        ``_ANNOUNCEMENT_PENDING_S``.
         """
         self._queue_turn(
             _PendingTurn(
@@ -2362,6 +2378,7 @@ class HybridRuntime:
                 answer=answer,
                 on_spoken=on_spoken,
                 game=game,
+                audio=audio,
             )
         )
 
@@ -2435,16 +2452,27 @@ class HybridRuntime:
             ran = True
         return ran
 
-    async def _speak_locally(self, text: object, language: str, generation: int) -> None:
-        """Queue a spoken reply for playback and wait until it has been heard."""
+    async def _speak_locally(
+        self, text: object, language: str, generation: int, *, audio: tuple[int, NDArray[np.int16]] | None = None
+    ) -> None:
+        """Queue a spoken reply (or the recorded ``audio`` standing for it) for playback; wait until heard."""
         speaker = self._reply_speaker
-        if not isinstance(text, str) or not text.strip() or speaker is None:
+        if audio is None and (not isinstance(text, str) or not text.strip() or speaker is None):
             return
-        self._local_output.append(AdditionalOutputs({"role": "assistant", "content": text}))
+        if isinstance(text, str) and text.strip():
+            self._local_output.append(AdditionalOutputs({"role": "assistant", "content": text}))
         started_at = self._clock()
+        if audio is not None:
+            rate, samples = audio
+            limit = self._QUICK_REPLY_BASE_S + samples.shape[-1] / rate
+            stream = _recorded(rate, samples)
+        else:
+            assert speaker is not None and isinstance(text, str)
+            limit = self._QUICK_REPLY_BASE_S + len(text) * self._QUICK_REPLY_PER_CHAR_S
+            stream = speaker(text, language)
         try:
-            async with asyncio.timeout(self._QUICK_REPLY_BASE_S + len(text) * self._QUICK_REPLY_PER_CHAR_S):
-                await self._queue_reply_audio(speaker(text, language), generation, started_at)
+            async with asyncio.timeout(limit):
+                await self._queue_reply_audio(stream, generation, started_at)
         except TimeoutError:
             logger.warning("Quick reply speech took too long; listening again")
         except asyncio.CancelledError:

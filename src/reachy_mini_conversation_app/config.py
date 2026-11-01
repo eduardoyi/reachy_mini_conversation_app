@@ -874,6 +874,11 @@ class Config:
     # Web pictures: Brave Image Search finds them, Jev (TypeSafe) checks each one. Both keys are needed.
     BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
+    # Big Brain (games/big_brain.py): the host voice, and its clue bank, clips and sounds.
+    ELEVENLABS_API_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip() or None
+    GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
+    # The phones join Big Brain on this port of the home Wi-Fi, only while a game runs.
+    BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
@@ -1108,6 +1113,9 @@ def refresh_runtime_config_from_env() -> None:
     config.DISPLAY_IMAGE_MODEL = (os.getenv("DISPLAY_IMAGE_MODEL") or "").strip() or "gpt-image-2.5-flare"
     config.BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     config.TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
+    config.ELEVENLABS_API_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip() or None
+    config.GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
+    config.BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (

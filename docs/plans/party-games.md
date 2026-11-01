@@ -1,6 +1,6 @@
 # Plan: Party games (Scribble Rush, Big Brain, Sheeple, Detectives)
 
-- Status: `draft` (designed with Eduardo 2026-10-31 to 2026-11-01; nothing built)
+- Status: `in-progress` (designed 2026-10-31 to 2026-11-01; clue bank and host clips made; Big Brain being built)
 - Owner: Eduardo
 - Created: 2026-11-01
 - Last updated: 2026-11-01
@@ -347,6 +347,58 @@ games, and nothing is published.
   it; to check on the real network).
 - The e-ink screen is near Richie and readable from the table.
 
+## Big Brain build (approved by Eduardo 2026-11-01)
+
+The first party game to build, music and sounds included. Mechanics as agreed (in plain words):
+
+- **Join:** "Richie, juguemos Big Brain", then "sí". The TRMNL shows a QR code, a four-letter code and the
+  teams; each phone scans it, types a name and picks red, blue, green or yellow, and becomes a buzzer. Intro
+  music and the welcome line play.
+- **A turn (20 squares):** the TRMNL shows the board: five columns (themed topics), four rows worth
+  **200, 400, 600 and 800 points** (Eduardo, 2026-11-01: points like a TV quiz, no money). The team in control
+  taps a square on a phone (the board is mirrored there). The TRMNL shows the clue in large type while Richie
+  reads it; then the buzzers unlock. The first buzz wins (its phone lights in the team color, Richie calls the
+  team); only that player answers aloud, and Richie listens only to them. Right: the team gets the points and
+  picks next. Wrong: it loses them (adults; kids mode loses nothing) and the other teams may buzz. Nobody:
+  Richie says the answer, and the square is crossed out.
+- **Hidden squares (three, never in the 200 row):** double or nothing; steal (a right answer takes the
+  square's points from the leading other team); everyone (each phone types an answer; every right one scores
+  for its team).
+- **Fairness:** after a wrong ruling, phones show "¡Eso vale!" until the next square is picked; a majority of
+  players makes it count. The clue text also appears on the phones once read.
+- **Final round:** the TRMNL shows the category; each team bets in secret on a phone (up to its score, or up
+  to 800 when it has less); Richie reads the clue; 30 seconds of thinking music while each team types one
+  answer; the reveal goes team by team from the lowest score, with a drumroll; the winner gets the fanfare,
+  a dance and the TRMNL.
+- **Around it:** our own sounds and music; banter now and then; Spanish or English with answers in either;
+  kids mode (easier clues, kids versions, no lost points); "pausa" or an antenna pauses; about 30–40 minutes.
+
+### How it is built
+
+| Piece | Where | What |
+|-------|-------|------|
+| Prerecorded speech | `hybrid_runtime.py` | `request_announcement(..., audio=(rate, samples))` plays a clip through the same announcement path as a spoken line (waits until Reachy is free, no wake from his own voice, `on_spoken`, then an awaited answer if asked), so a host clip followed by "listen to the buzzer" works like a question |
+| Clips and sounds | `games/big_brain_audio.py` | Host clips (`game-data/big-brain/voice/<moment>/<lang>-NN.wav`, 24 kHz mono, converted from the ElevenLabs mp3s), never the same take twice in a row; sounds and music (`game-data/big-brain/sounds/`); live speech for clues, answers and banter with Eleven v4 Turbo as raw 24 kHz PCM, cached by text on disk |
+| Board | `games/big_brain_board.py` | Loads `trivia-bank/bank.jsonl`; picks five columns (a merged topic with a clue in each hardness quarter, else a broad category), four clues each ordered by hardness, three hidden squares, a final clue (hardness ≥ the 75th percentile); filters adult clues out of kids mode and prefers kids versions; avoids clues used in the last 30 days (`big-brain/history.json`) |
+| Judge | `games/big_brain_judge.py` | Code first (normalize case, accents, articles and punctuation; any accepted form; close spelling or hearing slips; a surname alone), then Jev with the fixed rules (right, wrong, or too broad → "¿más específico?" once); every ruling stored per clue and answer (`big-brain/rulings.json`) so the same answer always gets the same ruling |
+| Phones | `games/big_brain_phones.py` + `static/big_brain/` | A FastAPI app on the home Wi-Fi (`0.0.0.0:7880`), only while a Big Brain game runs; every request needs the game's four-letter code; one WebSocket per phone; the phone page renders whatever state the server sends |
+| Screens | `eink_display.py` | `render_big_brain_join`, `_board`, `_clue`, `_final`, `_reveal`, `_winner` (800×480, four greys) |
+| Game | `games/big_brain.py` | The rounds above on the shared game host (pause, quit, idle end, "¿lo terminamos?" all inherited) |
+| Wiring | `catalog.py`, `main.py`, admin Games panel | Names ("Big Brain", "juguemos Big Brain", "el big brain", mishearings); enabled when the bank file and the ElevenLabs key exist (no camera needed) |
+| Making sounds | `scripts/big_brain_sounds.py` | ElevenLabs sound effects (200 credits each) and music (900 a minute); several takes each, the first used until Eduardo picks |
+
+Phone protocol (JSON over `/ws?code=ABCD`): the phone sends `join` {name, team, language, player}, `buzz`,
+`pick` {column, row}, `bet` {points}, `answer` {text}, `vote` {}; the server answers every change with a
+`state` snapshot for that phone (phase, teams and scores, the board, who is in control, the clue once read,
+who buzzed, deadlines, what this phone may do now, the vote) and `welcome` {player} on joining, which the
+phone keeps so a reload rejoins.
+
+Deferred: team colors on the room lights (lights cannot report their color, so they cannot be put back, as
+for the color hunt), the phone microphone, a game without phones.
+
+No new dependency: a QR library would have meant re-resolving the lock, which failed on 2026-11-01 on an
+unrelated package's build, so `qr_code.py` encodes the join link itself (checked with macOS's QR reader).
+
 ## Implementation order (proposed)
 
 1. Question data pipeline (offline, can run in parallel): survey cleanup and tags; trivia filter, tags and
@@ -421,3 +473,7 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   lines, waiting on his ear.
 - 2026-11-01: v4 Turbo chosen; the host's 334 fixed clips made and checked; trivia topics merged into
   columns (1,161 can fill a column).
+- 2026-11-01: Big Brain built (game, board, judge, audio, phones' server and page, TRMNL screens, QR code,
+  recorded speech through announcements, catalog and wiring); 18 sounds and music pieces made (three takes
+  each, the first chosen); host clips converted to WAV; feature doc [big-brain.md](../features/big-brain.md).
+  Points are 200/400/600/800 (Eduardo, mid-build). Full gate 2,928 passed. Not yet deployed or played.

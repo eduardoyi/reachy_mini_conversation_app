@@ -150,6 +150,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.host import GameHost
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
+    from reachy_mini_conversation_app.games.big_brain import BigBrain, BigBrainSetup
     from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.games.simon_says import SimonSays
@@ -176,6 +177,26 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
 
     def ask(text: str, language: str, answer: Callable[[str], Awaitable[object]]) -> None:
         runtime.request_announcement(text, language, answer=answer, game=True)
+
+    async def say_audio(
+        rate: int,
+        samples: Any,
+        text: str,
+        language: str,
+        answer: Callable[[str], Awaitable[object]] | None,
+    ) -> None:
+        """Play a game host's recorded line as Reachy's announcement; return once heard (then listen if asked)."""
+        heard = asyncio.get_running_loop().create_future()
+
+        def spoken() -> None:
+            if not heard.done():
+                heard.set_result(None)
+
+        runtime.request_announcement(text, language, on_spoken=spoken, game=True, audio=(rate, samples), answer=answer)
+        try:
+            await asyncio.wait_for(heard, SPEAK_TIMEOUT_S + len(samples) / rate)
+        except asyncio.TimeoutError:
+            log.info("Game clip not heard in time; going on")
 
     def show(png: bytes) -> None:
         if display is not None:
@@ -249,14 +270,19 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         picture=display.game_picture if display is not None else None,
         draw_pictures=display.draw_game_pictures if display is not None else None,
         gesture=gesture,
+        say_audio=say_audio,
     )
     games: dict[str, Callable[[], Game]] = (
         {"colors": ColorHunt, "treasure": TreasureHunt, "simon": SimonSays} if deps.camera_enabled else {}
     )
+    game_data = Path(config.GAME_DATA_DIR)
+    if (game_data / "trivia-bank" / "bank.jsonl").is_file():
+        setup = BigBrainSetup(data_dir=game_data, elevenlabs_key=config.ELEVENLABS_API_KEY, port=config.BIG_BRAIN_PORT)
+        games["bigbrain"] = lambda: BigBrain(setup)
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)
-    log.info("Games enabled: %s", ", ".join(games) or "none (no camera)")
+    log.info("Games enabled: %s", ", ".join(games) or "none (no camera, no Big Brain clue bank)")
     return host
 
 

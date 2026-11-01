@@ -29,6 +29,10 @@ Out of scope for now: flashing the room lights in the game's color (the light sy
 current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
 practice on the host, and every other game from the 2026-10-30 brainstorm.
 
+Big Brain, the team quiz show played on phones, runs on the same host and has its own page:
+[big-brain.md](big-brain.md). It adds `GameServices.say_audio` (recorded speech played as Reachy's line, through
+`request_announcement(..., audio=...)`), which any game can use for a recorded voice.
+
 ## User-facing behavior
 
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's

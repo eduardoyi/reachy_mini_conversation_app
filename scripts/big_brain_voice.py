@@ -1,6 +1,7 @@
 """Make Big Brain's fixed host clips with ElevenLabs (docs/plans/party-games.md, "Host, sounds and music").
 
-Every take in ``games/big_brain_lines.py`` becomes ``<out>/<moment>/<language>-<take>.mp3`` in the chosen host
+Every take in ``games/big_brain_lines.py`` becomes ``<out>/<moment>/<language>-<take>.wav`` (24 kHz mono, what
+the game plays) in the chosen host
 voice on Eleven v4 Turbo, audio tags included. ``manifest.json`` records each clip's text, so a rerun makes only
 the clips whose text is new or changed. With ``--check``, Whisper transcribes every clip and flags any that
 read a tag aloud or say something other than the line; flagged clips are listed in ``check.json`` and can be
@@ -12,6 +13,7 @@ Usage: uv run python scripts/big_brain_voice.py --out ~/.local/share/reachy/game
 import os
 import re
 import json
+import wave
 import asyncio
 import difflib
 import argparse
@@ -43,7 +45,7 @@ async def make(client: httpx.AsyncClient, gate: asyncio.Semaphore, text: str, la
         for attempt in range(8):
             response = await client.post(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
-                params={"output_format": "mp3_44100_128"},
+                params={"output_format": "pcm_24000"},
                 json={"text": text, "model_id": MODEL, "language_code": language},
             )
             if response.status_code != 429:
@@ -51,7 +53,11 @@ async def make(client: httpx.AsyncClient, gate: asyncio.Semaphore, text: str, la
             await asyncio.sleep(5 * (attempt + 1))
         response.raise_for_status()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(response.content)
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(24000)
+            audio.writeframes(response.content)
 
 
 async def check(openai: AsyncOpenAI, gate: asyncio.Semaphore, text: str, language: str, path: Path) -> dict[str, Any]:
@@ -87,7 +93,7 @@ async def main() -> None:
         for language, lines in takes.items():
             entries = []
             for take, text in enumerate(lines, start=1):
-                path = out / moment / f"{language}-{take:02d}.mp3"
+                path = out / moment / f"{language}-{take:02d}.wav"
                 entries.append({"file": str(path.relative_to(out)), "text": text})
                 old = manifest.get(moment, {}).get(language, [])
                 unchanged = take <= len(old) and old[take - 1]["text"] == text and path.exists()

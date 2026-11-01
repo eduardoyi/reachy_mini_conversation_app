@@ -2072,7 +2072,7 @@ const FEATURES = {
   display_picture_check: ["Picture checks", "Making sure pictures are OK for kids"],
   display_lesson: ["Drawing lessons", ""],
   display_lesson_captions: ["Lesson captions", ""],
-  game_check: ["Games", "Checking what is shown to his camera"],
+  game_check: ["Games", "Checking what is shown to his camera, and quiz answers"],
   game_color_check: ["Color hunt", "Checking the colors shown to his camera"],
 };
 const PARTS = {
