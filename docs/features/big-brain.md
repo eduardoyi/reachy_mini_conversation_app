@@ -56,13 +56,15 @@ A themed edition is the same show with its own clue bank, title, opening and clo
 (`Edition` in `games/big_brain.py`, its `GameInfo` in `games/catalog.py`). It is its own game in the catalog, so
 "Richie, let's play Big Brain, Hogwarts", "big brain Harry Potter", "juguemos Big Brain, edición Harry Potter" or
 "la trivia de Harry Potter" start it ("Big Brain, Lord of the Rings", "el Señor de los Anillos", "la Tierra Media"
-for Middle-earth), while plain "Big Brain" or "trivia" is still the general quiz. It is enabled
+for Middle-earth; "Big Brain, Star Wars", "la guerra de las galaxias" for Galactic), while plain "Big Brain" or
+"trivia" is still the general quiz. It is enabled
 once `trivia-bank/editions/<folder>/bank.jsonl` exists.
 
 | Edition | Game key | Bank | Lines and tune |
 |---------|----------|------|----------------|
 | Hogwarts (the eight Harry Potter films: story, characters, spells, creatures, the cast, the making) | `bigbrain_hp` | `editions/harry-potter/` | `welcome_hp`, `goodbye_hp`, `intro_hp` |
 | Middle-earth (Peter Jackson's three Lord of the Rings films: story, characters, places, battles, the cast, the making) | `bigbrain_lotr` | `editions/lord-of-the-rings/` | `welcome_lotr`, `goodbye_lotr`, `intro_lotr` |
+| Galactic (the six Star Wars saga films, Episodes I to VI: no sequels, spin-offs or series) | `bigbrain_sw` | `editions/star-wars/` | `welcome_sw`, `goodbye_sw`, `intro_sw` |
 
 An edition's clues are written new by `scripts/edition_bank.py` (the archive had 151 Harry Potter clues, mostly
 the books): Gemini with Google Search writes each column in batches; Gemini checks the facts (true, the only

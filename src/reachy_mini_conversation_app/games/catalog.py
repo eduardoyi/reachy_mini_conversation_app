@@ -259,8 +259,38 @@ BIG_BRAIN_LOTR: Final[GameInfo] = GameInfo(
     ),
 )
 
+BIG_BRAIN_SW: Final[GameInfo] = GameInfo(
+    key="bigbrain_sw",
+    names=_edition_names(
+        (
+            "star wars",
+            "starwars",
+            "la guerra de las galaxias",
+            "guerra de las galaxias",
+            "star war",
+            "estar wars",
+            "los jedi",
+            "jedi",
+            "la galaxia",
+            "galactica",
+            "galactic",
+        )
+    ),  # fmt: skip
+    title={"es": "Big Brain, edición Galáctica", "en": "Big Brain, Galactic edition"},
+    pitch={
+        "es": "El concurso de Big Brain, todo sobre las seis películas de Star Wars: cada quien juega desde su teléfono.",  # fmt: skip
+        "en": "The Big Brain quiz show, all about the six Star Wars films: everyone plays on their phone.",
+    },
+    rules=(
+        "Big Brain's Galactic edition: the same team quiz show, with every clue about the six Star Wars saga films "
+        "(the original trilogy and the prequels: characters, planets, ships, the Force, the cast and how the films "
+        "were made). Start it when someone asks for Big Brain with Star Wars; plain Big Brain is the general quiz."
+    ),
+)
+
 GAMES: Final[dict[str, GameInfo]] = {
-    game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR)
+    game.key: game
+    for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR, BIG_BRAIN_SW)
 }
 
 

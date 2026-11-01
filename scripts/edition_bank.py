@@ -224,6 +224,86 @@ EDITIONS: dict[str, dict[str, Any]] = {
         "per_column": 48,
         "search_columns": ("cast", "making"),
     },
+    "star-wars": {
+        "id": "sw",
+        "subject": (
+            "the six Star Wars saga films: the original trilogy (A New Hope, 1977; The Empire Strikes Back, 1980; "
+            "Return of the Jedi, 1983) and the prequels (The Phantom Menace, 1999; Attack of the Clones, 2002; "
+            "Revenge of the Sith, 2005): what happens and is seen in them, and how they were made (cast, crew, "
+            "George Lucas, ILM's effects, models, creatures, filming locations, John Williams's music, release, "
+            "awards). Nothing from the sequel trilogy, Rogue One, Solo, The Clone Wars or any other animated or "
+            "live-action series, the books, comics or games"
+        ),
+        "audience": "a family and their friends who have seen the six Star Wars films, some of them many times",
+        "spanish": (
+            "Spanish names are those of the Latin American Spanish dub and release: the films as 'La guerra de las "
+            "galaxias' (Episodio IV: Una nueva esperanza), 'El Imperio contraataca', 'El regreso del Jedi', 'La "
+            "amenaza fantasma', 'El ataque de los clones', 'La venganza de los Sith'; la Estrella de la Muerte, el "
+            "Halcón Milenario, la Fuerza, el sable de luz, el Ala-X, el caza TIE. Character names stay as in the "
+            "films (Luke Skywalker, Han Solo, Darth Vader), but the original trilogy's Latin American dub calls "
+            "R2-D2 'Arturito' and C-3PO 'Citripio': accept both forms"
+        ),
+        "columns": {
+            "jedi": ("The Jedi", "Los Jedi", "Jedi Knights and Masters, the Jedi Council, Padawans and training"),
+            "sith": (
+                "Sith & the Empire",
+                "Los Sith y el Imperio",
+                "Darth Sidious, Darth Vader, Darth Maul, Count Dooku, Tarkin, stormtroopers, bounty hunters",
+            ),
+            "rebels": (
+                "Heroes & Rebels",
+                "Héroes y rebeldes",
+                "Luke, Leia, Han, Chewbacca, Lando, Padmé and the Rebel Alliance",
+            ),
+            "droids": ("Droids", "Droides", "R2-D2, C-3PO, battle droids, droidekas, probe droids and others"),
+            "creatures": (
+                "Creatures & aliens",
+                "Criaturas y alienígenas",
+                "Wookiees, Ewoks, Hutts, Gungans, Jawas, Tusken Raiders, the wampa, the rancor, the Sarlacc",
+            ),
+            "planets": (
+                "Planets & places",
+                "Planetas y lugares",
+                "Tatooine, Hoth, Dagobah, Endor, Naboo, Coruscant, Kamino, Mustafar, and places on them",
+            ),
+            "ships": (
+                "Ships & vehicles",
+                "Naves y vehículos",
+                "the Millennium Falcon, X-wings, TIE fighters, Star Destroyers, AT-ATs, speeders, podracers",
+            ),
+            "force": (
+                "The Force & lightsabers",
+                "La Fuerza y los sables de luz",
+                "Force powers, lightsabers and their colours, duels, prophecies and Force lore shown in the films",
+            ),
+            "quotes": (
+                "Who said it?",
+                "¿Quién lo dijo?",
+                "a famous short line from the films (at most 12 words, quoted) and when it is said; the answer is "
+                "the character who says it",
+            ),
+            "cast": (
+                "The cast",
+                "El elenco",
+                "the actors: who played whom, their ages, other roles, casting stories; the answer is an actor or "
+                "the character they played",
+            ),
+            "making": (
+                "Behind the scenes",
+                "Detrás de cámaras",
+                "how the films were made: George Lucas, ILM, models, puppets, makeup, filming locations, sound "
+                "design, John Williams's music",
+            ),
+            "films": (
+                "The six films",
+                "Las seis películas",
+                "the films themselves: which episode something happens in, their titles, order, release, records, "
+                "the Oscars",
+            ),
+        },
+        "per_column": 48,
+        "search_columns": ("cast", "making", "films"),
+    },
 }
 
 WRITE_PROMPT = """You write clues for Big Brain, a trivia game a home robot hosts for {audience}, in English or

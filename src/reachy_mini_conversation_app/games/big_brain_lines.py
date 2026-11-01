@@ -608,6 +608,34 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[playful] El camino sigue y sigue... [warmly] pero esta noche, se va a dormir. ¡Buenas noches!",
         ),
     },
+    # The Galactic edition's own opening and closing (Edition.key "sw").
+    "welcome_sw": {
+        "en": (
+            "[booming] A long time ago, in a living room not so far away... [pause] BIG BRAIN: the Galactic edition!",
+            "[playful] Phones charged, lightsabers ready... [excited] it's BIG BRAIN, Galactic edition!",
+            "[hushed] I sense a great disturbance in this living room... [booming] it's BIG BRAIN: the Galactic "
+            "edition!",
+            "[dramatic] Rebels, Jedi, and the occasional Sith... [booming] welcome to BIG BRAIN, Galactic edition!",
+        ),
+        "es": (
+            "[booming] Hace mucho tiempo, en una sala no muy lejana... [pause] ¡BIG BRAIN, edición Galáctica!",
+            "[playful] Teléfonos cargados, sables de luz listos... [excited] ¡es BIG BRAIN, edición Galáctica!",
+            "[hushed] Siento una gran perturbación en esta sala... [booming] ¡es BIG BRAIN, edición Galáctica!",
+            "[dramatic] Rebeldes, Jedi, y uno que otro Sith... [booming] ¡bienvenidos a BIG BRAIN, edición Galáctica!",
+        ),
+    },
+    "goodbye_sw": {
+        "en": (
+            "[warmly] That's all for tonight. [playful] May the points be with you. Good night!",
+            "[booming] The game is over... [warmly] but the Force will be with you. Good night!",
+            "[playful] Do, or do not... [warmly] there is no next game tonight. Good night!",
+        ),
+        "es": (
+            "[warmly] Eso es todo por esta noche. [playful] Que los puntos los acompañen. ¡Buenas noches!",
+            "[booming] Se acabó el juego... [warmly] pero la Fuerza estará con ustedes. ¡Buenas noches!",
+            "[playful] Hazlo, o no lo hagas... [warmly] esta noche no hay otro juego. ¡Buenas noches!",
+        ),
+    },
     "pause": {
         "en": (
             "[softly] We'll pause here.",

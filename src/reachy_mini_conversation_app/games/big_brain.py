@@ -18,7 +18,14 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
-from reachy_mini_conversation_app.games.catalog import BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR, GameInfo, words
+from reachy_mini_conversation_app.games.catalog import (
+    BIG_BRAIN,
+    BIG_BRAIN_HP,
+    BIG_BRAIN_SW,
+    BIG_BRAIN_LOTR,
+    GameInfo,
+    words,
+)
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, join, silence
 from reachy_mini_conversation_app.games.big_brain_board import (
@@ -84,6 +91,7 @@ EDITIONS: Final[dict[str, Edition]] = {
         Edition(
             BIG_BRAIN_LOTR, "lord-of-the-rings", "lotr", {"en": "Middle-earth edition", "es": "Edición Tierra Media"}
         ),
+        Edition(BIG_BRAIN_SW, "star-wars", "sw", {"en": "Galactic edition", "es": "Edición Galáctica"}),
     )
 }
 
