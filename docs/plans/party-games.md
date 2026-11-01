@@ -174,6 +174,17 @@ game is in. Judging is predictable:
   (0.5 credit a character, as Flash does), and took about 3 seconds a line where v4 took 6 to 11. So a game
   costs about 2,250 credits, and Creator covers the one-time lines, sounds and music plus about 45 games a
   month.
+- **Fixed lines made (2026-11-01)**: `games/big_brain_lines.py` holds 41 moments and 334 takes (welcome,
+  joining, the board, picking, answering, right on a streak or a hard clue, wrong, anyone else, time up, the
+  answer was, more specific, overruled, double or nothing, steal, everyone answers, lead change, comeback,
+  scores, the board done, the final round, bets, thinking, the reveal, the winner, a tie, goodbye, pause,
+  resume, and each team color's buzz and win), written for the announcer voice with audio tags from a fixed
+  list and in Venezuelan Spanish ("Qué cráneo", "¡Epa!", "Qué sobrado"). `scripts/big_brain_voice.py` made
+  all 334 clips with v4 Turbo (16,030 characters, none failed) into `game-data/big-brain/voice/<moment>/`
+  on the mini, with a manifest of each clip's text so only changed lines are remade, and Whisper checked
+  every clip: 6 flagged, all one- or two-word clips Whisper mishears ("Era…" as "Error", "Red!" as
+  "Revved") plus one false alarm, now fixed (a tag word that is part of the line). Eduardo to listen to the
+  flagged five.
 - Richie's body joins in: antennas and head with the lines, team colors on the lights at a buzz, a dance for
   the winner.
 - Rough cost at third-party rates (to check against our ElevenLabs plan): about $0.024–0.048 per 1,000
@@ -299,7 +310,13 @@ games, and nothing is published.
   merging near-duplicate topics. Hard examples: Verdi's *Il trovatore* from its anvil chorus, Francis I
   inviting Leonardo, Emma Thompson's acting and writing Oscars. Markdown the writer added to titles is now
   stripped in the bank file.
-- Still to do on the bank: merge near-duplicate topics.
+- Topics merged into columns (2026-11-01, `scripts/trivia_topics.py`): every topic name embedded
+  (`text-embedding-3-small`); from the most common down, each joins the most similar column at 0.85 cosine
+  or starts its own. At 0.75 it made wrong merges ("south american cities" into "south american nations"),
+  and 0.85 gave as many full columns as 0.8. Result: 6,279 topics into 5,517 columns, 1,161 with at least four
+  clues (Greek mythology 213, World War II 186, classic literature 181, human anatomy 148, 1980s movies 129).
+  Each bank entry has `column` ({"en", "es"}); the bank before the merge is kept as
+  `bank.before-columns.jsonl`.
 - Supplement: the Open Trivia Database (CC BY-SA 4.0, about 4,000 verified, English, mostly multiple choice)
   rewritten into open questions; Spanish and Venezuelan categories written directly.
 
@@ -402,3 +419,5 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   clues in the bank, every category able to fill four rows. Host voice chosen (C, take 2) and saved; audio
   tags made a rule; Eduardo moved ElevenLabs to the Creator plan; v4, v4 Turbo and Flash compared on the same
   lines, waiting on his ear.
+- 2026-11-01: v4 Turbo chosen; the host's 334 fixed clips made and checked; trivia topics merged into
+  columns (1,161 can fill a column).
