@@ -18,7 +18,7 @@ from reachy_mini_conversation_app.qr_code import qr_matrix
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
-from reachy_mini_conversation_app.games.big_brain import BigBrain, BigBrainSetup
+from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
 from reachy_mini_conversation_app.games.big_brain_board import (
     POINTS,
     BoardError,
@@ -29,6 +29,7 @@ from reachy_mini_conversation_app.games.big_brain_board import (
 )
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling, plain, matches
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
+from reachy_mini_conversation_app.games.big_brain_screens import render_join
 
 
 def _entry(index: int, *, category: str, column: str, hardness: float, kids: bool = False, adult: bool = False) -> dict[str, Any]:  # fmt: skip
@@ -266,6 +267,45 @@ def test_the_qr_code_links_to_the_public_address_when_there_is_one() -> None:
     public = phones("https://mini.example.ts.net/bigbrain/")
     assert public.url() == f"https://mini.example.ts.net/bigbrain/?c={public.code}" and len(public.code) == 6
     assert phones(None).url("192.168.1.180").startswith("http://192.168.1.180:7880/?c=")
+
+
+# Editions -------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("said", "key"),
+    [
+        ("Let's play Big Brain, Hogwarts.", "bigbrain_hp"),
+        ("let's play big brain Harry Potter", "bigbrain_hp"),
+        ("Juguemos Big Brain, edición Harry Potter", "bigbrain_hp"),
+        ("juguemos la trivia de Harry Potter", "bigbrain_hp"),
+        ("let's play Harry Potter trivia", "bigbrain_hp"),
+        ("let's play big brain", "bigbrain"),
+        ("juguemos trivia", "bigbrain"),
+    ],
+)
+def test_an_edition_starts_by_its_subject_and_plain_big_brain_stays_the_general_quiz(said: str, key: str) -> None:
+    """ "Big Brain, Hogwarts" or "trivia de Harry Potter" asks for the edition; "Big Brain" alone does not."""
+    request = parse_game_request(said)
+    assert request is not None and request.game is not None and request.game.key == key
+
+
+def test_an_edition_plays_its_own_bank_title_and_columns(tmp_path: Path) -> None:
+    """The Hogwarts edition reads its own bank, names itself, and titles columns from its clues."""
+    edition = EDITIONS["bigbrain_hp"]
+    setup = BigBrainSetup(data_dir=tmp_path, elevenlabs_key=None, port=0, edition=edition)
+    assert setup.bank == tmp_path / "trivia-bank" / "editions" / "harry-potter" / "bank.jsonl"
+    game = BigBrain(setup)
+    assert game.info.key == "bigbrain_hp" and game.snapshot(None)["title"] == "Big Brain · Edición Hogwarts"
+    assert game._own("welcome") == "welcome"  # no clip recorded: the general one
+    bank = _bank()
+    for entry in bank:  # an edition's categories are its columns
+        index = int(entry["id"]) % 6
+        entry["category"] = f"key{index}"
+        entry["column"] = {"en": f"Column {index}", "es": f"Columna {index}"}
+    board = build_board(bank, "es", rng=random.Random(5), now=0)
+    assert all(title.startswith("Columna ") for title in board.titles)
+    assert render_join("https://x.ts.net/bigbrain/?c=ABCDEF", "ABCDEF", [("Rojo", ["Ana"])], "es", edition="Edición Hogwarts")  # fmt: skip
 
 
 # A whole show ----------------------------------------------------------------------------------------

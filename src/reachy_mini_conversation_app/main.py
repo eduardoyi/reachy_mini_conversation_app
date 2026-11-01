@@ -150,7 +150,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.host import GameHost
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
-    from reachy_mini_conversation_app.games.big_brain import BigBrain, BigBrainSetup
+    from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
     from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.games.simon_says import SimonSays
@@ -288,6 +288,16 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             public_url=config.BIG_BRAIN_PUBLIC_URL,
         )
         games["bigbrain"] = lambda: BigBrain(setup)
+    for key, edition in EDITIONS.items():  # a themed edition plays once its clue bank is made
+        themed = BigBrainSetup(
+            data_dir=game_data,
+            elevenlabs_key=config.ELEVENLABS_API_KEY,
+            port=config.BIG_BRAIN_PORT,
+            public_url=config.BIG_BRAIN_PUBLIC_URL,
+            edition=edition,
+        )
+        if themed.bank.is_file():
+            games[key] = lambda themed=themed: BigBrain(themed)  # type: ignore[misc]
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)

@@ -64,9 +64,15 @@ def _scores(draw: ImageDraw.ImageDraw, scores: Scores, top: int, *, control: str
 
 
 def render_join(
-    url: str, code: str, teams: list[tuple[str, list[str]]], language: str, *, kids: bool = False
+    url: str,
+    code: str,
+    teams: list[tuple[str, list[str]]],
+    language: str,
+    *,
+    kids: bool = False,
+    edition: str | None = None,
 ) -> bytes:
-    """Render the join screen: the QR code on the left, the code and who is on each team on the right."""
+    """Render the join screen: the QR code on the left, the title, the code and who is on each team on the right."""
     canvas, draw = _canvas()
     modules = qr_matrix(url)
     scale = min(400 // (len(modules) + 4), 14)
@@ -80,16 +86,21 @@ def render_join(
     right = left + size + 30
     width = WIDTH - right - 20
     _draw_lines(draw, ["BIG BRAIN"], _font(52, bold=True), left=right, width=width, top=30, centered=True)
-    _draw_lines(draw, [_TEXT["join"][language]], _font(28), left=right, width=width, top=96, centered=True)
+    shift = 0
+    if edition:  # "Hogwarts edition" under the title moves the rest down
+        _draw_lines(draw, [edition], _font(26, bold=True), left=right, width=width, top=88, centered=True)
+        shift = 30
+    _draw_lines(draw, [_TEXT["join"][language]], _font(28), left=right, width=width, top=96 + shift, centered=True)
     code_line = f"{_TEXT['code'][language]}: {code}"
-    _draw_lines(draw, [code_line], _font(30, bold=True), left=right, width=width, top=136, centered=True)
-    y = 196
+    _draw_lines(draw, [code_line], _font(30, bold=True), left=right, width=width, top=136 + shift, centered=True)
+    y = 196 + shift
+    step = 64 - shift // 4
     for name, players in teams:
         draw.text((right, y), name, font=_font(26, bold=True), fill=0)
         listed = ", ".join(players) if players else _TEXT["nobody"][language]
         lines = _wrapped(listed, _font(22), width - 10, 1)
         draw.text((right + 10, y + 32), lines[0] if lines else "", font=_font(22), fill=0 if players else _GREY)
-        y += 64
+        y += step
     if kids:
         _draw_lines(draw, [_TEXT["kids"][language]], _font(24, bold=True), left=right, width=width, top=HEIGHT - 44, centered=True)  # fmt: skip
     return encode_png(canvas)

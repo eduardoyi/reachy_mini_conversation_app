@@ -18,7 +18,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
-from reachy_mini_conversation_app.games.catalog import BIG_BRAIN, words
+from reachy_mini_conversation_app.games.catalog import BIG_BRAIN, BIG_BRAIN_HP, GameInfo, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, join, silence
 from reachy_mini_conversation_app.games.big_brain_board import (
@@ -67,6 +67,22 @@ START_WORDS: Final[frozenset[str]] = frozenset(
 )  # fmt: skip
 
 
+@dataclass(frozen=True)
+class Edition:
+    """A themed Big Brain: the same show with its own clues, title, opening and closing lines, and intro tune."""
+
+    info: GameInfo
+    folder: str  # its bank: trivia-bank/editions/<folder>/bank.jsonl (scripts/edition_bank.py)
+    key: str  # its host lines (welcome_<key>, goodbye_<key>) and intro tune (intro_<key>)
+    name: dict[str, str]  # under the title on the screens
+
+
+EDITIONS: Final[dict[str, Edition]] = {
+    edition.info.key: edition
+    for edition in (Edition(BIG_BRAIN_HP, "harry-potter", "hp", {"en": "Hogwarts edition", "es": "Edición Hogwarts"}),)
+}
+
+
 @dataclass
 class BigBrainSetup:
     """Where Big Brain's files are and how it speaks; main.py fills it from the config."""
@@ -75,6 +91,13 @@ class BigBrainSetup:
     elevenlabs_key: str | None
     port: int
     public_url: str | None = None  # the phones' https address, when one reaches ``port`` from the internet
+    edition: Edition | None = None  # None: the general quiz
+
+    @property
+    def bank(self) -> Path:
+        """Return the clue bank this show plays from."""
+        folder = self.data_dir / "trivia-bank"
+        return folder / "editions" / self.edition.folder / "bank.jsonl" if self.edition else folder / "bank.jsonl"
 
 
 def team_name(team: str, language: str) -> str:
@@ -102,6 +125,7 @@ class BigBrain(Game):
     def __init__(self, setup: BigBrainSetup, *, rng: random.Random | None = None) -> None:
         """Get ready to host; nothing is loaded until the game plays."""
         self._setup = setup
+        self.info = setup.edition.info if setup.edition else BIG_BRAIN
         self._rng = rng or random.Random()
         folder = setup.data_dir / "big-brain"
         self._clips = Clips(folder / "voice", self._rng)
@@ -218,7 +242,7 @@ class BigBrain(Game):
         return {
             "phase": phase,
             "language": language,
-            "title": "Big Brain",
+            "title": self._title,
             "kids": self._kids,
             "you": {"player": player.id, "name": player.name, "team": player.team} if player else None,
             "teams": teams,
@@ -345,6 +369,23 @@ class BigBrain(Game):
         except asyncio.TimeoutError:
             return None
 
+    @property
+    def _title(self) -> str:
+        edition = self._setup.edition
+        return f"Big Brain · {edition.name[self._language]}" if edition else "Big Brain"
+
+    def _own(self, moment: str) -> str:
+        """Return the edition's own version of ``moment`` ("welcome_hp") when it was recorded."""
+        edition = self._setup.edition
+        own = f"{moment}_{edition.key}" if edition else moment
+        return own if self._clips.has(own, self._language) else moment
+
+    def _own_sound(self, name: str) -> str:
+        """Return the edition's own version of sound ``name`` ("intro_hp") when it was made."""
+        edition = self._setup.edition
+        own = f"{name}_{edition.key}" if edition else name
+        return own if self._sounds.get(own) is not None else name
+
     def _line(self, moment: str) -> tuple[str, Audio] | None:
         return self._clips.line(moment, self._language)
 
@@ -421,7 +462,7 @@ class BigBrain(Game):
         """Host one show."""
         self._context = context
         self._judge = Judge(self._setup.data_dir / "big-brain" / "rulings.json", context.services.jev)
-        bank_path = self._setup.data_dir / "trivia-bank" / "bank.jsonl"
+        bank_path = self._setup.bank
         try:
             bank = await asyncio.to_thread(load_bank, bank_path)
         except OSError:
@@ -490,7 +531,17 @@ class BigBrain(Game):
         if phones is None:
             return
         teams = [(team_name(team, self._language), [p.name for p in phones.team_players(team)]) for team in TEAMS]
-        self._show(render_join(phones.url(), phones.code, teams, self._language, kids=self._kids))
+        edition = self._setup.edition
+        self._show(
+            render_join(
+                phones.url(),
+                phones.code,
+                teams,
+                self._language,
+                kids=self._kids,
+                edition=edition.name[self._language] if edition else None,
+            )
+        )
 
     async def _lobby(self) -> bool:
         """Show the join screen until someone starts the show; False when it never starts."""
@@ -499,7 +550,7 @@ class BigBrain(Game):
         self._phase = "lobby"
         self._show_join()
         self._changed()
-        await self._say("welcome", sounds=("intro",))
+        await self._say(self._own("welcome"), sounds=(self._own_sound("intro"),))
         await self._say("join")
         shown_players = -1
         while True:
@@ -789,7 +840,7 @@ class BigBrain(Game):
         else:
             await self._say("tie")
         await self._say(sounds=("fanfare", "applause"))
-        await self._say("goodbye")
+        await self._say(self._own("goodbye"))
         outro = self._sounds.get("outro")
         if outro is not None:
             await self._play(outro)

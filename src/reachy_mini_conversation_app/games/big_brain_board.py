@@ -230,7 +230,10 @@ def build_board(
     broad = [key for key in categories if key not in used_categories and all(by_rows(categories[key]))]
     rng.shuffle(broad)
     for key in broad[: COLUMNS - len(chosen)]:
-        chosen.append((CATEGORY_NAMES.get(key, {}).get(language, key.title()), by_rows(categories[key])))
+        # An edition's categories are its columns ("spells"), named by the column titles they carry.
+        named = (categories[key][0].get("column") or {}).get(language) if key not in CATEGORY_NAMES else None
+        title = named or CATEGORY_NAMES.get(key, {}).get(language, key.title())
+        chosen.append((title, by_rows(categories[key])))
     # A small bank: a second themed column from a category already on the board.
     titles = {title for title, _ in chosen}
     for title, rows, _ in candidates:

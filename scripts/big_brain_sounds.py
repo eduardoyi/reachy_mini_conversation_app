@@ -58,6 +58,12 @@ MUSIC: dict[str, tuple[float, str]] = {
         "Tense dramatic build for the final round of a quiz show, pulsing strings and low drums rising to a hit. "
         "Instrumental.",
     ),
+    # The Hogwarts edition's opening (games/big_brain.py, Edition): magical rather than brassy.
+    "intro_hp": (
+        20.0,
+        "Whimsical magical orchestral opening theme for a fantasy quiz show: twinkling celesta, soaring strings and "
+        "French horns, mysterious at first then grand, ends with a clear final hit. Instrumental.",
+    ),
     "outro": (
         20.0,
         "Cheerful closing theme for a quiz show, brassy and warm, celebratory, ends with a final flourish. "
@@ -100,12 +106,15 @@ async def main() -> None:
     """Make every missing take, convert them, and write chosen.json."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--only", default="", help="only these sounds, comma-separated (e.g. intro_hp)")
     args = parser.parse_args()
     load_dotenv(find_dotenv(usecwd=True))
     out: Path = args.out.expanduser()
     gate = asyncio.Semaphore(CONCURRENCY)
     jobs = [(name, "sound", seconds, prompt) for name, (seconds, prompt) in SOUNDS.items()]
     jobs += [(name, "music", seconds, prompt) for name, (seconds, prompt) in MUSIC.items()]
+    if args.only:
+        jobs = [job for job in jobs if job[0] in args.only.split(",")]
 
     async with httpx.AsyncClient(headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"]}, timeout=300) as client:
 

@@ -546,6 +546,38 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[warmly] Gracias por jugar, gente. [playful] ¿La semana que viene a la misma hora?",
         ),
     },
+    # The Hogwarts edition's own opening and closing (games/big_brain.py, Edition.key "hp").
+    "welcome_hp": {
+        "en": (
+            "[booming] Good evening, witches and wizards... [pause] and welcome to BIG BRAIN: the Hogwarts edition!",
+            "[playful] Wands at the ready, phones out... [excited] it's BIG BRAIN, Hogwarts edition!",
+            "[dramatic] Tonight, one house... [pause] I mean, one team... [booming] wins the cup! Welcome to BIG "
+            "BRAIN, Hogwarts edition!",
+            "[hushed] The castle is quiet, the candles are lit... [booming] it's time for BIG BRAIN: the Hogwarts "
+            "edition!",
+        ),
+        "es": (
+            "[booming] Muy buenas noches, brujas y magos... [pause] ¡y bienvenidos a BIG BRAIN, edición Hogwarts!",
+            "[playful] Varitas listas, teléfonos en mano... [excited] ¡es BIG BRAIN, edición Hogwarts!",
+            "[dramatic] Esta noche, una casa... [pause] digo, un equipo... [booming] se lleva la copa. ¡Bienvenidos "
+            "a BIG BRAIN, edición Hogwarts!",
+            "[hushed] El castillo está en silencio, las velas encendidas... [booming] ¡llegó la hora de BIG BRAIN, "
+            "edición Hogwarts!",
+        ),
+    },
+    "goodbye_hp": {
+        "en": (
+            "[warmly] That's all for tonight. [playful] Don't forget to feed your owls. Good night!",
+            "[playful] Ten points to every team, just for playing! [booming] Good night from BIG BRAIN!",
+            "[warmly] Thank you for playing, witches and wizards. [pause] See you next term!",
+        ),
+        "es": (
+            "[warmly] Eso es todo por esta noche. [playful] No se olviden de darle de comer a sus lechuzas. ¡Buenas "
+            "noches!",
+            "[playful] ¡Diez puntos para cada equipo, solo por jugar! [booming] ¡Buenas noches desde BIG BRAIN!",
+            "[warmly] Gracias por jugar, brujas y magos. [pause] ¡Nos vemos el próximo curso!",
+        ),
+    },
     "pause": {
         "en": (
             "[softly] We'll pause here.",

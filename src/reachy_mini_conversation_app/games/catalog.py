@@ -194,7 +194,45 @@ BIG_BRAIN: Final[GameInfo] = GameInfo(
     ),
 )
 
-GAMES: Final[dict[str, GameInfo]] = {game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN)}
+
+def _edition_names(subjects: tuple[str, ...]) -> frozenset[str]:
+    """Return the ways to ask for a Big Brain edition: "big brain harry potter", "trivia de hogwarts"..."""
+    shows = ("big brain", "bigbrain", "big brains", "big brein", "big brian", "el big brain")
+    quizzes = ("trivia", "la trivia", "quiz", "concurso", "el concurso", "juego de preguntas", "preguntas")
+    names: set[str] = set()
+    for subject in subjects:
+        for show in shows:
+            names |= {
+                f"{show} {subject}",
+                f"{show} de {subject}",
+                f"{show} edicion {subject}",
+                f"{show} edicion de {subject}",
+                f"{show} {subject} edition",
+                f"{subject} {show}",
+            }
+        for quiz in quizzes:
+            names |= {f"{quiz} de {subject}", f"{quiz} {subject}", f"{subject} {quiz}"}
+    return frozenset(names)
+
+
+BIG_BRAIN_HP: Final[GameInfo] = GameInfo(
+    key="bigbrain_hp",
+    names=_edition_names(("harry potter", "hogwarts", "harry poter", "hari potter", "jari poter")),
+    title={"es": "Big Brain, edición Hogwarts", "en": "Big Brain, Hogwarts edition"},
+    pitch={
+        "es": "El concurso de Big Brain, todo sobre las películas de Harry Potter: cada quien juega desde su teléfono.",
+        "en": "The Big Brain quiz show, all about the Harry Potter films: everyone plays on their phone.",
+    },
+    rules=(
+        "Big Brain's Hogwarts edition: the same team quiz show, with every clue about the eight Harry Potter films "
+        "(story, characters, spells, creatures, the cast and how the films were made). Start it when someone asks "
+        "for Big Brain with Harry Potter or Hogwarts; plain Big Brain is the general quiz."
+    ),
+)
+
+GAMES: Final[dict[str, GameInfo]] = {
+    game.key: game for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP)
+}
 
 
 @dataclass(frozen=True)

@@ -302,7 +302,7 @@ function render() {
 }
 function headHtml() {
  if (!S || !S.you) return '';
- var y = S.you, h = '<header><span class="logo">BIG BRAIN</span><span class="me" ' + ts(y.team) + '>' + esc(y.name) + ' · ' + esc(tname(y.team)) + '</span></header>';
+ var y = S.you, h = '<header><span class="logo">' + esc((S.title || 'Big Brain').toUpperCase()) + '</span><span class="me" ' + ts(y.team) + '>' + esc(y.name) + ' · ' + esc(tname(y.team)) + '</span></header>';
  if (S.phase === 'lobby') return h;
  h += '<div class="scores">';
  (S.teams || []).forEach(function (x) {
