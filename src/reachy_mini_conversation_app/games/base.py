@@ -94,6 +94,8 @@ class GameContext:
     progress: str = ""
     # When the game last saw someone play (a find, an answer); the host ends it after a long quiet.
     active_at: float = 0.0
+    # Play on after a pause, as "sigue" would (a phone's Continue button); the host sets it.
+    resume: Callable[[], None] = lambda: None
 
     async def playing(self) -> None:
         """Return once the game is not paused."""

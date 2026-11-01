@@ -18,7 +18,14 @@ from reachy_mini_conversation_app.qr_code import qr_matrix
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
 from reachy_mini_conversation_app.games.big_brain import BigBrain, BigBrainSetup
-from reachy_mini_conversation_app.games.big_brain_board import POINTS, BoardError, remember, build_board, read_history
+from reachy_mini_conversation_app.games.big_brain_board import (
+    POINTS,
+    BoardError,
+    imperial,
+    remember,
+    build_board,
+    read_history,
+)
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling, plain, matches
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 
@@ -94,6 +101,22 @@ def test_clues_used_this_month_are_left_out(tmp_path: Path) -> None:
     assert len(read_history(history)) == 50
 
 
+def test_imperial_measurements_and_repeated_answers_stay_off_the_board() -> None:
+    """Miles and Fahrenheit clues are left out (names like Fahrenheit 451 stay); no answer is on a board twice."""
+    bank = _bank()
+    for entry in bank[:120]:
+        entry["clue"]["en"] = "This peak rises 29,032 feet."
+    for entry in bank[120:200]:
+        entry["accept"] = ["The Atlantic and Indian Oceans"]
+    bank[200]["clue"]["en"] = "Ray Bradbury wrote Fahrenheit 451."
+    board = build_board(bank, "en", rng=random.Random(4), now=0)
+    picked = {clue.id for column in board.clues for clue in column} | {board.final.id}
+    assert not picked & {str(index) for index in range(120)}
+    assert len(picked & {str(index) for index in range(120, 200)}) <= 1
+    assert imperial({"clue": {"es": "Mide doce pies de alto."}}) and imperial({"answer": {"en": "1,000 mph"}})
+    assert not imperial({"clue": {"en": "Ray Bradbury wrote Fahrenheit 451.", "es": "Murieron miles de personas."}})
+
+
 # The judge -------------------------------------------------------------------------------------------
 
 
@@ -107,12 +130,29 @@ def test_clues_used_this_month_are_left_out(tmp_path: Path) -> None:
         ("Greta Garvo", True),
         ("Marlene Dietrich", False),
         ("Greta", False),
+        ("Garbo Garbo Garbo", False),
         ("", False),
     ],
 )
 def test_code_accepts_forms_slips_and_surnames(said: str, right: bool) -> None:
     """Accents, articles, lead-ins, a surname alone and a small slip count without asking a model."""
     assert matches(said, ["Greta Garbo"]) is right
+
+
+def test_a_name_counts_without_its_generic_word_but_the_word_alone_does_not() -> None:
+    """Pacific counts for the Pacific Ocean, el Amazonas for the río Amazonas; Ocean alone is not an answer."""
+    assert matches("Pacific", ["Pacific Ocean"]) and matches("el Amazonas", ["Río Amazonas"])
+    assert not matches("Ocean", ["Pacific Ocean"]) and not matches("Atlantic", ["Pacific Ocean"])
+
+
+@pytest.mark.asyncio
+async def test_a_hesitation_is_no_answer_and_never_reaches_jev(tmp_path: Path) -> None:
+    """A filler alone is wrong without asking Jev ("Um." once sounded like "Om" to it)."""
+
+    async def jev(state: dict[str, Any], questions: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
+        raise AssertionError("Jev asked")
+
+    assert await Judge(tmp_path / "rulings.json", jev).rule("1", "A sacred syllable.", ["Om"], "Um.") is Ruling.WRONG
 
 
 def test_answers_count_in_either_language() -> None:
@@ -231,7 +271,7 @@ def test_the_qr_code_links_to_the_public_address_when_there_is_one() -> None:
 
 
 class _Room:
-    """Two pretend phones: red always knows the answer, blue never buzzes; both start, pick and bet."""
+    """Two pretend phones: red buzzes and types the answer, blue never buzzes but counts a ruling; both bet."""
 
     def __init__(self, game: BigBrain) -> None:
         self.game = game
@@ -252,7 +292,9 @@ class _Room:
             for player in (self.red, self.blue):
                 can = game.snapshot(player)["can"]
                 board = game._board
-                if "start" in can and player is self.red:
+                if "vote" in can and player is self.blue:
+                    game.on_message(player, {"type": "vote"})
+                elif "start" in can and player is self.red:
                     game.on_message(player, {"type": "start"})
                 elif "pick" in can and board is not None:
                     column, row = next((c, r) for c, col in enumerate(board.clues) for r, clue in enumerate(col) if not clue.used)  # fmt: skip
@@ -268,9 +310,13 @@ class _Room:
 
 @pytest.mark.asyncio
 async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two teams play the twenty squares and the final (bets end once both teams bet); red wins; clues are kept."""
+    """Two teams play the board and the final; red wins; clues are kept.
+
+    A phone plays on after a pause; red's first answer is ruled wrong and blue's vote ends that square at once;
+    the bets end as soon as both teams bet.
+    """
     for name, value in {"PICK_S": 1.0, "BUZZ_S": 0.5, "REBUZZ_S": 0.3, "ANSWER_S": 1.0, "EVERYONE_S": 0.3,
-                        "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
+                        "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "FINAL_ANSWER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
         monkeypatch.setattr(big_brain, name, value)
 
     async def nothing(self: Phones) -> None:
@@ -291,7 +337,8 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
         played.append((text, answer is not None))
         game = games[0]
         if answer is not None and game._buzz is not None and game._clue is not None:
-            asyncio.get_running_loop().create_task(answer(game._clue.accept[0]))
+            said = "Algo raro" if not any(listening for _, listening in played[:-1]) else game._clue.accept[0]
+            asyncio.get_running_loop().create_task(answer(said))
 
     reachy.services.say_audio = say_audio
 
@@ -304,6 +351,18 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     await asyncio.sleep(0.1)
     room = _Room(games[0])
     room.join()
+    host.pause()
+    assert "resume" in games[0].snapshot(room.red)["can"]
+    games[0].on_message(room.red, {"type": "resume"})
+    assert host.state is GameState.PLAYING
+    counted: list[str] = []
+    counted_now = games[0]._counted_now
+
+    async def spy(clue: Any) -> None:
+        counted.append(clue.id)
+        await counted_now(clue)
+
+    monkeypatch.setattr(games[0], "_counted_now", spy)
     playing = asyncio.get_running_loop().create_task(room.play())
     try:
         for _ in range(900):
@@ -315,6 +374,7 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     game = games[0]
     assert host.state is GameState.IDLE
     assert game._phase == "over"
+    assert len(counted) == 1 and game.snapshot(room.red)["final"]["answer"] == game._board.final.answer  # type: ignore[union-attr]
     assert game._scores["red"] > 0 >= game._scores.get("blue", 0)
     assert game._board is not None and game._board.left == 0
     assert [entry["team"] for entry in game._reveal] == ["blue", "red"]

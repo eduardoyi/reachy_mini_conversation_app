@@ -57,6 +57,7 @@ EVERYONE_S: Final[float] = 30.0
 BET_S: Final[float] = 30.0
 FINAL_S: Final[float] = 30.0
 LOBBY_REMINDER_S: Final[float] = 75.0
+FINAL_ANSWER_S: Final[float] = 8.0  # the final's answer on the TRMNL before the winner
 # The page and its link stay up this long after the game, for the final scores.
 AFTER_S: Final[float] = 30.0
 STREAK: Final[int] = 3
@@ -118,6 +119,7 @@ class BigBrain(Game):
         self._control: str | None = None
         self._clue: Clue | None = None
         self._clue_shown = False
+        self._answer_shown = False  # the answer is on the TRMNL, so the phones show it too
         self._locked: set[str] = set()
         self._buzz: Player | None = None
         self._pick: tuple[int, int] | None = None
@@ -126,6 +128,7 @@ class BigBrain(Game):
         self._reveal: list[dict[str, Any]] = []
         self._vote: _Vote | None = None
         self._overruled = False
+        self._counted: Clue | None = None  # the square the room just counted, while it is still being played
         self._message: str | None = None
         self._deadline: float | None = None  # in playing seconds
         self._event = asyncio.Event()
@@ -164,7 +167,9 @@ class BigBrain(Game):
         if player is None:
             if self._phase == "lobby":
                 can.append("join")
-        elif not paused:
+        elif paused:
+            can.append("resume")
+        else:
             if self._phase == "lobby":
                 can += ["start", "settings"]
             elif self._phase == "board" and player.team == self._control:
@@ -181,6 +186,7 @@ class BigBrain(Game):
             vote = {
                 "open": True,
                 "for": self._vote.player.name,
+                "said": self._vote.said,
                 "yes": len(self._vote.voters),
                 "needed": needed,
                 "voted": player is not None and player.id in self._vote.voters,
@@ -194,6 +200,7 @@ class BigBrain(Game):
                 "points": self._clue.points,
                 "text": self._clue.text if self._clue_shown else None,
                 "hidden": self._clue.hidden,
+                "answer": self._clue.answer if self._answer_shown else None,
             }
         deadline = None
         if self._deadline is not None and context is not None and not paused:
@@ -203,7 +210,11 @@ class BigBrain(Game):
             max_bet = max(self._scores.get(player.team, 0), POINTS[-1])
         final = None
         if board is not None and self._phase in ("final_bet", "final_clue", "final_answer", "reveal", "over"):
-            final = {"category": board.final_category, "answers": self._reveal}
+            final = {
+                "category": board.final_category,
+                "answers": self._reveal,
+                "answer": board.final.answer if self._answer_shown and self._clue is board.final else None,
+            }
         return {
             "phase": phase,
             "language": language,
@@ -245,7 +256,10 @@ class BigBrain(Game):
             return
         context.played()
         kind = message.get("type")
-        if kind == "joined":
+        if kind == "resume" and not context.running.is_set():
+            # A false call or a bumped antenna paused the show; any phone can play on.
+            context.resume()
+        elif kind == "joined":
             self._scores.setdefault(player.team, 0)
             if self._started:
                 self._changed()
@@ -288,8 +302,12 @@ class BigBrain(Game):
         self._control = team
         if self._judge is not None:
             self._judge.overrule(vote.clue.id, vote.said)
-        self._message = f"¡{vote.player.name}: vale! +{vote.restore}" if self._language == "es" else f"{vote.player.name}: it counts! +{vote.restore}"  # fmt: skip
+        points = self._points(vote.clue)
+        self._message = f"¡{vote.player.name}: vale! +{points}" if self._language == "es" else f"{vote.player.name}: it counts! +{points}"  # fmt: skip
         self._overruled = True
+        # During its own square the square ends now; later, Richie says so before the next pick.
+        self._counted = vote.clue if vote.clue is self._clue else None
+        self._event.set()
         logger.info("Big Brain: the room overruled a ruling")
 
     def heard(self, context: GameContext, text: str) -> bool:
@@ -556,7 +574,7 @@ class BigBrain(Game):
         """Play one square: the clue, the buzzes, the answers, and what Richie says about them."""
         language = self._language
         clue.used = True
-        self._clue, self._phase, self._message = clue, "reading", None
+        self._clue, self._phase, self._message, self._answer_shown = clue, "reading", None, False
         self._changed()
         if clue.hidden:
             await self._say(clue.hidden, sounds=("pick", "steal" if clue.hidden == "steal" else "hidden"))
@@ -579,8 +597,15 @@ class BigBrain(Game):
         asked_specific = False
         seconds = BUZZ_S
         while True:
+            if self._counted is clue:  # counted while Richie was still talking
+                await self._counted_now(clue)
+                return
             self._phase, self._buzz = "buzzing", None
-            if not await self._wait(seconds) or self._buzz is None:
+            came = await self._wait(seconds)
+            if self._counted is clue:
+                await self._counted_now(clue)
+                return
+            if not came or self._buzz is None:
                 break
             player = self._buzz
             self._phase = "answering"
@@ -601,16 +626,29 @@ class BigBrain(Game):
                 await self._right(player, clue)
                 return
             await self._wrong(player, clue, said)
+            if self._counted is clue:
+                await self._counted_now(clue)
+                return
             seconds = REBUZZ_S
             if all(team in self._locked for team in self._teams_playing()):
                 break
             await self._say("anyone_else")
         self._phase = "reading"
         self._buzz = None
+        self._answer_shown = True
         self._show(render_answer(clue.column, clue.answer, language))
         self._changed()
         answer = await self._speech.say(clue.answer, language)
         await self._say("answer_was", sounds=("time_up",), after=answer)
+
+    async def _counted_now(self, clue: Clue) -> None:
+        """End the square the room just counted (while it was still open) with that team's points."""
+        self._counted, self._overruled = None, False
+        self._phase, self._buzz = "reading", None
+        self._answer_shown = True
+        self._show(render_answer(clue.column, clue.answer, self._language))
+        self._changed()
+        await self._say("overruled", sounds=("correct",))
 
     def _points(self, clue: Clue) -> int:
         return clue.points * (2 if clue.hidden == "double" else 1)
@@ -629,7 +667,7 @@ class BigBrain(Game):
         self._streak = {team: self._streak.get(team, 0) + 1}
         self._control = team
         self._message = (f"¡Correcto, {player.name}! +{points}" if language == "es" else f"Correct, {player.name}! +{points}")  # fmt: skip
-        self._phase = "reading"
+        self._phase, self._answer_shown = "reading", True
         self._changed()
         if self._context is not None:
             self._context.services.emotion("happy")
@@ -670,6 +708,7 @@ class BigBrain(Game):
             self._message = f"Acertaron: {names}" if right else "Nadie acertó"
         else:
             self._message = f"Got it: {names}" if right else "Nobody got it"
+        self._answer_shown = True
         self._changed()
         self._show(render_answer(clue.column, clue.answer, self._language))
         answer = await self._speech.say(clue.answer, self._language)
@@ -683,7 +722,7 @@ class BigBrain(Game):
         board, language = self._board, self._language
         assert board is not None and self._judge is not None
         clue = board.final
-        self._clue, self._clue_shown, self._vote = clue, False, None
+        self._clue, self._clue_shown, self._vote, self._answer_shown = clue, False, None, False
         self._phase, self._bets, self._typed, self._reveal = "final_bet", {}, {}, []
         self._show(render_final(board.final_category, self._scoreboard(), language, step="bet"))
         self._changed()
@@ -720,9 +759,14 @@ class BigBrain(Game):
             self._show(render_reveal(team_name(team, language), text, bet, right, language))
             self._changed()
             await self._say("correct" if right else "wrong", sounds=("correct" if right else "wrong",))
+        self._answer_shown = True
         self._show(render_answer(board.final_category, clue.answer, language))
+        self._changed()
         answer = await self._speech.say(clue.answer, language)
         await self._say("answer_was", after=answer)
+        # The e-ink screen takes a few seconds to draw; the answer stays up before the winner covers it.
+        if self._context is not None:
+            await self._context.sleep(FINAL_ANSWER_S)
 
     async def _ending(self) -> None:
         language = self._language

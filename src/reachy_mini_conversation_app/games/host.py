@@ -186,6 +186,7 @@ class GameHost:
         game = factory()
         services = self._services
         context = GameContext(info=game.info, language=language, services=services)
+        context.resume = lambda: self.resume(say=True)
         context.active_at = services.clock()
         self._game, self._context, self._language = game, context, language
         self._restore_screen = services.save_screen()

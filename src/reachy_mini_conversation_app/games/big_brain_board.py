@@ -6,8 +6,11 @@ every answer a judge accepts. A board's rows are the four quarters of the hardne
 200 points is always among the easiest and 800 among the hardest. Columns are themed topics with a clue in every
 row when there are enough, broad categories otherwise. Kids mode uses only clues with a kids version and no adult
 content. Clues used in the last ``RECENT_DAYS`` are left out, so a family does not see one twice in a month.
+Clues measured in imperial units (miles, feet, Fahrenheit) are left out too: the family thinks in metric
+(about 200 of 20,499 clues, 2026-11-01). A board never holds two clues with the same answer.
 """
 
+import re
 import json
 import math
 import time
@@ -16,6 +19,8 @@ import logging
 from typing import Any, Final
 from pathlib import Path
 from dataclasses import field, dataclass
+
+from reachy_mini_conversation_app.games.big_brain_judge import plain
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +31,30 @@ HIDDEN: Final[tuple[str, ...]] = ("double", "steal", "everyone")
 RECENT_DAYS: Final[float] = 30.0
 # The final clue is among the hardest quarter, and one people enjoy.
 FINAL_MIN_APPEAL: Final[float] = 2.3
+
+_NUMBER_EN: Final[str] = (
+    r"(?:\d[\d,.]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|"
+    r"fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)"
+)
+_NUMBER_ES: Final[str] = (
+    r"(?:\d[\d,.]*|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|"
+    r"cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien|ciento|cientos|mil|millones)"
+)
+# A measurement, not a name: a number before the unit ("480 feet", "doce pies"), a speed, or degrees Fahrenheit.
+# In Spanish "miles" means thousands, so only "millas" counts there.
+_IMPERIAL: Final[dict[str, re.Pattern[str]]] = {
+    "en": re.compile(
+        rf"\b{_NUMBER_EN}[\s-]+(?:square[\s-]+|cubic[\s-]+)?"
+        r"(?:miles?|feet|foot|ft|inch(?:es)?|yards?|gallons?|ounces?|oz|acres?|pounds?|lbs?)\b"
+        r"|\bmiles per hour\b|\bmph\b|\bdegrees? fahrenheit\b|°\s?F\b|\bfahrenheit (?:scale|degrees?)\b",
+        re.IGNORECASE,
+    ),
+    "es": re.compile(
+        rf"\b{_NUMBER_ES}[\s-]+(?:millas?|pies?|pulgadas?|yardas?|galones|gal[oó]n|onzas?|libras?|acres?)\b"
+        r"(?:[\s-]+cuadrad[oa]s)?|\bmillas por hora\b|\bgrados? fahrenheit\b|°\s?F\b",
+        re.IGNORECASE,
+    ),
+}
 
 CATEGORY_NAMES: Final[dict[str, dict[str, str]]] = {
     "science": {"en": "Science", "es": "Ciencia"},
@@ -119,6 +148,21 @@ def _text(entry: dict[str, Any], language: str, kids: bool) -> str:
     return str((source or {}).get(language) or "").strip()
 
 
+def imperial(entry: dict[str, Any]) -> bool:
+    """Whether a clue (or its answer, or its kids version) measures in miles, feet, Fahrenheit and the like."""
+    for language, pattern in _IMPERIAL.items():
+        texts = [(entry.get(key) or {}).get(language) for key in ("clue", "answer", "kids")]
+        if any(pattern.search(str(text)) for text in texts if text):
+            return True
+    return False
+
+
+def _answers(entry: dict[str, Any]) -> set[str]:
+    """Every accepted form of a clue's answer, plain, to keep two clues with one answer off a board."""
+    forms = [*(entry.get("accept") or []), *(entry.get("answer") or {}).values()]
+    return {plain(str(form)) for form in forms if form} - {""}
+
+
 def _quarter_edges(values: list[float]) -> tuple[float, float, float]:
     ordered = sorted(values)
     return tuple(ordered[int(len(ordered) * share)] for share in (0.25, 0.5, 0.75))  # type: ignore[return-value]
@@ -143,6 +187,7 @@ def build_board(
         if _text(entry, language, kids)
         and entry.get("hardness") is not None
         and (not kids or not entry.get("adult"))
+        and not imperial(entry)
         and now - recent.get(str(entry.get("id")), -math.inf) >= RECENT_DAYS * 86400
     ]
     if len(pool) < COLUMNS * len(POINTS) + 1:
@@ -201,7 +246,7 @@ def build_board(
 
     def make(entry: dict[str, Any], column: str, points: int) -> Clue:
         ids.append(str(entry["id"]))
-        taken_answers.add(str((entry.get("answer") or {}).get("en", "")).lower())
+        taken_answers.update(_answers(entry))
         answer = str((entry.get("answer") or {}).get(language) or (entry.get("answer") or {}).get("en") or "")
         return Clue(
             id=str(entry["id"]),
@@ -214,12 +259,7 @@ def build_board(
         )
 
     def pick(entries: list[dict[str, Any]]) -> dict[str, Any]:
-        fresh = [
-            entry
-            for entry in entries
-            if str(entry["id"]) not in ids
-            and str((entry.get("answer") or {}).get("en", "")).lower() not in taken_answers
-        ]
+        fresh = [entry for entry in entries if str(entry["id"]) not in ids and not _answers(entry) & taken_answers]
         return rng.choice(fresh or entries)
 
     clues = [[make(pick(rows[row]), title, POINTS[row]) for row in range(len(POINTS))] for title, rows in chosen]
@@ -237,7 +277,7 @@ def build_board(
         if row_of(entry) == 3
         and float(entry.get("appeal") or 0) >= FINAL_MIN_APPEAL
         and str(entry["id"]) not in ids
-        and str((entry.get("answer") or {}).get("en", "")).lower() not in taken_answers
+        and not _answers(entry) & taken_answers
     ]
     final_entry = rng.choice(finals or [entry for entry in pool if str(entry["id"]) not in ids])
     column = final_entry.get("column") or {}

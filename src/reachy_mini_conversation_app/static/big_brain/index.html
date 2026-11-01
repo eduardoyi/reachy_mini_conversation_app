@@ -70,6 +70,8 @@ label,.lbl{display:block;font-weight:800;font-size:15px;color:var(--dim);margin:
 .board.off{opacity:.45;filter:saturate(.4)}
 .board.on button.cell{animation:cellpulse 1.2s ease-in-out infinite}
 @keyframes cellpulse{50%{box-shadow:inset 0 -4px 0 rgba(0,0,0,.35),0 0 0 3px var(--gold)}}
+.answer{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--bg2);border-left:6px solid var(--ok);font-size:18px;font-weight:700;color:var(--dim)}
+.answer b{color:#fff;font-size:21px}
 .explain{text-align:center;color:var(--gold);font-weight:800;font-size:16px;margin:-2px 0 10px}
 .board{display:grid;gap:4px}
 .ct{font-size:10.5px;font-weight:800;line-height:1.15;text-align:center;color:var(--dim);display:flex;align-items:flex-end;justify-content:center;min-height:38px;padding:0 1px;word-break:break-word;hyphens:auto;overflow:hidden}
@@ -165,14 +167,14 @@ var T = {
   maxBet: function (m) { return 'Puedes apostar de 0 a ' + m; }, betSent: function (b) { return 'Apuesta enviada: ' + b; },
   category: 'Categoría', finalTitle: '¡Gran final!', listen: 'Escucha a Richie…', reveal: 'Respuestas finales',
   noAnswer: '(sin respuesta)', winner: 'Gana el equipo', winners: '¡Empate! Ganan', thanks: '¡Gracias por jugar!',
-  paused: 'Pausa', pausedSub: 'Richie vuelve enseguida.', next: 'Atento a Richie…',
+  paused: 'Pausa', pausedSub: 'Richie creyó que alguien lo llamó, o le tocaron una antena.', resume: '¡Seguimos!', next: 'Atento a Richie…',
   vote: function (y, n) { return '¡Eso vale! (' + y + '/' + n + ')'; }, voted: 'Votaste',
-  voteHint: function (n) { return '¿La respuesta de ' + n + ' era buena?'; },
+  voteHint: function (n, s) { return '¿«' + s + '» de ' + n + ' era buena?'; },
   hidden: {double: '¡Doble!', steal: '¡Robo!', everyone: '¡Todos responden!'}, pts: 'pts', you: 'tú',
   explain: {double: 'Puntos dobles. Si fallan, no pierden nada.',
    steal: function (p) { return 'Si aciertan: +' + p + ', y le quitan ' + p + ' al equipo que va ganando.'; },
    everyone: 'Todos escriben su respuesta en el teléfono.'},
-  myTurn: '¡Les toca escoger!', myTurnSub: 'Toca una casilla del tablero',
+  answerIs: 'Respuesta:', finalAnswer: 'Respuesta de la final:', myTurn: '¡Les toca escoger!', myTurnSub: 'Toca una casilla del tablero',
   notMyTurn: function (t) { return 'Escoge el equipo ' + t; }, notMyTurnSub: 'Todavía no les toca'
  },
  en: {
@@ -190,14 +192,14 @@ var T = {
   maxBet: function (m) { return 'You can bet 0 to ' + m; }, betSent: function (b) { return 'Bet sent: ' + b; },
   category: 'Category', finalTitle: 'Grand finale!', listen: 'Listen to Richie…', reveal: 'Final answers',
   noAnswer: '(no answer)', winner: 'The winner is', winners: "It's a tie! Winners:", thanks: 'Thanks for playing!',
-  paused: 'Paused', pausedSub: 'Richie will be right back.', next: 'Listen to Richie…',
+  paused: 'Paused', pausedSub: 'Richie thought someone called him, or an antenna got bumped.', resume: 'Keep playing!', next: 'Listen to Richie…',
   vote: function (y, n) { return 'That counts! (' + y + '/' + n + ')'; }, voted: 'You voted',
-  voteHint: function (n) { return "Was " + n + "'s answer right?"; },
+  voteHint: function (n, s) { return 'Was ' + n + '\u2019s \u201c' + s + '\u201d right?'; },
   hidden: {double: 'Double!', steal: 'Steal!', everyone: 'Everyone answers!'}, pts: 'pts', you: 'you',
   explain: {double: 'Double points. A miss costs nothing.',
    steal: function (p) { return 'Get it right: +' + p + ', and take ' + p + ' from the team in the lead.'; },
    everyone: 'Everyone types an answer on their phone.'},
-  myTurn: "Your team's pick!", myTurnSub: 'Tap a square on the board',
+  answerIs: 'Answer:', finalAnswer: 'Final answer:', myTurn: "Your team's pick!", myTurnSub: 'Tap a square on the board',
   notMyTurn: function (t) { return t + ' team is picking'; }, notMyTurnSub: 'Not your turn yet'
  }
 };
@@ -312,7 +314,7 @@ function voteHtml() {
  var v = S && S.vote;
  if (!v || !v.open || !S.you || !(can('vote') || v.voted)) return '';
  var off = v.voted || voteLock || !can('vote');
- return '<p class="votehint">' + esc(t().voteHint(v['for'])) + '</p><button class="vote" data-act="vote"' + (off ? ' disabled' : '') + '>' +
+ return '<p class="votehint">' + esc(t().voteHint(v['for'], v.said || '')) + '</p><button class="vote" data-act="vote"' + (off ? ' disabled' : '') + '>' +
   esc(t().vote(v.yes, v.needed)) + (v.voted ? ' · ' + esc(t().voted) : '') + '</button>';
 }
 function clueHead(huge) {
@@ -325,7 +327,10 @@ function clueHead(huge) {
  }
  return h + '<div class="cluehead' + (huge ? ' huge' : '') + '"><span class="cat">' + esc(c.column) + '</span><span class="pts">' + esc(c.points) + '</span></div>';
 }
-function clueText() { return S.clue && S.clue.text ? '<div class="clue">' + esc(S.clue.text) + '</div>' : ''; }
+function clueText() {
+ var c = S.clue; if (!c || !c.text) return '';
+ return '<div class="clue">' + esc(c.text) + '</div>' + (c.answer ? '<div class="answer">' + esc(t().answerIs) + ' <b>' + esc(c.answer) + '</b></div>' : '');
+}
 function buzzer(enabled, label, small) {
  return '<div class="buzzwrap"><button id="buzzer" type="button" class="' + (small ? 'small' : '') + '" ' + ts(S.you.team) +
   (enabled ? '' : ' disabled') + '>' + esc(label) + '</button></div>';
@@ -365,7 +370,8 @@ function stageHtml() {
   case 'final_answer': return '<div class="card">' + finalHead() + clueText() + answerForm() + '</div>';
   case 'reveal': return revealHtml();
   case 'over': return overHtml();
-  case 'paused': return '<div class="card center"><h1 class="big">' + esc(L.paused) + '</h1><p class="sub">' + esc(L.pausedSub) + '</p></div>';
+  case 'paused': return '<div class="card center"><h1 class="big">' + esc(L.paused) + '</h1><p class="sub">' + esc(L.pausedSub) + '</p>' +
+   (can('resume') ? '<button type="button" class="primary start" data-act="resume">' + esc(L.resume) + '</button>' : '') + '</div>';
  }
  return '<div class="card center"><p class="sub">' + esc(L.next) + '</p></div>';
 }
@@ -433,6 +439,7 @@ function revealHtml() {
   h += '<li ' + ts(a.team) + '><div class="t"><b>' + esc(tname(a.team)) + '</b><span>' + esc(a.text ? a.text : L.noAnswer) + '</span></div>' +
    (a.bet != null ? '<span class="bet">' + esc(a.bet) + '</span>' : '') + mk + '</li>';
  });
+ if (f.answer) h += '</ul><div class="answer">' + esc(L.answerIs) + ' <b>' + esc(f.answer) + '</b></div><ul class="rv">';
  return h + '</ul></div>';
 }
 function overHtml() {
@@ -445,6 +452,7 @@ function overHtml() {
   ts_.forEach(function (x) { h += '<li ' + ts(x.key) + '><span>' + esc(x.name) + '</span><span>' + esc(x.score) + '</span></li>'; });
   h += '</ul>';
  }
+ if (S.final && S.final.answer) h += '<div class="answer">' + esc(L.finalAnswer) + ' <b>' + esc(S.final.answer) + '</b></div>';
  return h + '<div class="card center"><h1>' + esc(L.thanks) + '</h1></div>';
 }
 
@@ -496,6 +504,8 @@ document.addEventListener('click', function (e) {
  } else if (a === 'q') { draft.bet = el.getAttribute('data-v'); render(); }
  else if (a === 'start') {
   if (!startLock && can('start') && send({type: 'start'})) { startLock = true; el.disabled = true; cache.stage = null; }
+ } else if (a === 'resume') {
+  if (can('resume') && send({type: 'resume'})) { el.disabled = true; }
  } else if (a === 'vote') {
   if (send({type: 'vote'})) { voteLock = true; el.disabled = true; cache.extra = null; }
  }

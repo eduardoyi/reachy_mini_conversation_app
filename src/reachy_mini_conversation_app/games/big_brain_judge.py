@@ -35,6 +35,75 @@ _LEAD_INS: Final[re.Pattern[str]] = re.compile(
     r"who are |what are |que es |quien es |quienes son )+"
 )
 
+# Hesitations alone are no answer (2026-11-01: "Um." was heard as "Om", the sacred syllable, and counted).
+_FILLERS: Final[frozenset[str]] = frozenset(
+    {
+        "um",
+        "uh",
+        "eh",
+        "em",
+        "mm",
+        "hmm",
+        "mmm",
+        "ah",
+        "er",
+        "erm",
+        "este",
+        "pues",
+        "bueno",
+        "a ver",
+        "no se",
+        "i dont know",
+    }
+)
+# Words a place's or thing's name often carries or drops: "Pacific" for "Pacific Ocean", "el Amazonas" for "río
+# Amazonas".
+_GENERIC: Final[frozenset[str]] = frozenset(
+    {
+        "ocean",
+        "oceans",
+        "sea",
+        "river",
+        "lake",
+        "mount",
+        "mountain",
+        "mountains",
+        "island",
+        "islands",
+        "desert",
+        "city",
+        "state",
+        "kingdom",
+        "republic",
+        "empire",
+        "company",
+        "co",
+        "inc",
+        "and",
+        "of",
+        "oceano",
+        "oceanos",
+        "mar",
+        "rio",
+        "lago",
+        "monte",
+        "montana",
+        "montanas",
+        "isla",
+        "islas",
+        "desierto",
+        "ciudad",
+        "estado",
+        "reino",
+        "republica",
+        "imperio",
+        "compania",
+        "y",
+        "de",
+        "del",
+    }
+)
+
 JevAsk = Callable[[dict[str, Any], dict[str, dict[str, Any]], dict[str, bytes]], Awaitable[dict[str, dict[str, Any]]]]
 
 _QUESTIONS: Final[dict[str, dict[str, Any]]] = {
@@ -101,11 +170,14 @@ def matches(said: str, accept: list[str]) -> bool:
             continue
         if heard == target:
             return True
+        bare = [word for word in target.split() if word not in _GENERIC]
+        if bare and [word for word in heard.split() if word not in _GENERIC] == bare:
+            return True
         if difflib.SequenceMatcher(None, heard, target).ratio() >= CLOSE_ENOUGH:
             return True
         words = target.split()
         # A surname alone for a person ("Garbo" for "Greta Garbo"), when it is a real word.
-        if len(words) >= 2 and len(words[-1]) >= 4 and heard == words[-1]:
+        if len(words) >= 2 and len(words[-1]) >= 4 and words[-1] not in _GENERIC and heard == words[-1]:
             return True
         # "Greta Garbo, la actriz": the answer said with a few more words around it.
         if f" {target} " in f" {heard} " and len(heard.split()) <= len(words) + 3:
@@ -130,7 +202,7 @@ class Judge:
 
         ``spoken`` answers were heard, so one that sounds like an accepted answer counts; typed ones must be right.
         """
-        if not plain(said):
+        if not plain(said) or plain(said) in _FILLERS:
             return Ruling.WRONG
         if matches(said, accept):
             return Ruling.RIGHT

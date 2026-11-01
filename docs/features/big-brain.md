@@ -34,23 +34,28 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
    costs nothing), steal (a right answer also takes the square's points from the leading other team), everyone
    (each phone types an answer for 30 s; every right one scores for its team). Richie says what each means and
    the phones spell it out under the badge.
-6. **Fairness:** after a wrong ruling, every other phone gets "¡Eso vale!" until the next square is picked; a
-   majority makes it count (points back and awarded, control to that team, and the ruling is kept for good).
+6. **Fairness:** after a wrong ruling, every other phone gets "Was Ana's “Pacific” right?" with "That counts!"
+   until the next square is picked; a majority makes it count (points back and awarded, control to that team, and
+   the ruling is kept for good). While the square is still open it ends there, with the correct sound and Richie's
+   "the room has spoken".
 7. **Final round:** the category on the TRMNL; each team bets in secret on a phone (up to its score, or 800 when
    it has less) for up to 30 s, moving on as soon as every team has bet; Richie reads the final clue; 30 s of thinking music while each team types one answer;
    a drumroll and the reveal team by team from the lowest score, each answer on the TRMNL and read aloud.
+   Each phone shows the answer once the TRMNL does (the final's stays up 8 s, since e-ink takes a few seconds to
+   draw, and on the phones' end screen).
 8. **The end:** the winner (or a tie) with a drumroll, fanfare and applause, Richie's happy moves, the winner
    screen, goodbye and the outro. The phones keep the final scores for 30 s.
-9. **Pause and quit** as every game: "pausa", his name or an antenna pauses (the phones show it), "se acabó el
-   juego" ends it, any other request asks "¿lo terminamos?".
+9. **Pause and quit** as every game: "pausa", his name or an antenna pauses, "se acabó el juego" ends it, any other
+   request asks "¿lo terminamos?". The phones say why it may have paused and have a "Keep playing!" button, since a
+   false wake in table talk pauses it too (twice in the 2026-11-01 game).
 
 ## Current architecture
 
 | Piece | File | What it does |
 |-------|------|--------------|
 | Game | `games/big_brain.py` | `BigBrain(Game)`: the lobby, the 20 squares, hidden squares, the vote, the final, the ending; `snapshot(player)` is each phone's view, `on_message` takes phones' messages |
-| Board | `games/big_brain_board.py` | `build_board(bank, language, kids, recent)`: rows by hardness quarter, themed columns (one per broad category) plus a broad one, three hidden squares, a final from the hardest quarter with appeal ≥ 2.3; `remember`/`read_history` keep clues out for 30 days |
-| Judge | `games/big_brain_judge.py` | `matches()` by code (case, accents, articles, lead-ins, slips ≥ 0.84 similar, a surname, the answer with a few words around it), then Jev (`right`, `too_broad`, and for spoken answers `sounds_like`: speech recognition's spelling of an accepted answer, "Téphanis" for "Tiffany's") → `Ruling.RIGHT/WRONG/SPECIFIC`; rulings kept in `rulings.json` |
+| Board | `games/big_brain_board.py` | `build_board(bank, language, kids, recent)`: rows by hardness quarter, themed columns (one per broad category) plus a broad one, three hidden squares, a final from the hardest quarter with appeal ≥ 2.3; no two clues sharing an accepted answer; `imperial()` leaves out clues measured in miles, feet or Fahrenheit; `remember`/`read_history` keep clues out for 30 days |
+| Judge | `games/big_brain_judge.py` | `matches()` by code (case, accents, articles, lead-ins, slips ≥ 0.84 similar, a surname, a name without its generic word such as "Pacific" for "Pacific Ocean", the answer with a few words around it; a filler such as "um" is wrong), then Jev (`right`, `too_broad`, and for spoken answers `sounds_like`: speech recognition's spelling of an accepted answer, "Téphanis" for "Tiffany's") → `Ruling.RIGHT/WRONG/SPECIFIC`; rulings kept in `rulings.json` |
 | Audio | `games/big_brain_audio.py` | `Clips` (host lines by moment, never the same take twice running), `Sounds` (as `chosen.json` picks), `Speech` (Eleven v4 Turbo, raw 24 kHz PCM, kept by text) |
 | Lines | `games/big_brain_lines.py` | 41 moments, 334 takes in English and Venezuelan Spanish with ElevenLabs audio tags |
 | Phones | `games/big_brain_phones.py`, `static/big_brain/index.html` | FastAPI on `0.0.0.0:BIG_BRAIN_PORT` inside Reachy's loop (no signal capture), only during a game; the code in every request; joins kept here |
@@ -104,6 +109,8 @@ big-brain/rulings.json          Jev's and the room's rulings
   text, without names).
 - ElevenLabs allows five requests at a time on the Creator plan; the board's clues are prepared while players
   join. Its cost is not yet in the admin app's usage ledger (Jev's judging is, under "Games").
+- A clip the speech model cannot read comes back empty and counts as silence (2026-11-01: "Pacific" lost that
+  way, 1.6 s of audio, no text); Richie does not ask again yet.
 - Answers are transcribed with the household's language guess, so a short English answer can come back in
   Spanish spelling; Jev's `sounds_like` covers that rather than biasing the recognizer with the answer, which on
   unclear audio could write the answer itself.
