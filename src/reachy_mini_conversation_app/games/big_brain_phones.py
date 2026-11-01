@@ -82,9 +82,14 @@ class Phones:
         code: str | None = None,
         clock: Callable[[], float] | None = None,
         public_url: str | None = None,
+        page: Path = PAGE,
     ) -> None:
-        """Serve the page on ``port``; ``snapshot`` gives each phone its state, ``on_message`` gets the rest."""
+        """Serve ``page`` on ``port``; ``snapshot`` gives each phone its state, ``on_message`` gets the rest.
+
+        Other phone games (Sheeple, Scribble Rush, Detectives) serve their own page through the same server.
+        """
         self.port = port
+        self._page = page
         self.code = code or join_code()
         self._public_url = public_url
         self.players: dict[str, Player] = {}
@@ -156,9 +161,9 @@ class Phones:
 
         @app.get("/")
         async def page(c: str = "") -> Any:
-            if c.upper() != self.code or not PAGE.exists():
+            if c.upper() != self.code or not self._page.exists():
                 return HTMLResponse(GONE, status_code=404)
-            return FileResponse(PAGE, headers={"Cache-Control": "no-store"})
+            return FileResponse(self._page, headers={"Cache-Control": "no-store"})
 
         @app.websocket("/ws")
         async def phone(websocket: WebSocket, code: str = "") -> None:
