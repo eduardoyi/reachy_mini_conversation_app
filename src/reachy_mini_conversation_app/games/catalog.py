@@ -288,9 +288,33 @@ BIG_BRAIN_SW: Final[GameInfo] = GameInfo(
     ),
 )
 
+BIG_BRAIN_DISNEY: Final[GameInfo] = GameInfo(
+    key="bigbrain_disney",
+    names=_edition_names(("disney", "de disney", "disney pixar", "disney y pixar", "pixar", "disni", "dizni")),
+    title={"es": "Big Brain, edición Disney", "en": "Big Brain, Disney edition"},
+    pitch={
+        "es": "El concurso de Big Brain, todo sobre las películas animadas de Disney y Pixar: cada quien juega desde su teléfono.",  # fmt: skip
+        "en": "The Big Brain quiz show, all about Disney and Pixar's animated films: everyone plays on their phone.",
+    },
+    rules=(
+        "Big Brain's Disney edition: the same team quiz show, with every clue about Disney and Pixar's animated "
+        "films (heroines, villains, sidekicks, songs, places, the voices and how the films were made). Start it "
+        "when someone asks for Big Brain with Disney or Pixar; plain Big Brain is the general quiz."
+    ),
+)
+
 GAMES: Final[dict[str, GameInfo]] = {
     game.key: game
-    for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR, BIG_BRAIN_SW)
+    for game in (
+        COLOR_HUNT,
+        TREASURE_HUNT,
+        SIMON_SAYS,
+        BIG_BRAIN,
+        BIG_BRAIN_HP,
+        BIG_BRAIN_LOTR,
+        BIG_BRAIN_SW,
+        BIG_BRAIN_DISNEY,
+    )
 }
 
 

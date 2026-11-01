@@ -636,6 +636,38 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[playful] Hazlo, o no lo hagas... [warmly] esta noche no hay otro juego. ¡Buenas noches!",
         ),
     },
+    # The Disney edition's own opening and closing (Edition.key "dis").
+    "welcome_dis": {
+        "en": (
+            "[booming] Once upon a time, in a living room just like this one... [pause] BIG BRAIN: the Disney "
+            "edition!",
+            "[playful] Wish upon a star, and grab your phones... [excited] it's BIG BRAIN, Disney edition!",
+            "[warmly] Princesses, heroes, and the occasional villain... [booming] welcome to BIG BRAIN, Disney "
+            "edition!",
+            "[dramatic] Tonight, someone gets their happily ever after... [booming] it's BIG BRAIN: the Disney "
+            "edition!",
+        ),
+        "es": (
+            "[booming] Había una vez, en una sala igualita a esta... [pause] ¡BIG BRAIN, edición Disney!",
+            "[playful] Pidan un deseo a una estrella, y agarren sus teléfonos... [excited] ¡es BIG BRAIN, edición "
+            "Disney!",
+            "[warmly] Princesas, héroes, y uno que otro villano... [booming] ¡bienvenidos a BIG BRAIN, edición "
+            "Disney!",
+            "[dramatic] Esta noche, alguien tendrá su final feliz... [booming] ¡es BIG BRAIN, edición Disney!",
+        ),
+    },
+    "goodbye_dis": {
+        "en": (
+            "[warmly] And they all lived happily ever after. [playful] The end! Good night!",
+            "[playful] That's all, folks... [warmly] well, that's another studio. Good night from BIG BRAIN!",
+            "[warmly] Thank you for playing. [playful] Now go to bed before the clock strikes midnight!",
+        ),
+        "es": (
+            "[warmly] Y vivieron felices para siempre. [playful] ¡Fin! ¡Buenas noches!",
+            "[playful] Hasta aquí llegó el cuento de hoy. [warmly] ¡Buenas noches desde BIG BRAIN!",
+            "[warmly] Gracias por jugar. [playful] ¡Ahora a dormir antes de que el reloj dé las doce!",
+        ),
+    },
     "pause": {
         "en": (
             "[softly] We'll pause here.",

@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.games.catalog import (
     BIG_BRAIN_HP,
     BIG_BRAIN_SW,
     BIG_BRAIN_LOTR,
+    BIG_BRAIN_DISNEY,
     GameInfo,
     words,
 )
@@ -92,6 +93,7 @@ EDITIONS: Final[dict[str, Edition]] = {
             BIG_BRAIN_LOTR, "lord-of-the-rings", "lotr", {"en": "Middle-earth edition", "es": "Edición Tierra Media"}
         ),
         Edition(BIG_BRAIN_SW, "star-wars", "sw", {"en": "Galactic edition", "es": "Edición Galáctica"}),
+        Edition(BIG_BRAIN_DISNEY, "disney", "dis", {"en": "Disney edition", "es": "Edición Disney"}),
     )
 }
 

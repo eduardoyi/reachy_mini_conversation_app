@@ -423,6 +423,75 @@ EDITIONS: dict[str, dict[str, Any]] = {
         ],
         "films_by_episode": True,
     },
+    "disney": {
+        "id": "dis",
+        "subject": (
+            "the animated feature films of Walt Disney Animation Studios and Pixar, from Snow White and the Seven "
+            "Dwarfs (1937) to today: their stories, characters, songs, places, the voice cast and how they were "
+            "made (Walt Disney, the animators, the composers, techniques, records, the Oscars). Nothing from the "
+            "live-action remakes, Marvel, Star Wars, the TV series, the theme parks, the games or the "
+            "direct-to-video sequels"
+        ),
+        "audience": "a family with children and their friends who have grown up with Disney and Pixar films",
+        "spanish": (
+            "Spanish names are those of the Latin American Spanish dub and release: 'Blanca Nieves y los siete "
+            "enanos', 'La Sirenita', 'La bella y la bestia', 'El rey león', 'Frozen: Una aventura congelada', "
+            "'Enredados', 'Valiente', 'Moana: Un mar de aventuras', 'Ralph, el demoledor', 'Buscando a Nemo', 'Los "
+            "Increíbles', 'Intensa-Mente', 'Up: Una aventura de altura', 'Encanto'; songs as sung in the Latin "
+            "American dub ('Libre soy', 'No se habla de Bruno', 'Bajo del mar', 'Un mundo ideal', 'Hakuna "
+            "Matata', 'Recuérdame'). Character names as in that dub (Rayo McQueen, Woody, Buzz Lightyear, el "
+            "Genio, Sebastián)"
+        ),
+        "columns": {
+            "heroines": (
+                "Princesses & heroines",
+                "Princesas y heroínas",
+                "the princesses and heroines and their stories",
+            ),
+            "heroes": ("Heroes", "Héroes", "the heroes and leading characters who are not princesses"),
+            "villains": ("Villains", "Villanos", "the villains, their plans, henchmen and ends"),
+            "sidekicks": (
+                "Sidekicks & animal friends",
+                "Compañeros y amigos animales",
+                "sidekicks, pets and animal friends",
+            ),
+            "songs": (
+                "Songs",
+                "Canciones",
+                "the songs: who sings them, in which film, a lyric line (at most 10 words, quoted), the songwriters",
+            ),
+            "pixar": ("Pixar", "Pixar", "the Pixar films: Toy Story to today"),
+            "classics": ("The classics", "Los clásicos", "Disney's animated films from 1937 to the 1980s"),
+            "nineties": (
+                "The 90s",
+                "Los noventa",
+                "Disney's animated films from The Little Mermaid (1989) to Tarzan (1999)",
+            ),
+            "modern": (
+                "The new era",
+                "La nueva era",
+                "Disney's animated films since 2000: Lilo & Stitch, Tangled, Frozen, Moana, Encanto and others",
+            ),
+            "places": (
+                "Kingdoms & places",
+                "Reinos y lugares",
+                "kingdoms, towns, islands, worlds and places in the films",
+            ),
+            "quotes": (
+                "Who said it?",
+                "¿Quién lo dijo?",
+                "a famous short line from the films (at most 12 words, quoted) and when it is said; the answer is "
+                "the character who says it",
+            ),
+            "making": (
+                "Behind the scenes",
+                "Detrás de cámaras",
+                "Walt Disney, the voice cast, animators, composers, techniques, firsts, records and the Oscars",
+            ),
+        },
+        "per_column": 48,
+        "search_columns": ("making", "songs"),
+    },
 }
 
 WRITE_PROMPT = """You write clues for Big Brain, a trivia game a home robot hosts for {audience}, in English or
