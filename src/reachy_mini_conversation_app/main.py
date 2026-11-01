@@ -155,6 +155,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.games.simon_says import SimonSays
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
+    from reachy_mini_conversation_app.games.scribble_rush import ScribbleRush, GeminiGuesser, ScribbleSetup
     from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
     from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
 
@@ -279,6 +280,14 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     games: dict[str, Callable[[], Game]] = (
         {"colors": ColorHunt, "treasure": TreasureHunt, "simon": SimonSays} if deps.camera_enabled else {}
     )
+    gemini_key = (config.GEMINI_API_KEY or "").strip()
+    if deps.camera_enabled and gemini_key:
+        scribble = ScribbleSetup(
+            port=config.BIG_BRAIN_PORT,
+            guess=GeminiGuesser(gemini_key, config.SCRIBBLE_VISION_MODEL),
+            public_url=config.BIG_BRAIN_PUBLIC_URL,
+        )
+        games["scribble"] = lambda: ScribbleRush(scribble)
     game_data = Path(config.GAME_DATA_DIR)
     if (game_data / "trivia-bank" / "bank.jsonl").is_file():
         setup = BigBrainSetup(

@@ -480,3 +480,9 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-01: deployed to the Mac mini (b0877d8, restarted 13:45): "Games enabled: colors, treasure, simon,
   bigbrain", no errors; clue bank, host clips, sounds and the ElevenLabs key in place. A QR library was tried on
   the mini too and fails the same way (pygobject needs cairo to re-lock), so the encoder stays. Not played yet.
+- 2026-11-01: Scribble Rush first version built on its own branch (feature doc
+  [scribble-rush.md](../features/scribble-rush.md)): phones join by QR on Big Brain's phone server, two or three
+  teams race 24 squares over six rounds, one Gemini Flash call per drawing gives up to three guesses (least to most
+  confident) that code and Jev judge; 139 kids' and 238 adults' words in both languages. Square types, Richie
+  drawing, telephone, the no-phone fallback and saved drawings are deferred. Tested with fakes only; the vision
+  guesses still need measuring on real drawings.

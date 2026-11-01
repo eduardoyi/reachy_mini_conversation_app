@@ -303,6 +303,51 @@ BIG_BRAIN_DISNEY: Final[GameInfo] = GameInfo(
     ),
 )
 
+SCRIBBLE_RUSH: Final[GameInfo] = GameInfo(
+    key="scribble",
+    names=frozenset(
+        {
+            "scribble rush",
+            "scribble",
+            "scribbles rush",
+            "scribble rash",
+            "scribble brush",
+            "scrible rush",
+            "skribble rush",
+            "scribble russ",
+            "escribel rush",
+            "escribol rush",
+            "escrible rush",
+            "dibujo relampago",
+            "el dibujo relampago",
+            "dibujos relampago",
+            "dibujo rapido",
+            "dibujar",
+            "a dibujar",
+            "dibujos",
+            "los dibujos",
+            "drawing",
+            "drawing game",
+            "the drawing game",
+            "draw",
+            "pictionary",
+        }
+    ),  # fmt: skip
+    title={"es": "Scribble Rush", "en": "Scribble Rush"},
+    pitch={
+        "es": "Ustedes dibujan una palabra secreta a toda prisa y yo trato de adivinarla: cada quien juega desde su teléfono.",  # fmt: skip
+        "en": "You draw a secret word in a rush and I try to guess it: everyone plays on their phone.",
+    },
+    rules=(
+        "A drawing race for two or three teams. Players scan the QR code on the e-ink screen, type a name and pick "
+        "a team. On a team's turn one player sees a secret word on their phone and draws it on paper in 20 seconds "
+        "while a tick-tock speeds up, then holds it up to Reachy's camera; Reachy makes up to three guesses aloud "
+        "and the earlier he gets it, the more squares the team moves on the track (24 squares, six rounds). Kids "
+        "mode has easy words and a square for every try. Needs the camera and phones on the home Wi-Fi. 'Pausa' "
+        "pauses, 'se acabó el juego' ends it."
+    ),
+)
+
 GAMES: Final[dict[str, GameInfo]] = {
     game.key: game
     for game in (
@@ -314,6 +359,7 @@ GAMES: Final[dict[str, GameInfo]] = {
         BIG_BRAIN_LOTR,
         BIG_BRAIN_SW,
         BIG_BRAIN_DISNEY,
+        SCRIBBLE_RUSH,
     )
 }
 

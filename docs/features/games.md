@@ -33,6 +33,9 @@ Big Brain, the team quiz show played on phones, runs on the same host and has it
 [big-brain.md](big-brain.md). It adds `GameServices.say_audio` (recorded speech played as Reachy's line, through
 `request_announcement(..., audio=...)`), which any game can use for a recorded voice.
 
+**Scribble Rush**, the drawing race Reachy guesses with a vision model, uses Big Brain's phone server with its
+own page: [scribble-rush.md](scribble-rush.md).
+
 ## User-facing behavior
 
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's
