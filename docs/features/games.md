@@ -33,6 +33,9 @@ Big Brain, the team quiz show played on phones, runs on the same host and has it
 [big-brain.md](big-brain.md). It adds `GameServices.say_audio` (recorded speech played as Reachy's line, through
 `request_announcement(..., audio=...)`), which any game can use for a recorded voice.
 
+Detectives, the mystery party game played on phones, also runs on the host and has its own page:
+[detectives.md](detectives.md).
+
 ## User-facing behavior
 
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's

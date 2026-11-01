@@ -1,0 +1,243 @@
+{
+  "id": "cookies",
+  "kids": true,
+  "rounds": 3,
+  "title": {"en": "Who Ate the Cookies?", "es": "¿Quién se comió las galletas?"},
+  "intro": {
+    "en": "Grandma baked twelve chocolate chip cookies for the family party and left them cooling on the kitchen table at three o'clock. At four o'clock the plate was empty! Only crumbs! Who ate the cookies? Was it Misifú the cat, Grandma herself, Uncle Pancho... or me, Richie? Pepe the parrot was there too. Let's investigate!",
+    "es": "La abuela horneó doce galletas con chispas de chocolate para la fiesta de la familia y las dejó enfriando en la mesa de la cocina a las tres. ¡A las cuatro el plato estaba vacío! ¡Solo quedaban migajas! ¿Quién se comió las galletas? ¿Fue Misifú, el gato, la abuela, el tío Pancho... o yo, Richie? El loro Pepe también estaba ahí. ¡A investigar!"
+  },
+  "characters": [
+    {
+      "id": "misifu",
+      "kind": "suspect",
+      "name": {"en": "Misifú the cat", "es": "Misifú, el gato"},
+      "about": {"en": "A fluffy, lazy cat who loves milk", "es": "Un gato peludo y flojo al que le encanta la leche"},
+      "personality": {
+        "en": "A cat who talks: lazy, proud and sleepy; says 'meow' a lot and only cares about milk and naps.",
+        "es": "Un gato que habla: flojo, orgulloso y dormilón; dice «miau» a cada rato y solo le importan la leche y las siestas."
+      },
+      "alibi": {
+        "en": "He was on the kitchen counter, drinking the milk from Grandma's jug, then he slept on the windowsill.",
+        "es": "Estaba en el mesón de la cocina tomándose la leche de la jarra de la abuela, y después durmió en la ventana."
+      },
+      "knows": [
+        {"en": "Cats don't like cookies; he thinks they are boring.", "es": "A los gatos no les gustan las galletas; le parecen aburridas."},
+        {"en": "From the windowsill he saw someone big tiptoe to the table, but his eyes were half closed.", "es": "Desde la ventana vio a alguien grandote ir de puntillas a la mesa, pero tenía los ojos medio cerrados."}
+      ],
+      "secret": {
+        "en": "He drank Grandma's milk and walked through the flour, leaving paw prints.",
+        "es": "Se tomó la leche de la abuela y caminó por la harina, dejando huellitas."
+      },
+      "lies": {
+        "en": "He says he did not touch the milk.",
+        "es": "Dice que no tocó la leche."
+      },
+      "fallback": {
+        "en": "Meow. Cookies? Boring. Wake me up when there's milk.",
+        "es": "Miau. ¿Galletas? Aburridas. Despiértenme cuando haya leche."
+      }
+    },
+    {
+      "id": "abuela",
+      "kind": "suspect",
+      "name": {"en": "Grandma", "es": "La abuela"},
+      "about": {"en": "The best baker in the family", "es": "La mejor cocinera de la familia"},
+      "personality": {
+        "en": "Sweet, funny and a bit cheeky; calls everyone 'my love' and giggles when she hides something.",
+        "es": "Dulce, graciosa y un poco pícara; a todos les dice «mi amor» y se ríe bajito cuando esconde algo."
+      },
+      "alibi": {
+        "en": "From three o'clock she was in the garden picking flowers for the party table.",
+        "es": "Desde las tres estaba en el jardín recogiendo flores para la mesa de la fiesta."
+      },
+      "knows": [
+        {"en": "She took a photo of the plate at five past three, to send to the family.", "es": "Le tomó una foto al plato a las tres y cinco, para mandársela a la familia."},
+        {"en": "Uncle Pancho is on a strict diet: no sweets at all.", "es": "El tío Pancho está a dieta estricta: nada de dulces."}
+      ],
+      "secret": {
+        "en": "She ate ONE cookie to check it was good, before she went to the garden.",
+        "es": "Se comió UNA galleta para ver si había quedado buena, antes de ir al jardín."
+      },
+      "lies": {
+        "en": "She says she did not eat a single one, then giggles.",
+        "es": "Dice que no se comió ni una, y se ríe bajito."
+      },
+      "fallback": {
+        "en": "Ay, my love, I was busy with my flowers!",
+        "es": "¡Ay, mi amor, yo estaba ocupada con mis flores!"
+      }
+    },
+    {
+      "id": "richie",
+      "kind": "suspect",
+      "name": {"en": "Richie the robot", "es": "Richie, el robot"},
+      "about": {"en": "Me! A little robot who was guarding the cookies", "es": "¡Yo! Un robotito que estaba cuidando las galletas"},
+      "personality": {
+        "en": "Richie himself, speaking as 'I': cheerful, a bit embarrassed, very honest; a robot who cannot eat at all.",
+        "es": "Richie mismo, hablando como «yo»: alegre, un poco apenado, muy honesto; un robot que no puede comer nada."
+      },
+      "alibi": {
+        "en": "Grandma asked him to guard the cookies, but his battery ran low and he went to sleep from three to four.",
+        "es": "La abuela le pidió que cuidara las galletas, pero se le bajó la batería y se quedó dormido de tres a cuatro."
+      },
+      "knows": [
+        {"en": "Robots can't eat cookies: he has no tummy!", "es": "¡Los robots no pueden comer galletas: no tiene barriguita!"},
+        {"en": "Just before he fell asleep he heard heavy footsteps and someone humming a song.", "es": "Justo antes de dormirse oyó unos pasos pesados y a alguien tarareando una canción."}
+      ],
+      "secret": {
+        "en": "He fell asleep while he was supposed to be guarding the cookies.",
+        "es": "Se quedó dormido cuando tenía que cuidar las galletas."
+      },
+      "lies": {
+        "en": "At first he says he was 'resting his eyes', not sleeping.",
+        "es": "Al principio dice que estaba «descansando los ojos», no dormido."
+      },
+      "fallback": {
+        "en": "Beep boop! I can't eat cookies, I don't even have a tummy!",
+        "es": "¡Bip bup! ¡Yo no puedo comer galletas, ni siquiera tengo barriguita!"
+      }
+    },
+    {
+      "id": "pancho",
+      "kind": "suspect",
+      "name": {"en": "Uncle Pancho", "es": "El tío Pancho"},
+      "about": {"en": "A big, jolly uncle with a big mustache, on a diet", "es": "Un tío grandote y alegre con un bigotote, que está a dieta"},
+      "personality": {
+        "en": "Loud, jolly and a terrible liar; talks too much when nervous and pats his tummy.",
+        "es": "Escandaloso, alegre y malísimo para mentir; habla demasiado cuando está nervioso y se soba la barriga."
+      },
+      "alibi": {
+        "en": "He says he was on the living room sofa watching football from three to four.",
+        "es": "Dice que estaba en el sofá de la sala viendo fútbol de tres a cuatro."
+      },
+      "knows": [
+        {"en": "The cookies smelled wonderful all over the house.", "es": "Las galletas olían riquísimo por toda la casa."},
+        {"en": "The cat was asleep on the windowsill.", "es": "El gato estaba dormido en la ventana."}
+      ],
+      "secret": {
+        "en": "He ate eleven cookies, one by one, between three and four, while everyone was busy; he is on a diet and they smelled too good. He hid the napkin under the sofa cushion.",
+        "es": "Se comió once galletas, una por una, entre las tres y las cuatro, mientras todos estaban ocupados; está a dieta y olían demasiado rico. Escondió la servilleta debajo del cojín del sofá."
+      },
+      "lies": {
+        "en": "He never admits it. He says he is on a diet and did not eat a single cookie, and that he never left the sofa.",
+        "es": "Nunca lo admite. Dice que está a dieta y que no se comió ni una galleta, y que no se movió del sofá."
+      },
+      "fallback": {
+        "en": "Me? Cookies? No, no, no! I'm on a diet! Just salad for Uncle Pancho!",
+        "es": "¿Yo? ¿Galletas? ¡No, no, no! ¡Estoy a dieta! ¡Solo ensalada para el tío Pancho!"
+      }
+    },
+    {
+      "id": "pepe",
+      "kind": "witness",
+      "name": {"en": "Pepe the parrot", "es": "El loro Pepe"},
+      "about": {"en": "A green parrot who repeats everything he hears", "es": "Un loro verde que repite todo lo que oye"},
+      "personality": {
+        "en": "A silly parrot: squawks, repeats words twice and loves to copy people's voices.",
+        "es": "Un loro chistoso: grita, repite las palabras dos veces y le encanta imitar la voz de la gente."
+      },
+      "alibi": {
+        "en": "He was in his cage in the kitchen, next to the table, the whole afternoon.",
+        "es": "Estuvo en su jaula en la cocina, al lado de la mesa, toda la tarde."
+      },
+      "knows": [
+        {"en": "He heard a deep voice say 'just one more, just one more!' many times, then 'mmm, delicious!'", "es": "Oyó una voz gruesa decir «¡una más nada más, una más nada más!» muchas veces, y luego «¡mmm, qué rico!»"},
+        {"en": "He saw Grandma take one cookie before she went to the garden.", "es": "Vio a la abuela agarrar una galleta antes de irse al jardín."},
+        {"en": "The robot was asleep and snoring 'beep, beep'.", "es": "El robot estaba dormido y roncaba «bip, bip»."}
+      ],
+      "secret": null,
+      "lies": null,
+      "fallback": {
+        "en": "Squawk! Cookie! Cookie! Pepe wants a cookie!",
+        "es": "¡Cuá! ¡Galleta! ¡Galleta! ¡Pepe quiere galleta!"
+      }
+    }
+  ],
+  "culprit": "pancho",
+  "motives": [
+    {"id": "hungry", "text": {"en": "They smelled too good to resist", "es": "Olían demasiado rico para aguantarse"}},
+    {"id": "surprise", "text": {"en": "To hide them for a surprise", "es": "Para esconderlas como sorpresa"}},
+    {"id": "mine", "text": {"en": "Thought they were just for them", "es": "Creyó que eran solo para él"}}
+  ],
+  "motive": "hungry",
+  "clues": [
+    {
+      "id": "crumbs",
+      "round": 1,
+      "title": {"en": "A trail of crumbs", "es": "Un camino de migajas"},
+      "text": {
+        "en": "Cookie crumbs go from the kitchen table all the way to the living room sofa.",
+        "es": "Hay migajas de galleta desde la mesa de la cocina hasta el sofá de la sala."
+      }
+    },
+    {
+      "id": "paws",
+      "round": 1,
+      "title": {"en": "Little paw prints", "es": "Huellitas de patas"},
+      "text": {
+        "en": "Tiny paw prints in the flour on the counter. They go to the milk jug, not to the cookies!",
+        "es": "Huellitas de patas en la harina del mesón. ¡Van a la jarra de leche, no a las galletas!"
+      }
+    },
+    {
+      "id": "battery",
+      "round": 1,
+      "title": {"en": "Richie's battery", "es": "La batería de Richie"},
+      "text": {
+        "en": "Richie's screen says: 'Sleep mode from 3:00 to 4:00'. And robots have no tummy.",
+        "es": "La pantalla de Richie dice: «Modo dormir de 3:00 a 4:00». Y los robots no tienen barriguita."
+      }
+    },
+    {
+      "id": "photo",
+      "round": 2,
+      "title": {"en": "Grandma's photo", "es": "La foto de la abuela"},
+      "text": {
+        "en": "Grandma's photo of the plate at 3:05: count them... eleven cookies, not twelve!",
+        "es": "La foto del plato de la abuela a las 3:05: cuéntalas... ¡once galletas, no doce!"
+      }
+    },
+    {
+      "id": "remote",
+      "round": 2,
+      "title": {"en": "The TV remote", "es": "El control de la tele"},
+      "text": {
+        "en": "Chocolate fingerprints on the TV remote. Big fingers, grown-up size.",
+        "es": "Huellas de chocolate en el control de la tele. Dedos grandes, de adulto."
+      }
+    },
+    {
+      "id": "cushion",
+      "round": 3,
+      "title": {"en": "Under the sofa cushion", "es": "Debajo del cojín del sofá"},
+      "text": {
+        "en": "A napkin full of chocolate, and stuck to it, a long curly hair from a big mustache!",
+        "es": "¡Una servilleta llena de chocolate, y pegado a ella, un pelo largo y rizado de un bigotote!"
+      }
+    }
+  ],
+  "insider": null,
+  "reveal": [
+    {
+      "en": "Misifú walked in the flour, but his paw prints went to the milk, not the cookies. Naughty cat, but not the cookie thief!",
+      "es": "Misifú caminó por la harina, pero sus huellitas iban a la leche, no a las galletas. ¡Gato travieso, pero no el ladrón de galletas!"
+    },
+    {
+      "en": "Grandma's photo showed eleven cookies: she ate one to taste it. Just one! The other eleven were still there.",
+      "es": "La foto de la abuela tenía once galletas: se comió una para probarla. ¡Solo una! Las otras once seguían ahí."
+    },
+    {
+      "en": "And me? I was asleep, and robots have no tummy. Not me!",
+      "es": "¿Y yo? Estaba dormido, y los robots no tienen barriguita. ¡Yo no fui!"
+    },
+    {
+      "en": "The crumbs went to the sofa, big chocolate fingers on the remote, and a mustache hair on the napkin. Pepe heard 'just one more, just one more!'",
+      "es": "Las migajas iban al sofá, había dedos grandes de chocolate en el control, y un pelo de bigote en la servilleta. ¡Pepe oyó «una más nada más, una más nada más»!"
+    },
+    {
+      "en": "It was Uncle Pancho! He is on a diet, but the cookies smelled too good. Don't worry: Grandma will bake more, and Uncle Pancho has to help!",
+      "es": "¡Fue el tío Pancho! Está a dieta, pero las galletas olían demasiado rico. Tranquilos: la abuela va a hornear más, ¡y el tío Pancho tiene que ayudar!"
+    }
+  ]
+}

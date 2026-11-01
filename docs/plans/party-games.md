@@ -480,3 +480,8 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-01: deployed to the Mac mini (b0877d8, restarted 13:45): "Games enabled: colors, treasure, simon,
   bigbrain", no errors; clue bank, host clips, sounds and the ElevenLabs key in place. A QR library was tried on
   the mini too and fails the same way (pygobject needs cairo to re-lock), so the encoder stays. Not played yet.
+- 2026-11-01: Detectives built (first version, without waiting for approval, as Eduardo asked): pre-written
+  cases instead of a case written at game time (two adult dinner-party cases and "¿Quién se comió las galletas?"),
+  phones for turns, roles, clues and the secret accusation, Gemini text for witness lines held to one character's
+  sheet; feature doc [detectives.md](../features/detectives.md). Searching the house with the camera, dim lights
+  and noir music are not built. Not deployed or played.

@@ -1,0 +1,268 @@
+{
+  "id": "last-toast",
+  "kids": false,
+  "rounds": 4,
+  "title": {"en": "The Last Toast", "es": "El último brindis"},
+  "intro": {
+    "en": "Tonight was Don Aurelio Montoro's seventieth birthday dinner at his vineyard house. At a quarter past nine he raised his glass, made a toast, drank, and a few minutes later he collapsed. He never woke up. Four people at that dinner had reasons to keep secrets, and the housekeeper, Rosa, saw more than she thinks. One of them poisoned him. Find out who, and why.",
+    "es": "Esta noche era la cena de los setenta años de don Aurelio Montoro, en su casa del viñedo. A las nueve y cuarto levantó su copa, brindó, bebió, y a los pocos minutos se desplomó. No volvió a despertar. Cuatro personas en esa cena tenían secretos que guardar, y Rosa, el ama de llaves, vio más de lo que cree. Uno de ellos lo envenenó. Descubran quién, y por qué."
+  },
+  "characters": [
+    {
+      "id": "valeria",
+      "kind": "suspect",
+      "name": {"en": "Valeria Montoro", "es": "Valeria Montoro"},
+      "about": {"en": "Aurelio's daughter, who runs the winery's money", "es": "La hija de Aurelio, que lleva las cuentas de la bodega"},
+      "personality": {
+        "en": "Sharp, proud and impatient; answers quickly and hates being doubted.",
+        "es": "Aguda, orgullosa e impaciente; responde rápido y odia que duden de ella."
+      },
+      "alibi": {
+        "en": "At ten past nine she was out on the terrace on the phone with the bank manager, Mr. Salas; she came back in just for the toast.",
+        "es": "A las nueve y diez estaba en la terraza hablando por teléfono con el gerente del banco, el señor Salas; volvió a entrar justo para el brindis."
+      },
+      "knows": [
+        {"en": "Her father had been tense all week and kept a thick envelope locked in his desk.", "es": "Su padre llevaba toda la semana tenso y guardaba un sobre grueso bajo llave en su escritorio."},
+        {"en": "Doctor Julián Ferrer has been the family doctor for thirty years and also treated her late mother, Clara.", "es": "El doctor Julián Ferrer es el médico de la familia desde hace treinta años y también atendió a su difunta madre, Clara."},
+        {"en": "Her father needed to sign a rescue loan with the bank on Monday; without his signature the winery is lost.", "es": "Su padre tenía que firmar un préstamo de rescate con el banco el lunes; sin su firma la bodega se pierde."}
+      ],
+      "secret": {
+        "en": "The winery owes the bank two million and she has been hiding it from everyone.",
+        "es": "La bodega le debe dos millones al banco y ella se lo ha ocultado a todos."
+      },
+      "lies": {
+        "en": "She says the winery is doing very well and that her call was with a friend.",
+        "es": "Dice que a la bodega le va muy bien y que su llamada era con una amiga."
+      },
+      "fallback": {
+        "en": "I don't have to answer that. My father is dead and you're wasting time with me.",
+        "es": "No tengo por qué contestar eso. Mi papá está muerto y ustedes pierden el tiempo conmigo."
+      }
+    },
+    {
+      "id": "tomas",
+      "kind": "suspect",
+      "name": {"en": "Tomás Rivas", "es": "Tomás Rivas"},
+      "about": {"en": "The chef who cooked the dinner and poured the champagne", "es": "El chef que cocinó la cena y sirvió el champán"},
+      "personality": {
+        "en": "Warm, talkative and nervous; jokes when he is scared and talks about food when cornered.",
+        "es": "Cálido, conversador y nervioso; echa chistes cuando tiene miedo y habla de comida cuando lo acorralan."
+      },
+      "alibi": {
+        "en": "At ten past nine he was in the kitchen plating the chocolate dessert with his helper.",
+        "es": "A las nueve y diez estaba en la cocina sirviendo el postre de chocolate con su ayudante."
+      },
+      "knows": [
+        {"en": "He poured all the champagne in the kitchen at nine, from one bottle, into identical glasses, and Rosa carried them out on one tray.", "es": "Sirvió todo el champán en la cocina a las nueve, de una sola botella, en copas iguales, y Rosa las sacó en una sola bandeja."},
+        {"en": "He tasted the champagne himself and it was fine.", "es": "Él mismo probó el champán y estaba bien."},
+        {"en": "Through the kitchen door he saw the doctor's black medical bag open on a chair in the hall.", "es": "Por la puerta de la cocina vio el maletín negro del doctor abierto en una silla del pasillo."}
+      ],
+      "secret": {
+        "en": "For months he has been taking the vineyard's best bottles at night and selling them.",
+        "es": "Desde hace meses se lleva de noche las mejores botellas del viñedo y las vende."
+      },
+      "lies": {
+        "en": "He says he never takes anything home, not even leftovers.",
+        "es": "Dice que nunca se lleva nada a su casa, ni siquiera las sobras."
+      },
+      "fallback": {
+        "en": "Ay, I just cook! Ask me about the lamb, not about that.",
+        "es": "¡Ay, yo solo cocino! Pregúntame por el cordero, no por eso."
+      }
+    },
+    {
+      "id": "ines",
+      "kind": "suspect",
+      "name": {"en": "Inés Calderón", "es": "Inés Calderón"},
+      "about": {"en": "Aurelio's second wife, thirty years younger", "es": "La segunda esposa de Aurelio, treinta años menor"},
+      "personality": {
+        "en": "Elegant, cool and careful; chooses every word and changes the subject when it gets personal.",
+        "es": "Elegante, fría y cuidadosa; escoge cada palabra y cambia de tema cuando se pone personal."
+      },
+      "alibi": {
+        "en": "At ten past nine she was in the hallway upstairs on the phone; she came down when she heard the glasses for the toast.",
+        "es": "A las nueve y diez estaba en el pasillo de arriba hablando por teléfono; bajó cuando oyó las copas del brindis."
+      },
+      "knows": [
+        {"en": "Aurelio had shouted at someone on the phone yesterday, saying 'I have the file'.", "es": "Ayer Aurelio le gritó a alguien por teléfono: «tengo el expediente»."},
+        {"en": "Aurelio did not take any heart medicine; he was proud of his healthy heart.", "es": "Aurelio no tomaba ninguna medicina para el corazón; estaba orgulloso de su corazón sano."}
+      ],
+      "secret": {
+        "en": "She was going to leave Aurelio and had a meeting with a divorce lawyer on Tuesday; the call upstairs was with that lawyer.",
+        "es": "Iba a dejar a Aurelio y tenía una cita con un abogado de divorcios el martes; la llamada de arriba era con ese abogado."
+      },
+      "lies": {
+        "en": "She says the call was with her sister and that her marriage was happy.",
+        "es": "Dice que la llamada era con su hermana y que su matrimonio era feliz."
+      },
+      "fallback": {
+        "en": "That is a rather personal question. I'd prefer to talk about what matters.",
+        "es": "Esa es una pregunta bastante personal. Prefiero hablar de lo que importa."
+      }
+    },
+    {
+      "id": "julian",
+      "kind": "suspect",
+      "name": {"en": "Doctor Julián Ferrer", "es": "Doctor Julián Ferrer"},
+      "about": {"en": "The family doctor and Aurelio's oldest friend", "es": "El médico de la familia y el amigo más antiguo de Aurelio"},
+      "personality": {
+        "en": "Calm, kind and reassuring, like a doctor at a bedside; a little too eager to help.",
+        "es": "Tranquilo, amable y tranquilizador, como un médico junto a la cama; un poco demasiado servicial."
+      },
+      "alibi": {
+        "en": "At ten past nine he was by the piano with Aurelio, taking his pulse because Aurelio said he felt dizzy. Aurelio's glass was on the piano.",
+        "es": "A las nueve y diez estaba junto al piano con Aurelio, tomándole el pulso porque Aurelio dijo que se sentía mareado. La copa de Aurelio estaba sobre el piano."
+      },
+      "knows": [
+        {"en": "He tried to revive Aurelio after he collapsed.", "es": "Intentó reanimar a Aurelio cuando se desplomó."},
+        {"en": "He treated Aurelio's first wife, Clara, when she died ten years ago.", "es": "Atendió a Clara, la primera esposa de Aurelio, cuando murió hace diez años."}
+      ],
+      "secret": {
+        "en": "He poisoned Aurelio: while taking his pulse by the piano he slipped digitalis drops from his bag into Aurelio's glass. Ten years ago his mistake killed Clara and he changed her hospital file to hide it; Aurelio had found the real file and was going to tell everyone after the toast.",
+        "es": "Él envenenó a Aurelio: mientras le tomaba el pulso junto al piano echó gotas de digitalina de su maletín en la copa. Hace diez años un error suyo mató a Clara y cambió su expediente del hospital para ocultarlo; Aurelio había encontrado el expediente real e iba a contarlo después del brindis."
+      },
+      "lies": {
+        "en": "He never confesses. He says Aurelio took digitalis for his heart, that he put nothing in the glass, and that he and Aurelio had no quarrel at all.",
+        "es": "Nunca confiesa. Dice que Aurelio tomaba digitalina para el corazón, que no le echó nada a la copa y que entre él y Aurelio no había ningún problema."
+      },
+      "fallback": {
+        "en": "I did everything I could to save him. Everything. He was my oldest friend.",
+        "es": "Hice todo lo que pude por salvarlo. Todo. Era mi amigo más antiguo."
+      }
+    },
+    {
+      "id": "rosa",
+      "kind": "witness",
+      "name": {"en": "Rosa, the housekeeper", "es": "Rosa, el ama de llaves"},
+      "about": {"en": "Has worked in the house for twenty years and sees everything", "es": "Trabaja en la casa desde hace veinte años y lo ve todo"},
+      "personality": {
+        "en": "Loyal, chatty and a bit of a gossip; loves the family and is very upset.",
+        "es": "Leal, conversadora y un poco chismosa; quiere mucho a la familia y está muy afectada."
+      },
+      "alibi": {
+        "en": "She carried the champagne tray from the kitchen and then stayed by the dining room door.",
+        "es": "Llevó la bandeja del champán desde la cocina y luego se quedó junto a la puerta del comedor."
+      },
+      "knows": [
+        {"en": "Don Aurelio took the first glass from her tray at random and set it on the piano.", "es": "Don Aurelio tomó la primera copa de su bandeja, cualquiera, y la dejó sobre el piano."},
+        {"en": "Before the toast only the doctor was by the piano with Don Aurelio; everyone else was at the other end of the room or outside.", "es": "Antes del brindis solo el doctor estaba junto al piano con don Aurelio; los demás estaban al otro lado del salón o afuera."},
+        {"en": "She has seen Tomás carrying wine boxes to his van late at night.", "es": "Ha visto a Tomás llevando cajas de vino a su camioneta tarde en la noche."},
+        {"en": "She heard Señora Inés upstairs saying on the phone 'on Tuesday, then; I'll sign'.", "es": "Oyó a la señora Inés arriba decir por teléfono «el martes, entonces; yo firmo»."}
+      ],
+      "secret": null,
+      "lies": null,
+      "fallback": {
+        "en": "Ay, Dios mío, I can't think straight. Poor Don Aurelio.",
+        "es": "Ay, Dios mío, no puedo ni pensar. Pobre don Aurelio."
+      }
+    }
+  ],
+  "culprit": "julian",
+  "motives": [
+    {"id": "secret", "text": {"en": "To stop Aurelio revealing an old secret", "es": "Para que Aurelio no revelara un viejo secreto"}},
+    {"id": "will", "text": {"en": "To inherit money from the will", "es": "Para heredar dinero del testamento"}},
+    {"id": "debts", "text": {"en": "To hide the winery's debts", "es": "Para ocultar las deudas de la bodega"}},
+    {"id": "jealousy", "text": {"en": "Jealousy", "es": "Celos"}}
+  ],
+  "motive": "secret",
+  "clues": [
+    {
+      "id": "glass",
+      "round": 1,
+      "title": {"en": "Aurelio's glass", "es": "La copa de Aurelio"},
+      "text": {
+        "en": "Only Aurelio's glass holds poison: digitalis, a heart medicine. The bottle and every other glass are clean.",
+        "es": "Solo la copa de Aurelio tiene veneno: digitalina, una medicina para el corazón. La botella y las demás copas están limpias."
+      }
+    },
+    {
+      "id": "tray",
+      "round": 1,
+      "title": {"en": "The champagne tray", "es": "La bandeja del champán"},
+      "text": {
+        "en": "Twelve identical glasses on one tray. Nobody could know which one Aurelio would take, so the poison went in after he took it.",
+        "es": "Doce copas iguales en una bandeja. Nadie podía saber cuál tomaría Aurelio, así que el veneno se echó después de que la tomó."
+      }
+    },
+    {
+      "id": "ledger",
+      "round": 2,
+      "title": {"en": "Valeria's ledger", "es": "El libro de cuentas de Valeria"},
+      "text": {
+        "en": "A hidden ledger: the winery owes the bank two million. A note says 'Monday: Papá signs the rescue loan'.",
+        "es": "Un libro de cuentas escondido: la bodega le debe dos millones al banco. Una nota dice «Lunes: papá firma el préstamo de rescate»."
+      }
+    },
+    {
+      "id": "card",
+      "round": 2,
+      "title": {"en": "A card in Inés's purse", "es": "Una tarjeta en la cartera de Inés"},
+      "text": {
+        "en": "The business card of a divorce lawyer, with 'Tuesday, 10 am' written on the back.",
+        "es": "La tarjeta de un abogado de divorcios, con «martes, 10 am» escrito por detrás."
+      }
+    },
+    {
+      "id": "bag",
+      "round": 2,
+      "title": {"en": "The doctor's bag", "es": "El maletín del doctor"},
+      "text": {
+        "en": "In Doctor Ferrer's bag: a small bottle of digitalis drops, half empty.",
+        "es": "En el maletín del doctor Ferrer: un frasquito de gotas de digitalina, medio vacío."
+      }
+    },
+    {
+      "id": "letter",
+      "round": 3,
+      "title": {"en": "The torn letter", "es": "La carta rota"},
+      "text": {
+        "en": "Half burnt in the fireplace, in Aurelio's handwriting: 'J., I have read Clara's real hospital file. After the toast, everyone will know what you did.'",
+        "es": "Medio quemada en la chimenea, con la letra de Aurelio: «J., leí el expediente real de Clara. Después del brindis, todos sabrán lo que hiciste»."
+      }
+    },
+    {
+      "id": "photo",
+      "round": 3,
+      "title": {"en": "A photo from 9:10", "es": "Una foto de las 9:10"},
+      "text": {
+        "en": "A guest's photo at 9:10: the doctor holds Aurelio's wrist by the piano, his other hand right beside Aurelio's glass. Everyone else is at the far end of the room.",
+        "es": "La foto de un invitado a las 9:10: el doctor le toma la muñeca a Aurelio junto al piano, con la otra mano justo al lado de la copa. Todos los demás están al otro lado del salón."
+      }
+    },
+    {
+      "id": "pharmacy",
+      "round": 4,
+      "title": {"en": "The pharmacy record", "es": "El registro de la farmacia"},
+      "text": {
+        "en": "Aurelio was never prescribed digitalis. The bottle in the doctor's bag was bought last week, on Doctor Ferrer's own prescription.",
+        "es": "A Aurelio nunca le recetaron digitalina. El frasco del maletín del doctor se compró la semana pasada, con una receta del propio doctor Ferrer."
+      }
+    }
+  ],
+  "insider": {
+    "en": "Yesterday you heard Aurelio on the phone in his study, saying: 'I have the file. I'll say it at the party, in front of everyone.' You don't know who he was talking to.",
+    "es": "Ayer oíste a Aurelio por teléfono en su estudio decir: «Tengo el expediente. Lo voy a decir en la fiesta, delante de todos». No sabes con quién hablaba."
+  },
+  "reveal": [
+    {
+      "en": "The poison was digitalis, and it was only in Aurelio's glass. The champagne itself was clean, so Tomás the chef did not poison the bottle.",
+      "es": "El veneno era digitalina, y estaba solo en la copa de Aurelio. El champán estaba limpio, así que Tomás, el chef, no envenenó la botella."
+    },
+    {
+      "en": "Aurelio took a glass at random from Rosa's tray and set it on the piano. So the poison went in after that, by the piano.",
+      "es": "Aurelio tomó una copa cualquiera de la bandeja de Rosa y la dejó sobre el piano. Así que el veneno se echó después, junto al piano."
+    },
+    {
+      "en": "Valeria was on the terrace with the bank, and she needed her father alive to sign on Monday. Inés was upstairs with her divorce lawyer. Only one person stood by that piano.",
+      "es": "Valeria estaba en la terraza con el banco, y necesitaba a su papá vivo para firmar el lunes. Inés estaba arriba con su abogado de divorcios. Solo una persona estuvo junto a ese piano."
+    },
+    {
+      "en": "Doctor Julián Ferrer, 'taking his pulse'. And Aurelio never took digitalis: the doctor bought that bottle himself, last week.",
+      "es": "El doctor Julián Ferrer, «tomándole el pulso». Y Aurelio nunca tomó digitalina: el doctor compró ese frasco él mismo, la semana pasada."
+    },
+    {
+      "en": "Why? Ten years ago the doctor's mistake killed Clara, Aurelio's first wife, and he changed her file to hide it. Aurelio found the real file and was going to tell everyone after the toast. The doctor silenced him first.",
+      "es": "¿Por qué? Hace diez años un error del doctor mató a Clara, la primera esposa de Aurelio, y él cambió su expediente para ocultarlo. Aurelio encontró el expediente real e iba a contarlo después del brindis. El doctor lo calló antes."
+    }
+  ]
+}

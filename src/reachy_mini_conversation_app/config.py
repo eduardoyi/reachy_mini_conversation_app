@@ -881,6 +881,8 @@ class Config:
     BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     # A public https address that reaches that port (a Tailscale Funnel path); the QR code links there instead.
     BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
+    # Detectives (games/detectives.py): the text model that answers as its suspects and witnesses.
+    DETECTIVES_MODEL = (os.getenv("DETECTIVES_MODEL") or "").strip() or "gemini-3.8-flash"
     DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
@@ -1119,6 +1121,7 @@ def refresh_runtime_config_from_env() -> None:
     config.GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
     config.BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     config.BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
+    config.DETECTIVES_MODEL = (os.getenv("DETECTIVES_MODEL") or "").strip() or "gemini-3.8-flash"
     config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (

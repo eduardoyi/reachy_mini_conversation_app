@@ -288,9 +288,64 @@ BIG_BRAIN_SW: Final[GameInfo] = GameInfo(
     ),
 )
 
+DETECTIVES: Final[GameInfo] = GameInfo(
+    key="detectives",
+    names=frozenset(
+        {
+            "detectives",
+            "los detectives",
+            "detective",
+            "el detective",
+            "juego de detectives",
+            "el juego de detectives",
+            "el caso",
+            "caso",
+            "un caso",
+            "misterio",
+            "un misterio",
+            "el misterio",
+            "detectivs",
+            "detectiv",
+            "the detectives",
+            "detective game",
+            "the detective game",
+            "mystery",
+            "a mystery",
+            "mystery game",
+            "the mystery game",
+            "murder mystery",
+            "a murder mystery",
+            "whodunit",
+            "who done it",
+        }
+    ),  # fmt: skip
+    title={"es": "Detectives", "en": "Detectives"},
+    pitch={
+        "es": "Un misterio para resolver: yo hago de sospechosos y testigos, y ustedes investigan desde el teléfono.",
+        "en": "A mystery to solve: I play the suspects and witnesses, and you investigate on your phones.",
+    },
+    rules=(
+        "A mystery party game. Players scan the QR code on the e-ink screen with their phones and type a name; each "
+        "phone gets a secret role. Reachy tells a pre-written case (a dinner-party mystery for adults, 'Who ate the "
+        "cookies?' in kids mode); in turns each player questions a suspect or witness aloud, whom Reachy plays, or "
+        "examines a clue shown on the screen. After a few rounds, or when most vote to, everyone accuses in secret on "
+        "the phone and Reachy reveals the truth step by step. About 30 to 45 minutes; kids 15 to 20. Spanish or "
+        "English. Needs phones on the home Wi-Fi. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
 GAMES: Final[dict[str, GameInfo]] = {
     game.key: game
-    for game in (COLOR_HUNT, TREASURE_HUNT, SIMON_SAYS, BIG_BRAIN, BIG_BRAIN_HP, BIG_BRAIN_LOTR, BIG_BRAIN_SW)
+    for game in (
+        COLOR_HUNT,
+        TREASURE_HUNT,
+        SIMON_SAYS,
+        BIG_BRAIN,
+        BIG_BRAIN_HP,
+        BIG_BRAIN_LOTR,
+        BIG_BRAIN_SW,
+        DETECTIVES,
+    )
 }
 
 
