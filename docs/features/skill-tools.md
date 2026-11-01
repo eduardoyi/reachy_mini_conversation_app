@@ -1,7 +1,7 @@
 # Feature: Skill tools (progressive tool disclosure)
 
 - Status: `in-progress` (on by default as a test; `SKILL_TOOLS_ENABLED=0` switches back)
-- Last updated: 2026-10-27
+- Last updated: 2026-11-01
 - Plan: [skill-tools.md](../plans/skill-tools.md)
 
 ## Overview
@@ -18,12 +18,13 @@ mid-session (Gemini Live cannot change its configuration while connected).
 ## User-facing behavior
 
 - Nothing changes for always-on tools: camera, emotions, dances, head moves, sleep, end
-  conversation, turn off, weather, time, the e-ink display, Spotify, and background task status/cancel.
-- Skills: `home_lights`, `tv`, `remember`, `forget`, `update_memory`,
+  conversation, turn off, weather, time, the e-ink display, Spotify, the lights, and background task
+  status/cancel.
+- Skills: `tv`, `call_person`, `remember`, `forget`, `update_memory`,
   `remember_face`, `forget_face`, `who_is_here`, `head_tracking`, `sweep_look` (only those enabled).
   The first use of a skill in a conversation usually adds one `skill_help` round trip, about 1–2 s
   and one extra model generation. Lights, TV and music are mostly handled by local quick commands
-  before Gemini is involved.
+  before Gemini is involved; the lights are a direct tool for the requests that reach Gemini.
 - A `use_skill` call with missing, unknown or out-of-range arguments is not run; it returns the
   error together with the skill's instructions and arguments, so the model can retry at once.
 - `SKILL_TOOLS_ENABLED=0` offers the full tool list again, exactly as before.
@@ -74,6 +75,9 @@ flowchart LR
 - `spotify_control` stays direct: playing music takes a search and then a play with its result. As a
   skill, Gemini re-read `skill_help` after the search and closed the conversation without playing
   (2026-10-27). Keep any tool that needs several calls in a row out of the skills.
+- `home_lights` stays direct: it is used every day, often as status then set. As a skill, 4 of 17
+  calls (2026-10-27 to 11-01) came with no arguments; Gemini re-read `skill_help` instead of
+  retrying, said nothing, and the conversation closed with the lights unchanged.
 
 ## Constraints, privacy, and failure modes
 
@@ -82,15 +86,17 @@ flowchart LR
 - A skill's instructions stay in the conversation until compression drops them, so repeated use in
   one session needs no new help call.
 - No new data leaves the machine; the same tool descriptions are sent, later and less often.
-- A rejected `use_skill` logs `use_skill rejected: skill=... missing=[...] unknown=[...] invalid=[...]`
-  with argument names only (an unknown skill logs no name): values can carry the person's words.
-  Before 2026-10-28 a rejected call left no trace.
+- A rejected `use_skill` logs `use_skill rejected: skill=... missing=[...] unknown=[...] invalid=[...]
+  given=[...] beside=[...]` with argument names only (an unknown skill logs no name): values can
+  carry the person's words. `given` lists the names inside `arguments` (`None` when the call had no
+  `arguments`); `beside` lists names put next to `skill` instead. Before 2026-10-28 a rejected call
+  left no trace; before 2026-11-01 an empty call and a misplaced one looked the same.
 
 ## Testing
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/tools/test_skills.py` | Skills become menu lines and leave the declarations; switching off restores every declaration; no skills, no extra tools; `skill_help` returns the tool's description and schema; `use_skill` runs the tool with its arguments; missing / bad enum / unknown / non-object arguments return the instructions and log argument names but no values; direct tools, disabled skills and missing names are refused |
+| `tests/tools/test_skills.py` | Skills become menu lines and leave the declarations; switching off restores every declaration; no skills, no extra tools; `skill_help` returns the tool's description and schema; `use_skill` runs the tool with its arguments; missing / bad enum / unknown / non-object arguments return the instructions and log argument names but no values; no arguments and arguments beside the skill name are told apart in the log; Spotify and the lights stay direct; direct tools, disabled skills and missing names are refused |
 | `tests/test_external_loading.py` | Registry reload tests pin `SKILL_TOOLS_ENABLED=0`, since they check the full list |
 
 Commands run on 2026-10-25 (macOS, Python 3.12):
@@ -111,3 +117,5 @@ YouTube on the TV and "remember Enzo's swimming class moved to Thursdays" each w
 - 2026-10-25: Added as a switchable test (`SKILL_TOOLS_ENABLED`, default on).
 - 2026-10-27: `spotify_control` is a direct tool again; as a skill, "play Spotify" stalled after the search.
 - 2026-10-28: Rejected `use_skill` calls are logged by argument name.
+- 2026-11-01: `home_lights` is a direct tool again (about +400 tokens a turn); as a skill, about one
+  call in four came with no arguments. Rejections log `given` and `beside`.

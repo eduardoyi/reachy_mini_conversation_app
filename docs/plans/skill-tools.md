@@ -1,7 +1,7 @@
 # Plan: Skill tools to cut Gemini Live's per-turn cost
 
 - Status: `in-progress`
-- Last updated: 2026-10-25
+- Last updated: 2026-11-01
 - Feature doc: [skill-tools.md](../features/skill-tools.md)
 
 ## Why
@@ -36,3 +36,10 @@ can switch back if it feels clunky. The `dance` move list no longer repeats ever
   `skill_help` again, then a spoken reply; the follow-up window closed with nothing playing. Spotify
   needs search and play in a row, so `spotify_control` is a direct tool again (about +350 tokens per
   turn); the other skills stay.
+- 2026-11-01: Household test, lights: from 2026-10-27 to 11-01, 13 `use_skill` lights calls ran and 4
+  were refused with `missing=['action'] unknown=[]` (no arguments). After a refusal Gemini re-read
+  `skill_help` instead of retrying and said nothing; the conversation closed with the lights
+  unchanged (2026-11-01 16:44, "people are talking among themselves"). `call_person` and
+  `remember_face` were refused the same way once or twice. `home_lights` is a direct tool again
+  (about +400 tokens per turn); refusals now log whether `arguments` was missing or the names were
+  put beside `skill`, to see what happens with the skills that remain.

@@ -5,7 +5,8 @@ repeats cheap. A skill appears only as one line in the ``use_skill`` menu; the m
 instructions with ``skill_help`` when it needs them (they then sit in the conversation until context
 compression drops them), or calls ``use_skill`` straight away and gets the instructions back with
 any argument error. Frequently used, latency-sensitive and system tools stay ordinary tools, and so do
-tools that take several calls in a row: behind a skill, Spotify's search-then-play stalled after the search.
+tools that take several calls in a row: behind a skill, Spotify's search-then-play stalled after the search,
+and the lights, used every day, came through as a skill call with no arguments about one time in four.
 """
 
 import logging
@@ -23,7 +24,6 @@ USE_SKILL = "use_skill"
 
 # One line each for the menu; the tool's own description is what skill_help returns.
 SKILL_SUMMARIES: Dict[str, str] = {
-    "home_lights": "home lights and smart plugs: what is on, on/off, brightness, warmth, color, scenes",
     "call_person": "a WhatsApp voice call through you to someone on the call list, when Mom or Dad asks",
     "tv": "the TV: on/off, volume, mute, play/pause, remote buttons, open an app, search YouTube",
     "remember": "save a household memory, only when someone explicitly asks you to remember something",
@@ -105,13 +105,16 @@ def check_arguments(tools: "dict[str, Tool]", args: Dict[str, Any]) -> tuple["To
             problems.append(f"{name} must be one of {allowed}")
             invalid.append(name)
     if problems:
-        # Argument names only: their values can carry the person's words.
+        # Argument names only: their values can carry the person's words. ``given`` is None when the
+        # call had no ``arguments``; ``beside`` holds names put next to ``skill`` instead of inside it.
         logger.info(
-            "use_skill rejected: skill=%s missing=%s unknown=%s invalid=%s",
+            "use_skill rejected: skill=%s missing=%s unknown=%s invalid=%s given=%s beside=%s",
             tool.name,
             [name for name in schema.get("required") or [] if name not in arguments],
             unknown,
             invalid,
+            sorted(arguments) if "arguments" in args else None,
+            sorted(name for name in args if name not in ("skill", "arguments", "tool_manager")),
         )
         return None, {"error": "; ".join(problems), **skill_help(tools, {"skill": tool.name})}
     return tool, arguments
