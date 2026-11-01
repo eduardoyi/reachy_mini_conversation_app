@@ -3,7 +3,9 @@
 Code accepts an answer that matches any accepted form of the clue's answer (both languages) once case, accents,
 articles, punctuation and lead-ins ("creo que", "is it") are set aside, with small spelling or hearing slips,
 or a surname alone for a person. Anything else goes to Jev with fixed rules: right, wrong, or right but too broad
-("un barco" for the Titanic), which earns one "¿más específico?". Every Jev ruling is kept per clue and answer
+("un barco" for the Titanic), which earns one "¿más específico?". Spoken answers are what speech recognition
+wrote, often in the other language's spelling ("Téphanis" for "Tiffany's", 2026-11-01), so Jev also says whether
+the text would sound like an accepted answer read aloud. Every Jev ruling is kept per clue and answer
 (``rulings.json``), so a family arguing about an answer gets the same ruling next time too.
 """
 
@@ -23,6 +25,8 @@ logger = logging.getLogger(__name__)
 CLOSE_ENOUGH: Final[float] = 0.84
 RIGHT_P: Final[float] = 0.5
 TOO_BROAD_P: Final[float] = 0.6
+# Tried 2026-11-01: misheard answers scored 0.76 to 0.89, other words 0.04 to 0.15.
+SOUNDS_LIKE_P: Final[float] = 0.5
 
 _ARTICLES: Final[frozenset[str]] = frozenset({"the", "a", "an", "el", "la", "los", "las", "un", "una", "unos", "unas", "lo"})  # fmt: skip
 _LEAD_INS: Final[re.Pattern[str]] = re.compile(
@@ -50,6 +54,16 @@ _QUESTIONS: Final[dict[str, dict[str, Any]]] = {
             "Is `player_answer` on the right track for the quiz clue `clue` (whose answer is any of "
             "`accepted_answers`) but too broad or incomplete to count, such as 'a ship' for the Titanic, 'a "
             "painter' for Frida Kahlo, or a first name alone when the surname matters?"
+        ),
+    },
+    "sounds_like": {
+        "type": "noul",
+        "instructions": (
+            "`player_answer` is what speech recognition wrote down when a player said a quiz answer aloud. Players "
+            "speak English or Spanish, and the recognizer often spells a word in the wrong language ('Téphanis' "
+            "for 'Tiffany's', 'Shato brian' for 'Chateaubriand'). Read `player_answer` aloud: would it sound nearly "
+            "the same as one of `accepted_answers`, so the player most likely said that answer? A different word "
+            "that only shares a few sounds is no."
         ),
     },
 }
@@ -111,27 +125,38 @@ class Judge:
         except (OSError, ValueError):
             self._rulings = {}
 
-    async def rule(self, clue_id: str, clue_text: str, accept: list[str], said: str) -> Ruling:
-        """Return the ruling on ``said`` for a clue; WRONG when nothing was said or Jev cannot be reached."""
+    async def rule(self, clue_id: str, clue_text: str, accept: list[str], said: str, *, spoken: bool = True) -> Ruling:
+        """Return the ruling on ``said`` for a clue; WRONG when nothing was said or Jev cannot be reached.
+
+        ``spoken`` answers were heard, so one that sounds like an accepted answer counts; typed ones must be right.
+        """
         if not plain(said):
             return Ruling.WRONG
         if matches(said, accept):
             return Ruling.RIGHT
-        key = f"{clue_id}|{plain(said)}"
+        key = f"{clue_id}|{plain(said)}" + ("" if spoken else "|typed")
         if key in self._rulings:
             return Ruling(self._rulings[key])
         if self._jev is None:
             return Ruling.WRONG
         try:
+            questions = _QUESTIONS if spoken else {k: v for k, v in _QUESTIONS.items() if k != "sounds_like"}
             answers = await self._jev(
-                {"clue": clue_text, "accepted_answers": accept, "player_answer": said}, _QUESTIONS, {}
+                {"clue": clue_text, "accepted_answers": accept, "player_answer": said}, questions, {}
             )
             right = float(answers["right"]["noul"])
             broad = float(answers["too_broad"]["noul"])
+            heard_right = spoken and float(answers["sounds_like"]["noul"]) >= SOUNDS_LIKE_P
         except Exception as error:
             logger.warning("Big Brain answer not judged by Jev: %s", type(error).__name__)
             return Ruling.WRONG
-        ruling = Ruling.RIGHT if right >= RIGHT_P else Ruling.SPECIFIC if broad >= TOO_BROAD_P else Ruling.WRONG
+        ruling = (
+            Ruling.RIGHT
+            if right >= RIGHT_P or heard_right
+            else Ruling.SPECIFIC
+            if broad >= TOO_BROAD_P
+            else Ruling.WRONG
+        )
         self._rulings[key] = ruling.value
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)

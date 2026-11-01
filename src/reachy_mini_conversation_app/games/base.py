@@ -7,7 +7,7 @@ starting, pausing, ending and putting things back; a game only plays.
 
 import time
 import asyncio
-from typing import Any, Callable, Optional, Awaitable, Coroutine
+from typing import Any, Callable, Optional, Protocol, Awaitable, Coroutine
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -20,9 +20,24 @@ from reachy_mini_conversation_app.games.catalog import GameInfo
 SPEAK_TIMEOUT_S = 20.0
 _TICK_S = 0.05
 
-SayAudio = Callable[
-    [int, NDArray[np.int16], str, str, Optional[Callable[[str], Awaitable[object]]]], Coroutine[Any, Any, None]
-]
+
+class SayAudio(Protocol):
+    """Play recorded speech (rate, samples) as Reachy's line, then hand the next thing heard to ``answer``."""
+
+    def __call__(
+        self,
+        rate: int,
+        samples: NDArray[np.int16],
+        text: str,
+        language: str,
+        answer: Optional[Callable[[str], Awaitable[object]]],
+        *,
+        listen_s: Optional[float] = None,
+    ) -> Coroutine[Any, Any, None]:
+        """Play the line; ``listen_s`` is how long the answer may take to start (Reachy's default when None)."""
+        ...
+
+
 JevAsk = Callable[[dict[str, Any], dict[str, dict[str, Any]], dict[str, bytes]], Awaitable[dict[str, dict[str, Any]]]]
 
 

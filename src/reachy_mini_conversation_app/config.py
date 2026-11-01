@@ -879,6 +879,8 @@ class Config:
     GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
     # The phones join Big Brain on this port of the home Wi-Fi, only while a game runs.
     BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
+    # A public https address that reaches that port (a Tailscale Funnel path); the QR code links there instead.
+    BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
     DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
@@ -1116,6 +1118,7 @@ def refresh_runtime_config_from_env() -> None:
     config.ELEVENLABS_API_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip() or None
     config.GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
     config.BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
+    config.BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
     config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (

@@ -4952,6 +4952,30 @@ async def test_no_answer_after_a_question_goes_back_to_listening_for_the_name(
 
 
 @pytest.mark.asyncio
+async def test_a_question_with_its_own_short_wait_hears_silence_as_an_empty_answer() -> None:
+    """A quiz's question waits only its own ``listen_s``, and silence reaches the answer handler as ""."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply(None)
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer, listen_s=0.2)
+        return _QuickReply("Red team!")
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    try:
+        assert await runtime.activate("keyboard", addressed_text="buzz")
+        await _eventually(lambda: answers == [""])
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer() -> None:
     """A late reply from another thread is spoken only once Reachy is free; a question then listens."""
     handler = FakeHandler()

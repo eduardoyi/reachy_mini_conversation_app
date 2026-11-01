@@ -184,6 +184,8 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         text: str,
         language: str,
         answer: Callable[[str], Awaitable[object]] | None,
+        *,
+        listen_s: float | None = None,
     ) -> None:
         """Play a game host's recorded line as Reachy's announcement; return once heard (then listen if asked)."""
         heard = asyncio.get_running_loop().create_future()
@@ -192,7 +194,9 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             if not heard.done():
                 heard.set_result(None)
 
-        runtime.request_announcement(text, language, on_spoken=spoken, game=True, audio=(rate, samples), answer=answer)
+        runtime.request_announcement(
+            text, language, on_spoken=spoken, game=True, audio=(rate, samples), answer=answer, listen_s=listen_s
+        )
         try:
             await asyncio.wait_for(heard, SPEAK_TIMEOUT_S + len(samples) / rate)
         except asyncio.TimeoutError:
@@ -277,7 +281,12 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     )
     game_data = Path(config.GAME_DATA_DIR)
     if (game_data / "trivia-bank" / "bank.jsonl").is_file():
-        setup = BigBrainSetup(data_dir=game_data, elevenlabs_key=config.ELEVENLABS_API_KEY, port=config.BIG_BRAIN_PORT)
+        setup = BigBrainSetup(
+            data_dir=game_data,
+            elevenlabs_key=config.ELEVENLABS_API_KEY,
+            port=config.BIG_BRAIN_PORT,
+            public_url=config.BIG_BRAIN_PUBLIC_URL,
+        )
         games["bigbrain"] = lambda: BigBrain(setup)
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)

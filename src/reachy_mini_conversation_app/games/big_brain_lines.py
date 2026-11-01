@@ -143,7 +143,7 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[curious] Which one are we going for?",
             "[playful] The board is yours. [pause] Pick one.",
             "[warmly] Go ahead, pick a square on your phone.",
-            "[playful] Category and stars, please.",
+            "[playful] Category and points, please.",
         ),
         "es": (
             "[warmly] ¡Escojan una casilla!",
@@ -153,7 +153,7 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[curious] ¿Cuál nos toca?",
             "[playful] El tablero es suyo. [pause] Escojan una.",
             "[warmly] Dale, escoge una casilla en tu teléfono.",
-            "[playful] Categoría y estrellas, por favor.",
+            "[playful] Categoría y puntos, por favor.",
         ),
     },
     "answer": {
@@ -226,7 +226,7 @@ _MOMENTS: Final[dict[str, _Lines]] = {
         "en": (
             "[amazed] Wow! [pause] That was a hard one. Correct!",
             "[gasps] Correct! [amazed] I did not think anyone would get that.",
-            "[booming] Correct! [proud] Four stars, and you made it look easy.",
+            "[booming] Correct! [proud] Eight hundred points, and you made it look easy.",
             "[amazed] Correct! [playful] Okay, now you're just showing off.",
             "[disbelief] How did you know that? [excited] Correct!",
             "[amazed] Correct! [warmly] That one deserves a round of applause.",
@@ -234,7 +234,7 @@ _MOMENTS: Final[dict[str, _Lines]] = {
         "es": (
             "[amazed] ¡Guao! [pause] Esa estaba difícil. ¡Correcto!",
             "[gasps] ¡Correcto! [amazed] No pensé que nadie se la supiera.",
-            "[booming] ¡Correcto! [proud] Cuatro estrellas, y lo hicieron ver fácil.",
+            "[booming] ¡Correcto! [proud] Ochocientos puntos, y lo hicieron ver fácil.",
             "[amazed] ¡Correcto! [playful] Bueno, ya esto es por echárselas.",
             "[disbelief] ¿Cómo sabías eso? [excited] ¡Correcto!",
             "[amazed] ¡Correcto! [warmly] Esa se merece un aplauso.",
@@ -352,14 +352,18 @@ _MOMENTS: Final[dict[str, _Lines]] = {
     },
     "steal": {
         "en": (
-            "[gasps] [booming] A steal square! Get it right and take a star from another team!",
-            "[playful] Oh, this one's sneaky. [pause] Answer right, and you steal a star.",
-            "[dramatic] It's a steal! [playful] Somebody's about to lose a star.",
+            "[gasps] [booming] A steal square! [playful] Get it right, and you win these points... [pause] and take "
+            "the same from the team in the lead!",
+            "[playful] Oh, this one's sneaky. [pause] Answer right, and you win the points AND steal them from the "
+            "leaders.",
+            "[dramatic] It's a steal! [playful] Get it right, and the team in the lead loses these points to you.",
         ),
         "es": (
-            "[gasps] [booming] ¡Casilla de robo! ¡Si aciertan, le quitan una estrella a otro equipo!",
-            "[playful] Uy, esta es tramposa. [pause] Si aciertan, se roban una estrella.",
-            "[dramatic] ¡Es un robo! [playful] Alguien está a punto de perder una estrella.",
+            "[gasps] [booming] ¡Casilla de robo! [playful] Si aciertan, se ganan estos puntos... [pause] ¡y se los "
+            "quitan al equipo que va ganando!",
+            "[playful] Uy, esta es tramposa. [pause] Si aciertan, ganan los puntos Y se los roban al que va "
+            "punteando.",
+            "[dramatic] ¡Es un robo! [playful] Si aciertan, el equipo que va ganando les pasa estos puntos.",
         ),
     },
     "everyone": {
@@ -447,12 +451,12 @@ _MOMENTS: Final[dict[str, _Lines]] = {
     "place_bets": {
         "en": (
             "[hushed] Here's the category. [pause] Now place your bets on your phone.",
-            "[dramatic] How many stars will you risk? [pause] Bet on your phone.",
+            "[dramatic] How many points will you risk? [pause] Bet on your phone.",
             "[playful] Bet big or play it safe... [pause] it's up to you.",
         ),
         "es": (
             "[hushed] Esta es la categoría. [pause] Ahora hagan su apuesta en el teléfono.",
-            "[dramatic] ¿Cuántas estrellas van a arriesgar? [pause] Apuesten en el teléfono.",
+            "[dramatic] ¿Cuántos puntos van a arriesgar? [pause] Apuesten en el teléfono.",
             "[playful] Apostar duro o ir a la segura... [pause] ustedes deciden.",
         ),
     },
@@ -558,12 +562,24 @@ _MOMENTS: Final[dict[str, _Lines]] = {
 
 
 def _team_lines() -> dict[str, _Lines]:
-    """Return the lines that name a team: a buzz calls it out, a win crowns it."""
+    """Return the lines that name a team: a buzz calls it out, its pick is announced, a win crowns it."""
     lines: dict[str, _Lines] = {}
     for key, (en, es) in TEAMS.items():
         lines[f"buzz_{key}"] = {
             "en": (f"[snappy] {en.capitalize()} team!", f"[excited] {en.capitalize()}!"),
             "es": (f"[snappy] ¡Equipo {es}!", f"[excited] ¡{es.capitalize()}!"),
+        }
+        lines[f"pick_{key}"] = {
+            "en": (
+                f"[warmly] {en.capitalize()} team, it's your pick! [pause] Tap a square on your phone.",
+                f"[playful] {en.capitalize()} team, the board is yours. [pause] Pick a square.",
+                f"[curious] {en.capitalize()} team... [pause] where to next?",
+            ),
+            "es": (
+                f"[warmly] ¡Equipo {es}, les toca escoger! [pause] Toquen una casilla en el teléfono.",
+                f"[playful] Equipo {es}, el tablero es suyo. [pause] Escojan una casilla.",
+                f"[curious] Equipo {es}... [pause] ¿para dónde vamos?",
+            ),
         }
         lines[f"winner_{key}"] = {
             "en": (f"[booming] The {en.upper()} TEAM!", f"[excited] Team {en}! [booming] Champions!"),

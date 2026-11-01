@@ -6,11 +6,13 @@ import asyncio
 from typing import Any
 from pathlib import Path
 
+import httpx
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from .fakes import FakeReachy
+from reachy_mini_conversation_app import jev
 from reachy_mini_conversation_app.games import big_brain
 from reachy_mini_conversation_app.qr_code import qr_matrix
 from reachy_mini_conversation_app.games.host import GameHost, GameState
@@ -127,7 +129,7 @@ async def test_jev_rules_on_the_rest_and_its_ruling_is_kept(tmp_path: Path) -> N
 
     async def jev(state: dict[str, Any], questions: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
         calls.append(state)
-        return {"right": {"noul": 0.1}, "too_broad": {"noul": 0.9}}
+        return {"right": {"noul": 0.1}, "too_broad": {"noul": 0.9}, "sounds_like": {"noul": 0.1}}
 
     judge = Judge(tmp_path / "rulings.json", jev)
     assert await judge.rule("7", "This ship sank in 1912.", ["the Titanic"], "un barco") is Ruling.SPECIFIC
@@ -136,6 +138,39 @@ async def test_jev_rules_on_the_rest_and_its_ruling_is_kept(tmp_path: Path) -> N
     assert len(calls) == 1
     again.overrule("7", "un barco")
     assert await Judge(tmp_path / "rulings.json", jev).rule("7", "", ["the Titanic"], "un barco") is Ruling.RIGHT
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_answer_that_sounds_right_counts_but_a_typed_one_must_be_right(tmp_path: Path) -> None:
+    """Speech recognition's "Téphanis" for "Tiffany's" counts aloud; typed, only Jev's "right" counts."""
+    asked: list[set[str]] = []
+
+    async def jev(state: dict[str, Any], questions: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
+        asked.append(set(questions))
+        answers = {"right": {"noul": 0.2}, "too_broad": {"noul": 0.1}, "sounds_like": {"noul": 0.8}}
+        return {key: answers[key] for key in questions}
+
+    judge = Judge(tmp_path / "rulings.json", jev)
+    accept = ["Tiffany & Co.", "Tiffany's"]
+    assert await judge.rule("9", "A jeweler's blue box.", accept, "Téphanis.") is Ruling.RIGHT
+    assert await judge.rule("9", "A jeweler's blue box.", accept, "Téphanis", spoken=False) is Ruling.WRONG
+    assert asked == [{"right", "too_broad", "sounds_like"}, {"right", "too_broad"}]
+
+
+@pytest.mark.asyncio
+async def test_jev_requests_without_images_send_no_assets() -> None:
+    """Jev refuses an empty "assets" object, so a question about text alone leaves it out."""
+    bodies: list[dict[str, Any]] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"answers": {"q": {"type": "noul", "noul": 0.9}}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+        answers = await jev.ask(
+            client, api_key="k", model="jev-latest", state={"t": "hi"}, questions={"q": {}}, images={}, feature="x"
+        )
+    assert answers["q"]["noul"] == 0.9 and "assets" not in bodies[0]
 
 
 # The QR code ----------------------------------------------------------------------------------------
@@ -181,6 +216,17 @@ def test_phones_need_the_code_and_join_with_a_name_and_team() -> None:
     assert received == [("Ana María", {"type": "joined"}), ("Ana María", {"type": "buzz"})]
 
 
+def test_the_qr_code_links_to_the_public_address_when_there_is_one() -> None:
+    """With a Funnel address, phones skip the Wi-Fi (and Android's permission); codes are six letters."""
+
+    def phones(public_url: str | None) -> Phones:
+        return Phones(7880, lambda p: {}, lambda p, m: None, lambda: True, clock=lambda: 0.0, public_url=public_url)
+
+    public = phones("https://mini.example.ts.net/bigbrain/")
+    assert public.url() == f"https://mini.example.ts.net/bigbrain/?c={public.code}" and len(public.code) == 6
+    assert phones(None).url("192.168.1.180").startswith("http://192.168.1.180:7880/?c=")
+
+
 # A whole show ----------------------------------------------------------------------------------------
 
 
@@ -222,9 +268,9 @@ class _Room:
 
 @pytest.mark.asyncio
 async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two teams play the twenty squares and the final; red, always right, wins, and the clues are remembered."""
+    """Two teams play the twenty squares and the final (bets end once both teams bet); red wins; clues are kept."""
     for name, value in {"PICK_S": 1.0, "BUZZ_S": 0.5, "REBUZZ_S": 0.3, "ANSWER_S": 1.0, "EVERYONE_S": 0.3,
-                        "BET_S": 0.3, "FINAL_S": 0.3, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
+                        "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
         monkeypatch.setattr(big_brain, name, value)
 
     async def nothing(self: Phones) -> None:
@@ -239,7 +285,9 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     games: list[BigBrain] = []
     played: list[tuple[str, bool]] = []
 
-    async def say_audio(rate: int, samples: np.ndarray, text: str, language: str, answer: Any) -> None:
+    async def say_audio(
+        rate: int, samples: np.ndarray, text: str, language: str, answer: Any, *, listen_s: float | None = None
+    ) -> None:
         played.append((text, answer is not None))
         game = games[0]
         if answer is not None and game._buzz is not None and game._clue is not None:

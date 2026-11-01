@@ -1,8 +1,11 @@
 """The phones' side of Big Brain: a small web server on the home Wi-Fi while a game runs.
 
 A phone opens ``http://<the Mac mini on the Wi-Fi>:<port>/?c=<code>`` (the QR code on the TRMNL), gets the page
-``static/big_brain/index.html`` and keeps one WebSocket open. Every request needs the game's four-letter code,
-and the server runs only during a game, so the link dies with it; it has none of the admin app's powers. Joining
+``static/big_brain/index.html`` and keeps one WebSocket open. With ``public_url`` (a Tailscale Funnel path such
+as ``https://<mini>.ts.net/bigbrain`` that reaches the port), the QR code links there instead: Android blocks
+Chrome from home-network addresses until it has the "Nearby devices" permission, and a public https address needs
+none (and works on mobile data too). Every request needs the game's six-letter code, and the server runs only
+during a game, so the link dies with it; it has none of the admin app's powers. Joining
 (a name and a team) is kept here; everything else a phone sends goes to the game, and after every change each
 phone gets the game's state as it should see it (``snapshot``). Buzzes are ordered by when they reach the Mac
 mini, which is fair on one Wi-Fi.
@@ -43,9 +46,9 @@ class Player:
 
 
 def join_code() -> str:
-    """Return a four-letter code easy to read off a screen (no I, O or Q)."""
+    """Return a six-letter code easy to read off a screen (no I, O or Q); the link can be public, so not four."""
     letters = [letter for letter in string.ascii_uppercase if letter not in "IOQ"]
-    return "".join(random.choice(letters) for _ in range(4))
+    return "".join(random.SystemRandom().choice(letters) for _ in range(6))
 
 
 def wifi_address() -> str:
@@ -78,10 +81,12 @@ class Phones:
         *,
         code: str | None = None,
         clock: Callable[[], float] | None = None,
+        public_url: str | None = None,
     ) -> None:
         """Serve the page on ``port``; ``snapshot`` gives each phone its state, ``on_message`` gets the rest."""
         self.port = port
         self.code = code or join_code()
+        self._public_url = public_url
         self.players: dict[str, Player] = {}
         self._snapshot = snapshot
         self._on_message = on_message
@@ -94,7 +99,9 @@ class Phones:
         self.app = self._make_app()
 
     def url(self, host: str | None = None) -> str:
-        """Return the address phones open (the QR code)."""
+        """Return the address phones open (the QR code): the public one when there is one, else the Wi-Fi's."""
+        if self._public_url:
+            return f"{self._public_url.rstrip('/')}/?c={self.code}"
         return f"http://{host or wifi_address()}:{self.port}/?c={self.code}"
 
     def team_players(self, team: str) -> list[Player]:

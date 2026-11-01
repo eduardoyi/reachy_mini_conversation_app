@@ -64,7 +64,8 @@ async def ask(
         response = await client.post(
             TYPESAFE_URL,
             headers={"Authorization": f"Bearer {api_key}", "TypeSafe-Danger-Zone-Images": "true"},
-            json={"model": model, "state": state, "questions": questions, "assets": assets},
+            # Jev refuses an empty "assets" (400, 2026-11-01): it is sent only with images.
+            json={"model": model, "state": state, "questions": questions, **({"assets": assets} if assets else {})},
         )
         response.raise_for_status()
         body = response.json()

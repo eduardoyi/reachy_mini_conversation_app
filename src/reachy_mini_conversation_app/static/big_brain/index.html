@@ -11,7 +11,9 @@
 html,body{margin:0;padding:0}
 body{background:var(--bg);background-image:radial-gradient(ellipse at 50% -10%,#24398a 0,var(--bg) 60%);background-attachment:fixed;color:var(--ink);
  font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;min-height:100vh;overflow-x:hidden;
- -webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-text-size-adjust:100%}
+ -webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-text-size-adjust:100%;
+ user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+input,.txt{user-select:text;-webkit-user-select:text}
 #app{max-width:640px;margin:0 auto;padding:8px 10px 40px}
 button{font:inherit;touch-action:manipulation;cursor:pointer}
 input{font:inherit}
@@ -58,6 +60,17 @@ label,.lbl{display:block;font-weight:800;font-size:15px;color:var(--dim);margin:
 .tl b{display:block;font-size:16px}
 .hint{text-align:center;font-weight:900;font-size:20px;margin:4px 0 10px}
 .hint.go{color:var(--gold)}
+.turn{border-radius:16px;padding:14px 12px;margin:0 0 10px;text-align:center;font-weight:900;line-height:1.2}
+.turn b{display:block;font-size:26px}
+.turn small{display:block;font-size:15px;font-weight:700;margin-top:4px;opacity:.9}
+.turn.mine{background:var(--tc);color:var(--tx);box-shadow:0 0 0 4px var(--gold),0 0 30px var(--tc);animation:glow 1.2s ease-in-out infinite}
+.turn.theirs{background:var(--bg2);color:var(--ink);border:3px dashed var(--tc)}
+.turn.theirs b{color:var(--tc);font-size:22px}
+@keyframes glow{50%{box-shadow:0 0 0 7px var(--gold),0 0 44px var(--tc)}}
+.board.off{opacity:.45;filter:saturate(.4)}
+.board.on button.cell{animation:cellpulse 1.2s ease-in-out infinite}
+@keyframes cellpulse{50%{box-shadow:inset 0 -4px 0 rgba(0,0,0,.35),0 0 0 3px var(--gold)}}
+.explain{text-align:center;color:var(--gold);font-weight:800;font-size:16px;margin:-2px 0 10px}
 .board{display:grid;gap:4px}
 .ct{font-size:10.5px;font-weight:800;line-height:1.15;text-align:center;color:var(--dim);display:flex;align-items:flex-end;justify-content:center;min-height:38px;padding:0 1px;word-break:break-word;hyphens:auto;overflow:hidden}
 .cell{min-height:54px;border-radius:8px;background:#1f3aa8;color:var(--gold);font-weight:900;font-size:17px;display:flex;align-items:center;justify-content:center;border:none;padding:0;box-shadow:inset 0 -3px 0 rgba(0,0,0,.3)}
@@ -155,7 +168,12 @@ var T = {
   paused: 'Pausa', pausedSub: 'Richie vuelve enseguida.', next: 'Atento a Richie…',
   vote: function (y, n) { return '¡Eso vale! (' + y + '/' + n + ')'; }, voted: 'Votaste',
   voteHint: function (n) { return '¿La respuesta de ' + n + ' era buena?'; },
-  hidden: {double: '¡Doble!', steal: '¡Robo!', everyone: '¡Todos responden!'}, pts: 'pts', you: 'tú'
+  hidden: {double: '¡Doble!', steal: '¡Robo!', everyone: '¡Todos responden!'}, pts: 'pts', you: 'tú',
+  explain: {double: 'Puntos dobles. Si fallan, no pierden nada.',
+   steal: function (p) { return 'Si aciertan: +' + p + ', y le quitan ' + p + ' al equipo que va ganando.'; },
+   everyone: 'Todos escriben su respuesta en el teléfono.'},
+  myTurn: '¡Les toca escoger!', myTurnSub: 'Toca una casilla del tablero',
+  notMyTurn: function (t) { return 'Escoge el equipo ' + t; }, notMyTurnSub: 'Todavía no les toca'
  },
  en: {
   names: {red: 'Red', blue: 'Blue', green: 'Green', yellow: 'Yellow'},
@@ -175,7 +193,12 @@ var T = {
   paused: 'Paused', pausedSub: 'Richie will be right back.', next: 'Listen to Richie…',
   vote: function (y, n) { return 'That counts! (' + y + '/' + n + ')'; }, voted: 'You voted',
   voteHint: function (n) { return "Was " + n + "'s answer right?"; },
-  hidden: {double: 'Double!', steal: 'Steal!', everyone: 'Everyone answers!'}, pts: 'pts', you: 'you'
+  hidden: {double: 'Double!', steal: 'Steal!', everyone: 'Everyone answers!'}, pts: 'pts', you: 'you',
+  explain: {double: 'Double points. A miss costs nothing.',
+   steal: function (p) { return 'Get it right: +' + p + ', and take ' + p + ' from the team in the lead.'; },
+   everyone: 'Everyone types an answer on their phone.'},
+  myTurn: "Your team's pick!", myTurnSub: 'Tap a square on the board',
+  notMyTurn: function (t) { return t + ' team is picking'; }, notMyTurnSub: 'Not your turn yet'
  }
 };
 var KEYS = ['red', 'blue', 'green', 'yellow'];
@@ -211,7 +234,9 @@ function connect() {
  clearTimeout(timer); timer = null;
  if (!code) { render(); return; }
  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:', sock;
- try { sock = new WebSocket(proto + '//' + location.host + '/ws?code=' + encodeURIComponent(code)); }
+ // Next to the page, so it also works under a path (https://<mini>.ts.net/bigbrain/).
+ var dir = location.pathname.replace(/[^\/]*$/, '');
+ try { sock = new WebSocket(proto + '//' + location.host + dir + 'ws?code=' + encodeURIComponent(code)); }
  catch (e) { schedule(); return; }
  ws = sock;
  sock.onopen = function () {
@@ -238,7 +263,10 @@ function handle(m) {
  }
  else if (m.type === 'state') {
   S = m; lang = m.language === 'en' ? 'en' : 'es';
-  if (m.phase !== lastPhase) { sent = {answer: null, bet: null}; draft.answer = ''; draft.bet = ''; lastPhase = m.phase; }
+  if (m.phase !== lastPhase) {
+   sent = {answer: null, bet: null}; draft.answer = ''; draft.bet = ''; lastPhase = m.phase;
+   if (m.phase === 'board' && m.can && m.can.indexOf('pick') >= 0) { try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (x) {} }
+  }
   buzzLock = false; pickLock = false; voteLock = false; startLock = false;
   render();
  }
@@ -289,7 +317,12 @@ function voteHtml() {
 }
 function clueHead(huge) {
  var c = S.clue; if (!c) return '';
- var h = c.hidden && t().hidden[c.hidden] ? '<div class="center"><span class="badge">' + esc(t().hidden[c.hidden]) + '</span></div>' : '';
+ var h = '';
+ if (c.hidden && t().hidden[c.hidden]) {
+  var x = t().explain[c.hidden];
+  h = '<div class="center"><span class="badge">' + esc(t().hidden[c.hidden]) + '</span></div>' +
+   '<p class="explain">' + esc(typeof x === 'function' ? x(c.points) : x) + '</p>';
+ }
  return h + '<div class="cluehead' + (huge ? ' huge' : '') + '"><span class="cat">' + esc(c.column) + '</span><span class="pts">' + esc(c.points) + '</span></div>';
 }
 function clueText() { return S.clue && S.clue.text ? '<div class="clue">' + esc(S.clue.text) + '</div>' : ''; }
@@ -355,9 +388,10 @@ function boardHtml() {
  var L = t(), b = S.board; if (!b || !b.columns) return '<div class="card center"><p class="sub">' + esc(L.next) + '</p></div>';
  var pick = can('pick') && !pickLock, cols = b.columns, rows = 0;
  cols.forEach(function (c) { rows = Math.max(rows, (c.cells || []).length); });
- var hint = pick ? '<div class="hint go">' + esc(L.pickHint) + '</div>'
-  : '<div class="hint">' + esc(S.control ? L.waitPick(tname(S.control)) : L.waitPickAny) + '</div>';
- var h = hint + '<div class="board" style="grid-template-columns:repeat(' + cols.length + ',minmax(0,1fr))">';
+ var hint = pick ? '<div class="turn mine" ' + ts(S.you.team) + '><b>' + esc(L.myTurn) + '</b><small>' + esc(L.myTurnSub) + '</small></div>'
+  : S.control ? '<div class="turn theirs" ' + ts(S.control) + '><b>' + esc(L.notMyTurn(tname(S.control))) + '</b><small>' + esc(L.notMyTurnSub) + '</small></div>'
+  : '<div class="hint">' + esc(L.waitPickAny) + '</div>';
+ var h = hint + '<div class="board ' + (pick ? 'on' : 'off') + '" style="grid-template-columns:repeat(' + cols.length + ',minmax(0,1fr))">';
  cols.forEach(function (c) { h += '<div class="ct">' + esc(c.title) + '</div>'; });
  for (var r = 0; r < rows; r++) for (var ci = 0; ci < cols.length; ci++) {
   var cell = (cols[ci].cells || [])[r];

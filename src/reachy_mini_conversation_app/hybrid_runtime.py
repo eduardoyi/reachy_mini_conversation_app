@@ -414,6 +414,8 @@ class _PendingTurn:
     game: bool = False
     # Recorded speech played instead of saying ``text`` (a game host's voice): sample rate and samples.
     audio: tuple[int, NDArray[np.int16]] | None = None
+    # How long an awaited answer may take to start (None: _ANSWER_START_S); a quiz gives less.
+    listen_s: float | None = None
 
 
 class HybridRuntime:
@@ -1429,7 +1431,11 @@ class HybridRuntime:
                         generation,
                         lead_in=wake_audio,
                         wake_event=wake_event,
-                        start_s=self._ANSWER_START_S if reason == "awaited_answer" else self._REQUEST_CLIP_START_S,
+                        start_s=(
+                            (turn.listen_s if turn is not None and turn.listen_s else self._ANSWER_START_S)
+                            if reason == "awaited_answer"
+                            else self._REQUEST_CLIP_START_S
+                        ),
                         language=turn.language if reason == "awaited_answer" and turn is not None else "",
                     ),
                     name=f"hybrid-request-clip-{generation}",
@@ -1461,7 +1467,7 @@ class HybridRuntime:
                 if turn is not None:
                     await self._speak_locally(turn.text, turn.language, generation, audio=turn.audio)
                     if turn.answer is not None:
-                        self.expect_answer(turn.answer, turn.language)
+                        self.expect_answer(turn.answer, turn.language, listen_s=turn.listen_s)
                     if turn.on_spoken is not None:
                         turn.on_spoken()
                 await self._return_to_ambient(generation, "announcement_spoken")
@@ -1595,6 +1601,9 @@ class HybridRuntime:
                 logger.info("Awaited answer heard=%s", bool(quick_text))
                 if quick_text and answer is not None and await self._try_quick_command(quick_text, generation, answer):
                     return True
+                if not quick_text and answer is not None and turn is not None and turn.listen_s:
+                    # A question with its own short wait (a quiz) hears the silence as an empty answer at once.
+                    await answer("")
                 await self._return_to_ambient(generation, "no_answer")
                 return True
             # Still talking when the clip stopped: commands that need every word leave it to the conversation.
@@ -2342,14 +2351,20 @@ class HybridRuntime:
             logger.debug("Head touches unavailable: %s", type(error).__name__)
             return 0
 
-    def expect_answer(self, answer: QuickCommandHandler, language: str = "") -> None:
+    def expect_answer(self, answer: QuickCommandHandler, language: str = "", *, listen_s: float | None = None) -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
 
-        ``language`` is the one the question was asked in, when known. Thread-safe. Silence for
-        ``_ANSWER_START_S`` ends it without opening the conversation.
+        ``language`` is the one the question was asked in, when known. Thread-safe. Silence for ``listen_s``
+        (default ``_ANSWER_START_S``) ends it without opening the conversation.
         """
         self._queue_turn(
-            _PendingTurn("awaited_answer", self._clock() + self._ANSWER_PENDING_S, language=language, answer=answer)
+            _PendingTurn(
+                "awaited_answer",
+                self._clock() + self._ANSWER_PENDING_S,
+                language=language,
+                answer=answer,
+                listen_s=listen_s,
+            )
         )
 
     def request_announcement(
@@ -2361,13 +2376,14 @@ class HybridRuntime:
         on_spoken: Callable[[], None] | None = None,
         game: bool = False,
         audio: tuple[int, NDArray[np.int16]] | None = None,
+        listen_s: float | None = None,
     ) -> None:
         """Say ``text`` once Reachy is free (no conversation or command), then await ``answer`` if given.
 
         ``on_spoken`` runs on the runtime's loop once it has been heard; ``game`` marks a game's own line, said
         while other announcements are held; ``audio`` (sample rate, samples) is played instead of saying ``text``,
-        which then only goes to the transcript. Thread-safe; dropped if he stays busy for
-        ``_ANNOUNCEMENT_PENDING_S``.
+        which then only goes to the transcript; ``listen_s`` is how long ``answer`` may take to start.
+        Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
         """
         self._queue_turn(
             _PendingTurn(
@@ -2379,6 +2395,7 @@ class HybridRuntime:
                 on_spoken=on_spoken,
                 game=game,
                 audio=audio,
+                listen_s=listen_s,
             )
         )
 

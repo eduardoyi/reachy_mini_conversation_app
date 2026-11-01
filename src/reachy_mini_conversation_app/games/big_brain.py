@@ -13,7 +13,7 @@ import time
 import random
 import asyncio
 import logging
-from typing import Any, Final
+from typing import Any, Final, Callable
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -50,7 +50,9 @@ logger = logging.getLogger(__name__)
 PICK_S: Final[float] = 40.0
 BUZZ_S: Final[float] = 8.0
 REBUZZ_S: Final[float] = 6.0
-ANSWER_S: Final[float] = 20.0
+# The buzzing player has this long to start answering aloud; silence is "no answer" at once.
+ANSWER_START_S: Final[float] = 6.0
+ANSWER_S: Final[float] = 20.0  # at most, from the end of Richie's line to the answer's text
 EVERYONE_S: Final[float] = 30.0
 BET_S: Final[float] = 30.0
 FINAL_S: Final[float] = 30.0
@@ -71,6 +73,7 @@ class BigBrainSetup:
     data_dir: Path
     elevenlabs_key: str | None
     port: int
+    public_url: str | None = None  # the phones' https address, when one reaches ``port`` from the internet
 
 
 def team_name(team: str, language: str) -> str:
@@ -318,9 +321,9 @@ class BigBrain(Game):
                 heard.set_result(said)
             return QuickReply(None, context.language, "game")
 
-        await say_audio(RATE, samples, text, context.language, answer)
+        await say_audio(RATE, samples, text, context.language, answer, listen_s=ANSWER_START_S)
         try:
-            return await asyncio.wait_for(heard, ANSWER_S)
+            return await asyncio.wait_for(heard, ANSWER_S) or None
         except asyncio.TimeoutError:
             return None
 
@@ -378,8 +381,10 @@ class BigBrain(Game):
         finally:
             self._deadline = None
 
-    async def _countdown(self, seconds: float, music: str | None = None) -> None:
-        """Let ``seconds`` of playing time pass (answers keep arriving), with ``music`` if there is some."""
+    async def _countdown(
+        self, seconds: float, music: str | None = None, *, done: Callable[[], bool] | None = None
+    ) -> None:
+        """Let ``seconds`` of playing time pass (answers keep arriving), with ``music``; sooner once ``done()``."""
         context = self._context
         assert context is not None
         self._deadline = context.played_s + seconds
@@ -387,7 +392,7 @@ class BigBrain(Game):
         sound = self._sounds.get(music) if music else None
         if sound is not None:
             await self._play(sound[: int(RATE * seconds)])
-        while context.played_s < self._deadline:
+        while context.played_s < self._deadline and not (done is not None and done()):
             await context.playing()
             await asyncio.sleep(0.2)
         self._deadline = None
@@ -405,7 +410,13 @@ class BigBrain(Game):
             logger.warning("Big Brain: no clue bank at %s", bank_path)
             await context.say("No encuentro las preguntas." if context.language == "es" else "I can't find the questions.")  # fmt: skip
             return
-        self._phones = Phones(self._setup.port, self.snapshot, self.on_message, lambda: self._phase == "lobby")
+        self._phones = Phones(
+            self._setup.port,
+            self.snapshot,
+            self.on_message,
+            lambda: self._phase == "lobby",
+            public_url=self._setup.public_url,
+        )
         await self._phones.start()
         watcher = asyncio.get_running_loop().create_task(self._watch_pause(), name="big-brain-pause")
         try:
@@ -512,7 +523,9 @@ class BigBrain(Game):
             if self._overruled:
                 self._overruled = False
                 await self._say("overruled", sounds=("correct",))
-            await self._say("pick")
+            # The team is named, so the room knows whose phone the board is on.
+            team_pick = f"pick_{self._control}"
+            await self._say(team_pick if self._clips.has(team_pick, self._language) else "pick")
             if not await self._wait(PICK_S) or self._pick is None:
                 free = [
                     (c, r) for c, column in enumerate(board.clues) for r, clue in enumerate(column) if not clue.used
@@ -646,7 +659,9 @@ class BigBrain(Game):
         self._changed()
         players = self._phones.players
         typed = [(players[player_id], text) for player_id, text in self._typed.items() if player_id in players]
-        rulings = await asyncio.gather(*(self._judge.rule(clue.id, clue.text, clue.accept, text) for _, text in typed))
+        rulings = await asyncio.gather(
+            *(self._judge.rule(clue.id, clue.text, clue.accept, text, spoken=False) for _, text in typed)
+        )
         right = [player for (player, _), ruling in zip(typed, rulings) if ruling is Ruling.RIGHT]
         for player in right:
             self._scores[player.team] = self._scores.get(player.team, 0) + clue.points
@@ -674,7 +689,7 @@ class BigBrain(Game):
         self._changed()
         await self._say("final_intro", sounds=("final",))
         await self._say("place_bets")
-        await self._countdown(BET_S)
+        await self._countdown(BET_S, done=lambda: all(team in self._bets for team in self._teams_playing()))
         self._phase = "final_clue"
         self._changed()
         self._show(render_clue(board.final_category, 0, clue.text, language))
@@ -699,7 +714,7 @@ class BigBrain(Game):
             spoken = await self._speech.say(text, language) if text else None
             buzz = self._sounds.get(f"buzz_{team}")
             await self._play(join(*([buzz] if buzz is not None else []), *([spoken] if spoken is not None else [silence(0.5)])), text)  # fmt: skip
-            right = await self._judge.rule(clue.id, clue.text, clue.accept, text) is Ruling.RIGHT
+            right = await self._judge.rule(clue.id, clue.text, clue.accept, text, spoken=False) is Ruling.RIGHT
             entry["right"] = right
             self._scores[team] = self._scores.get(team, 0) + (bet if right else -bet)
             self._show(render_reveal(team_name(team, language), text, bet, right, language))
