@@ -1,0 +1,298 @@
+{
+  "id": "gala-blackout",
+  "kids": false,
+  "rounds": 4,
+  "title": {"en": "Blackout at the Gala", "es": "Apagón en la gala"},
+  "intro": {
+    "en": "A charity dinner in Beatriz Lamas's penthouse. At half past ten the lights went out for two minutes. When they came back, the Heart of the Andes, a famous emerald necklace, was gone from its glass case. Nobody has left the building. Five guests had a reason to be in the dark, and Samuel the bartender saw the whole room. Find the thief, and why they did it.",
+    "es": "Una cena benéfica en el penthouse de Beatriz Lamas. A las diez y media se fue la luz durante dos minutos. Cuando volvió, el Corazón de los Andes, un famoso collar de esmeraldas, ya no estaba en su vitrina. Nadie ha salido del edificio. Cinco invitados tenían motivos para estar a oscuras, y Samuel, el barman, vio todo el salón. Encuentren al ladrón, y por qué lo hizo."
+  },
+  "characters": [
+    {
+      "id": "marco",
+      "kind": "suspect",
+      "name": {"en": "Marco Bellini", "es": "Marco Bellini"},
+      "about": {"en": "The magician hired to entertain the guests", "es": "El mago contratado para entretener a los invitados"},
+      "personality": {
+        "en": "Theatrical, charming and full of himself; answers with a flourish and loves a mystery.",
+        "es": "Teatral, encantador y creído; responde con floritura y le encantan los misterios."
+      },
+      "alibi": {
+        "en": "At half past ten he was doing a card trick at table three; he kept talking in the dark so the guests would not panic, and they heard him the whole time.",
+        "es": "A las diez y media hacía un truco de cartas en la mesa tres; siguió hablando a oscuras para que los invitados no se asustaran, y lo oyeron todo el tiempo."
+      },
+      "knows": [
+        {"en": "Just before the lights went out he heard a small ticking sound, like a kitchen timer, from the service corridor.", "es": "Justo antes de que se fuera la luz oyó un tictac, como de un temporizador de cocina, en el pasillo de servicio."},
+        {"en": "The necklace in his case is a cheap copy for his vanishing trick; he shows it in every show.", "es": "El collar de su maletín es una copia barata para su truco de desaparición; lo usa en todos sus shows."}
+      ],
+      "secret": {
+        "en": "Twenty years ago, as a young man, he was arrested for picking pockets.",
+        "es": "Hace veinte años, de joven, lo arrestaron por carterista."
+      },
+      "lies": {
+        "en": "He says he has never been in trouble with the police.",
+        "es": "Dice que nunca ha tenido problemas con la policía."
+      },
+      "fallback": {
+        "en": "A magician never reveals his secrets. But I am no thief, my friend.",
+        "es": "Un mago nunca revela sus secretos. Pero ladrón no soy, amigo mío."
+      }
+    },
+    {
+      "id": "lucia",
+      "kind": "suspect",
+      "name": {"en": "Lucía Herrera", "es": "Lucía Herrera"},
+      "about": {"en": "Beatriz's assistant, in a black dress and a red scarf", "es": "La asistente de Beatriz, con vestido negro y pañuelo rojo"},
+      "personality": {
+        "en": "Efficient, polite and very helpful; always has an answer ready and offers to help the detectives.",
+        "es": "Eficiente, educada y muy servicial; siempre tiene una respuesta lista y se ofrece a ayudar a los detectives."
+      },
+      "alibi": {
+        "en": "She says that at half past ten she was in the kitchen checking the dessert with the staff.",
+        "es": "Dice que a las diez y media estaba en la cocina revisando el postre con el personal."
+      },
+      "knows": [
+        {"en": "She manages Beatriz's alarm and knows the code of the glass case.", "es": "Ella maneja la alarma de Beatriz y sabe el código de la vitrina."},
+        {"en": "She has keys to the service room where the fuse box is.", "es": "Tiene llaves del cuarto de servicio donde está la caja de fusibles."},
+        {"en": "She ordered the big flower arrangement by the door, to be collected by the florist at midnight.", "es": "Ella encargó el gran arreglo de flores de la entrada, que la floristería recoge a medianoche."},
+        {"en": "She has a younger brother, Dani.", "es": "Tiene un hermano menor, Dani."}
+      ],
+      "secret": {
+        "en": "She stole the necklace. She taped a kitchen timer to the main switch to cut the lights at 10:31, followed glow-in-the-dark tape dots on the floor to the case, opened it with the code and hid the necklace in the flower arrangement, to sell it and pay her brother Dani's gambling debts; people were threatening him.",
+        "es": "Ella robó el collar. Pegó un temporizador de cocina al interruptor general para cortar la luz a las 10:31, siguió unos puntos de cinta fosforescente en el piso hasta la vitrina, la abrió con el código y escondió el collar en el arreglo de flores, para venderlo y pagar las deudas de juego de su hermano Dani; lo estaban amenazando."
+      },
+      "lies": {
+        "en": "She never confesses. She says she was in the kitchen, that she never went near the service room tonight, and that her family is fine.",
+        "es": "Nunca confiesa. Dice que estaba en la cocina, que esta noche no se acercó al cuarto de servicio y que su familia está bien."
+      },
+      "fallback": {
+        "en": "I just want to help find it. Mrs. Lamas has been so good to me.",
+        "es": "Yo solo quiero ayudar a encontrarlo. La señora Lamas ha sido tan buena conmigo."
+      }
+    },
+    {
+      "id": "ricardo",
+      "kind": "suspect",
+      "name": {"en": "Ricardo Lamas", "es": "Ricardo Lamas"},
+      "about": {"en": "Beatriz's nephew and heir, always short of money", "es": "El sobrino y heredero de Beatriz, siempre corto de dinero"},
+      "personality": {
+        "en": "Spoiled, defensive and dramatic; complains a lot and blames others.",
+        "es": "Consentido, a la defensiva y dramático; se queja mucho y le echa la culpa a los demás."
+      },
+      "alibi": {
+        "en": "At half past ten he was at the bar ordering his third whisky; Samuel the bartender was right in front of him.",
+        "es": "A las diez y media estaba en la barra pidiendo su tercer whisky; Samuel, el barman, estaba justo enfrente."
+      },
+      "knows": [
+        {"en": "His aunt said the necklace will be his one day anyway.", "es": "Su tía dice que el collar algún día será suyo de todas formas."},
+        {"en": "Lucía seemed nervous all evening and kept checking her watch.", "es": "Lucía se veía nerviosa toda la noche y no dejaba de mirar el reloj."}
+      ],
+      "secret": {
+        "en": "Last month he pawned his aunt's gold watch and she has not noticed.",
+        "es": "El mes pasado empeñó el reloj de oro de su tía y ella no se ha dado cuenta."
+      },
+      "lies": {
+        "en": "He says he has plenty of money and never borrowed anything from his aunt.",
+        "es": "Dice que tiene mucho dinero y que nunca le ha tomado nada a su tía."
+      },
+      "fallback": {
+        "en": "Why does everyone always look at me? I was at the bar!",
+        "es": "¿Por qué todo el mundo me mira a mí? ¡Yo estaba en la barra!"
+      }
+    },
+    {
+      "id": "elena",
+      "kind": "suspect",
+      "name": {"en": "Elena Vidal", "es": "Elena Vidal"},
+      "about": {"en": "The insurance agent who insured the necklace", "es": "La agente de seguros que aseguró el collar"},
+      "personality": {
+        "en": "Precise, dry and worried; speaks in numbers and policies.",
+        "es": "Precisa, seca y preocupada; habla de cifras y pólizas."
+      },
+      "alibi": {
+        "en": "At half past ten she was alone on the balcony, smoking.",
+        "es": "A las diez y media estaba sola en el balcón, fumando."
+      },
+      "knows": [
+        {"en": "Only three people know the case's code: Beatriz, her assistant Lucía, and the insurance company.", "es": "Solo tres personas saben el código de la vitrina: Beatriz, su asistente Lucía y la compañía de seguros."},
+        {"en": "The alarm records every time the case is opened with the code.", "es": "La alarma registra cada vez que se abre la vitrina con el código."}
+      ],
+      "secret": {
+        "en": "She made a mistake in the policy and the necklace is insured for far too little; if it is not found she will probably lose her job.",
+        "es": "Se equivocó en la póliza y el collar está asegurado por mucho menos de lo que vale; si no aparece, seguramente perderá su trabajo."
+      },
+      "lies": {
+        "en": "She says she quit smoking and was near the bar, and that the policy is perfect.",
+        "es": "Dice que dejó de fumar y que estaba cerca de la barra, y que la póliza está perfecta."
+      },
+      "fallback": {
+        "en": "I'd rather not speculate. Facts, please, not stories.",
+        "es": "Prefiero no especular. Hechos, por favor, no cuentos."
+      }
+    },
+    {
+      "id": "coronel",
+      "kind": "suspect",
+      "name": {"en": "Colonel Ferrán Ortiz", "es": "Coronel Ferrán Ortiz"},
+      "about": {"en": "A retired colonel who collects precious stones", "es": "Un coronel retirado que colecciona piedras preciosas"},
+      "personality": {
+        "en": "Stiff, proud and old-fashioned; speaks like he is giving orders.",
+        "es": "Rígido, orgulloso y anticuado; habla como si diera órdenes."
+      },
+      "alibi": {
+        "en": "In truth, at half past ten he was right next to the glass case, admiring the emerald.",
+        "es": "En realidad, a las diez y media estaba justo al lado de la vitrina, admirando la esmeralda."
+      },
+      "knows": [
+        {"en": "In the dark, someone brushed past him towards the case, wearing a strong gardenia perfume and a silk scarf.", "es": "A oscuras, alguien pasó rozándolo hacia la vitrina, con un perfume fuerte de gardenia y un pañuelo de seda."},
+        {"en": "He heard the soft beeps of a code being typed on the case.", "es": "Oyó los pitidos suaves de alguien marcando un código en la vitrina."}
+      ],
+      "secret": {
+        "en": "He offered Beatriz three million for the necklace last month and she laughed at him.",
+        "es": "El mes pasado le ofreció a Beatriz tres millones por el collar y ella se rió de él."
+      },
+      "lies": {
+        "en": "At first he says he was at his table; if pressed hard he admits he was by the case and tells what he sensed in the dark.",
+        "es": "Al principio dice que estaba en su mesa; si lo presionan mucho admite que estaba junto a la vitrina y cuenta lo que notó a oscuras."
+      },
+      "fallback": {
+        "en": "Young man, a soldier does not steal. Next question.",
+        "es": "Jovencito, un soldado no roba. Siguiente pregunta."
+      }
+    },
+    {
+      "id": "samuel",
+      "kind": "witness",
+      "name": {"en": "Samuel, the bartender", "es": "Samuel, el barman"},
+      "about": {"en": "Served drinks all night from the bar, facing the whole room", "es": "Sirvió tragos toda la noche desde la barra, de frente a todo el salón"},
+      "personality": {
+        "en": "Relaxed, observant and funny; remembers what everyone drank.",
+        "es": "Relajado, observador y gracioso; se acuerda de lo que tomó cada quien."
+      },
+      "alibi": {
+        "en": "He was behind the bar all night.",
+        "es": "Estuvo detrás de la barra toda la noche."
+      },
+      "knows": [
+        {"en": "Ricardo was at the bar the whole time, before, during and after the blackout.", "es": "Ricardo estuvo en la barra todo el tiempo, antes, durante y después del apagón."},
+        {"en": "At about 10:25 he saw Lucía come out of the service corridor, not the kitchen, with her hands in her pockets.", "es": "Como a las 10:25 vio a Lucía salir del pasillo de servicio, no de la cocina, con las manos en los bolsillos."},
+        {"en": "Elena went out to the balcony with a cigarette at about 10:20.", "es": "Elena salió al balcón con un cigarrillo como a las 10:20."},
+        {"en": "Last week a young man called Dani came to the building asking for Lucía; he looked scared.", "es": "La semana pasada un muchacho llamado Dani vino al edificio preguntando por Lucía; se veía asustado."}
+      ],
+      "secret": null,
+      "lies": null,
+      "fallback": {
+        "en": "From behind the bar you see a lot, but in the dark, not much, compadre.",
+        "es": "Desde la barra se ve mucho, pero a oscuras, poco, compadre."
+      }
+    }
+  ],
+  "culprit": "lucia",
+  "motives": [
+    {"id": "debts", "text": {"en": "To pay a relative's debts", "es": "Para pagar las deudas de un familiar"}},
+    {"id": "revenge", "text": {"en": "Revenge against Beatriz", "es": "Venganza contra Beatriz"}},
+    {"id": "insurance", "text": {"en": "To cash in the insurance", "es": "Para cobrar el seguro"}},
+    {"id": "collector", "text": {"en": "To keep it in a private collection", "es": "Para quedárselo en una colección privada"}}
+  ],
+  "motive": "debts",
+  "clues": [
+    {
+      "id": "fusebox",
+      "round": 1,
+      "title": {"en": "The fuse box", "es": "La caja de fusibles"},
+      "text": {
+        "en": "No accident: a kitchen timer is taped to the main switch, set for 10:31. The service room needs a key: only Lucía, Samuel and the building manager have one.",
+        "es": "No fue un accidente: hay un temporizador de cocina pegado al interruptor general, puesto para las 10:31. El cuarto de servicio necesita llave: solo la tienen Lucía, Samuel y el administrador."
+      }
+    },
+    {
+      "id": "prop",
+      "round": 1,
+      "title": {"en": "The magician's case", "es": "El maletín del mago"},
+      "text": {
+        "en": "Inside Marco's case: a green necklace. Up close it is glass and plastic, a stage prop.",
+        "es": "Dentro del maletín de Marco: un collar verde. De cerca es de vidrio y plástico, un accesorio de show."
+      }
+    },
+    {
+      "id": "pawn",
+      "round": 2,
+      "title": {"en": "A pawn ticket", "es": "Una boleta de empeño"},
+      "text": {
+        "en": "In Ricardo's jacket: a pawn ticket for a gold watch, dated last month.",
+        "es": "En la chaqueta de Ricardo: una boleta de empeño de un reloj de oro, del mes pasado."
+      }
+    },
+    {
+      "id": "offer",
+      "round": 2,
+      "title": {"en": "The colonel's letter", "es": "La carta del coronel"},
+      "text": {
+        "en": "A letter from Colonel Ortiz offering three million for the necklace. Across it, in Beatriz's hand: 'Never.'",
+        "es": "Una carta del coronel Ortiz ofreciendo tres millones por el collar. Encima, con la letra de Beatriz: «Jamás»."
+      }
+    },
+    {
+      "id": "dots",
+      "round": 2,
+      "title": {"en": "Dots on the floor", "es": "Puntos en el piso"},
+      "text": {
+        "en": "Tiny glow-in-the-dark dots of tape on the floor, from the service corridor straight to the glass case. Someone planned to walk there in the dark.",
+        "es": "Puntitos de cinta fosforescente en el piso, desde el pasillo de servicio directo a la vitrina. Alguien planeó caminar hasta ahí a oscuras."
+      }
+    },
+    {
+      "id": "alarm",
+      "round": 3,
+      "title": {"en": "The alarm log", "es": "El registro de la alarma"},
+      "text": {
+        "en": "The case was opened with the right code at 10:31 and 40 seconds, in the dark. No force. Only Beatriz, Lucía and the insurance company know the code.",
+        "es": "La vitrina se abrió con el código correcto a las 10:31 y 40 segundos, a oscuras. Sin forzarla. Solo Beatriz, Lucía y la aseguradora saben el código."
+      }
+    },
+    {
+      "id": "phone",
+      "round": 3,
+      "title": {"en": "A phone in the restroom", "es": "Un teléfono en el baño"},
+      "text": {
+        "en": "A cheap phone hidden in the ladies' restroom. One message: 'Friday, or your brother pays.'",
+        "es": "Un teléfono barato escondido en el baño de damas. Un mensaje: «El viernes, o tu hermano paga»."
+      }
+    },
+    {
+      "id": "tote",
+      "round": 4,
+      "title": {"en": "Lucía's tote bag", "es": "La bolsa de Lucía"},
+      "text": {
+        "en": "In Lucía's tote bag: a roll of glow-in-the-dark tape and a receipt for a kitchen timer, bought yesterday.",
+        "es": "En la bolsa de Lucía: un rollo de cinta fosforescente y el recibo de un temporizador de cocina, comprado ayer."
+      }
+    }
+  ],
+  "insider": {
+    "en": "When you arrived tonight, you saw someone slip into the service corridor carrying something small that ticked. You didn't see their face, only a flash of a red scarf.",
+    "es": "Cuando llegaste esta noche, viste a alguien meterse al pasillo de servicio con algo pequeño que hacía tictac. No le viste la cara, solo un destello de un pañuelo rojo."
+  },
+  "reveal": [
+    {
+      "en": "The blackout was no accident: a kitchen timer cut the lights at 10:31, and only three people had a key to that room.",
+      "es": "El apagón no fue un accidente: un temporizador cortó la luz a las 10:31, y solo tres personas tenían llave de ese cuarto."
+    },
+    {
+      "en": "The case was opened with the code, in the dark, following glow dots from the service corridor. Marco was talking at table three, Ricardo was at the bar, Elena was on the balcony.",
+      "es": "La vitrina se abrió con el código, a oscuras, siguiendo puntos fosforescentes desde el pasillo de servicio. Marco hablaba en la mesa tres, Ricardo estaba en la barra, Elena en el balcón."
+    },
+    {
+      "en": "The colonel was by the case and felt the thief pass: gardenia perfume and a silk scarf. Samuel saw who came out of the service corridor just before: not from the kitchen.",
+      "es": "El coronel estaba junto a la vitrina y sintió pasar al ladrón: perfume de gardenia y un pañuelo de seda. Samuel vio quién salió del pasillo de servicio justo antes: no de la cocina."
+    },
+    {
+      "en": "It was Lucía Herrera, the helpful assistant: the key, the code, the tape and the timer in her bag. The necklace is in the flowers she ordered, waiting for midnight.",
+      "es": "Fue Lucía Herrera, la asistente tan servicial: la llave, el código, la cinta y el temporizador en su bolsa. El collar está en las flores que ella encargó, esperando la medianoche."
+    },
+    {
+      "en": "Why? Her brother Dani owed money to dangerous people. 'Friday, or your brother pays.' She stole it to save him.",
+      "es": "¿Por qué? Su hermano Dani le debía dinero a gente peligrosa. «El viernes, o tu hermano paga». Lo robó para salvarlo."
+    }
+  ]
+}

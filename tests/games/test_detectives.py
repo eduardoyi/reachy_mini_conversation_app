@@ -1,0 +1,264 @@
+"""Tests for Detectives: the cases and their schema, the witness prompt, the phones' page and a whole game."""
+
+import json
+import random
+import shutil
+import asyncio
+from typing import Any
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from .fakes import FakeReachy
+from reachy_mini_conversation_app.games import detectives
+from reachy_mini_conversation_app.games.host import GameHost, GameState
+from reachy_mini_conversation_app.games.catalog import parse_game_request
+from reachy_mini_conversation_app.games.detectives import PAGE, Detectives, DetectivesSetup, read_played
+from reachy_mini_conversation_app.games.detectives_case import (
+    CASES_DIR,
+    LANGUAGES,
+    CaseError,
+    pick_case,
+    load_cases,
+    parse_case,
+)
+from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
+from reachy_mini_conversation_app.games.detectives_screens import render_card, render_join, render_board
+from reachy_mini_conversation_app.games.detectives_witness import WitnessError, spoken, witness_instructions
+
+
+# The cases -------------------------------------------------------------------------------------------
+
+
+def test_the_cases_follow_the_schema_in_both_languages() -> None:
+    """Two or more adult dinner-party cases with 4–5 suspects and the kids' cookie case; the solution names the culprit."""
+    cases = load_cases()
+    adult = [case for case in cases if not case.kids]
+    kids = [case for case in cases if case.kids]
+    assert len(adult) >= 2 and all(4 <= len(case.suspects) <= 5 for case in adult)
+    assert any(case.title["es"] == "¿Quién se comió las galletas?" for case in kids)
+    for case in cases:
+        culprit = case.character(case.culprit)
+        assert culprit is not None
+        for language in LANGUAGES:
+            assert any(culprit.name[language].split()[-1] in step[language] for step in case.reveal), (case.id, language)  # fmt: skip
+        assert all(clue.round <= case.rounds for clue in case.clues)
+        assert all(clue.round == 1 for clue in case.clues[:1])
+
+
+def test_the_kids_case_has_the_silly_suspects() -> None:
+    """The cat, the grandmother and Richie himself are suspects in the cookie case."""
+    cookies = next(case for case in load_cases() if case.kids)
+    names = {c.name["en"] for c in cookies.suspects}
+    assert {"Misifú the cat", "Grandma", "Richie the robot"} <= names
+
+
+def _raw(case_id: str = "last-toast") -> dict[str, Any]:
+    raw: dict[str, Any] = json.loads((CASES_DIR / f"{case_id}.json").read_text(encoding="utf-8"))
+    return raw
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (lambda raw: raw["intro"].pop("es"), "intro"),
+        (lambda raw: raw.update(culprit="rosa"), "culprit"),
+        (lambda raw: raw.update(motive="greed"), "motive"),
+        (lambda raw: raw["clues"][0].update(round=9), "rounds"),
+        (lambda raw: raw["characters"].append(dict(raw["characters"][0])), "unique"),
+    ],
+)
+def test_a_broken_case_says_what_is_wrong(change: Any, problem: str) -> None:
+    """A missing language, a witness as culprit, an unknown motive, a clue out of range or a repeated id."""
+    raw = _raw()
+    change(raw)
+    with pytest.raises(CaseError, match=problem):
+        parse_case(raw)
+
+
+def test_kids_mode_picks_the_kids_case_and_fresh_cases_come_first() -> None:
+    """Kids get the kids' case; adults get a case not played yet, else the one played longest ago."""
+    cases = load_cases()
+    rng = random.Random(1)
+    assert pick_case(cases, kids=True, played=[], rng=rng).kids  # type: ignore[union-attr]
+    adult = [case.id for case in cases if not case.kids]
+    fresh = pick_case(cases, kids=False, played=adult[:1], rng=rng)
+    assert fresh is not None and fresh.id != adult[0]
+    oldest = pick_case(cases, kids=False, played=list(reversed(adult)), rng=rng)
+    assert oldest is not None and oldest.id == adult[-1]
+
+
+# The witness -----------------------------------------------------------------------------------------
+
+
+def test_a_witness_sees_only_their_own_sheet_and_the_evidence_found() -> None:
+    """An innocent suspect's prompt has their secret and the clues found, never the culprit's secret."""
+    case = parse_case(_raw())
+    valeria, julian = case.character("valeria"), case.character("julian")
+    assert valeria is not None and julian is not None and julian.secret is not None
+    found = [case.clues[0]]
+    prompt = witness_instructions(case, valeria, found, "es")
+    assert valeria.secret is not None and valeria.secret["es"] in prompt
+    assert julian.secret["es"] not in prompt and julian.secret["en"] not in prompt
+    assert case.clues[0].text["es"] in prompt and case.clues[-1].text["es"] not in prompt
+    assert "Venezuelan Spanish" in prompt
+    assert "young children" in witness_instructions(next(c for c in load_cases() if c.kids), julian, [], "en")
+
+
+def test_a_long_answer_is_cut_to_three_spoken_sentences() -> None:
+    """Markdown and quotes go; at most three sentences are said."""
+    assert spoken('**I** was there. "Truly." Ask Rosa! She saw. Nobody else.') == "I was there. Truly. Ask Rosa!"
+
+
+# Phones and screens ----------------------------------------------------------------------------------
+
+
+def test_the_phones_get_the_detectives_page() -> None:
+    """The shared phone server serves Detectives' own page with the game's code."""
+    phones = Phones(0, lambda player: {}, lambda player, message: None, lambda: True, code="ABCDEF", clock=lambda: 0.0, page=PAGE)  # fmt: skip
+    client = TestClient(phones.app)
+    page = client.get("/?c=abcdef")
+    assert page.status_code == 200 and "DETECTIVES" in page.text
+    assert client.get("/?c=XXXXXX").status_code == 404
+
+
+def test_the_screens_render() -> None:
+    """Join, board and card screens are PNGs (2-bit, 800×480)."""
+    for png in (
+        render_join("http://192.168.1.2:7880/?c=ABCDEF", "ABCDEF", ["Ana", "Luis"], "es", kids=True),
+        render_board(
+            "El último brindis", [("Valeria Montoro", False), ("Rosa", True)], ["La copa"], 1, 4, "Ana", "es"
+        ),
+        render_card("Rosa", "Don Aurelio tomó la primera copa. " * 6, footer="Ana"),
+    ):
+        assert png.startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["juguemos Detectives", "let's play Detectives", "el juego de detectives", "el caso", "juguemos a los detectives",
+     "let's play a mystery game", "juguemos detective"],
+)  # fmt: skip
+def test_detectives_starts_by_its_names(said: str) -> None:
+    """Its names in both languages, and a close mishearing."""
+    request = parse_game_request(said)
+    assert request is not None and request.game is not None and request.game.key == "detectives"
+
+
+# A whole game ----------------------------------------------------------------------------------------
+
+
+class _Room:
+    """Three pretend phones. Ana types a question, then asks one aloud; Luis examines clues; Eva never plays.
+
+    Ana and Luis vote to accuse once two statements are in; Ana accuses the doctor for the right motive, Luis Valeria.
+    """
+
+    def __init__(self, game: Detectives, reachy: FakeReachy) -> None:
+        self.game = game
+        self.reachy = reachy
+        self.ana = Player("p1", "Ana", "red", 0.0)
+        self.luis = Player("p2", "Luis", "red", 1.0)
+        self.eva = Player("p3", "Eva", "red", 2.0)
+
+    def join(self) -> None:
+        phones = self.game._phones
+        assert phones is not None
+        for player in (self.ana, self.luis, self.eva):
+            phones.players[player.id] = player
+            self.game.on_message(player, {"type": "joined"})
+
+    async def play(self) -> None:
+        game = self.game
+        while True:
+            await asyncio.sleep(0.02)
+            while self.reachy.asked:  # Richie asked Ana for her question: she says it aloud
+                _, answer = self.reachy.asked.pop(0)
+                asyncio.get_running_loop().create_task(answer("Did you put anything in his glass?"))
+            for player in (self.ana, self.luis):
+                can = game.snapshot(player)["can"]
+                if "start" in can and player is self.ana:
+                    game.on_message(player, {"type": "start"})
+                elif "vote" in can and len(game._notes) >= 2:
+                    game.on_message(player, {"type": "vote"})
+                elif "act" in can and player is self.ana:
+                    if not game._notes:
+                        game.on_message(player, {"type": "ask", "id": "valeria", "text": "Where were you at 9:10?"})
+                    else:
+                        game.on_message(player, {"type": "ask", "id": "julian"})
+                elif "act" in can:
+                    clue = game.snapshot(player)["available"][0]["id"]
+                    game.on_message(player, {"type": "examine", "id": clue})
+                elif "accuse" in can:
+                    suspect = "julian" if player is self.ana else "valeria"
+                    game.on_message(player, {"type": "accuse", "suspect": suspect, "motive": "secret"})
+
+
+@pytest.mark.asyncio
+async def test_a_whole_game_from_joining_to_the_solution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three detectives play the adult case: statements from the model and the scripted line, a clue, the vote, the truth.
+
+    The model answers the typed question and fails on the spoken one (the doctor's scripted line is said instead);
+    Eva lets her turn pass; the room votes to accuse in round 2; only Ana solves it, motive included.
+    """
+    for name, value in {"TURN_S": 0.3, "QUESTION_S": 1.0, "ACCUSE_S": 0.5, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
+        monkeypatch.setattr(detectives, name, value)
+
+    async def nothing(self: Phones) -> None:
+        return None
+
+    monkeypatch.setattr(Phones, "start", nothing)
+    monkeypatch.setattr(Phones, "stop", nothing)
+    cases = tmp_path / "cases"
+    cases.mkdir()
+    shutil.copy(CASES_DIR / "last-toast.json", cases)
+    asked: list[tuple[str, str]] = []
+
+    async def witness(instructions: str, question: str) -> str:
+        asked.append((instructions, question))
+        if len(asked) > 1:
+            raise WitnessError("busy")
+        return "I was on the terrace. With a friend. Why do you ask? I loved my father. Truly."
+
+    reachy = FakeReachy(real_clock=True)
+    games: list[Detectives] = []
+
+    def make() -> Detectives:
+        setup = DetectivesSetup(data_dir=tmp_path, port=0, witness=witness, cases_dir=cases)
+        games.append(Detectives(setup, rng=random.Random(4)))
+        return games[0]
+
+    host = GameHost(reachy.services, {"detectives": make})
+    host.start("detectives", "en")
+    await asyncio.sleep(0.1)
+    room = _Room(games[0], reachy)
+    room.join()
+    playing = asyncio.get_running_loop().create_task(room.play())
+    roles: set[str] = set()
+    try:
+        for _ in range(600):
+            if host.state is GameState.IDLE:
+                break
+            if games[0]._case is not None and not roles:
+                roles = {games[0].snapshot(p)["you"]["role"]["name"] for p in (room.ana, room.luis, room.eva)}
+            await asyncio.sleep(0.05)
+    finally:
+        playing.cancel()
+    game = games[0]
+    case = game._case
+    assert host.state is GameState.IDLE and game._phase == "over" and case is not None
+    assert roles == {"Detective", "Detective · secret witness"}  # three players: one also saw something
+    assert [(note.asker, note.character.id) for note in game._notes] == [("Ana", "valeria"), ("Ana", "julian")]
+    assert game._notes[0].answer == "I was on the terrace. With a friend. Why do you ask?"
+    assert game._notes[1].question == "Did you put anything in his glass?"
+    assert game._notes[1].answer == case.character("julian").fallback["en"]  # type: ignore[union-attr]
+    assert "Your secret: The winery owes the bank" in asked[0][0] and "digitalis drops" not in asked[0][0]
+    assert len(game._found) == 1 and game._round == 2
+    assert "Eva passes." in reachy.said
+    result = game.snapshot(room.ana)["result"]
+    assert result["solvers"] == ["Ana"] and result["motive_right"] == ["Ana"] and result["you_right"]
+    assert not game.snapshot(room.luis)["result"]["you_right"]
+    assert all(step["en"] in reachy.said for step in case.reveal)
+    assert "The culprit is Doctor Julián Ferrer!" in reachy.said
+    assert read_played(tmp_path / "detectives" / "played.json") == ["last-toast"]

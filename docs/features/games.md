@@ -35,6 +35,8 @@ Big Brain, the team quiz show played on phones, runs on the same host and has it
 
 **Scribble Rush**, the drawing race Reachy guesses with a vision model, uses Big Brain's phone server with its
 own page: [scribble-rush.md](scribble-rush.md).
+Detectives, the mystery party game played on phones, also runs on the host and has its own page:
+[detectives.md](detectives.md).
 
 ## User-facing behavior
 

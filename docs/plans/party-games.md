@@ -489,3 +489,8 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-01: Sheeple first version built (flock and team rounds, six boards with the last one double, kids filter,
   phones page, TRMNL board, judging by code then Jev); feature doc [sheeple.md](../features/sheeple.md). Plays once
   `sheeple/bank.jsonl` is in `GAME_DATA_DIR`. Not yet deployed or played.
+- 2026-11-01: Detectives built (first version, without waiting for approval, as Eduardo asked): pre-written
+  cases instead of a case written at game time (two adult dinner-party cases and "¿Quién se comió las galletas?"),
+  phones for turns, roles, clues and the secret accusation, Gemini text for witness lines held to one character's
+  sheet; feature doc [detectives.md](../features/detectives.md). Searching the house with the camera, dim lights
+  and noir music are not built. Not deployed or played.

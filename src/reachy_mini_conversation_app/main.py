@@ -143,6 +143,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     if not games_configured():
         return None
     import httpx
+    from google import genai
 
     from reachy_mini_conversation_app import jev
     from reachy_mini_conversation_app.config import config
@@ -154,11 +155,13 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
     from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
+    from reachy_mini_conversation_app.games.detectives import Detectives, DetectivesSetup
     from reachy_mini_conversation_app.games.simon_says import SimonSays
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
     from reachy_mini_conversation_app.games.scribble_rush import ScribbleRush, GeminiGuesser, ScribbleSetup
     from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
     from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
+    from reachy_mini_conversation_app.games.detectives_witness import gemini_witness
 
     log = logging.getLogger(__name__)
     display = deps.display
@@ -311,6 +314,15 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     sheeple = SheepleSetup(data_dir=game_data, port=config.BIG_BRAIN_PORT, public_url=config.BIG_BRAIN_PUBLIC_URL)
     if sheeple.bank.is_file():  # one phone game at a time, so it shares Big Brain's port and public address
         games["sheeple"] = lambda: Sheeple(sheeple)
+    gemini_key = (config.GEMINI_API_KEY or "").strip()
+    if gemini_key:  # the cases ship with the app; witnesses need the text model
+        detectives = DetectivesSetup(
+            data_dir=game_data,
+            port=config.BIG_BRAIN_PORT,
+            witness=gemini_witness(genai.Client(api_key=gemini_key), config.DETECTIVES_MODEL),
+            public_url=config.BIG_BRAIN_PUBLIC_URL,
+        )
+        games["detectives"] = lambda: Detectives(detectives)
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)

@@ -883,6 +883,8 @@ class Config:
     BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
     # Scribble Rush's guesser (games/scribble_rush.py): a Gemini model that reads images; phones use Big Brain's port.
     SCRIBBLE_VISION_MODEL = (os.getenv("SCRIBBLE_VISION_MODEL") or "").strip() or "gemini-3.8-flash"
+    # Detectives (games/detectives.py): the text model that answers as its suspects and witnesses.
+    DETECTIVES_MODEL = (os.getenv("DETECTIVES_MODEL") or "").strip() or "gemini-3.8-flash"
     DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     HF_REALTIME_CONNECTION_MODE = (
@@ -1122,6 +1124,7 @@ def refresh_runtime_config_from_env() -> None:
     config.BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     config.BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None
     config.SCRIBBLE_VISION_MODEL = (os.getenv("SCRIBBLE_VISION_MODEL") or "").strip() or "gemini-3.8-flash"
+    config.DETECTIVES_MODEL = (os.getenv("DETECTIVES_MODEL") or "").strip() or "gemini-3.8-flash"
     config.DISPLAY_CHECK_MODEL = (os.getenv("DISPLAY_CHECK_MODEL") or "").strip() or "jev-latest"
     config.AUDIO_OUTPUT_BACKEND = resolve_audio_output_backend()
     config.HF_REALTIME_CONNECTION_MODE = (

@@ -68,6 +68,7 @@ async def test_unknown_games_and_no_host() -> None:
         "bigbrain_disney",
         "scribble",
         "sheeple",
+        "detectives",
     ]
     missing = await tool(_deps(None), game="colors", action="rules")
     assert "not available" in missing["error"]
