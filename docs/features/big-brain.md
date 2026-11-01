@@ -71,10 +71,13 @@ bank uses each clue's column as its category, so the board names columns by thei
 
 Eduardo prefers this batch work on his Claude subscription rather than the Gemini API, whose prepaid credits
 Richie's voice shares (on 2026-11-01 the Hogwarts run used them up mid-run and the camera games fell back to the
-Mac's voice). So the Hogwarts edition's last 390 fact checks were done by Claude Code agents with web search,
-written to `facts.jsonl`, and the script then ran with `--no-gemini` (blind answer and Jev only). Future
-editions should have Claude agents write and fact-check the clues the same way; the script's Gemini path stays
-for reference.
+Mac's voice). So the Hogwarts edition's last 390 fact checks were done by Claude Code agents with web search.
+`--claude` now keeps every model call but Jev's on Claude: `--claude --export DIR` writes the clues still to
+check as batches with two briefs (`brief-facts.md`: fact checks with web search; `brief-blind.md`: blind answers
+from the clue alone, no search, as a player would), parallel Claude agents write `verdicts-N.json` and
+`answers-N.json`, and `--claude --import DIR` adds them and runs Jev, which judges the blind answers as it judges
+players in the game and rates each clue. Future editions should also have Claude agents write the clues; the
+script's Gemini and OpenAI paths stay for reference.
 
 ## Current architecture
 
