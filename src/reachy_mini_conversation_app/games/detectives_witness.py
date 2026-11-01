@@ -83,7 +83,12 @@ def gemini_witness(client: genai.Client, model: str) -> Witness:
             response = await client.aio.models.generate_content(
                 model=model,
                 contents=question,
-                config=types.GenerateContentConfig(system_instruction=instructions, temperature=0.8),
+                # Low thinking: a suspect's two or three sentences took 7.9 s by default (2026-11-01).
+                config=types.GenerateContentConfig(
+                    system_instruction=instructions,
+                    temperature=0.8,
+                    thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+                ),
             )
         except (genai_errors.APIError, httpx.HTTPError) as error:
             raise WitnessError(str(error)) from error

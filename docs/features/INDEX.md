@@ -16,7 +16,7 @@ the implementation.
 | Games | [games.md](games.md) | in-progress: game host and color hunt built and tested; not yet played on the robot |
 | Big Brain (team quiz show) | [big-brain.md](big-brain.md) | in-progress: played twice on 2026-11-01 and fixed after each; Hogwarts (Harry Potter), Middle-earth (Lord of the Rings), Galactic (Star Wars) and Disney editions |
 | Scribble Rush (drawing race) | [scribble-rush.md](scribble-rush.md) | in-progress: built and tested with fakes on 2026-11-01; not yet played, vision guesses not yet measured on real drawings |
-| Sheeple (survey party game) | [sheeple.md](sheeple.md) | in-progress: first version built and tested 2026-11-01; waiting for the survey bank; not yet played |
+| Sheeple (survey party game) | [sheeple.md](sheeple.md) | in-progress: built 2026-11-01 and deployed with a 636-board survey bank; not yet played |
 | Detectives (mystery party game) | [detectives.md](detectives.md) | in-progress: built and tested on the laptop (two adult cases, one kids' case); not deployed or played |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
 | Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |

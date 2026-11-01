@@ -1,6 +1,6 @@
 # Feature: Sheeple (survey party game)
 
-- Status: `in-progress` (first version built and tested 2026-11-01; not yet deployed or played)
+- Status: `in-progress` (built and tested 2026-11-01; deployed to the Mac mini with the survey bank; not yet played)
 - Last updated: 2026-11-01
 - Plan: [party-games.md](../plans/party-games.md) ("Sheeple", "Surveys (Sheeple)")
 - Part of: [games.md](games.md) (the shared game host); phones, judging and screens borrowed from
@@ -64,7 +64,10 @@ so the same guess gets the same ruling next time. Repeated flock guesses (same p
 
 ## Data contract
 
-`GAME_DATA_DIR/sheeple/bank.jsonl`, one JSON object a line, made by the survey pipeline (not by the game):
+`GAME_DATA_DIR/sheeple/bank.jsonl`, one JSON object a line, made by `scripts/sheeple_bank.py` (not by the game):
+Jev tagged all 4,721 counted questions in Eduardo's sheet (US-only, adult, kids, appeal; $0.11), the best 636
+that work outside the US were rewritten in both languages by Claude agents with every count kept (600 boards, 36
+two-answer quick boards; 548 suit kids, 88 are adult, 11 work only in English).
 
 ```json
 {"id": "s-0001", "kind": "board", "question": {"en": "...", "es": "..."},
