@@ -13,6 +13,11 @@ edition's clues are written new, column by column, and checked before they reach
    the match, as for the main bank, and whether the clue gives its answer away.
 4. Ratings: Jev rates appeal and hardness for the edition's audience, and whether it suits children.
 
+With ``--no-gemini`` the script writes nothing and calls no Gemini: the fact verdicts come from Claude Code
+agents with web search, appended to ``facts.jsonl`` as {"id": ..., "verdicts": {clue id: verdict}}, and stand in
+for the searched answer (Eduardo prefers his Claude subscription for this work to the Gemini API, whose prepaid
+credits Richie's voice shares; 2026-11-01 they ran out mid-run). The blind answer and Jev stay as they are.
+
 A clue reaches the bank when the facts hold, it gives nothing away, and the blind answer matches; a hard clue
 (writer's difficulty 3 or 4) may miss the blind answer, since a model without search may not know production
 trivia, when the fact check found it the only answer. A real-world clue must also match the searched answer. Each stage is cached as JSON lines in ``--out``; a rerun
@@ -243,6 +248,9 @@ async def main() -> None:
     parser.add_argument("--per-column", type=int, default=0, help="clues to write per column (0: the edition's)")
     parser.add_argument("--columns", default="", help="only these column keys, comma-separated")
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument(
+        "--no-gemini", action="store_true", help="write nothing; facts.jsonl already holds Claude's verdicts"
+    )
     args = parser.parse_args()
     load_dotenv(find_dotenv(usecwd=True))
     edition = EDITIONS[args.edition]
@@ -301,7 +309,8 @@ async def main() -> None:
                     file.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"write {key}: {len(mine)} drafts")
 
-    await asyncio.gather(*(write_column(key) for key in wanted))
+    if not args.no_gemini:
+        await asyncio.gather(*(write_column(key) for key in wanted))
     items = [record for record in drafts.values() if record["column"] in wanted]
 
     # 2. Facts, in batches of the same column.
@@ -328,7 +337,11 @@ async def main() -> None:
             raise ValueError("verdicts do not match the clues")
         return {"verdicts": {record["id"]: verdict for record, verdict in zip(batch["records"], verdicts)}}
 
-    checked_facts = await run_stage(batches, out / "facts.jsonl", check_facts, args.concurrency, "facts")
+    checked_facts = (
+        read_jsonl(out / "facts.jsonl")
+        if args.no_gemini
+        else await run_stage(batches, out / "facts.jsonl", check_facts, args.concurrency, "facts")
+    )
     facts: dict[str, dict[str, Any]] = {}
     for record in checked_facts.values():
         facts.update(record["verdicts"])
@@ -368,7 +381,7 @@ async def main() -> None:
                     "match": round(float(judged["match"]["noul"]), 3),
                     "giveaway": round(float(judged["giveaway"]["noul"]), 3),
                 }
-            if record["column"] in edition["search_columns"]:
+            if record["column"] in edition["search_columns"] and not args.no_gemini:
                 response = await gemini.aio.models.generate_content(
                     model=REWRITE_MODEL,
                     contents=SEARCHED_PROMPT.format(subject=edition["subject"], clue=record["clue"]["en"]),
