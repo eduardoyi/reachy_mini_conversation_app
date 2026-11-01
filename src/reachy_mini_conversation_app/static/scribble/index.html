@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#fff8e7">
+<title>Scribble Rush</title>
+<style>
+:root{--bg:#fff8e7;--paper:#fff;--ink:#1d1b2f;--dim:#6b6880;--line:#e3dcc8;--hot:#ff5a36;--ok:#2e9e5b;--bad:#d64545}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;min-height:100vh;
+ -webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-text-size-adjust:100%}
+#app{max-width:560px;margin:0 auto;padding:10px 14px 40px}
+button,input{font:inherit}
+button{cursor:pointer;touch-action:manipulation}
+.logo{font-weight:900;font-size:22px;letter-spacing:.02em;transform:rotate(-2deg);display:inline-block}
+.logo b{color:var(--hot)}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0 10px}
+.me{background:var(--tc);color:#fff;border-radius:999px;padding:5px 12px;font-weight:800;font-size:14px;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card{background:var(--paper);border:2px solid var(--line);border-radius:16px;padding:14px;margin:0 0 12px;box-shadow:0 3px 0 var(--line)}
+.center{text-align:center}
+h1{margin:0 0 6px;font-size:26px;font-weight:900;line-height:1.15}
+.sub{color:var(--dim);font-size:16px;margin:4px 0 0}
+label{display:block;font-weight:800;font-size:15px;color:var(--dim);margin:10px 0 6px}
+.txt{width:100%;font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#fff;color:var(--ink);outline:none}
+.txt:focus{border-color:var(--hot)}
+.primary{display:block;width:100%;margin-top:12px;padding:16px;border:none;border-radius:14px;background:var(--hot);color:#fff;font-size:21px;font-weight:900;box-shadow:0 4px 0 #b83a1e}
+.primary:active{transform:translateY(3px);box-shadow:0 1px 0 #b83a1e}
+.primary:disabled{opacity:.45}
+.secondary{display:block;width:100%;margin-top:10px;padding:12px;border:2px solid var(--line);border-radius:14px;background:#fff;color:var(--ink);font-size:17px;font-weight:800}
+.teams{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tbtn{background:var(--tc);color:#fff;border:4px solid transparent;border-radius:14px;min-height:76px;padding:8px;font-weight:900;font-size:19px;opacity:.75}
+.tbtn.sel{border-color:var(--ink);opacity:1}
+.tbtn small{display:block;font-size:12px;font-weight:600;opacity:.95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane{display:flex;align-items:center;gap:8px;margin:6px 0}
+.lane b{width:74px;font-size:14px;color:var(--tc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane .bar{flex:1;height:14px;border-radius:8px;background:var(--line);overflow:hidden}
+.lane .fill{height:100%;background:var(--tc)}
+.lane span{width:46px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;font-size:14px}
+.lane.turn b::before{content:'✏️ '}
+.word{font-size:44px;font-weight:900;line-height:1.1;margin:8px 0;word-break:break-word;color:var(--hot)}
+.cat{display:inline-block;background:var(--ink);color:#fff;border-radius:999px;padding:4px 12px;font-size:14px;font-weight:800}
+#timer{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0}
+#timer.low{color:var(--bad)}
+.guess{font-size:22px;font-weight:800;padding:8px 10px;border-radius:10px;margin:6px 0;background:#f4efe1}
+.guess.hit{background:var(--ok);color:#fff}
+.guess.miss{text-decoration:line-through;color:var(--dim)}
+.msg{background:var(--ok);color:#fff;font-weight:900;font-size:22px;text-align:center;border-radius:14px;padding:12px;margin:0 0 12px}
+.toggle{display:flex;align-items:center;gap:10px;margin-top:12px;font-weight:700}
+.toggle input{width:22px;height:22px}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<script>
+var T = {
+ es: {join: 'Únete al juego', name: 'Tu nombre', team: 'Tu equipo', go: '¡Entrar!', start: '¡Empezar!', kids: 'Modo niños (palabras fáciles)',
+  waitStart: 'Cuando estén todos, denle a empezar.', drawYou: '¡Te toca dibujar!', draw: 'Dibuja en un papel:', done: '¡Listo! Enseñárselo a Richie',
+  skip: 'Otra palabra', drawing: '{name} está dibujando', holdUp: '¡Levanta el dibujo frente a la cámara de Richie!', holding: '¡A mostrarle el dibujo a Richie!',
+  guessing: 'Richie está adivinando…', was: 'Era:', paused: 'Juego en pausa', resume: 'Seguir jugando', over: '¡Fin del juego!',
+  round: 'Ronda {r} de {n}', errName: 'Escribe tu nombre y escoge un equipo.', errClosed: 'El juego ya empezó.', reconnecting: 'Reconectando…',
+  names: {red: 'Rojo', blue: 'Azul', green: 'Verde'}, gone: 'Abre el enlace del código QR.'},
+ en: {join: 'Join the game', name: 'Your name', team: 'Your team', go: 'Join!', start: 'Start!', kids: 'Kids mode (easy words)',
+  waitStart: 'When everyone is in, press start.', drawYou: 'Your turn to draw!', draw: 'Draw on paper:', done: 'Done! Show Richie',
+  skip: 'Another word', drawing: '{name} is drawing', holdUp: 'Hold your drawing up to Richie\'s camera!', holding: 'Time to show Richie the drawing!',
+  guessing: 'Richie is guessing…', was: 'It was:', paused: 'Game paused', resume: 'Keep playing', over: 'Game over!',
+  round: 'Round {r} of {n}', errName: 'Type your name and pick a team.', errClosed: 'The game has already started.', reconnecting: 'Reconnecting…',
+  names: {red: 'Red', blue: 'Blue', green: 'Green'}, gone: 'Open the link from the QR code.'}
+};
+var KEYS = ['red', 'blue', 'green'];
+var TC = {red: '#e53935', blue: '#1e88e5', green: '#2e9e5b', yellow: '#e0b100'};
+var code = (new URLSearchParams(location.search).get('c') || '').trim();
+var STORE = 'scribble:' + code;
+var S = null, ws = null, retry = 0, timer = null, draft = {name: '', team: null}, shown = '';
+function $(id) { return document.getElementById(id); }
+function lang() { return (S && S.language) || (/^es/i.test(navigator.language || '') ? 'es' : 'en'); }
+function t() { return T[lang()]; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+function tc(k) { return 'style="--tc:' + (TC[k] || '#888') + '"'; }
+function load() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
+function save(v) { try { localStorage.setItem(STORE, v); } catch (e) {} }
+function forget() { try { localStorage.removeItem(STORE); } catch (e) {} }
+function can(a) { return !!(S && S.can && S.can.indexOf(a) >= 0); }
+function send(o) { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast(t().reconnecting); return false; }
+function toast(m) { var el = $('toast'); el.textContent = m; el.classList.add('on'); setTimeout(function () { el.classList.remove('on'); }, 3000); }
+function fill(s, o) { return s.replace(/\{(\w+)\}/g, function (_, k) { return esc(o[k]); }); }
+
+function connect() {
+ clearTimeout(timer); timer = null;
+ if (!code) { $('app').innerHTML = '<div class="card center"><h1>Scribble Rush</h1><p class="sub">' + t().gone + '</p></div>'; return; }
+ var proto = location.protocol === 'https:' ? 'wss:' : 'ws:', sock;
+ var dir = location.pathname.replace(/[^\/]*$/, '');  // next to the page, so it also works under a path
+ try { sock = new WebSocket(proto + '//' + location.host + dir + 'ws?code=' + encodeURIComponent(code)); } catch (e) { schedule(); return; }
+ ws = sock;
+ sock.onopen = function () { retry = 0; var id = load(); if (id) sock.send(JSON.stringify({type: 'join', player: id})); };
+ sock.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (e) { return; } handle(m); };
+ sock.onclose = function () { if (ws !== sock) return; ws = null; schedule(); };
+ sock.onerror = function () { try { sock.close(); } catch (e) {} };
+}
+function schedule() { if (timer) return; var d = Math.min(5000, 1000 + retry * 1000); retry++; timer = setTimeout(connect, d); }
+document.addEventListener('visibilitychange', function () {
+ if (document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); }
+});
+
+function handle(m) {
+ if (m.type === 'welcome') { if (m.player) save(m.player); }
+ else if (m.type === 'forget') { forget(); shown = ''; render(); }
+ else if (m.type === 'error') { toast(m.message === 'closed' ? t().errClosed : m.message === 'name' ? t().errName : m.message); }
+ else if (m.type === 'state') { S = m; render(); }
+}
+
+function lanes() {
+ var h = '';
+ (S.teams || []).forEach(function (x) {
+  var pct = Math.min(100, Math.round(100 * x.squares / S.goal));
+  h += '<div class="lane' + (S.turn === x.key ? ' turn' : '') + '" ' + tc(x.key) + '><b>' + esc(x.name) + '</b>' +
+   '<div class="bar"><div class="fill" style="width:' + pct + '%"></div></div><span>' + x.squares + '/' + S.goal + '</span></div>';
+ });
+ return '<div class="card">' + (S.round ? '<div class="sub center">' + fill(t().round, {r: S.round, n: S.rounds}) + '</div>' : '') + h + '</div>';
+}
+
+function joinForm() {
+ var h = '<div class="card"><h1>' + t().join + '</h1><label>' + t().name + '</label>' +
+  '<input id="name" class="txt" maxlength="16" autocomplete="off" value="' + esc(draft.name) + '"><label>' + t().team + '</label><div class="teams">';
+ KEYS.forEach(function (k) {
+  var x = (S.teams || []).filter(function (y) { return y.key === k; })[0];
+  h += '<button class="tbtn' + (draft.team === k ? ' sel' : '') + '" data-team="' + k + '" ' + tc(k) + '>' + esc(x ? x.name : t().names[k]) +
+   '<small>' + esc(x ? x.players.join(', ') : '') + '</small></button>';
+ });
+ return h + '</div><button class="primary" id="go">' + t().go + '</button></div>';
+}
+
+function render() {
+ if (!S) return;
+ var you = S.you, h = '', key;
+ h += '<header><span class="logo">Scribble <b>Rush</b></span>' + (you ? '<span class="me" ' + tc(you.team) + '>' + esc(you.name) + '</span>' : '') + '</header>';
+ if (!you) {
+  if (S.phase !== 'lobby') { h += '<div class="card center"><p class="sub">' + t().errClosed + '</p></div>' + lanes(); }
+  else h += joinForm();
+  key = 'join:' + JSON.stringify(S.teams) + draft.team;
+  if (key === shown && $('name')) return;  // keep the name field while someone types
+ } else if (S.phase === 'paused') {
+  h += '<div class="card center"><h1>' + t().paused + '</h1>' + (can('resume') ? '<button class="primary" data-act="resume">' + t().resume + '</button>' : '') + '</div>';
+ } else if (S.phase === 'lobby') {
+  h += lanes().replace(/<span>[^<]*<\/span>/g, '');
+  h += '<div class="card center"><p class="sub">' + t().waitStart + '</p>' + (can('start') ? '<button class="primary" data-act="start">' + t().start + '</button>' : '') +
+   (can('settings') ? '<label class="toggle"><input type="checkbox" id="kids"' + (S.kids ? ' checked' : '') + '>' + t().kids + '</label>' : '') + '</div>';
+ } else {
+  var mine = S.drawing && S.phase === 'drawing';
+  if (S.message) h += '<div class="msg">' + esc(S.message) + '</div>';
+  h += '<div class="card center">';
+  if (S.phase === 'over') h += '<h1>' + t().over + '</h1>';
+  else if (mine) {
+   h += '<h1>' + t().drawYou + '</h1><p class="sub">' + t().draw + '</p><div class="word">' + esc(S.word) + '</div><span class="cat">' + esc(S.category) + '</span>';
+  } else if (S.drawer) {
+   h += '<h1 ' + tc(S.drawer.team) + '>' + fill(t().drawing, {name: S.drawer.name}) + '</h1>' + (S.category ? '<span class="cat">' + esc(S.category) + '</span>' : '');
+  }
+  if (S.phase === 'drawing') h += '<div id="timer"></div>';
+  if (mine) {
+   h += '<button class="primary" data-act="done">' + t().done + '</button>';
+   if (can('skip')) h += '<button class="secondary" data-act="skip">' + t().skip + '</button>';
+  }
+  if (S.phase === 'showing') h += '<p class="sub"><b>' + (S.drawing ? t().holdUp : t().holding) + '</b></p>';
+  if (S.phase === 'guessing' || S.phase === 'result') {
+   if (S.phase === 'guessing') h += '<p class="sub">' + t().guessing + '</p>';
+   (S.guesses || []).forEach(function (g) { h += '<div class="guess' + (g.hit === true ? ' hit' : g.hit === false ? ' miss' : '') + '">' + esc(g.text) + '</div>'; });
+   if (S.phase === 'result' && S.word) h += '<p class="sub">' + t().was + '</p><div class="word">' + esc(S.word) + '</div>';
+  }
+  h += '</div>' + lanes();
+ }
+ key = key || JSON.stringify(S);
+ if (key === shown) return;
+ shown = key;
+ $('app').innerHTML = h;
+ tick();
+}
+
+function tick() {
+ var el = $('timer');
+ if (!el || !S || !S.deadline) { if (el) el.textContent = ''; return; }
+ var left = Math.max(0, Math.ceil((S.deadline - Date.now()) / 1000));
+ el.textContent = left;
+ el.classList.toggle('low', left <= 5);
+}
+setInterval(tick, 250);
+
+document.addEventListener('input', function (e) { if (e.target.id === 'name') draft.name = e.target.value; });
+document.addEventListener('change', function (e) { if (e.target.id === 'kids') send({type: 'kids', on: !!e.target.checked}); });
+document.addEventListener('click', function (e) {
+ var el = e.target.closest('button');
+ if (!el) return;
+ if (el.getAttribute('data-team')) { draft.team = el.getAttribute('data-team'); shown = ''; render(); return; }
+ if (el.id === 'go') {
+  var name = (draft.name || '').trim();
+  if (!name || !draft.team) { toast(t().errName); return; }
+  send({type: 'join', name: name, team: draft.team, player: load() || null});
+  return;
+ }
+ var act = el.getAttribute('data-act');
+ if (act && send({type: act})) el.disabled = true;
+});
+connect();
+</script>
+</body>
+</html>
