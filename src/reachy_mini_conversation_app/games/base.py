@@ -18,6 +18,9 @@ from reachy_mini_conversation_app.games.catalog import GameInfo
 
 # How long a game waits for one of its lines to be heard before going on without it.
 SPEAK_TIMEOUT_S = 20.0
+# What a question with its own short wait (``listen_s``) gets when someone spoke but the speech model wrote nothing
+# (2026-11-01: "Pacific", 1.6 s, no text); silence gets "".
+UNCLEAR_ANSWER = "…"
 _TICK_S = 0.05
 
 

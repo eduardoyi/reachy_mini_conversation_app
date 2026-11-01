@@ -17,7 +17,7 @@ from typing import Any, Final, Callable
 from pathlib import Path
 from dataclasses import dataclass
 
-from reachy_mini_conversation_app.games.base import Game, GameContext
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.games.catalog import BIG_BRAIN, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, join, silence
@@ -614,13 +614,19 @@ class BigBrain(Game):
             # With no clip made, a moment of silence still opens the listening.
             spoken = join(*pieces) if pieces else silence(0.1)
             said = await self._play(spoken, " ".join(texts), listen=True) or ""
+            if said == UNCLEAR_ANSWER:
+                # Someone spoke but the speech model wrote nothing: one more try, then it is no answer.
+                again = self._line("say_again")
+                said = await self._play(again[1] if again else silence(0.1), again[0] if again else "", listen=True) or ""  # fmt: skip
+                said = "" if said == UNCLEAR_ANSWER else said
             assert self._judge is not None
             ruling = await self._judge.rule(clue.id, clue.text, clue.accept, said)
             if ruling is Ruling.SPECIFIC and not asked_specific:
                 asked_specific = True
                 more = self._line("more_specific")
                 again = more[1] if more else silence(0.1)
-                said = await self._play(again, more[0] if more else "", listen=True) or said
+                more_said = await self._play(again, more[0] if more else "", listen=True)
+                said = more_said if more_said and more_said != UNCLEAR_ANSWER else said
                 ruling = await self._judge.rule(clue.id, clue.text, clue.accept, said)
             if ruling is Ruling.RIGHT:
                 await self._right(player, clue)

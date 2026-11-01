@@ -15,6 +15,7 @@ from .fakes import FakeReachy
 from reachy_mini_conversation_app import jev
 from reachy_mini_conversation_app.games import big_brain
 from reachy_mini_conversation_app.qr_code import qr_matrix
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
 from reachy_mini_conversation_app.games.big_brain import BigBrain, BigBrainSetup
@@ -312,8 +313,8 @@ class _Room:
 async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two teams play the board and the final; red wins; clues are kept.
 
-    A phone plays on after a pause; red's first answer is ruled wrong and blue's vote ends that square at once;
-    the bets end as soon as both teams bet.
+    A phone plays on after a pause; red's first answer cannot be read, so Richie asks again; the second is ruled
+    wrong and blue's vote ends that square at once; the bets end as soon as both teams bet.
     """
     for name, value in {"PICK_S": 1.0, "BUZZ_S": 0.5, "REBUZZ_S": 0.3, "ANSWER_S": 1.0, "EVERYONE_S": 0.3,
                         "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "FINAL_ANSWER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
@@ -330,6 +331,7 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     reachy = FakeReachy(real_clock=True)
     games: list[BigBrain] = []
     played: list[tuple[str, bool]] = []
+    given: list[str] = []
 
     async def say_audio(
         rate: int, samples: np.ndarray, text: str, language: str, answer: Any, *, listen_s: float | None = None
@@ -337,7 +339,8 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
         played.append((text, answer is not None))
         game = games[0]
         if answer is not None and game._buzz is not None and game._clue is not None:
-            said = "Algo raro" if not any(listening for _, listening in played[:-1]) else game._clue.accept[0]
+            said = [UNCLEAR_ANSWER, "Algo raro"][len(given)] if len(given) < 2 else game._clue.accept[0]
+            given.append(said)
             asyncio.get_running_loop().create_task(answer(said))
 
     reachy.services.say_audio = say_audio
@@ -374,7 +377,11 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     game = games[0]
     assert host.state is GameState.IDLE
     assert game._phase == "over"
-    assert len(counted) == 1 and game.snapshot(room.red)["final"]["answer"] == game._board.final.answer  # type: ignore[union-attr]
+    assert (
+        given[:3] == [UNCLEAR_ANSWER, "Algo raro", given[2]]
+        and len(counted) == 1
+        and game.snapshot(room.red)["final"]["answer"] == game._board.final.answer
+    )  # type: ignore[union-attr]
     assert game._scores["red"] > 0 >= game._scores.get("blue", 0)
     assert game._board is not None and game._board.left == 0
     assert [entry["team"] for entry in game._reveal] == ["blue", "red"]

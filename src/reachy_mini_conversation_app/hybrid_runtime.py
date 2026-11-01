@@ -26,6 +26,7 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE as SPEECH_SAMPLE_RATE
 from reachy_mini_conversation_app.local_speech import beep
@@ -642,6 +643,7 @@ class HybridRuntime:
         self._request_clip_vad = RmsEnergyVAD(threshold=config.LOCAL_VAD_RMS_THRESHOLD)
         # The last request clip stopped at its length cap while the speaker was still talking.
         self._request_clip_cut_off = False
+        self._request_clip_spoke = False  # someone spoke in the last clip (even if no text came of it)
         # A voice message is being recorded into _request_clip: post-activation audio is not kept for Gemini.
         self._recording_message = False
         # During a WhatsApp call, every captured frame goes here instead of the post-activation queue.
@@ -1602,8 +1604,9 @@ class HybridRuntime:
                 if quick_text and answer is not None and await self._try_quick_command(quick_text, generation, answer):
                     return True
                 if not quick_text and answer is not None and turn is not None and turn.listen_s:
-                    # A question with its own short wait (a quiz) hears the silence as an empty answer at once.
-                    await answer("")
+                    # A question with its own short wait (a quiz) hears the silence as an empty answer at once,
+                    # and speech the model could not read as UNCLEAR_ANSWER, so it can ask again.
+                    await answer(UNCLEAR_ANSWER if clip_request and self._request_clip_spoke else "")
                 await self._return_to_ambient(generation, "no_answer")
                 return True
             # Still talking when the clip stopped: commands that need every word leave it to the conversation.
@@ -1812,6 +1815,7 @@ class HybridRuntime:
         """
         transcriber = self._request_transcriber
         self._request_clip_cut_off = False
+        self._request_clip_spoke = False  # someone spoke in the last clip (even if no text came of it)
         if transcriber is None:
             return ""
         loop = asyncio.get_running_loop()
@@ -1852,6 +1856,7 @@ class HybridRuntime:
         frames = self._request_clip_frames()
         if not frames:
             return ""
+        self._request_clip_spoke = True
         sample_rate = frames[0][0]
         parts = [audio_to_mono_int16(frame[1]) for frame in frames if frame[0] == sample_rate]
         if lead_in is not None and lead_in[0] == sample_rate and lead_in[1].size:

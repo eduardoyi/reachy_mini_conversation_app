@@ -27,7 +27,8 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
    while the other phones show whose pick it is over a dimmed board. After 40 s Richie picks one himself.
 4. **A clue:** the TRMNL shows it large while Richie reads it in the host voice; then the buzzers unlock for 8 s.
    The first buzz wins (its sound and the team's name), and only that player answers aloud; Richie listens only
-   then, for up to 6 s for the answer to start (silence is a miss at once). Right: the points, the next pick, a cheer (a streak and the 800 row get their own lines). Wrong: the
+   then, for up to 6 s for the answer to start (silence is a miss at once; speech he could not make out gets one
+   "say that again?"). Right: the points, the next pick, a cheer (a streak and the 800 row get their own lines). Wrong: the
    points are lost (not in kids mode, nor on a double), that team is locked out and the others get 6 s more.
    Nobody: "time's up", and the answer on the TRMNL and in his voice.
 5. **Hidden squares** (never in the 200 row, in different columns): double or nothing (twice the points; a miss
@@ -109,8 +110,8 @@ big-brain/rulings.json          Jev's and the room's rulings
   text, without names).
 - ElevenLabs allows five requests at a time on the Creator plan; the board's clues are prepared while players
   join. Its cost is not yet in the admin app's usage ledger (Jev's judging is, under "Games").
-- A clip the speech model cannot read comes back empty and counts as silence (2026-11-01: "Pacific" lost that
-  way, 1.6 s of audio, no text); Richie does not ask again yet.
+- A clip the speech model cannot read (2026-11-01: "Pacific", 1.6 s of audio, no text) reaches the game as
+  `UNCLEAR_ANSWER` rather than silence; Richie asks once to say it again ("say_again"), then it is no answer.
 - Answers are transcribed with the household's language guess, so a short English answer can come back in
   Spanish spelling; Jev's `sounds_like` covers that rather than biasing the recognizer with the answer, which on
   unclear audio could write the answer itself.

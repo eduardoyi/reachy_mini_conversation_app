@@ -18,6 +18,7 @@ from reachy_mini_conversation_app import config
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.local_actions import LocalActionExecutor
 from reachy_mini_conversation_app.hybrid_runtime import (
@@ -4970,6 +4971,35 @@ async def test_a_question_with_its_own_short_wait_hears_silence_as_an_empty_answ
     try:
         assert await runtime.activate("keyboard", addressed_text="buzz")
         await _eventually(lambda: answers == [""])
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_quiz_answer_spoken_but_not_transcribed_comes_back_as_unclear() -> None:
+    """Speech the model writes nothing for ("Pacific" on 2026-11-01) is UNCLEAR_ANSWER, not silence."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply(None)
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer, listen_s=2.0)
+        return _QuickReply("Red team!")
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    try:
+        assert await runtime.activate("keyboard", addressed_text="buzz")
+        await _eventually(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        await _eventually(lambda: answers == [UNCLEAR_ANSWER])
         assert not handler.started.is_set()
     finally:
         await runtime.close()

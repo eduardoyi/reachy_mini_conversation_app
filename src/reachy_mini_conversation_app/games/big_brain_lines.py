@@ -308,6 +308,18 @@ _MOMENTS: Final[dict[str, _Lines]] = {
         "en": ("[softly] The answer was...", "[curious] It was...", "[warmly] The right answer:"),
         "es": ("[softly] La respuesta era...", "[curious] Era...", "[warmly] La respuesta correcta:"),
     },
+    "say_again": {
+        "en": (
+            "[curious] Sorry, I didn't catch that. [pause] Say it again?",
+            "[playful] One more time, a little louder?",
+            "[curious] Hm? [pause] Say that again for me.",
+        ),
+        "es": (
+            "[curious] Perdón, no te entendí. [pause] ¿Me lo repites?",
+            "[playful] Otra vez, un poquito más alto.",
+            "[curious] ¿Cómo? [pause] Repítemelo, porfa.",
+        ),
+    },
     "more_specific": {
         "en": (
             "[curious] Can you be more specific?",
