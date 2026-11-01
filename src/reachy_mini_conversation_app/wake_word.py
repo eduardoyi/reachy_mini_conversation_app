@@ -119,6 +119,11 @@ REACHY_TRANSCRIPT_ALIASES: tuple[str, ...] = (
 )
 
 
+def transcript_aliases(wake_word: str) -> tuple[str, ...]:
+    """Return the extra spellings to accept for ``wake_word``: Reachy's, or none for another name."""
+    return REACHY_TRANSCRIPT_ALIASES if wake_word.casefold() == "reachy" else ()
+
+
 class TranscriptWakeWordDetector:
     """Detect a bounded wake phrase from local partial and final transcripts."""
 

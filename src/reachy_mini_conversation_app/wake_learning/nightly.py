@@ -34,7 +34,7 @@ import onnxruntime as ort
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector
+from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector, transcript_aliases
 from reachy_mini_conversation_app.wake_clips import make_private_dir
 from reachy_mini_conversation_app.admin.server import restart_app
 from reachy_mini_conversation_app.wake_learning.store import (
@@ -91,7 +91,8 @@ def speech_server_check() -> NameCheck:
     stt = OpenAICompatibleLocalSTT(
         config.LOCAL_STT_BASE_URL, model=config.LOCAL_STT_MODEL, request_model=config.LOCAL_STT_REQUEST_MODEL
     )
-    names = TranscriptWakeWordDetector()
+    # The spellings the live check takes: Whisper writes a Spanish "Ri-chi" as "richi" far more often than "Reachy".
+    names = TranscriptWakeWordDetector(config.LOCAL_WAKE_WORD, aliases=transcript_aliases(config.LOCAL_WAKE_WORD))
 
     async def check(rate: int, audio: NDArray[np.int16]) -> bool:
         return names.mentions_wake_word(await stt.transcribe_request((rate, audio)))
@@ -141,6 +142,8 @@ async def label_day(store: WakeLearningStore, day: str, check: NameCheck) -> dic
             logger.warning("Name check failed for a %s clip: %s", event["kind"], type(error).__name__)
             continue
     write_private(path, json.dumps(labels).encode())
+    logger.info("Labelled %s: the name is in %d of %d clips", day, sum(1 for ends in labels.values() if ends),
+                len(labels))  # fmt: skip
     return labels
 
 
@@ -751,6 +754,16 @@ def _prune(folder: Path, today: date, *, keep_days: int) -> None:
                 path.unlink(missing_ok=True)
 
 
+# macOS asks before a program reads these; run by launchd, the night would wait on that prompt until morning.
+_PROMPTED_FOLDERS: Final[tuple[str, ...]] = ("Desktop", "Documents", "Downloads")
+
+
+def behind_privacy_prompt(path: Path, home: Path | None = None) -> bool:
+    """Return whether reading ``path`` from a LaunchAgent would stop on a macOS privacy prompt."""
+    home = home or Path.home()
+    return any(path.expanduser().is_relative_to(home / folder) for folder in _PROMPTED_FOLDERS)
+
+
 def main() -> None:
     """Run tonight's wake learning (the LaunchAgent's entry point)."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -775,6 +788,10 @@ def main() -> None:
         seed_threshold=config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD,
         restart=restart if service else None,
     )
+    if behind_privacy_prompt(settings.model_dir):
+        logger.error("Wake models are in %s, where macOS would hold the night on a privacy prompt; move them out",
+                     settings.model_dir)  # fmt: skip
+        sys.exit(1)
     started = time.monotonic()
     try:
         asyncio.run(run_night(settings, speech_server_check()))

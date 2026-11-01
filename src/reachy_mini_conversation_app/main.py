@@ -751,7 +751,7 @@ def run(
     hybrid_runtime: HybridRuntime | None = None
     if config.HYBRID_RUNTIME_ENABLED:
         from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
-        from reachy_mini_conversation_app.wake_word import REACHY_TRANSCRIPT_ALIASES, TranscriptWakeWordDetector
+        from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector, transcript_aliases
         from reachy_mini_conversation_app.local_actions import LocalActionExecutor
         from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
         from reachy_mini_conversation_app.ambient_context import (
@@ -858,7 +858,7 @@ def run(
                 # With acoustic wake too, this is the backup for a wake word spoken mid-sentence.
                 wake_detector = TranscriptWakeWordDetector(
                     config.LOCAL_WAKE_WORD,
-                    aliases=REACHY_TRANSCRIPT_ALIASES if config.LOCAL_WAKE_WORD.casefold() == "reachy" else (),
+                    aliases=transcript_aliases(config.LOCAL_WAKE_WORD),
                     cooldown_seconds=config.LOCAL_WAKE_COOLDOWN_SECONDS,
                 )
                 context_processor.set_name_probe(wake_detector.mentions_wake_word)

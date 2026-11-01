@@ -54,6 +54,35 @@ async def test_names_are_located_where_they_end() -> None:
     assert await locate_names(_hears_mark, RATE, np.zeros(4 * RATE, dtype=np.int16)) == []
 
 
+@pytest.mark.asyncio
+async def test_the_name_check_takes_the_spellings_the_live_check_takes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whisper writes a Spanish "Ri-chi" as "richi"; the night counts it as the name, as the live check does."""
+    heard = iter(["oye richi, ven aquí", "Ricky, come here"])
+
+    class FakeSTT:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        async def transcribe_request(self, _audio: Any) -> str:
+            return next(heard)
+
+    monkeypatch.setattr(nightly.config, "LOCAL_STT_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setattr(nightly.config, "LOCAL_WAKE_WORD", "Reachy")
+    monkeypatch.setattr(nightly, "OpenAICompatibleLocalSTT", FakeSTT)
+    check = nightly.speech_server_check()
+
+    silence = np.zeros(RATE, dtype=np.int16)
+    assert await check(RATE, silence) and not await check(RATE, silence)
+
+
+def test_models_where_macos_would_ask_first_are_caught(tmp_path: Path) -> None:
+    """Models in Documents, Desktop or Downloads would hold the night on a privacy prompt; elsewhere is fine."""
+    assert nightly.behind_privacy_prompt(tmp_path / "Documents" / "Reachy" / "models", home=tmp_path)
+    assert nightly.behind_privacy_prompt(tmp_path / "Downloads", home=tmp_path)
+    assert not nightly.behind_privacy_prompt(tmp_path / ".local" / "share" / "wake-models", home=tmp_path)
+    assert not nightly.behind_privacy_prompt(tmp_path / "DocumentsOld", home=tmp_path)
+
+
 def test_moments_come_from_wakes_names_and_answers_and_answers_win() -> None:
     """A woke fire is a call; a rejected one with no name is not; a name the check found is; people overrule."""
     woke = _event("wake", DAY + 100, heard=True)

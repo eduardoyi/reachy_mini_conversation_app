@@ -159,6 +159,10 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 
 1. In `.env`: `WAKE_CLIPS_ENABLED=1`, `WAKE_LEARNING_ENABLED=1`, `WAKE_TRAINER_PYTHON=<python with torch>`
    (`~/wake-retrain/.venv/bin/python` on the mini), and `ADMIN_APP_SERVICE` (already set for the admin app).
+   Keep the wake models (`LOCAL_ACOUSTIC_WAKE_MODEL_DIR`, `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD`) out of `~/Documents`,
+   `~/Desktop` and `~/Downloads`: macOS asks before a program launchd started reads those, and nobody answers at
+   02:15. The night refuses to start with them there. On the mini they are in
+   `~/.local/share/reachy_mini_conversation_app/wake-models/`.
 2. A LaunchAgent `com.eduardo.reachy-wake-nightly`:
    - program `<checkout>/.venv/bin/reachy-wake-nightly`;
    - working directory the checkout (so it finds `.env`);
@@ -182,6 +186,9 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 - **Clip timing.** Events are timed with the wall clock when recorded (milliseconds after the audio); feature
   frames are timed as they arrive. Calls are matched within −0.6 to +1 s.
 - **Buffering.** Up to 2 s of features are buffered in memory and lost if the app stops abruptly.
+- **The name's spellings.** The night's name check takes the same name and spellings as the live transcript
+  check (`transcript_aliases`). Whisper writes a Spanish "Ri-chi" as "richi" or "ricci" far more often than
+  "Reachy", so a check on "Reachy" alone finds almost no calls. Each night logs how many clips had the name.
 - **Scoreboard approximations.** False wakes are woke-but-nothing-asked, sent to sleep at once with no name, "not
   for me" (voice, conversation or phone), or a household "Didn't". Calls include
   names the speech server found that may have been people talking about Reachy, until someone answers. The
@@ -196,7 +203,7 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 | `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused); clip cut and confinement; switch, undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
 | `tests/wake_learning/test_feature_log.py` | Runs split by gaps, start times, windows and `window_at`; pruning |
 | `tests/wake_learning/test_takes.py` | When a take ends; voice span with margins; a far quiet call; level in dB |
-| `tests/wake_learning/test_nightly.py` | Locating names; calls, non-calls and unknowns with answers winning; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
+| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
 | `tests/test_acoustic_wake_word.py` | Shadow fires reported, never waking; the model's float32 scores written to the records; feature frames; re-arming inside the cooldown; loading a shadow head |
 | `tests/test_hybrid_runtime.py` | A rejected wake keeps the stream (no reset) and hears a repeated call, and can't be marked false; fire records; missed marks; a false-wake mark closes its conversation and a sleep soon after is noted; recording a name holds wakes |
 | `tests/test_control_api.py` | `/wake/missed` (privacy refuses); `/wake/false`; `/wake/take` keeps only the voice, refuses quiet or long takes and when he can't record |
