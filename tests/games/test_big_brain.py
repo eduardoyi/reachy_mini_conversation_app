@@ -108,8 +108,8 @@ def test_imperial_measurements_and_repeated_answers_stay_off_the_board() -> None
     bank = _bank()
     for entry in bank[:120]:
         entry["clue"]["en"] = "This peak rises 29,032 feet."
-    for entry in bank[120:200]:
-        entry["accept"] = ["The Atlantic and Indian Oceans"]
+    for index, entry in enumerate(bank[120:200]):
+        entry["accept"] = ["Dementor" if index % 2 else "Dementors"]
     bank[200]["clue"]["en"] = "Ray Bradbury wrote Fahrenheit 451."
     board = build_board(bank, "en", rng=random.Random(4), now=0)
     picked = {clue.id for column in board.clues for clue in column} | {board.final.id}
@@ -285,7 +285,7 @@ def test_the_qr_code_links_to_the_public_address_when_there_is_one() -> None:
     ],
 )
 def test_an_edition_starts_by_its_subject_and_plain_big_brain_stays_the_general_quiz(said: str, key: str) -> None:
-    """ "Big Brain, Hogwarts" or "trivia de Harry Potter" asks for the edition; "Big Brain" alone does not."""
+    """Asking for Big Brain with Hogwarts or Harry Potter starts the edition; Big Brain alone does not."""
     request = parse_game_request(said)
     assert request is not None and request.game is not None and request.game.key == key
 

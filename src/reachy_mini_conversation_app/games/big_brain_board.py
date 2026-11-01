@@ -159,8 +159,11 @@ def imperial(entry: dict[str, Any]) -> bool:
 
 def _answers(entry: dict[str, Any]) -> set[str]:
     """Every accepted form of a clue's answer, plain, to keep two clues with one answer off a board."""
-    forms = [*(entry.get("accept") or []), *(entry.get("answer") or {}).values()]
-    return {plain(str(form)) for form in forms if form} - {""}
+    forms = {
+        plain(str(form)) for form in [*(entry.get("accept") or []), *(entry.get("answer") or {}).values()] if form
+    }
+    # "Dementor" and "Dementors" are one answer.
+    return (forms | {form[:-1] for form in forms if form.endswith("s") and len(form) > 3}) - {""}
 
 
 def _quarter_edges(values: list[float]) -> tuple[float, float, float]:
