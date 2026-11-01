@@ -147,6 +147,70 @@ EDITIONS: dict[str, dict[str, Any]] = {
         "per_column": 48,
         # Real-world facts (names, dates, places, numbers) the checker must look up rather than remember.
         "search_columns": ("cast", "making", "films"),
+        # In release order: the title an answer shows, in English and Spanish, and other forms to accept.
+        "films": [
+            (
+                "The Sorcerer's Stone",
+                "La piedra filosofal",
+                [
+                    "Harry Potter and the Philosopher's Stone",
+                    "Philosopher's Stone",
+                    "Harry Potter and the Sorcerer's Stone",
+                    "Harry Potter y la piedra filosofal",
+                ],
+            ),
+            (
+                "The Chamber of Secrets",
+                "La cámara secreta",
+                ["Harry Potter and the Chamber of Secrets", "Harry Potter y la cámara secreta"],
+            ),
+            (
+                "The Prisoner of Azkaban",
+                "El prisionero de Azkaban",
+                ["Harry Potter and the Prisoner of Azkaban", "Harry Potter y el prisionero de Azkaban"],
+            ),
+            (
+                "The Goblet of Fire",
+                "El cáliz de fuego",
+                ["Harry Potter and the Goblet of Fire", "Harry Potter y el cáliz de fuego"],
+            ),
+            (
+                "The Order of the Phoenix",
+                "La Orden del Fénix",
+                ["Harry Potter and the Order of the Phoenix", "Harry Potter y la Orden del Fénix"],
+            ),
+            (
+                "The Half-Blood Prince",
+                "El misterio del príncipe",
+                [
+                    "Harry Potter and the Half-Blood Prince",
+                    "Harry Potter y el misterio del príncipe",
+                    "El príncipe mestizo",
+                ],
+            ),
+            (
+                "Deathly Hallows: Part 1",
+                "Las reliquias de la muerte: parte 1",
+                [
+                    "Harry Potter and the Deathly Hallows – Part 1",
+                    "Deathly Hallows Part 1",
+                    "Deathly Hallows Part One",
+                    "Las reliquias de la muerte parte uno",
+                    "Harry Potter y las reliquias de la muerte: parte 1",
+                ],
+            ),
+            (
+                "Deathly Hallows: Part 2",
+                "Las reliquias de la muerte: parte 2",
+                [
+                    "Harry Potter and the Deathly Hallows – Part 2",
+                    "Deathly Hallows Part 2",
+                    "Deathly Hallows Part Two",
+                    "Las reliquias de la muerte parte dos",
+                    "Harry Potter y las reliquias de la muerte: parte 2",
+                ],
+            ),
+        ],
     },
     "lord-of-the-rings": {
         "id": "lotr",
@@ -223,6 +287,31 @@ EDITIONS: dict[str, dict[str, Any]] = {
         },
         "per_column": 48,
         "search_columns": ("cast", "making"),
+        "films": [
+            (
+                "The Fellowship of the Ring",
+                "La Comunidad del Anillo",
+                [
+                    "Fellowship of the Ring",
+                    "The Lord of the Rings: The Fellowship of the Ring",
+                    "El Señor de los Anillos: La Comunidad del Anillo",
+                ],
+            ),
+            (
+                "The Two Towers",
+                "Las dos torres",
+                ["Two Towers", "The Lord of the Rings: The Two Towers", "El Señor de los Anillos: Las dos torres"],
+            ),
+            (
+                "The Return of the King",
+                "El retorno del rey",
+                [
+                    "Return of the King",
+                    "The Lord of the Rings: The Return of the King",
+                    "El Señor de los Anillos: El retorno del rey",
+                ],
+            ),
+        ],
     },
     "star-wars": {
         "id": "sw",
@@ -303,6 +392,36 @@ EDITIONS: dict[str, dict[str, Any]] = {
         },
         "per_column": 48,
         "search_columns": ("cast", "making", "films"),
+        # In episode order; "the first film" is ambiguous here (release or episode), so only episode numbers count.
+        "films": [
+            ("The Phantom Menace", "La amenaza fantasma", ["Episode I", "Episodio I", "Episode 1", "Episodio 1"]),
+            (
+                "Attack of the Clones",
+                "El ataque de los clones",
+                ["Episode II", "Episodio II", "Episode 2", "Episodio 2"],
+            ),
+            (
+                "Revenge of the Sith",
+                "La venganza de los Sith",
+                ["Episode III", "Episodio III", "Episode 3", "Episodio 3"],
+            ),
+            (
+                "A New Hope",
+                "Una nueva esperanza",
+                ["Star Wars", "La guerra de las galaxias", "Episode IV", "Episodio IV", "Episode 4", "Episodio 4"],
+            ),
+            (
+                "The Empire Strikes Back",
+                "El Imperio contraataca",
+                ["Empire Strikes Back", "Episode V", "Episodio V", "Episode 5", "Episodio 5"],
+            ),
+            (
+                "Return of the Jedi",
+                "El regreso del Jedi",
+                ["El retorno del Jedi", "Episode VI", "Episodio VI", "Episode 6", "Episodio 6"],
+            ),
+        ],
+        "films_by_episode": True,
     },
 }
 
@@ -364,7 +483,8 @@ actual words.
 Each clue is a statement that points at its answer, as the host reads it aloud and players name what it describes
 ("This hobbit gardener..." / "Este jardinero hobbit..."). It must stand alone without the column title, take
 under eight seconds to read (at most 25 words), have exactly one answer that fits, and never contain the answer's
-words (nor a translation of them). Mix difficulty for the audience: about a quarter each of 1 (anyone who saw the
+words (nor a translation of them). When the answer is one of the films, it is the film's title, never its number
+("The Prisoner of Azkaban", not "the third film"). Mix difficulty for the audience: about a quarter each of 1 (anyone who saw the
 films knows it), 2 (fans know it), 3 (big fans know it), 4 (only superfans or film buffs know it). No two clues
 in a column share an answer, and vary the answers across columns too.
 
@@ -812,6 +932,54 @@ def verdict(record: dict[str, Any], fact: dict[str, Any] | None, check: dict[str
     return None
 
 
+_ORDINALS_EN = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth")
+_ORDINALS_ES = ("primera", "segunda", "tercera", "cuarta", "quinta", "sexta", "séptima", "octava")
+_NUMBERED = re.compile(
+    r"^(?:the )?(?P<en>first|second|third|fourth|fifth|sixth|seventh|eighth)(?: (?:film|movie|installment|instalment|entry|one))?$"
+    r"|^(?:film|movie|harry potter) (?P<n>[1-8])$|^(?P<d>[1-8])(?:st|nd|rd|th)? (?:film|movie)$",
+    re.IGNORECASE,
+)
+
+
+def film_answer(record: dict[str, Any], edition: dict[str, Any]) -> dict[str, Any]:
+    """Name a film by its title rather than its number ("The third film" was an answer, 2026-11-01).
+
+    An answer that numbers a film becomes the title in both languages; any film answer then accepts the full and
+    short titles in both languages and, for a numbered series, "the third film" and "la tercera película".
+    """
+    films = edition.get("films") or []
+    if not films:
+        return record
+    answer = str(record["answer"]["en"]).strip().rstrip(".")
+    match = _NUMBERED.match(answer) if not edition.get("films_by_episode") else None
+    index = None
+    if match:
+        word, digit, ordinal = match.group("en"), match.group("n"), match.group("d")
+        index = _ORDINALS_EN.index(word.lower()) if word else int(digit or ordinal) - 1
+    else:
+        known = plain_title(answer)
+        for n, (en, es, others) in enumerate(films):
+            if known in {plain_title(form) for form in (en, es, *others)}:
+                index = n
+                break
+    if index is None or index >= len(films):
+        return record
+    en, es, others = films[index]
+    forms = [en, es, *others]
+    if not edition.get("films_by_episode"):
+        forms += [f"The {_ORDINALS_EN[index]} film", f"The {_ORDINALS_EN[index]} movie", f"La {_ORDINALS_ES[index]} película"]  # fmt: skip
+    record = dict(record)
+    record["answer"] = {"en": en, "es": es}
+    record["also_accept"] = list(dict.fromkeys([*forms, *(record.get("also_accept") or [])]))
+    return record
+
+
+def plain_title(text: str) -> str:
+    """Return a title reduced for comparing ("Harry Potter and the Chamber of Secrets" → same as without "the")."""
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    return " ".join(word for word in words if word not in ("the", "la", "el", "las", "los"))
+
+
 def write_bank(
     out: Path,
     edition: dict[str, Any],
@@ -847,6 +1015,7 @@ def write_bank(
     with (out / "bank.jsonl").open("w", encoding="utf-8") as file:
         for record in kept:
             ratings = checked[record["id"]]["ratings"]
+            record = film_answer(record, edition)
             name_en, name_es, _ = edition["columns"][record["column"]]
             kids_ok = ratings["kids"] >= KIDS_P and ratings["adult"] < ADULT_P
             entry = {
