@@ -137,15 +137,43 @@ game is in. Judging is predictable:
 - **Fixed lines with many variations**, generated once and cached: welcome, category reveal, "pick a
   square", right (plain, on a streak, on a hard clue), wrong, nobody buzzed, time up, hidden square, steal,
   lead change, comeback, final round, winner, goodbye; eight to twelve takes each, in both languages, with
-  players' names where it fits. Eleven v3, whose audio tags allow laughs and excitement.
+  players' names where it fits, with audio tags for laughs and excitement.
 - **Banter now and then**: about one event in four, a text model writes a short line about the moment (a
-  streak, a tight score, a player's name), spoken with the faster Flash model so it never holds up the game.
+  streak, a tight score, a player's name), spoken the same way; about three seconds a line, so it never holds
+  up the game.
 - **Clue audio** is generated for the whole board while players join and cached per clue for later games.
 - **Our own sound and music**, generated with ElevenLabs sound effects (and its music model if our plan has
   it) and used at the same kinds of moments as a TV quiz, never imitating a show's theme: an intro theme, the
   board reveal, picking a square, a buzz sound per team, right, wrong, time up, a hidden-square sting,
   30 seconds of thinking music for the final round, a drumroll for the reveal, a winner's fanfare and an
   outro. Several takes each; Eduardo picks.
+- **Chosen voice (2026-11-01): "C, announcer", take 2** (a booming, smooth vintage-TV announcer, grand
+  and dramatic), designed with `eleven_ttv_v3` and saved to the account as "Richie Big Brain host"
+  (voice id `PluKrefK4JWrlyoTgZkd`). The four options and their previews are kept on the mini in
+  `game-data/host-voice/`.
+- **Audio tags in every generated line** (Eduardo, 2026-11-01; ElevenLabs' tag list:
+  https://elevenlabs.io/blog/elevenlabs-audio-tags-list). Tags go in square brackets right before the words
+  they shape, last until the next tag, combine with commas inside one bracket, and work with Eleven v4
+  (`eleven_v4`, which handles them most consistently), v4 Turbo (for live lines) and v3. Groups: high energy
+  (excited, playful, amazed, proud), delivery (booming, whispers, hushed, shouts), pacing (pause, long pause,
+  drawn out, snappy, slowly), reactions (laughs, sighs, gasps, clears throat), plus free-form ones
+  ("[mock disappointment]"). One tag per change of mood; dashes, ellipses and capitals shape timing too.
+  Examples: "[booming] Welcome to Big Brain!", "[excited] Correct!", "[playful] Ooh… [sighs] so close.",
+  "[hushed] Final round… [long pause] place your bets." Clue readings get light tags (a "[curious]" or a
+  "[pause]" before the last detail) so the clue stays clear. Banter written by the text model may only use
+  square-bracket tags from an allowed list, and the screen and phones show text with the tags stripped.
+- **ElevenLabs limits**: Eduardo moved from Starter (3 requests at a time, 30,000 credits a month) to Creator
+  (121,000 credits a month, 5 requests at a time) on 2026-11-01, so a board's clue audio is made five at a
+  time while players join.
+  Credits needed: about 30,000 once for the fixed lines (about 18 moments × 10 takes × 2 languages), about
+  9,000 for sounds (45 takes at 200 each) and about 7,000 for music (7.5 minutes at 900 a minute); then about
+  4,500 characters a game in one language (26 clues, the answers, some banter); clue audio is saved after its
+  first use.
+- **Speech model: Eleven v4 Turbo (`eleven_v4_turbo`) for everything** (Eduardo, 2026-11-01, after hearing
+  the same lines on v4, v4 Turbo and Flash). It reads audio tags like v4 and none were read aloud, costs half
+  (0.5 credit a character, as Flash does), and took about 3 seconds a line where v4 took 6 to 11. So a game
+  costs about 2,250 credits, and Creator covers the one-time lines, sounds and music plus about 45 games a
+  month.
 - Richie's body joins in: antennas and head with the lines, team colors on the lights at a buzz, a dance for
   the winner.
 - Rough cost at third-party rates (to check against our ElevenLabs plan): about $0.024–0.048 per 1,000
@@ -260,10 +288,18 @@ games, and nothing is published.
   mixed difficulty); most common Greek mythology 126, human anatomy 119, classic literature 110.
   Cost about $22 (tags about $9, rewrites about $12, checks about $1; estimated from the samples' per-request
   costs, since the run was restarted twice and each restart only counts its own requests).
-- Still to do on the bank: the best-by-appeal pick is easy (difficulty 7,659 one-star, 4,151 two-star, 128
-  three-star, none four-star), so harder rows need a second batch from the 33,597 good clues weighted toward
-  high values; merge near-duplicate topics; strip Markdown the writer sometimes adds to titles
-  (*El silencio de los inocentes*) before speech and the screen.
+- The best-by-appeal pick was easy (difficulty 7,659 one-star, 4,151 two-star, 128 three-star, none
+  four-star), so a second batch picked hard ones (`--pick hard`, 2026-11-01, on the mini, $16.38): Jev
+  scored the hardness (0 everyone knows to 4 only buffs) of all 80,155 passing clues, and the 12,000 hardest
+  with appeal at least 2.2 not yet rewritten were rewritten and checked (two per answer at most, counting the
+  first batch). **The bank now holds 20,499 clues** (2,355 adult-only, 5,559 with a kids version; the first
+  batch is kept as `bank-first-batch.jsonl`). Hardness quartiles 1.21 / 1.99 / 2.36, 95th percentile 2.75.
+  Using those quartiles as a board's four rows, all 14 categories fill every row many times over, and 379
+  topics fill a column with at least one clue per row (90 with three or more choices per row), before
+  merging near-duplicate topics. Hard examples: Verdi's *Il trovatore* from its anvil chorus, Francis I
+  inviting Leonardo, Emma Thompson's acting and writing Oscars. Markdown the writer added to titles is now
+  stripped in the bank file.
+- Still to do on the bank: merge near-duplicate topics.
 - Supplement: the Open Trivia Database (CC BY-SA 4.0, about 4,000 verified, English, mostly multiple choice)
   rewritten into open questions; Spanish and Venezuelan categories written directly.
 
@@ -362,3 +398,7 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   new prompts (383 clues for $0.46).
 - 2026-11-01: giveaway check and topics added; the full run moved to the Mac mini after the laptop's disk
   filled, and finished with 10,377 clues in the bank for about $22.
+- 2026-11-01: harder batch (Jev hardness scores, the 12,000 hardest enjoyable clues) on the mini: 20,499
+  clues in the bank, every category able to fill four rows. Host voice chosen (C, take 2) and saved; audio
+  tags made a rule; Eduardo moved ElevenLabs to the Creator plan; v4, v4 Turbo and Flash compared on the same
+  lines, waiting on his ear.

@@ -27,7 +27,7 @@ import argparse
 from typing import Any
 from pathlib import Path
 from collections import Counter
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable, Iterable, Awaitable
 
 import httpx
 from dotenv import find_dotenv, load_dotenv
@@ -52,6 +52,8 @@ MAX_FLAG_P = 0.5
 MIN_APPEAL = 2.0
 # What the full run would keep, for the report.
 GOOD_APPEAL = 2.5
+# The hard pick still wants clues people enjoy.
+HARD_MIN_APPEAL = 2.2
 KIDS_P = 0.5
 MATCH_P = 0.5
 GIVEAWAY_P = 0.5
@@ -113,6 +115,22 @@ _TAG_QUESTIONS: dict[str, dict[str, Any]] = {
             "Great: a satisfying 'I know this!' moment for most of the group",
         ],
     },
+}
+_HARDNESS_QUESTION: dict[str, dict[str, Any]] = {
+    "hardness": {
+        "type": "score",
+        "instructions": (
+            "How hard is `clue` (answered by `answer`) for curious, well-read adults in Latin America who follow "
+            "world news and American pop culture?"
+        ),
+        "criteria": [
+            "Almost everyone in the group would know it",
+            "Most of them would know it",
+            "About half of them would know it",
+            "Only a few of them would know it",
+            "Only a real buff would know it",
+        ],
+    }
 }
 _CHECK_QUESTIONS: dict[str, dict[str, Any]] = {
     "giveaway": {
@@ -290,11 +308,20 @@ def answer_key(answer: str) -> str:
     return " ".join(words[1:] if words[:1] in (["the"], ["a"], ["an"]) else words)
 
 
-def choose(candidates: list[dict[str, Any]], top: int, per_answer: int) -> list[dict[str, Any]]:
-    """Return the best ``top`` candidates by appeal (all when 0), at most ``per_answer`` clues per answer."""
+def choose(
+    candidates: list[dict[str, Any]],
+    top: int,
+    per_answer: int,
+    order: Callable[[dict[str, Any]], float],
+    taken: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Return the first ``top`` candidates by ``order`` (all when 0), at most ``per_answer`` clues per answer.
+
+    ``taken`` holds the answers of clues already rewritten; they count toward ``per_answer``.
+    """
     chosen: list[dict[str, Any]] = []
-    seen: Counter[str] = Counter()
-    for clue in sorted(candidates, key=lambda clue: -clue["tags"]["appeal"]):
+    seen: Counter[str] = Counter(answer_key(answer) for answer in taken)
+    for clue in sorted(candidates, key=order):
         key = answer_key(clue["answer"])
         if seen[key] >= per_answer:
             continue
@@ -303,6 +330,17 @@ def choose(candidates: list[dict[str, Any]], top: int, per_answer: int) -> list[
         if top and len(chosen) >= top:
             break
     return chosen
+
+
+def plain(value: Any) -> Any:
+    """Return ``value`` with the Markdown emphasis the writer sometimes adds removed, in every string."""
+    if isinstance(value, str):
+        return re.sub(r"\*+([^*]+)\*+", r"\1", value).replace("*", "")
+    if isinstance(value, list):
+        return [plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    return value
 
 
 def complete(record: dict[str, Any]) -> bool:
@@ -325,6 +363,12 @@ async def main() -> None:
     parser.add_argument("--size", type=int, default=1000, help="clues to sample; 0 for the whole archive")
     parser.add_argument("--rewrite-top", type=int, default=0, help="rewrite only the best N by appeal; 0 for all")
     parser.add_argument("--per-answer", type=int, default=2, help="at most this many clues with the same answer")
+    parser.add_argument(
+        "--pick",
+        choices=("appeal", "hard"),
+        default="appeal",
+        help="rewrite the most enjoyable clues, or the hardest still-enjoyable ones not yet rewritten",
+    )
     parser.add_argument("--seed", type=int, default=20261101)
     parser.add_argument("--concurrency", type=int, default=12)
     args = parser.parse_args()
@@ -344,11 +388,29 @@ async def main() -> None:
         tagged = await run_stage(sample, out / "tags.jsonl", tag, args.concurrency, "tags")
 
         gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        candidates = choose(
-            [by_id[key] | record for key, record in tagged.items() if passes(record["tags"])],
-            args.rewrite_top,
-            args.per_answer,
-        )
+        passing = [by_id[key] | record for key, record in tagged.items() if passes(record["tags"])]
+
+        async def rate(clue: dict[str, Any]) -> dict[str, Any]:
+            state = {key: clue[key] for key in ("category", "clue", "answer")}
+            answers = await ask_jev(http, costs, state, _HARDNESS_QUESTION)
+            return {"hardness": round(float(answers["hardness"]["score"]), 2)}
+
+        hardness: dict[str, float] = {}
+        if args.pick == "hard":
+            rated = await run_stage(passing, out / "hardness.jsonl", rate, args.concurrency, "hardness")
+            hardness = {key: record["hardness"] for key, record in rated.items()}
+            done = read_jsonl(out / "rewrites.jsonl")
+            candidates = choose(
+                [clue for clue in passing if clue["id"] not in done and clue["tags"]["appeal"] >= HARD_MIN_APPEAL],
+                args.rewrite_top,
+                args.per_answer,
+                lambda clue: -hardness.get(clue["id"], 0.0),
+                [by_id[key]["answer"] for key in done if key in by_id],
+            )
+            candidates = [*(by_id[key] | tagged[key] for key in done if key in by_id), *candidates]
+        else:
+            hardness = {key: record["hardness"] for key, record in read_jsonl(out / "hardness.jsonl").items()}
+            candidates = choose(passing, args.rewrite_top, args.per_answer, lambda clue: -clue["tags"]["appeal"])
 
         async def rewrite(clue: dict[str, Any]) -> dict[str, Any]:
             kids = clue["tags"]["kids"] >= KIDS_P and clue["tags"]["adult"] < MAX_FLAG_P
@@ -426,7 +488,7 @@ async def main() -> None:
 
         checked = await run_stage(usable, out / "checks.jsonl", check, args.concurrency, "checks")
 
-    write_report(out, sample, tagged, rewritten, checked, costs)
+    write_report(out, sample, tagged, rewritten, checked, hardness, costs)
 
 
 def write_report(
@@ -435,6 +497,7 @@ def write_report(
     tagged: dict[str, dict[str, Any]],
     rewritten: dict[str, dict[str, Any]],
     checked: dict[str, dict[str, Any]],
+    hardness: dict[str, float],
     costs: Costs,
 ) -> None:
     """Write ``report.md`` (counts, costs, examples) and ``review.csv`` (every rewrite next to its original)."""
@@ -493,6 +556,8 @@ def write_report(
         f"- Topics: {len(topics)}, {columns} with at least 4 clues (a full column); most common: "
         f"{dict(topics.most_common(25))}",
         f"- Difficulty: {dict(sorted(difficulty.items(), key=lambda item: str(item[0])))}",
+        f"- Jev hardness of kept clues (0 everyone knows – 4 buffs only), rounded: "
+        f"{dict(sorted(Counter(round(hardness[key]) for key in kept if key in hardness).items()))}",
         "",
         "## Cost (this run's requests only)",
         "",
@@ -538,20 +603,23 @@ def write_report(
         for key in bank:
             record = rewritten[key]["rewrite"]
             tags = tagged[key]["tags"]
-            entry = {
-                "id": key,
-                "category": record.get("category"),
-                "topic": record.get("topic"),
-                "difficulty": record.get("difficulty"),
-                "value": by_id[key]["value"],
-                "round": by_id[key]["round"],
-                "clue": record["clue"],
-                "answer": record["answer"],
-                "accept": accepted(record),
-                "kids": record.get("kids"),
-                "adult": tags["adult"] >= MAX_FLAG_P,
-                "appeal": tags["appeal"],
-            }
+            entry = plain(
+                {
+                    "id": key,
+                    "category": record.get("category"),
+                    "topic": record.get("topic"),
+                    "difficulty": record.get("difficulty"),
+                    "value": by_id[key]["value"],
+                    "round": by_id[key]["round"],
+                    "clue": record["clue"],
+                    "answer": record["answer"],
+                    "accept": accepted(record),
+                    "kids": record.get("kids"),
+                    "adult": tags["adult"] >= MAX_FLAG_P,
+                    "appeal": tags["appeal"],
+                    "hardness": hardness.get(key),
+                }
+            )
             file.write(json.dumps(entry, ensure_ascii=False) + "\n")
     (out / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
