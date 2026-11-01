@@ -1,7 +1,7 @@
 # Feature: Big Brain (team quiz show)
 
-- Status: `in-progress` (built and tested on the MacBook 2026-11-01; clue bank, host clips, sounds and music on the
-  Mac mini; not yet played on the robot)
+- Status: `in-progress` (built and tested 2026-11-01; deployed to the Mac mini 2026-11-01 13:45, enabled; not yet
+  played on the robot)
 - Last updated: 2026-11-01
 - Plan: [party-games.md](../plans/party-games.md) ("Big Brain build")
 - Part of: [games.md](games.md) (the shared game host)

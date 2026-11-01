@@ -477,3 +477,6 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   recorded speech through announcements, catalog and wiring); 18 sounds and music pieces made (three takes
   each, the first chosen); host clips converted to WAV; feature doc [big-brain.md](../features/big-brain.md).
   Points are 200/400/600/800 (Eduardo, mid-build). Full gate 2,928 passed. Not yet deployed or played.
+- 2026-11-01: deployed to the Mac mini (b0877d8, restarted 13:45): "Games enabled: colors, treasure, simon,
+  bigbrain", no errors; clue bank, host clips, sounds and the ElevenLabs key in place. A QR library was tried on
+  the mini too and fails the same way (pygobject needs cairo to re-lock), so the encoder stays. Not played yet.
