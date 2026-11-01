@@ -149,6 +149,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.games.base import SPEAK_TIMEOUT_S, Game, GameServices
     from reachy_mini_conversation_app.games.host import GameHost
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
+    from reachy_mini_conversation_app.games.sheeple import Sheeple, SheepleSetup
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
     from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
     from reachy_mini_conversation_app.tools.move_head import MoveHead
@@ -307,6 +308,9 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         )
         if themed.bank.is_file():
             games[key] = lambda themed=themed: BigBrain(themed)  # type: ignore[misc]
+    sheeple = SheepleSetup(data_dir=game_data, port=config.BIG_BRAIN_PORT, public_url=config.BIG_BRAIN_PUBLIC_URL)
+    if sheeple.bank.is_file():  # one phone game at a time, so it shares Big Brain's port and public address
+        games["sheeple"] = lambda: Sheeple(sheeple)
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)

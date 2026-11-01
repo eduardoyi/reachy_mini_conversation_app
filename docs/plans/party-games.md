@@ -486,3 +486,6 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   confident) that code and Jev judge; 139 kids' and 238 adults' words in both languages. Square types, Richie
   drawing, telephone, the no-phone fallback and saved drawings are deferred. Tested with fakes only; the vision
   guesses still need measuring on real drawings.
+- 2026-11-01: Sheeple first version built (flock and team rounds, six boards with the last one double, kids filter,
+  phones page, TRMNL board, judging by code then Jev); feature doc [sheeple.md](../features/sheeple.md). Plays once
+  `sheeple/bank.jsonl` is in `GAME_DATA_DIR`. Not yet deployed or played.

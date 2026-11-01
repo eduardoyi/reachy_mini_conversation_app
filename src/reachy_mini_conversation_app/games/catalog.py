@@ -195,6 +195,46 @@ BIG_BRAIN: Final[GameInfo] = GameInfo(
 )
 
 
+SHEEPLE: Final[GameInfo] = GameInfo(
+    key="sheeple",
+    names=frozenset(
+        {
+            "sheeple",
+            "el sheeple",
+            "sheeple game",
+            "shipul",
+            "shipol",
+            "shiple",
+            "sheep pull",
+            "sheep people",
+            "she pull",
+            "las encuestas",
+            "encuestas",
+            "la encuesta",
+            "encuesta",
+            "survey",
+            "surveys",
+            "the survey",
+            "survey says",
+        }
+    ),  # fmt: skip
+    title={"es": "Sheeple", "en": "Sheeple"},
+    pitch={
+        "es": "Adivinen qué contestó la encuesta: gana quien piensa como el rebaño. Cada quien juega desde su teléfono.",
+        "en": "Guess what the survey said: whoever thinks like the flock wins. Everyone plays on their phone.",
+    },
+    rules=(
+        "A survey game for teams. Players scan the QR code on the e-ink screen with their phones, type a name and "
+        "pick a team. Each board is a question asked to 100 people with its answers hidden, ranked by how many said "
+        "them. Flock rounds: everyone types a guess on the phone, Reachy reveals the answers from least to most "
+        "popular and each guess scores the people who gave that answer. Team rounds: teams take turns, one player "
+        "taps the phone and says the guess aloud; a hit scores, a miss passes the turn, six misses end the board. "
+        "Six boards, the last one double, then the winning team. Spanish or English (the surveys were asked in the "
+        "US). Kids mode leaves out adult and US-only questions. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
+
 def _edition_names(subjects: tuple[str, ...]) -> frozenset[str]:
     """Return the ways to ask for a Big Brain edition: "big brain harry potter", "trivia de hogwarts"..."""
     shows = ("big brain", "bigbrain", "big brains", "big brein", "big brian", "el big brain")
@@ -360,6 +400,7 @@ GAMES: Final[dict[str, GameInfo]] = {
         BIG_BRAIN_SW,
         BIG_BRAIN_DISNEY,
         SCRIBBLE_RUSH,
+        SHEEPLE,
     )
 }
 
