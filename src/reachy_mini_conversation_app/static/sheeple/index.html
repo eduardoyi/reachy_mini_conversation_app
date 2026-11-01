@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#123d2a">
+<title>Sheeple</title>
+<style>
+:root{--bg:#123d2a;--bg2:#1b5139;--card:#226446;--line:#3a8a63;--ink:#fff;--dim:#b9dcc8;--wool:#fff7e6;--gold:#ffd166;--ok:#5ee08a;--bad:#ff6b6b}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);background-image:radial-gradient(ellipse at 50% -10%,#2f7a55 0,var(--bg) 60%);background-attachment:fixed;color:var(--ink);
+ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;min-height:100vh;overflow-x:hidden;
+ -webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-text-size-adjust:100%;user-select:none;-webkit-user-select:none}
+input,.txt{user-select:text;-webkit-user-select:text}
+#app{max-width:640px;margin:0 auto;padding:8px 10px 40px}
+button,input{font:inherit}
+button{touch-action:manipulation;cursor:pointer}
+.logo{font-weight:900;letter-spacing:.06em;color:var(--wool);text-shadow:0 2px 0 #0a2619}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0 8px}
+header .logo{font-size:16px}
+.me{background:var(--tc);color:var(--tx);border-radius:999px;padding:5px 12px;font-weight:800;font-size:14px;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scores{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.sc{flex:1 1 0;min-width:72px;background:var(--bg2);border:2px solid transparent;border-radius:10px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;border-top:5px solid var(--tc)}
+.sc b{font-size:12px;font-weight:700;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sc span{font-size:18px;font-weight:900}
+.sc.turn{border-color:var(--gold);box-shadow:0 0 12px rgba(255,209,102,.45)}
+#timer{display:none;align-items:center;gap:8px;margin:0 0 8px}
+#timer.on{display:flex}
+#timer .bar{flex:1;height:10px;background:var(--bg2);border-radius:6px;overflow:hidden}
+#timer .fill{height:100%;background:var(--gold);width:100%;transition:width .2s linear}
+#timer.low .fill{background:var(--bad)}
+#timer .secs{font-weight:900;font-size:20px;min-width:2.2em;text-align:right;font-variant-numeric:tabular-nums}
+.msg{background:var(--gold);color:#1a1a1a;font-weight:900;font-size:20px;text-align:center;border-radius:14px;padding:10px 14px;margin:0 0 10px;box-shadow:0 4px 0 #b38b1b}
+.card{background:var(--card);border-radius:16px;padding:14px;margin:0 0 10px;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+.center{text-align:center}
+h1{margin:0 0 6px;font-size:28px;font-weight:900;line-height:1.15}
+h2{margin:0 0 6px;font-size:22px;font-weight:900;line-height:1.2}
+.sub{color:var(--dim);font-size:16px;margin:4px 0 0}
+.big{font-size:38px}
+label,.lbl{display:block;font-weight:800;font-size:15px;color:var(--dim);margin:10px 0 6px}
+.txt{width:100%;font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#0d2e20;color:#fff;outline:none}
+.txt:focus{border-color:var(--gold)}
+.primary{display:block;width:100%;margin-top:12px;padding:15px;border:none;border-radius:14px;background:var(--gold);color:#1a1a1a;font-size:21px;font-weight:900;box-shadow:0 4px 0 #b38b1b}
+.primary:disabled{opacity:.45}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tbtn{background:var(--tc);color:var(--tx);border:4px solid transparent;border-radius:14px;min-height:84px;padding:8px;text-align:left;display:flex;flex-direction:column;justify-content:space-between;opacity:.8}
+.tbtn b{font-size:21px;font-weight:900}
+.tbtn small{font-size:13px;font-weight:600;opacity:.9}
+.tbtn.sel{border-color:#fff;opacity:1;box-shadow:0 0 0 3px var(--gold)}
+.teams.picked .tbtn:not(.sel){opacity:.4}
+.tlist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.tl{text-align:left;border-left:6px solid var(--tc);background:var(--bg2);border-radius:10px;padding:8px 10px;font-size:14px}
+.tl b{display:block;font-size:16px}
+.round{display:inline-block;background:var(--wool);color:#123d2a;font-weight:900;font-size:14px;border-radius:999px;padding:4px 12px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em}
+.q{font-size:22px;font-weight:800;line-height:1.3}
+.slots{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.slots li{display:flex;align-items:center;gap:10px;border-radius:10px;padding:8px 10px;background:var(--bg2);min-height:44px}
+.slots li.on{background:var(--wool);color:#123d2a}
+.slots li.mine{box-shadow:0 0 0 3px var(--gold)}
+.slots .r{font-weight:900;width:1.6em;text-align:center;opacity:.8}
+.slots .a{flex:1;font-weight:800;font-size:18px;word-break:break-word}
+.slots .n{font-weight:900;font-size:20px}
+.misses{text-align:center;font-weight:900;font-size:22px;letter-spacing:.3em;color:var(--bad);margin:6px 0}
+.ansform{display:flex;gap:8px;margin-top:10px}
+.ansform .txt{flex:1;min-width:0}
+.ansform .primary{width:auto;margin:0;padding:0 18px;font-size:18px}
+.sent{margin-top:10px;color:var(--ok);font-weight:800;font-size:17px;word-break:break-word}
+.speak{display:block;width:100%;padding:34px 16px;border:none;border-radius:20px;background:var(--tc);color:var(--tx);font-size:34px;font-weight:900;box-shadow:0 8px 0 rgba(0,0,0,.4),0 0 40px var(--tc);margin:0 0 10px}
+.speak:disabled{filter:grayscale(.6) brightness(.6)}
+.wait{border-radius:16px;padding:14px 12px;margin:0 0 10px;text-align:center;font-weight:900;font-size:20px;background:var(--bg2);border:3px dashed var(--tc)}
+.say{background:var(--tc);color:var(--tx);border-radius:20px;padding:30px 16px;text-align:center;font-size:32px;font-weight:900;box-shadow:0 0 40px var(--tc);margin:0 0 10px}
+.mine-guess{margin-top:10px;font-weight:800;font-size:17px}
+.mine-guess.y{color:var(--ok)}.mine-guess.n{color:var(--dim)}
+.win{background:var(--tc);color:var(--tx);border-radius:20px;padding:22px 14px;text-align:center;margin-bottom:10px;box-shadow:0 0 40px var(--tc)}
+.win .w1{font-size:18px;font-weight:800;opacity:.9}
+.win .w2{font-size:40px;font-weight:900;line-height:1.1}
+.final{margin:0;padding:0}
+.final li{display:flex;justify-content:space-between;font-size:19px;font-weight:800;padding:8px 10px;border-left:8px solid var(--tc);background:var(--bg2);border-radius:10px;margin-bottom:6px;list-style:none}
+.kids{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:12px 14px;background:var(--bg2);border-radius:12px;font-weight:800;font-size:18px;cursor:pointer}
+.kids input{position:absolute;opacity:0;pointer-events:none}
+.kids .sw{flex:none;width:58px;height:32px;border-radius:999px;background:var(--line);position:relative}
+.kids .sw::after{content:'';position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:#fff;transition:left .15s}
+.kids input:checked+.sw{background:var(--ok)}
+.kids input:checked+.sw::after{left:30px}
+#banner{position:fixed;top:0;left:0;right:0;z-index:20;background:var(--bad);color:#fff;text-align:center;font-weight:800;font-size:14px;padding:6px;transform:translateY(-100%);transition:transform .2s}
+#banner.on{transform:none}
+#toast{position:fixed;left:50%;bottom:18px;z-index:21;transform:translate(-50%,150%);background:#fff;color:#1a1a1a;font-weight:800;border-radius:12px;padding:12px 16px;max-width:92vw;transition:transform .25s;text-align:center}
+#toast.on{transform:translate(-50%,0)}
+.spin{display:inline-block;width:28px;height:28px;border:4px solid var(--line);border-top-color:var(--wool);border-radius:50%;animation:sp 1s linear infinite;margin:10px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="banner"></div>
+<div id="app">
+ <div id="head"></div>
+ <div id="timer"><div class="bar"><div class="fill"></div></div><div class="secs"></div></div>
+ <div id="msg"></div>
+ <div id="stage"></div>
+</div>
+<div id="toast"></div>
+<script>
+(function () {
+'use strict';
+var T = {
+ es: {
+  names: {red: 'Rojo', blue: 'Azul', green: 'Verde', yellow: 'Amarillo'},
+  yourName: 'Tu nombre', pickTeam: 'Escoge tu equipo', join: '¡Entrar!', needName: 'Escribe tu nombre', needTeam: 'Escoge un equipo',
+  nobody: 'Nadie todavía', inProgress: 'Juego en curso', inProgressSub: 'Espera a la próxima partida para unirte.',
+  noCode: 'Falta el código del juego. Escanea el QR otra vez.', connecting: 'Conectando…', reconnecting: 'Reconectando…',
+  lobbyIn: '¡Estás dentro!', lobbyWait: 'Esperando a los demás…', start: '¡Empezar!', startHint: 'Cuando estén todos', kidsMode: 'Modo niños',
+  errClosed: 'El juego ya empezó', errName: 'Escribe tu nombre y escoge un equipo',
+  round: function (n, o) { return 'Ronda ' + n + ' de ' + o; }, flock: 'Todos responden', team: 'Por equipos',
+  asked: '100 gringos respondieron:', yourAnswer: '¿Qué dijo la mayoría?', send: 'Enviar', sent: 'Enviado',
+  canResend: 'Puedes cambiarla antes de que acabe el tiempo.', speak: '¡Responder!', speakSub: 'Toca y dile tu respuesta a Richie',
+  turnOf: function (t) { return 'Turno del equipo ' + t; }, sayIt: '¡Dilo en voz alta!', answering: function (n) { return n + ' está respondiendo…'; },
+  hit: function (r) { return '¡Salió! Puesto ' + r; }, miss: 'No salió en la encuesta', yourGuess: 'Tu respuesta:',
+  listen: 'Escucha a Richie…', winner: 'Gana el equipo', winners: '¡Empate! Ganan', sheep: 'Ovejas del rebaño', pts: 'pts',
+  thanks: '¡Gracias por jugar!', paused: 'Pausa', pausedSub: 'Richie creyó que alguien lo llamó, o le tocaron una antena.', resume: '¡Seguimos!'
+ },
+ en: {
+  names: {red: 'Red', blue: 'Blue', green: 'Green', yellow: 'Yellow'},
+  yourName: 'Your name', pickTeam: 'Pick your team', join: 'Join!', needName: 'Type your name', needTeam: 'Pick a team',
+  nobody: 'Nobody yet', inProgress: 'Game in progress', inProgressSub: 'Wait for the next game to join.',
+  noCode: 'The game code is missing. Scan the QR code again.', connecting: 'Connecting…', reconnecting: 'Reconnecting…',
+  lobbyIn: "You're in!", lobbyWait: 'Waiting for everyone…', start: 'Start!', startHint: "When everyone's in", kidsMode: 'Kids mode',
+  errClosed: 'The game already started', errName: 'Type your name and pick a team',
+  round: function (n, o) { return 'Round ' + n + ' of ' + o; }, flock: 'Everyone answers', team: 'Team by team',
+  asked: 'We asked 100 people:', yourAnswer: 'What did most people say?', send: 'Send', sent: 'Sent',
+  canResend: 'You can change it until time runs out.', speak: 'Answer!', speakSub: 'Tap, then tell Richie your answer',
+  turnOf: function (t) { return t + " team's turn"; }, sayIt: 'Say it out loud!', answering: function (n) { return n + ' is answering…'; },
+  hit: function (r) { return 'On the board! Number ' + r; }, miss: 'Not in the survey', yourGuess: 'Your answer:',
+  listen: 'Listen to Richie…', winner: 'The winner is', winners: "It's a tie! Winners:", sheep: 'The flock', pts: 'pts',
+  thanks: 'Thanks for playing!', paused: 'Paused', pausedSub: 'Richie thought someone called him, or an antenna got bumped.', resume: 'Keep playing!'
+ }
+};
+var KEYS = ['red', 'blue', 'green', 'yellow'];
+var TC = {red: ['#e53935', '#fff'], blue: ['#1e88e5', '#fff'], green: ['#7cb342', '#fff'], yellow: ['#fdd835', '#1a1a1a']};
+var code = (new URLSearchParams(location.search).get('c') || '').trim();
+var STORE = 'sheeple:' + code;
+var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
+var S = null, ws = null, retry = 0, timer = null, cache = {}, lastPhase = null, lastRound = null;
+var draft = {name: '', team: null, answer: ''}, lock = false;
+var dl = {key: null, total: 1};
+function $(id) { return document.getElementById(id); }
+function t() { return T[lang]; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+function ts(k) { var c = TC[k] || ['#888', '#fff']; return 'style="--tc:' + c[0] + ';--tx:' + c[1] + '"'; }
+function load() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
+function save(v) { try { localStorage.setItem(STORE, v); } catch (e) {} }
+function forget() { try { localStorage.removeItem(STORE); } catch (e) {} }
+function can(a) { return !!(S && S.can && S.can.indexOf(a) >= 0); }
+function team(k) { var l = (S && S.teams) || []; for (var i = 0; i < l.length; i++) if (l[i].key === k) return l[i]; return null; }
+function tname(k) { var x = team(k); return (x && x.name) || t().names[k] || k; }
+function send(o) { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast(t().reconnecting); return false; }
+var toastTimer = null;
+function toast(m) { var el = $('toast'); el.textContent = m; el.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('on'); }, 3200); }
+function banner(on) { var b = $('banner'); b.textContent = t().reconnecting; b.classList.toggle('on', !!on); }
+
+function connect() {
+ clearTimeout(timer); timer = null;
+ if (!code) { render(); return; }
+ var proto = location.protocol === 'https:' ? 'wss:' : 'ws:', sock;
+ var dir = location.pathname.replace(/[^\/]*$/, '');
+ try { sock = new WebSocket(proto + '//' + location.host + dir + 'ws?code=' + encodeURIComponent(code)); } catch (e) { schedule(); return; }
+ ws = sock;
+ sock.onopen = function () { retry = 0; banner(false); var id = load(); if (id) sock.send(JSON.stringify({type: 'join', player: id})); };
+ sock.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (e) { return; } handle(m); };
+ sock.onclose = function () { if (ws !== sock) return; ws = null; banner(true); schedule(); };
+ sock.onerror = function () { try { sock.close(); } catch (e) {} };
+}
+function schedule() { if (timer) return; var d = Math.min(5000, 1000 + retry * 1000); retry++; timer = setTimeout(connect, d); }
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); } });
+
+function handle(m) {
+ if (m.type === 'welcome') { if (m.player) save(m.player); }
+ else if (m.type === 'forget') { forget(); showJoin(); }
+ else if (m.type === 'error') {
+  var em = m.message || '!';
+  if (em === 'join') { showJoin(); return; }
+  toast(em === 'closed' ? t().errClosed : em === 'name' ? t().errName : em);
+  lock = false; cache.stage = null; render();
+ } else if (m.type === 'state') {
+  S = m; lang = m.language === 'en' ? 'en' : 'es';
+  var r = m.round ? m.round.number : null;
+  if (r !== lastRound) { draft.answer = ''; lastRound = r; }
+  if (m.phase !== lastPhase) {
+   lastPhase = m.phase;
+   if (can('speak')) { try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (x) {} }
+  }
+  lock = false;
+  render();
+ }
+}
+function showJoin() { if (!S) return; S.you = null; S.can = (S.can || []).concat('join'); render(); }
+
+function setRegion(id, html) {
+ if (cache[id] === html) return;
+ var el = $(id), a = document.activeElement, fid = a && a.id && el.contains(a) ? a.id : null;
+ el.innerHTML = html; cache[id] = html;
+ if (fid) { var n = $(fid); if (n) n.focus(); }
+}
+function render() {
+ document.documentElement.lang = lang;
+ setRegion('head', headHtml());
+ setRegion('msg', S && S.you && S.message ? '<div class="msg">' + esc(S.message) + '</div>' : '');
+ setRegion('stage', stageHtml());
+ tick();
+}
+function headHtml() {
+ if (!S || !S.you) return '';
+ var y = S.you, h = '<header><span class="logo">SHEEPLE</span><span class="me" ' + ts(y.team) + '>' + esc(y.name) + ' · ' + esc(tname(y.team)) + '</span></header>';
+ if (S.phase === 'lobby') return h;
+ h += '<div class="scores">';
+ (S.teams || []).forEach(function (x) { h += '<div class="sc' + (S.turn === x.key ? ' turn' : '') + '" ' + ts(x.key) + '><b>' + (S.turn === x.key ? '▶ ' : '') + esc(x.name) + '</b><span>' + esc(x.score) + '</span></div>'; });
+ return h + '</div>';
+}
+function stageHtml() {
+ var L = t();
+ if (!code) return '<div class="card center"><h2>' + esc(L.noCode) + '</h2></div>';
+ if (!S) return '<div class="card center"><h1 class="logo big">SHEEPLE</h1><div class="spin"></div><p class="sub">' + esc(L.connecting) + '</p></div>';
+ if (!S.you) {
+  if (can('join')) return joinHtml();
+  return '<div class="card center"><h1 class="logo big">SHEEPLE</h1><h2>' + esc(L.inProgress) + '</h2><p class="sub">' + esc(L.inProgressSub) + '</p></div>';
+ }
+ var p = S.phase;
+ if (p === 'paused') return '<div class="card center"><h1 class="big">' + esc(L.paused) + '</h1><p class="sub">' + esc(L.pausedSub) + '</p>' +
+  (can('resume') ? '<button type="button" class="primary" data-act="resume">' + esc(L.resume) + '</button>' : '') + '</div>';
+ if (p === 'lobby') {
+  var lb = '<div class="card center"><h1>' + esc(L.lobbyIn) + '</h1><p class="sub">' + esc(L.lobbyWait) + '</p><div class="spin"></div>' + teamList();
+  if (can('settings')) lb += '<label class="kids" for="iKids"><span>' + esc(L.kidsMode) + '</span><input id="iKids" type="checkbox"' + (S.kids ? ' checked' : '') + '><span class="sw"></span></label>';
+  if (can('start')) lb += '<button type="button" class="primary" data-act="start"' + (lock ? ' disabled' : '') + '>' + esc(L.start) + '</button><p class="sub">' + esc(L.startHint) + '</p>';
+  return lb + '</div>';
+ }
+ if (p === 'over') return overHtml();
+ if (!S.question) return '<div class="card center"><p class="sub">' + esc(L.listen) + '</p><div class="spin"></div></div>';
+ var h = '';
+ if (can('speak')) h += '<button type="button" class="speak" data-act="speak" ' + ts(S.you.team) + (lock ? ' disabled' : '') + '>' + esc(L.speak) + '<br><small style="font-size:16px">' + esc(L.speakSub) + '</small></button>';
+ else if (p === 'answering' && S.speaker) {
+  var me = S.speaker.name === S.you.name && S.speaker.team === S.you.team;
+  h += me ? '<div class="say" ' + ts(S.speaker.team) + '>' + esc(L.sayIt) + '</div>' : '<div class="wait" ' + ts(S.speaker.team) + '>' + esc(L.answering(S.speaker.name)) + '</div>';
+ } else if (S.turn && (p === 'team')) h += '<div class="wait" ' + ts(S.turn) + '>' + esc(L.turnOf(tname(S.turn))) + '</div>';
+ var r = S.round || {};
+ h += '<div class="card"><span class="round">' + esc(L.round(r.number, r.of)) + ' · ' + esc(r.kind === 'team' ? L.team : L.flock) + '</span>' +
+  '<p class="sub">' + esc(L.asked) + '</p><div class="q">' + esc(S.question) + '</div>';
+ if (can('answer')) h += '<form id="fAns" class="ansform" autocomplete="off"><input id="iAns" class="txt" maxlength="60" autocomplete="off" enterkeyhint="send" placeholder="' +
+  esc(L.yourAnswer) + '" value="' + esc(draft.answer) + '"><button class="primary" type="submit">' + esc(L.send) + '</button></form>';
+ if (S.guess) {
+  if (can('answer')) h += '<div class="sent">✓ ' + esc(L.sent) + ': “' + esc(S.guess.text) + '”<br><small>' + esc(L.canResend) + '</small></div>';
+  else h += '<div class="mine-guess ' + (S.guess.rank ? 'y' : 'n') + '">' + esc(L.yourGuess) + ' “' + esc(S.guess.text) + '” — ' +
+   esc(S.guess.rank ? L.hit(S.guess.rank) : (p === 'reveal' ? '…' : L.miss)) + '</div>';
+ }
+ h += '</div>';
+ if (S.misses != null) h += '<div class="misses">' + new Array(S.misses + 1).join('✗') + '<span style="opacity:.3">' + new Array(7 - Math.min(6, S.misses)).join('✗') + '</span></div>';
+ h += '<ul class="slots">';
+ (S.answers || []).forEach(function (a) {
+  var mine = S.guess && S.guess.rank === a.rank;
+  h += '<li class="' + (a.text ? 'on' : '') + (mine ? ' mine' : '') + '"><span class="r">' + a.rank + '</span><span class="a">' + esc(a.text || '') + '</span><span class="n">' + (a.count != null ? esc(a.count) : '') + '</span></li>';
+ });
+ return h + '</ul>';
+}
+function playersOf(k) { var x = team(k); return x && x.players && x.players.length ? x.players.join(', ') : t().nobody; }
+function teamList() {
+ var h = '<div class="tlist">';
+ (S.teams || []).forEach(function (x) { h += '<div class="tl" ' + ts(x.key) + '><b>' + esc(x.name) + '</b>' + esc(playersOf(x.key)) + '</div>'; });
+ return h + '</div>';
+}
+function joinHtml() {
+ var L = t(), h = '<form id="fJoin" class="card" autocomplete="off"><h1 class="logo big center">SHEEPLE</h1>' +
+  '<label for="iName">' + esc(L.yourName) + '</label><input id="iName" class="txt" maxlength="16" autocomplete="off" autocapitalize="words" enterkeyhint="done" value="' + esc(draft.name) + '">' +
+  '<div class="lbl">' + esc(L.pickTeam) + '</div><div class="teams' + (draft.team ? ' picked' : '') + '">';
+ KEYS.forEach(function (k) { h += '<button type="button" class="tbtn' + (draft.team === k ? ' sel' : '') + '" data-act="team" data-v="' + k + '" ' + ts(k) + '><b>' + esc(tname(k)) + '</b><small>' + esc(playersOf(k)) + '</small></button>'; });
+ return h + '</div><button class="primary" type="submit">' + esc(L.join) + '</button></form>';
+}
+function overHtml() {
+ var L = t(), list = (S.teams || []).slice().sort(function (a, b) { return b.score - a.score; }), h = '';
+ if (list.length) {
+  var top = list[0].score, win = list.filter(function (x) { return x.score === top; });
+  h += '<div class="win" ' + ts(win[0].key) + '><div class="w1">' + esc(win.length > 1 ? L.winners : L.winner) + '</div><div class="w2">' +
+   win.map(function (x) { return esc(x.name); }).join(' · ') + '</div><div class="w1">' + esc(top) + ' ' + esc(L.pts) + '</div></div><ul class="final card">';
+  list.forEach(function (x) { h += '<li ' + ts(x.key) + '><span>' + esc(x.name) + '</span><span>' + esc(x.score) + '</span></li>'; });
+  h += '</ul>';
+ }
+ if (S.sheep && S.sheep.length) {
+  h += '<div class="card"><h2>' + esc(L.sheep) + '</h2><ul class="final">';
+  S.sheep.forEach(function (x) { h += '<li ' + ts(x.team) + '><span>' + esc(x.name) + '</span><span>' + esc(x.points) + '</span></li>'; });
+  h += '</ul></div>';
+ }
+ return h + '<div class="card center"><h1>' + esc(L.thanks) + '</h1></div>';
+}
+function tick() {
+ var el = $('timer');
+ if (!S || !S.deadline) { el.classList.remove('on'); return; }
+ var rem = S.deadline - Date.now();
+ if (dl.key !== S.deadline) { dl.key = S.deadline; dl.total = Math.max(1000, rem); }
+ rem = Math.max(0, rem);
+ el.classList.add('on'); el.classList.toggle('low', rem < 5000);
+ el.querySelector('.fill').style.width = Math.min(100, rem / dl.total * 100) + '%';
+ el.querySelector('.secs').textContent = Math.ceil(rem / 1000) + 's';
+}
+setInterval(tick, 200);
+
+document.addEventListener('input', function (e) {
+ if (e.target.id === 'iName') draft.name = e.target.value;
+ else if (e.target.id === 'iAns') draft.answer = e.target.value;
+});
+document.addEventListener('click', function (e) {
+ var el = e.target.closest ? e.target.closest('[data-act]') : null;
+ if (!el || el.disabled) return;
+ var a = el.getAttribute('data-act');
+ if (a === 'team') { draft.team = el.getAttribute('data-v'); render(); }
+ else if (a === 'start') { if (!lock && can('start') && send({type: 'start'})) { lock = true; el.disabled = true; } }
+ else if (a === 'speak') {
+  if (!lock && can('speak') && send({type: 'speak'})) { lock = true; el.disabled = true; try { if (navigator.vibrate) navigator.vibrate(80); } catch (x) {} }
+ } else if (a === 'resume') { if (can('resume') && send({type: 'resume'})) el.disabled = true; }
+});
+document.addEventListener('submit', function (e) {
+ e.preventDefault();
+ var id = e.target.id, L = t();
+ if (id === 'fJoin') {
+  var name = draft.name.trim().slice(0, 16);
+  if (!name) { toast(L.needName); return; }
+  if (!draft.team) { toast(L.needTeam); return; }
+  send({type: 'join', name: name, team: draft.team, player: load() || null});
+ } else if (id === 'fAns') {
+  var txt = draft.answer.trim();
+  if (txt && send({type: 'answer', text: txt})) { draft.answer = ''; var a = document.activeElement; if (a && a.blur) a.blur(); cache.stage = null; }
+ }
+});
+document.addEventListener('change', function (e) {
+ if (e.target.id !== 'iKids') return;
+ cache.stage = null;
+ if (!can('settings') || !send({type: 'kids', on: !!e.target.checked})) e.target.checked = !!(S && S.kids);
+});
+render();
+connect();
+})();
+</script>
+</body>
+</html>

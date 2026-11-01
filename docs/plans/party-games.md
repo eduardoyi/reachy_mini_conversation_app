@@ -480,3 +480,6 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-01: deployed to the Mac mini (b0877d8, restarted 13:45): "Games enabled: colors, treasure, simon,
   bigbrain", no errors; clue bank, host clips, sounds and the ElevenLabs key in place. A QR library was tried on
   the mini too and fails the same way (pygobject needs cairo to re-lock), so the encoder stays. Not played yet.
+- 2026-11-01: Sheeple first version built (flock and team rounds, six boards with the last one double, kids filter,
+  phones page, TRMNL board, judging by code then Jev); feature doc [sheeple.md](../features/sheeple.md). Plays once
+  `sheeple/bank.jsonl` is in `GAME_DATA_DIR`. Not yet deployed or played.

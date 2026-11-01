@@ -71,6 +71,7 @@ def render_join(
     *,
     kids: bool = False,
     edition: str | None = None,
+    title: str = "BIG BRAIN",
 ) -> bytes:
     """Render the join screen: the QR code on the left, the title, the code and who is on each team on the right."""
     canvas, draw = _canvas()
@@ -85,7 +86,7 @@ def render_join(
                 draw.rectangle((x0, y0, x0 + scale - 1, y0 + scale - 1), fill=0)
     right = left + size + 30
     width = WIDTH - right - 20
-    _draw_lines(draw, ["BIG BRAIN"], _font(52, bold=True), left=right, width=width, top=30, centered=True)
+    _draw_lines(draw, [title], _font(52, bold=True), left=right, width=width, top=30, centered=True)
     shift = 0
     if edition:  # "Hogwarts edition" under the title moves the rest down
         _draw_lines(draw, [edition], _font(26, bold=True), left=right, width=width, top=88, centered=True)

@@ -15,6 +15,7 @@ the implementation.
 | Hybrid runtime | [hybrid-runtime.md](hybrid-runtime.md) | in-progress |
 | Games | [games.md](games.md) | in-progress: game host and color hunt built and tested; not yet played on the robot |
 | Big Brain (team quiz show) | [big-brain.md](big-brain.md) | in-progress: played twice on 2026-11-01 and fixed after each; Hogwarts (Harry Potter), Middle-earth (Lord of the Rings) and Galactic (Star Wars) editions |
+| Sheeple (survey party game) | [sheeple.md](sheeple.md) | in-progress: first version built and tested 2026-11-01; waiting for the survey bank; not yet played |
 | Local ambient context | [ambient-context.md](ambient-context.md) | in-progress |
 | Local audio backends | [local-audio-backends.md](local-audio-backends.md) | in-progress |
 | Simulator speaker output bypass | [simulator-speaker-output.md](simulator-speaker-output.md) | in-progress |
