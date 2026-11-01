@@ -2,99 +2,470 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#141210">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#141d27">
 <title>Detectives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Fredoka:wght@500;600;700&display=swap">
 <style>
-:root{--bg:#141210;--card:#211d19;--line:#3a332b;--ink:#f3ece0;--dim:#b3a794;--gold:#e0b453;--ok:#6fcf8a;--bad:#ef6f61}
+/* Noir skin: a desk at night under a brass lamp; everything you hold is paper. */
+:root{
+ --bg:#141d27;--bg2:#1d2a38;--lamp:rgba(233,180,76,.17);
+ --paper:#efe4ca;--manila:#dcc590;--manila-edge:#b89a5c;--ink:#251d14;--ink2:#5a4934;
+ --on:#eef1f4;--on2:#a9b8c6;--rule:rgba(238,241,244,.12);
+ --brass:#e9b44c;--brass-dk:#9c7224;--btn-ink:#2a1c06;
+ --red:#b3291f;--red-hi:#ff8a7a;--ok:#2f7d45;--ok-hi:#7fdc98;
+ --mug:#2a3644;--sil:#0b1017;
+ --f-display:"Big Shoulders Display","Arial Narrow","Roboto Condensed",Impact,sans-serif;
+ --f-text:"Courier Prime","Courier New",ui-monospace,monospace;
+ --r-paper:3px;--r-btn:6px;
+ --shadow:0 1px 0 rgba(255,255,255,.35) inset,0 14px 28px -10px rgba(0,0,0,.65),0 2px 4px rgba(0,0,0,.35);
+ --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .25 0 0 0 0 .1 0 0 0 .16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Kids skin: a sunny kitchen table, crayon on notebook paper. */
+body.kids{
+ --bg:#ffd35a;--bg2:#ffc53d;--lamp:rgba(255,255,255,.45);
+ --paper:#fffdf6;--manila:#fff1bf;--manila-edge:#e9c75b;--ink:#26306b;--ink2:#4c5590;
+ --on:#26306b;--on2:#5b4a12;--rule:rgba(38,48,107,.18);
+ --brass:#e8502e;--brass-dk:#a8341a;--btn-ink:#fff;
+ --red:#e0342f;--red-hi:#c42520;--ok:#1f8a4c;--ok-hi:#1f8a4c;
+ --mug:#ffe9a8;--sil:#26306b;
+ --f-display:"Fredoka","Baloo 2","Arial Rounded MT Bold",system-ui,sans-serif;
+ --f-text:"Fredoka","Arial Rounded MT Bold",system-ui,sans-serif;
+ --r-paper:18px;--r-btn:18px;
+ --shadow:0 6px 0 rgba(38,48,107,.18),0 12px 22px -12px rgba(38,48,107,.5);
+ --grain:none;
+}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
-body{background:var(--bg);color:var(--ink);font-family:Georgia,"Times New Roman",serif;min-height:100vh;-webkit-text-size-adjust:100%;touch-action:manipulation}
-#app{max-width:640px;margin:0 auto;padding:10px 16px 48px}
-button,input,textarea{font:inherit}
-button{cursor:pointer;border:0;border-radius:12px;padding:12px 14px;font-weight:700;background:var(--gold);color:#1a1408;width:100%}
-button.ghost{background:transparent;color:var(--gold);border:2px solid var(--gold)}
-button:disabled{opacity:.45}
-header{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0 10px}
-.logo{font-weight:900;letter-spacing:.14em;color:var(--gold);font-size:15px}
-.me{color:var(--dim);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 12px}
-h1{font-size:24px;margin:0 0 8px}
-h2{font-size:15px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);margin:0 0 10px}
-p{margin:0 0 8px;line-height:1.4}
-.dim{color:var(--dim)}
-.role{border-color:var(--gold)}
-.msg{background:var(--gold);color:#1a1408;font-weight:800;text-align:center;border-radius:12px;padding:10px;margin:0 0 12px}
-.turn{font-size:20px;font-weight:800;text-align:center}
-.mine{box-shadow:0 0 0 2px var(--gold),0 0 18px rgba(224,180,83,.35)}
-.list{display:flex;flex-direction:column;gap:8px}
-.row{display:flex;align-items:center;gap:10px;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px}
-.row:first-child{border-top:0;padding-top:0}
-.row div{flex:1}
-.row button{width:auto;flex:0 0 auto;padding:10px 12px}
-.who{font-weight:800}
-small{color:var(--dim)}
-input[type=text],textarea{width:100%;background:#0f0d0b;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;margin:0 0 10px}
-textarea{min-height:64px;resize:vertical}
-label.opt{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;margin:0 0 8px}
-label.opt input{transform:scale(1.3)}
-.note{border-top:1px solid var(--line);padding:8px 0}
-.note:first-child{border-top:0}
-#timer{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin:0 0 12px;display:none}
-#timer.on{display:block}
-#timer i{display:block;height:100%;background:var(--gold);width:100%}
-#banner{display:none;background:var(--bad);color:#fff;text-align:center;padding:6px;border-radius:8px;margin:0 0 10px}
-#banner.on{display:block}
-.ok{color:var(--ok)}.bad{color:var(--bad)}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{
+ background-color:var(--bg);color:var(--on);font-family:var(--f-text);font-size:17px;line-height:1.5;min-height:100vh;min-height:100dvh;
+ overflow-x:hidden;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none;transition:background-color .6s ease}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+ background-image:radial-gradient(120% 60% at 50% -8%,var(--lamp),transparent 62%),
+  repeating-linear-gradient(104deg,transparent 0 22px,rgba(255,255,255,.012) 22px 23px),
+  linear-gradient(180deg,var(--bg) 0,var(--bg2) 100%);
+}
+body.kids::before{
+ background-image:radial-gradient(100% 50% at 50% -5%,var(--lamp),transparent 60%),
+  linear-gradient(90deg,rgba(255,255,255,.28) 50%,transparent 50%),
+  linear-gradient(0deg,rgba(255,255,255,.28) 50%,transparent 50%);
+ background-size:auto,44px 44px,44px 44px;
+}
+body.tense{--lamp:rgba(179,41,31,.28)}
+body.kids.tense{--lamp:rgba(255,255,255,.45)}
+body::after{content:"";position:fixed;right:-70px;bottom:-60px;width:260px;height:300px;z-index:-1;pointer-events:none;opacity:.07;
+ background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 120' fill='none' stroke='%23e9b44c' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M50 10C28 10 14 28 14 52c0 20 4 38 12 54'/%3E%3Cpath d='M50 10c22 0 36 18 36 42 0 14-2 30-8 46'/%3E%3Cpath d='M50 20c-16 0-28 14-28 32 0 22 6 40 14 56'/%3E%3Cpath d='M50 20c16 0 28 14 28 32 0 16-3 32-9 48'/%3E%3Cpath d='M50 30c-11 0-20 10-20 22 0 20 5 36 12 52'/%3E%3Cpath d='M50 30c11 0 20 10 20 22 0 14-3 30-8 44'/%3E%3Cpath d='M50 40c-6 0-12 5-12 12 0 16 4 34 12 50'/%3E%3Cpath d='M50 40c6 0 12 5 12 12 0 14-2 26-6 38'/%3E%3Cpath d='M50 50c0 18 3 34 8 48'/%3E%3C/svg%3E") no-repeat center/contain}
+body.kids::after{opacity:.5;width:220px;height:220px;right:-50px;bottom:-40px;
+ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 4a46 46 0 1 0 46 46c-6 2-12-2-12-8-8 1-12-6-9-12-8-2-10-10-6-16-8-2-12-6-19-10z' fill='%23d9a05b' stroke='%23a0622d' stroke-width='3'/%3E%3Cg fill='%235a3a22'%3E%3Ccircle cx='30' cy='40' r='6'/%3E%3Ccircle cx='52' cy='62' r='7'/%3E%3Ccircle cx='28' cy='70' r='5'/%3E%3Ccircle cx='70' cy='72' r='5'/%3E%3Ccircle cx='50' cy='30' r='4'/%3E%3C/g%3E%3C/svg%3E")}
+input,textarea{user-select:text;-webkit-user-select:text}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;touch-action:manipulation}
+:focus{outline:none}
+:focus-visible{outline:3px solid var(--brass);outline-offset:3px}
+.sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+#app{max-width:560px;margin:0 auto;overflow-x:clip;padding:0 max(16px,env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+
+/* Header: wordmark, the case number (the join code) and your name tag; the turn timer burns along its edge. */
+header{position:sticky;top:0;z-index:20;margin:0 -16px 14px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;gap:10px;
+ background:linear-gradient(180deg,var(--bg) 70%,transparent);}
+.mark{font-family:"Big Shoulders Display","Arial Narrow",Impact,sans-serif;font-weight:900;font-size:22px;letter-spacing:.16em;color:var(--brass);line-height:1;display:flex;align-items:center;gap:8px}
+body.kids .mark{color:var(--ink)}
+.mark svg{width:22px;height:22px;flex:none}
+.caseno{font-size:12px;color:var(--on2);line-height:1.1}
+.me{margin-left:auto;max-width:44%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700;font-size:15px;padding:5px 12px;border-radius:999px;
+ background:var(--paper);color:var(--ink);box-shadow:0 2px 0 var(--manila-edge)}
+.me:empty{display:none}
+#fuse{position:absolute;left:16px;right:16px;bottom:2px;height:3px;border-radius:3px;background:var(--rule);overflow:hidden;opacity:0;transition:opacity .3s}
+#fuse.on{opacity:1}
+#fuse i{display:block;height:100%;width:100%;background:var(--brass);transform-origin:left;transition:width .25s linear,background .3s}
+#fuse.hot i{background:var(--red-hi)}
+
+#banner{display:none;position:fixed;left:50%;top:calc(64px + env(safe-area-inset-top));transform:translateX(-50%);z-index:30;
+ background:var(--red);color:#fff;font-weight:700;padding:8px 16px;border-radius:999px;box-shadow:0 8px 20px rgba(0,0,0,.4);font-size:15px;white-space:nowrap}
+#banner.on{display:block;animation:drop .35s ease both}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:30;max-width:528px;margin:0 auto;background:var(--paper);color:var(--ink);
+ border-left:6px solid var(--red);padding:14px 16px;border-radius:var(--r-paper);box-shadow:var(--shadow);font-weight:700;display:none}
+#toast.on{display:block;animation:rise .35s ease both}
+
+/* Type */
+h1,h2,h3{font-family:var(--f-display);margin:0;line-height:1.02;font-weight:800}
+h1{font-size:40px;letter-spacing:.005em}
+h2{font-size:28px}
+h3{font-size:21px}
+body.kids h1{font-size:34px;font-weight:700}
+body.kids h2{font-size:25px;font-weight:700}
+body.kids h3{font-size:19px;font-weight:600}
+p{margin:0 0 10px}
+.hint{color:var(--on2);font-size:15px}
+.paper .hint,.paper .dim{color:var(--ink2)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:26px 2px 12px;color:var(--on)}
+.sec h2{font-size:24px}
+.sec .hint{margin:0}
+
+/* Paper */
+.paper{position:relative;background:var(--paper) var(--grain);color:var(--ink);border-radius:var(--r-paper);box-shadow:var(--shadow);padding:20px 18px;margin:0 0 16px}
+.folder{position:relative;background:var(--manila) var(--grain);color:var(--ink);border-radius:2px var(--r-paper) var(--r-paper) var(--r-paper);box-shadow:var(--shadow);padding:22px 18px 20px;margin:22px 0 16px}
+.folder::before{content:"";position:absolute;left:0;top:-16px;width:42%;height:17px;background:inherit;border-radius:8px 14px 0 0;clip-path:polygon(0 0,88% 0,100% 100%,0 100%)}
+.folder .tabtxt{position:absolute;left:14px;top:-13px;font-size:12px;color:var(--ink2);font-weight:700;z-index:1}
+body.kids .folder::before{border-radius:14px 14px 0 0}
+body.kids .paper{background-image:repeating-linear-gradient(180deg,transparent 0 29px,rgba(80,130,220,.22) 29px 30px);background-position:0 12px}
+body.kids .paper::after{content:"";position:absolute;top:0;bottom:0;left:30px;width:2px;background:rgba(224,52,47,.25);pointer-events:none}
+body.kids .paper.noline::after{display:none}
+.casetext{font-size:17px;line-height:1.62}
+.casetext::first-letter{font-family:var(--f-display);font-size:3.1em;float:left;line-height:.82;padding:4px 8px 0 0;color:var(--red);font-weight:900}
+
+.stamp{display:inline-block;font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--red);
+ border:3px solid currentColor;padding:2px 10px 0;border-radius:4px;transform:rotate(-7deg);font-size:20px;line-height:1.15;opacity:.9;mix-blend-mode:multiply}
+body.kids .stamp{font-family:var(--f-display);border-radius:12px;text-transform:none;letter-spacing:0;mix-blend-mode:normal}
+
+/* Buttons */
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:58px;border:0;border-radius:var(--r-btn);padding:12px 18px;
+ font-family:var(--f-display);font-weight:800;font-size:23px;letter-spacing:.02em;background:var(--brass);color:var(--btn-ink);
+ box-shadow:0 4px 0 var(--brass-dk),0 10px 20px -8px rgba(0,0,0,.6);transition:transform .08s,box-shadow .08s,opacity .2s}
+body.kids .btn{font-weight:700;font-size:22px}
+.btn:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 var(--brass-dk),0 4px 10px -6px rgba(0,0,0,.6)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.red{background:var(--red);color:#fff;box-shadow:0 4px 0 #6d140e,0 10px 20px -8px rgba(0,0,0,.6)}
+.btn.ghost{background:transparent;color:var(--on);border:2px solid var(--rule);box-shadow:none;font-size:20px}
+.btn svg{width:24px;height:24px;flex:none}
+.stack>*+*{margin-top:12px}
+
+input[type=text],textarea{width:100%;border:0;border-bottom:2px solid var(--ink2);background:transparent;color:var(--ink);padding:10px 2px;font-size:22px;font-family:var(--f-text);border-radius:0}
+input[type=text]:focus,textarea:focus{border-bottom-color:var(--red);outline:none}
+input::placeholder,textarea::placeholder{color:var(--ink2);opacity:.75}
+textarea{min-height:76px;resize:none;font-size:18px;line-height:1.5;border:2px dashed var(--manila-edge);border-radius:var(--r-paper);padding:10px 12px;background:rgba(255,255,255,.35)}
+textarea:focus{border-style:solid;border-color:var(--red)}
+.label{display:block;font-weight:700;font-size:14px;color:var(--ink2);margin:0 0 2px}
+
+/* Join */
+.cover{text-align:left;padding:30px 20px 24px;margin-top:40px}
+.cover .big{font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:900;font-size:clamp(46px,16vw,72px);letter-spacing:.06em;line-height:.9;color:var(--ink);margin:4px 0 16px}
+body.kids .cover .big{font-family:var(--f-display);letter-spacing:.01em}
+.cover .stamp{position:absolute;right:14px;top:18px}
+.cover form{margin-top:18px}
+.cover .btn{margin-top:18px}
+
+/* Lobby roster: name tags */
+.tags{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 4px;padding:0;list-style:none}
+.tags li{background:var(--paper);color:var(--ink);font-weight:700;padding:6px 14px 6px 10px;border-radius:4px;box-shadow:0 2px 0 var(--manila-edge);display:flex;align-items:center;gap:8px;font-size:16px}
+.tags li:nth-child(odd){transform:rotate(-1.5deg)}.tags li:nth-child(even){transform:rotate(1.2deg)}
+.tags li .dot{width:10px;height:10px;border-radius:50%;background:var(--ink2)}
+.tags li.you{background:var(--brass);color:var(--btn-ink);box-shadow:0 2px 0 var(--brass-dk)}
+.tags li.you .dot{background:var(--btn-ink)}
+.tags li.turn{outline:3px solid var(--brass);outline-offset:2px}
+.tags li.done .dot{background:var(--ok)}
+.switch{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--r-paper);background:rgba(255,255,255,.06);border:2px solid var(--rule);margin:18px 0 16px;cursor:pointer;min-height:64px}
+body.kids .switch{background:rgba(255,255,255,.5)}
+.switch input{position:absolute;opacity:0;width:1px;height:1px}
+.switch .track{flex:none;width:54px;height:32px;border-radius:999px;background:var(--rule);position:relative;transition:background .2s}
+.switch .track::after{content:"";position:absolute;left:4px;top:4px;width:24px;height:24px;border-radius:50%;background:var(--on);transition:transform .25s cubic-bezier(.3,1.6,.5,1)}
+.switch input:checked+.track{background:var(--brass)}
+.switch input:checked+.track::after{transform:translateX(22px);background:#fff}
+.switch:has(input:focus-visible){outline:3px solid var(--brass);outline-offset:3px}
+.switch b{display:block;font-family:var(--f-display);font-size:21px;font-weight:800}
+.switch small{display:block;color:var(--on2);font-size:14px;line-height:1.3}
+
+/* Role card: a sealed envelope that flips to the secret */
+.flip{perspective:1200px;margin:0 0 16px;cursor:pointer;border:0;background:none;padding:0;width:100%;display:block;text-align:left}
+.flip .inner{position:relative;display:grid;transition:transform .7s cubic-bezier(.3,1.25,.4,1);transform-style:preserve-3d}
+.flip.open .inner{transform:rotateY(180deg)}
+.flip .face{position:relative;grid-area:1/1;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:var(--r-paper);min-height:220px;padding:22px 20px;box-shadow:var(--shadow)}
+.flip .front{background:var(--manila) var(--grain);color:var(--ink);display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.flip .front::before{content:"";position:absolute;inset:0;background:linear-gradient(160deg,transparent 49.6%,rgba(0,0,0,.1) 50%,transparent 50.4%),linear-gradient(20deg,transparent 49.6%,rgba(0,0,0,.1) 50%,transparent 50.4%);pointer-events:none}
+.flip .seal{align-self:center;width:72px;height:72px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d94a3c,var(--red) 55%,#6d140e);box-shadow:0 3px 6px rgba(0,0,0,.4),inset 0 -3px 6px rgba(0,0,0,.3);
+ display:grid;place-items:center;color:#f7d9cf;font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:900;font-size:30px;position:relative}
+.flip .back{background:var(--paper) var(--grain);color:var(--ink);transform:rotateY(180deg)}
+.flip .back h2{margin:6px 0 10px;color:var(--red)}
+.flip .tapnote{font-size:14px;color:var(--ink2);display:flex;align-items:center;gap:8px}
+.flip:not(.open) .seal{animation:breathe 2.6s ease-in-out infinite}
+
+/* Turn hero */
+.hero{position:relative;overflow:hidden;border-radius:var(--r-paper);padding:22px 20px;margin:0 0 16px;background:var(--brass);color:var(--btn-ink);box-shadow:var(--shadow)}
+.hero h1{font-size:52px;font-weight:900}
+body.kids .hero h1{font-size:44px}
+.hero p{margin:6px 0 0;font-weight:700}
+.hero .clock{position:absolute;right:16px;top:16px;width:64px;height:64px}
+.hero .clock circle{fill:none;stroke-width:6}
+.hero .clock .bgc{stroke:rgba(0,0,0,.15)}
+.hero .clock .fg{stroke:var(--btn-ink);stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%;transition:stroke-dashoffset .25s linear}
+.hero .clock text{font-family:var(--f-display);font-weight:900;font-size:22px;fill:var(--btn-ink)}
+.hero.hot .clock .fg{stroke:var(--red)}
+.hero::after{content:"";position:absolute;inset:-40%;background:radial-gradient(closest-side,rgba(255,255,255,.55),transparent);transform:translateX(-120%);pointer-events:none}
+.hero[data-fx]{animation:slam .55s cubic-bezier(.2,1.5,.4,1) var(--d,0ms) both}
+.hero[data-fx]::after{animation:sweep 1.4s ease-out calc(var(--d,0ms) + .3s) both}
+
+.listen{padding:22px 20px;border-radius:var(--r-paper);border:2px solid var(--rule);margin:0 0 16px;position:relative;overflow:hidden}
+body.kids .listen{background:rgba(255,255,255,.55)}
+.listen .who{font-family:var(--f-display);font-size:44px;font-weight:900;line-height:1;color:var(--on);margin:4px 0 8px;word-break:break-word}
+.listen .lbl{color:var(--on2);font-weight:700;font-size:15px}
+.listen .row{display:flex;align-items:center;gap:14px}
+.wave{display:flex;gap:4px;align-items:center;height:30px}
+.wave i{width:5px;border-radius:3px;background:var(--brass);height:30%;animation:wave 1s ease-in-out infinite}
+.wave i:nth-child(2){animation-delay:.15s}.wave i:nth-child(3){animation-delay:.3s}.wave i:nth-child(4){animation-delay:.45s}.wave i:nth-child(5){animation-delay:.6s}
+.dots{display:inline-flex;gap:6px}
+.dots i{width:9px;height:9px;border-radius:50%;background:var(--brass);animation:blink 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+.mic{width:76px;height:76px;flex:none;border-radius:50%;background:var(--red);display:grid;place-items:center;position:relative}
+.mic svg{width:34px;height:34px;color:#fff}
+.mic::before,.mic::after{content:"";position:absolute;inset:0;border-radius:50%;border:3px solid var(--red);animation:ring 1.8s ease-out infinite}
+.mic::after{animation-delay:.9s}
+
+/* Ask box */
+#ask{display:none}
+#ask.on{display:block}
+#ask .paper{padding:16px 16px 12px}
+
+/* Suspect cards */
+.people{display:grid;gap:12px}
+.suspect{display:grid;grid-template-columns:78px 1fr;gap:14px;align-items:center;width:100%;text-align:left;border:0;background:var(--paper) var(--grain);color:var(--ink);
+ border-radius:var(--r-paper);padding:10px 12px 10px 10px;box-shadow:var(--shadow);min-height:104px;position:relative;transition:transform .12s}
+.suspect:active:not(:disabled){transform:scale(.98)}
+.suspect:disabled{opacity:.55}
+.suspect .av{width:78px;height:94px;border-radius:2px;display:block}
+body.kids .suspect .av{border-radius:14px}
+.suspect h3{margin:0 0 3px;padding-right:4px}
+.suspect .about{font-size:14.5px;line-height:1.38;color:var(--ink2);margin:0 0 8px}
+.suspect .go{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-display);font-weight:800;font-size:17px;background:var(--ink);color:var(--paper);padding:5px 12px 4px;border-radius:4px}
+body.kids .suspect .go{border-radius:999px;font-weight:600}
+.suspect .go svg{width:16px;height:16px}
+.kind{position:absolute;right:10px;top:8px;font-size:12px;font-weight:700;color:var(--red);border:2px solid currentColor;border-radius:3px;padding:0 6px;transform:rotate(4deg);background:var(--paper)}
+.suspect.witness .kind{color:#2b5d8a}
+body.kids .suspect.witness .kind{color:#1f6fc2}
+.suspect.witness h3{padding-right:74px}
+
+/* Evidence tags */
+.tagsx{display:grid;gap:12px}
+.ev{position:relative;display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:0;color:var(--ink);background:var(--manila) var(--grain);min-height:68px;
+ padding:12px 14px 12px 46px;border-radius:4px 14px 14px 4px;clip-path:polygon(0 50%,22px 0,100% 0,100% 100%,22px 100%);box-shadow:var(--shadow);transition:transform .12s}
+body.kids .ev{border-radius:14px}
+.ev::before{content:"";position:absolute;left:24px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;background:var(--bg);box-shadow:inset 0 0 0 2px var(--manila-edge)}
+.ev:active:not(:disabled){transform:scale(.98)}
+.ev:disabled{opacity:.55}
+.ev b{flex:1;font-family:var(--f-display);font-size:21px;font-weight:800;line-height:1.1}
+body.kids .ev b{font-weight:600;font-size:19px}
+.ev .go{font-family:var(--f-display);font-weight:800;font-size:16px;color:var(--red);display:inline-flex;gap:4px;align-items:center}
+.ev .go svg{width:20px;height:20px}
+.empty{color:var(--on2);border:2px dashed var(--rule);border-radius:var(--r-paper);padding:16px;font-size:15px;margin:0}
+
+/* Vote to accuse */
+.vote{margin:26px 0 8px;padding:16px;border-radius:var(--r-paper);border:2px solid var(--rule)}
+body.kids .vote{background:rgba(255,255,255,.45)}
+.vote .pips{display:flex;gap:6px;margin:0 0 12px;align-items:center;flex-wrap:wrap}
+.vote .pips i{width:22px;height:8px;border-radius:2px;background:var(--rule)}
+.vote .pips i.on{background:var(--red-hi)}
+body.kids .vote .pips i.on{background:var(--red)}
+.vote .pips span{margin-left:6px;color:var(--on2);font-size:14px;font-weight:700}
+
+/* New clue: the evidence bag lands on the desk */
+.newclue{padding-top:26px;transform:rotate(-1deg)}
+.newclue .stamp{position:absolute;right:14px;top:-14px;background:var(--paper);mix-blend-mode:normal}
+.newclue h2{margin:0 0 10px;font-size:32px}
+.newclue[data-fx]{animation:land .7s cubic-bezier(.2,1.3,.4,1) var(--d,0ms) both}
+.newclue[data-fx] .stamp{animation:stamp .4s cubic-bezier(.3,1.6,.5,1) calc(var(--d,0ms) + .55s) both}
+
+/* Notebook */
+.book{margin-top:30px}
+.tabs{display:flex;gap:4px;margin:0 0 -2px;position:relative;z-index:1}
+.tabs button{flex:1;min-height:50px;border:0;background:var(--manila);color:var(--ink);opacity:.7;font-family:var(--f-display);font-weight:800;font-size:18px;border-radius:10px 10px 0 0;padding:8px 6px;display:flex;align-items:center;justify-content:center;gap:6px}
+body.kids .tabs button{font-weight:600;font-size:17px}
+.tabs button[aria-selected=true]{opacity:1;background:var(--paper);box-shadow:0 -3px 8px rgba(0,0,0,.18)}
+.tabs .n{font-family:var(--f-text);font-size:13px;font-weight:700;min-width:22px;height:22px;border-radius:11px;background:var(--ink);color:var(--paper);display:inline-grid;place-items:center;padding:0 6px}
+.tabs .n.fresh{background:var(--red);color:#fff;animation:pop .5s cubic-bezier(.3,1.8,.5,1)}
+.book .paper{border-top-left-radius:0;border-top-right-radius:0;min-height:120px}
+.card{position:relative;background:#fffaf0;padding:14px 14px 12px;margin:0 0 14px;box-shadow:0 2px 6px rgba(0,0,0,.18);border-left:4px solid var(--manila-edge)}
+body.kids .card{background:#fff;border-radius:12px;border-left-color:var(--brass)}
+.card:nth-child(odd){transform:rotate(-.6deg)}.card:nth-child(even){transform:rotate(.5deg)}
+.card h3{font-size:20px;margin:0 0 6px}
+.card p{margin:0;font-size:16px;line-height:1.5}
+.card.latest{border-left-color:var(--red)}
+.card .pin{position:absolute;right:12px;top:-6px;width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#f28b7d,var(--red));box-shadow:0 2px 2px rgba(0,0,0,.35)}
+.said{padding:12px 0 14px;border-top:1px dashed var(--manila-edge)}
+.said:first-child{border-top:0;padding-top:0}
+.said .meta{font-size:13px;font-weight:700;color:var(--ink2);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.said .meta svg{width:14px;height:14px}
+.said .q{font-style:italic;margin:4px 0;color:var(--ink2);font-size:15.5px}
+.said .a{margin:0;font-size:16.5px;padding-left:12px;border-left:3px solid var(--ink)}
+.nothing{color:var(--ink2);font-size:15px;margin:4px 0}
+
+/* Accusation: the line-up */
+.accuse-head{text-align:left;margin:4px 0 14px}
+.accuse-head h1{font-size:54px;color:var(--red-hi)}
+body.kids .accuse-head h1{color:var(--red)}
+.accuse-head[data-fx] h1{animation:thump 1.6s ease-in-out var(--d,0ms) infinite}
+.lineup{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 6px}
+.pick{position:relative;display:block;cursor:pointer;background:var(--paper) var(--grain);color:var(--ink);border-radius:var(--r-paper);padding:8px 8px 10px;box-shadow:var(--shadow);transition:transform .15s}
+.pick input{position:absolute;opacity:0;width:1px;height:1px}
+.pick .av{width:100%;height:auto;aspect-ratio:80/96;display:block;border-radius:2px;filter:grayscale(.35)}
+body.kids .pick .av{border-radius:12px;filter:none}
+.pick b{display:block;font-family:var(--f-display);font-weight:800;font-size:18px;line-height:1.1;margin-top:8px;min-height:2.2em}
+body.kids .pick b{font-weight:600}
+.pick .ring{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);pointer-events:none;overflow:visible}
+.pick .ring path{fill:none;stroke:var(--red);stroke-width:4;stroke-linecap:round;stroke-dasharray:1 1;stroke-dashoffset:1;opacity:0;transition:stroke-dashoffset .5s ease,opacity .1s}
+.pick:has(input:checked){transform:rotate(-1deg) scale(1.02)}
+.pick:has(input:checked) .av{filter:none}
+.pick:has(input:checked) .ring path{stroke-dashoffset:0;opacity:1}
+.pick:has(input:focus-visible){outline:3px solid var(--brass);outline-offset:4px}
+.motives{display:grid;gap:10px}
+.motive{display:flex;gap:14px;align-items:center;padding:14px;min-height:60px;border-radius:var(--r-paper);background:var(--paper) var(--grain);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);font-size:16.5px;line-height:1.35}
+.motive input{position:absolute;opacity:0;width:1px;height:1px}
+.motive .box{flex:none;width:26px;height:26px;border:2.5px solid var(--ink);border-radius:4px;position:relative}
+body.kids .motive .box{border-radius:50%}
+.motive .box::after{content:"";position:absolute;left:-3px;top:-8px;width:30px;height:30px;
+ background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Cpath d='M4 16 L12 24 L27 3' fill='none' stroke='%23b3291f' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat;transform:scale(0);transition:transform .25s cubic-bezier(.3,1.8,.5,1)}
+.motive:has(input:checked) .box::after{transform:scale(1)}
+.motive:has(input:checked){outline:3px solid var(--red);outline-offset:-3px}
+.motive:has(input:focus-visible){outline:3px solid var(--brass);outline-offset:3px}
+.accuse-go{margin-top:22px}
+.accuse-go .hint{text-align:center;margin-top:10px}
+.envelope{text-align:center;padding:28px 20px 22px}
+.envelope .stamp{font-size:28px;margin:4px 0 16px}
+.envelope[data-fx] .stamp{animation:stamp .45s cubic-bezier(.3,1.6,.5,1) calc(var(--d,0ms) + .1s) both}
+.envelope .mine{font-family:var(--f-display);font-size:30px;font-weight:900;line-height:1.05;margin:2px 0 6px}
+.envelope .why{color:var(--ink2);font-style:italic}
+
+/* Reveal */
+.spot{position:relative;text-align:center;padding:44px 20px 30px;border-radius:var(--r-paper);overflow:hidden;margin:0 0 16px}
+.spot::before{content:"";position:absolute;left:50%;top:-30%;width:150%;height:150%;transform:translateX(-50%);background:radial-gradient(closest-side,rgba(255,236,190,.32),transparent 70%);animation:flicker 4s infinite}
+body.kids .spot::before{background:radial-gradient(closest-side,rgba(255,255,255,.8),transparent 70%)}
+.spot>*{position:relative}
+.spot h1{font-size:60px;color:var(--on)}
+.spot p{color:var(--on2)}
+.step[data-fx]{animation:rise .7s cubic-bezier(.2,1,.3,1) var(--d,0ms) both}
+.verdict{display:grid;grid-template-columns:110px 1fr;gap:16px;align-items:center}
+.verdict .av{width:110px;height:132px;border-radius:2px}
+body.kids .verdict .av{border-radius:14px}
+.verdict .stamp{font-size:26px;margin-top:10px}
+.step[data-fx] .stamp{animation:stamp .45s cubic-bezier(.3,1.6,.5,1) calc(var(--d,0ms) + .5s) both}
+.verdict h1{font-size:38px;word-break:break-word}
+.result{text-align:center;padding:28px 18px}
+.result h1{font-size:46px}
+.result.right{background:var(--ok);color:#fff}
+.result.right .hint{color:rgba(255,255,255,.85)}
+.result.wrong h1{color:var(--red)}
+.result.right[data-fx]::before{content:"";position:fixed;inset:0;background:#fff;pointer-events:none;opacity:0;animation:flash .9s ease-out var(--d,0ms) both;z-index:40}
+.names{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;padding:0;list-style:none}
+.names li{background:var(--ink);color:var(--paper);padding:4px 12px;border-radius:4px;font-weight:700;font-size:15px}
+.names li.both{background:var(--red);color:#fff}
+
+/* Paused */
+.hold{text-align:center;padding:34px 20px 26px;margin-top:30px}
+.hold .reel{width:96px;height:96px;margin:0 auto 14px;color:var(--ink)}
+.hold .reel g{transform-origin:48px 48px;animation:spin 6s linear infinite}
+
+.round{display:flex;align-items:center;gap:10px;margin:0 0 14px;color:var(--on2);font-size:14px;font-weight:700}
+.round .bar{flex:1;display:flex;gap:4px}
+.round .bar i{flex:1;height:5px;border-radius:3px;background:var(--rule)}
+.round .bar i.on{background:var(--brass)}
+.msg{margin:0 0 16px;padding:12px 16px;border-left:4px solid var(--brass);background:rgba(255,255,255,.06);font-weight:700;color:var(--on)}
+body.kids .msg{background:rgba(255,255,255,.55)}
+
+/* Motion */
+[data-fx].rise{animation:rise .6s cubic-bezier(.2,1,.3,1) var(--d,0ms) both}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes drop{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes slam{0%{opacity:0;transform:scale(1.08) rotate(-1.5deg)}60%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes sweep{to{transform:translateX(120%)}}
+@keyframes land{0%{opacity:0;transform:translateY(-60px) rotate(-8deg) scale(1.08)}100%{opacity:1;transform:rotate(-1deg)}}
+@keyframes stamp{0%{opacity:0;transform:scale(2.4) rotate(-14deg)}100%{opacity:.92;transform:scale(1) rotate(-7deg)}}
+@keyframes thump{0%,100%{transform:scale(1)}8%{transform:scale(1.05)}16%{transform:scale(1)}24%{transform:scale(1.035)}32%{transform:scale(1)}}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+@keyframes wave{0%,100%{height:25%}50%{height:100%}}
+@keyframes blink{0%,100%{opacity:.25}40%{opacity:1}}
+@keyframes ring{from{transform:scale(1);opacity:.8}to{transform:scale(1.7);opacity:0}}
+@keyframes pop{from{transform:scale(.3)}to{transform:scale(1)}}
+@keyframes flicker{0%,100%{opacity:1}47%{opacity:1}48%{opacity:.55}50%{opacity:1}52%{opacity:.75}53%{opacity:1}}
+@keyframes flash{from{opacity:.75}to{opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}
+@media (min-width:600px){
+ .lineup{grid-template-columns:repeat(3,1fr)}
+ h1{font-size:46px}
+}
+@media (max-width:370px){
+ h1{font-size:34px}.hero h1{font-size:44px}.accuse-head h1{font-size:46px}.spot h1{font-size:50px}
+ .suspect{grid-template-columns:64px 1fr}.suspect .av{width:64px;height:78px}
+ .verdict{grid-template-columns:90px 1fr}.verdict .av{width:90px;height:108px}
+}
 </style>
 </head>
 <body>
 <div id="app">
- <header><span class="logo">DETECTIVES</span><span class="me" id="me"></span></header>
- <div id="banner"></div>
- <div id="timer"><i></i></div>
- <div id="main"></div>
- <div id="ask" class="card mine" style="display:none">
-  <h2 id="askTitle"></h2>
-  <textarea id="question" maxlength="200"></textarea>
-  <p class="dim" id="askHint"></p>
- </div>
- <div id="act"></div>
- <div id="book"></div>
+ <header>
+  <div>
+   <div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15 15l6 6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>DETECTIVES</div>
+   <div class="caseno" id="caseno"></div>
+  </div>
+  <span class="me" id="me"></span>
+  <div id="fuse" aria-hidden="true"><i></i></div>
+ </header>
+ <div id="banner" role="status"></div>
+ <div id="live" class="sr" aria-live="polite" aria-atomic="true"></div>
+ <main>
+  <div id="main"></div>
+  <div id="ask">
+   <div class="paper noline">
+    <label class="label" for="question" id="askTitle"></label>
+    <textarea id="question" maxlength="200" rows="2"></textarea>
+    <p class="hint" id="askHint" style="margin:8px 0 0;font-size:14px"></p>
+   </div>
+  </div>
+  <div id="act"></div>
+  <div id="book"></div>
+ </main>
 </div>
+<div id="toast" role="alert"></div>
 <script>
 var T = {
- es: {join: 'Únete al caso', name: 'Tu nombre', enter: 'Entrar', start: '¡Empezar!', kids: 'Caso para niños',
-  waiting: 'Esperando a que empiece el caso…', players: 'Detectives', role: 'Tu papel secreto', round: 'Ronda',
-  yourTurn: '¡Te toca!', turnOf: 'Turno de', ask: 'Interrogar', examine: 'Examinar', people: 'Sospechosos y testigos',
-  clues: 'Pistas para examinar', noClues: 'No hay pistas nuevas en esta ronda.', question: 'Tu pregunta',
-  askHint: 'Escríbela aquí, o déjala vacía y házsela en voz alta a Richie cuando te la pida.',
-  vote: 'Votar para acusar ya', voted: 'Votaste para acusar', accuse: '¿Quién fue?', why: '¿Por qué?',
-  send: 'Acusar en secreto', sent: 'Acusación enviada. Espera a los demás…', paused: 'Juego en pausa',
-  resume: '¡Seguir jugando!', pausedHint: 'Richie pausó el juego (quizás oyó su nombre).',
-  book: 'Libreta', evidence: 'Pruebas', said: 'Declaraciones', none: 'Nada todavía.', culprit: 'El culpable',
-  motive: 'Motivo', right: '¡Lo resolviste!', wrong: 'Esta vez no.', solvers: 'Lo resolvieron', nobody: 'Nadie',
-  witness: 'testigo', over: 'Caso cerrado', reconnecting: 'Reconectando…', errClosed: 'El caso ya empezó.',
-  errName: 'Escribe tu nombre.', listening: 'Richie te escucha: haz tu pregunta en voz alta.', thinking: 'Pensando…',
-  gone: 'Este juego ya terminó.'},
- en: {join: 'Join the case', name: 'Your name', enter: 'Join', start: 'Start!', kids: "Kids' case",
-  waiting: 'Waiting for the case to start…', players: 'Detectives', role: 'Your secret role', round: 'Round',
-  yourTurn: 'Your turn!', turnOf: 'Turn:', ask: 'Question', examine: 'Examine', people: 'Suspects and witnesses',
-  clues: 'Clues to examine', noClues: 'No new clues this round.', question: 'Your question',
-  askHint: 'Type it here, or leave it empty and ask Richie out loud when he asks you.',
-  vote: 'Vote to accuse now', voted: 'You voted to accuse', accuse: 'Who did it?', why: 'Why?',
-  send: 'Accuse in secret', sent: 'Accusation sent. Waiting for the others…', paused: 'Game paused',
-  resume: 'Keep playing!', pausedHint: 'Richie paused the game (maybe he heard his name).',
-  book: 'Notebook', evidence: 'Evidence', said: 'Statements', none: 'Nothing yet.', culprit: 'The culprit',
-  motive: 'Motive', right: 'You solved it!', wrong: 'Not this time.', solvers: 'Solved by', nobody: 'Nobody',
-  witness: 'witness', over: 'Case closed', reconnecting: 'Reconnecting…', errClosed: 'The case has already started.',
-  errName: 'Type your name.', listening: 'Richie is listening: ask your question out loud.', thinking: 'Thinking…',
-  gone: 'This game is over.'}
+ es: {join: 'Únete al caso', joinLead: 'Escribe tu nombre de detective. Richie te está esperando.', name: 'Tu nombre', enter: 'Entrar al caso',
+  caseNo: 'Expediente', topSecret: 'Confidencial', start: 'Empezar el caso', kids: 'Caso para niños', kidsHint: 'Un misterio fácil y divertido para detectives pequeños.',
+  waiting: 'Cuando estén todos, toca Empezar.', players: 'Detectives en el caso', role: 'Tu papel secreto', round: 'Ronda',
+  yourTurn: '¡Te toca!', yourTurnHint: 'Interroga a alguien o examina una pista.', turnOf: 'Le toca a', listenHint: 'Escucha con atención y toma nota.',
+  ask: 'Interrogar', examine: 'Examinar', people: 'Sospechosos y testigos', clues: 'Pistas para examinar', noClues: 'No hay pistas nuevas en esta ronda.',
+  question: 'Tu pregunta', askHint: 'Escríbela aquí, o déjala vacía y házsela en voz alta a Richie cuando te la pida.',
+  vote: 'Votar para acusar ya', voted: 'Votaste para acusar', votes: 'votos', voteHint: '¿Ya sabes quién fue? Si la mayoría vota, se acusa ahora.',
+  accuse: '¿Quién fue?', why: '¿Por qué?', whyHint: 'Opcional, pero suma.', pickFirst: 'Primero marca a un sospechoso.', send: 'Acusar en secreto',
+  sent: 'Acusación enviada. Espera a los demás…', sealed: 'Sellada', yourPick: 'Tu acusación', accusedOf: 'ya acusaron',
+  paused: 'Juego en pausa', resume: '¡Seguir jugando!', pausedHint: 'Richie pausó el juego (quizás oyó su nombre).',
+  book: 'Libreta', evidence: 'Pruebas', said: 'Declaraciones', myRole: 'Mi papel', none: 'Nada todavía.', noneClues: 'Aún no hay pruebas. Examina una pista en tu turno.',
+  noneSaid: 'Nadie ha declarado todavía.', culprit: 'El culpable', motive: 'Motivo', right: '¡Lo resolviste!', wrong: 'Esta vez no.',
+  rightHint: 'Buen ojo, detective.', wrongHint: 'El culpable se te escapó.', solvers: 'Lo resolvieron', motiveToo: 'en rojo: también acertaron el motivo', nobody: 'Nadie',
+  witness: 'Testigo', suspect: 'Sospechoso', over: 'Caso cerrado', guilty: 'Culpable', reconnecting: 'Reconectando…', errClosed: 'El caso ya empezó.',
+  errName: 'Escribe tu nombre.', listening: 'Richie te escucha: haz tu pregunta en voz alta.', asking: 'está interrogando', thinking: 'Pensando…',
+  thinkingHint: 'Escucha la respuesta.', newClue: 'Nueva prueba', foundBy: 'La examinó', truth: 'La verdad', truthHint: 'Richie está contando lo que pasó. Escucha…',
+  tapOpen: 'Toca para abrirlo. Que nadie más lo vea.', tapClose: 'Toca para cerrarlo.', listenRichie: 'Escucha a Richie: él te cuenta el caso.',
+  gone: 'Este juego ya terminó.', you: 'tú', of: 'de', secs: 's'},
+ en: {join: 'Join the case', joinLead: 'Type your detective name. Richie is waiting.', name: 'Your name', enter: 'Join the case',
+  caseNo: 'Case', topSecret: 'Confidential', start: 'Start the case', kids: "Kids' case", kidsHint: 'An easy, silly mystery for little detectives.',
+  waiting: 'When everyone is in, tap Start.', players: 'Detectives on the case', role: 'Your secret role', round: 'Round',
+  yourTurn: 'Your turn!', yourTurnHint: 'Question someone or examine a clue.', turnOf: 'Now playing', listenHint: 'Listen closely and take notes.',
+  ask: 'Question', examine: 'Examine', people: 'Suspects and witnesses', clues: 'Clues to examine', noClues: 'No new clues this round.',
+  question: 'Your question', askHint: 'Type it here, or leave it empty and ask Richie out loud when he asks you.',
+  vote: 'Vote to accuse now', voted: 'You voted to accuse', votes: 'votes', voteHint: 'Know who did it? If most of you vote, you accuse now.',
+  accuse: 'Who did it?', why: 'Why?', whyHint: 'Optional, but it counts.', pickFirst: 'Circle a suspect first.', send: 'Accuse in secret',
+  sent: 'Accusation sent. Waiting for the others…', sealed: 'Sealed', yourPick: 'Your accusation', accusedOf: 'have accused',
+  paused: 'Game paused', resume: 'Keep playing!', pausedHint: 'Richie paused the game (maybe he heard his name).',
+  book: 'Notebook', evidence: 'Evidence', said: 'Statements', myRole: 'My role', none: 'Nothing yet.', noneClues: 'No evidence yet. Examine a clue on your turn.',
+  noneSaid: 'Nobody has talked yet.', culprit: 'The culprit', motive: 'Motive', right: 'You solved it!', wrong: 'Not this time.',
+  rightHint: 'Sharp eyes, detective.', wrongHint: 'The culprit slipped past you.', solvers: 'Solved by', motiveToo: 'in red: got the motive too', nobody: 'Nobody',
+  witness: 'Witness', suspect: 'Suspect', over: 'Case closed', guilty: 'Guilty', reconnecting: 'Reconnecting…', errClosed: 'The case has already started.',
+  errName: 'Type your name.', listening: 'Richie is listening: ask your question out loud.', asking: 'is asking a question', thinking: 'Thinking…',
+  thinkingHint: 'Listen to the answer.', newClue: 'New evidence', foundBy: 'Examined by', truth: 'The truth', truthHint: 'Richie is telling what happened. Listen…',
+  tapOpen: "Tap to open. Don't let anyone else see.", tapClose: 'Tap to close it.', listenRichie: 'Listen to Richie: he reads you the case.',
+  gone: 'This game is over.', you: 'you', of: 'of', secs: 's'}
 };
-var code = (new URLSearchParams(location.search).get('c') || '').trim();
+var params = new URLSearchParams(location.search);
+var code = (params.get('c') || '').trim();
+var DEMO = params.get('demo');
 var STORE = 'detectives:' + code;
 var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
 var S = null, ws = null, retry = 0, timer = null, joined = false, choice = {suspect: null, motive: null};
+var ui = {tab: 'evidence', flipped: false, seen: {}, clues: 0, phase: null, said: null};
 function $(id) { return document.getElementById(id); }
 function t() { return T[lang]; }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
@@ -102,11 +473,59 @@ function can(a) { return !!(S && S.can && S.can.indexOf(a) >= 0); }
 function load() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
 function save(v) { try { localStorage.setItem(STORE, v); } catch (e) {} }
 function forget() { try { localStorage.removeItem(STORE); } catch (e) {} }
-function send(o) { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } return false; }
+function send(o) { if (DEMO) { console.log('demo send', o); return true; } if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } return false; }
+function hash(s) { var h = 2166136261; s = String(s); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function say(text) { var l = $('live'); l.textContent = ''; setTimeout(function () { l.textContent = text; }, 60); }
+function toast(text) { var el = $('toast'); el.textContent = text; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(function () { el.classList.remove('on'); }, 3800); }
+// Entrances play once per key; a re-render mid-way resumes them (negative delay) instead of restarting.
+function fx(key, delay) {
+ if (!(key in ui.seen)) ui.seen[key] = Date.now();
+ var d = (delay || 0) - (Date.now() - ui.seen[key]);
+ return d < -1600 ? '' : ' data-fx style="--d:' + d + 'ms"';
+}
+
+var ICON = {
+ ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>',
+ lens: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15 15l5.5 5.5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>',
+ mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+ arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+ play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></svg>',
+ seal: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z M3 6l9 7 9-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>'
+};
+
+// A mugshot for each character, drawn from its id: noir silhouettes against height lines, or a crayon face for kids.
+function avatar(id) {
+ var h = hash(id), v = h % 4, hue = (h >> 3) % 360, s = '';
+ if (S && S.kids) {
+  var face = 'hsl(' + hue + ',85%,72%)';
+  s += '<rect width="80" height="96" fill="hsl(' + hue + ',90%,92%)"/>';
+  if (v === 0) s += '<path d="M18 40 L22 14 L38 30Z M62 40 L58 14 L42 30Z" fill="' + face + '" stroke="#26306b" stroke-width="3" stroke-linejoin="round"/>';
+  if (v === 1) s += '<path d="M40 22 V10" stroke="#26306b" stroke-width="3"/><circle cx="40" cy="9" r="5" fill="#ff6b4a" stroke="#26306b" stroke-width="3"/>';
+  if (v === 2) s += '<circle cx="40" cy="22" r="10" fill="#a8a8b8" stroke="#26306b" stroke-width="3"/>';
+  s += '<circle cx="40" cy="54" r="27" fill="' + face + '" stroke="#26306b" stroke-width="3"/>' +
+   '<circle cx="30" cy="50" r="4" fill="#26306b"/><circle cx="50" cy="50" r="4" fill="#26306b"/><circle cx="31.5" cy="48.5" r="1.3" fill="#fff"/><circle cx="51.5" cy="48.5" r="1.3" fill="#fff"/>' +
+   '<circle cx="24" cy="61" r="5" fill="#ff8fa3" opacity=".6"/><circle cx="56" cy="61" r="5" fill="#ff8fa3" opacity=".6"/>' +
+   (v === 3 ? '<path d="M27 63 Q33 56 40 61 Q47 56 53 63 Q47 67 40 63 Q33 67 27 63Z" fill="#5a3a22"/>' : '<path d="M31 63 Q40 72 49 63" fill="none" stroke="#26306b" stroke-width="3" stroke-linecap="round"/>');
+  return '<svg class="av" viewBox="0 0 80 96" aria-hidden="true">' + s + '</svg>';
+ }
+ s += '<rect width="80" height="96" fill="hsl(' + hue + ',22%,30%)"/>';
+ for (var y = 12; y < 96; y += 12) s += '<path d="M0 ' + y + 'H' + (y % 24 ? 8 : 14) + 'M' + (y % 24 ? 72 : 66) + ' ' + y + 'H80" stroke="rgba(255,255,255,.35)" stroke-width="1"/><path d="M0 ' + y + 'H80" stroke="rgba(255,255,255,.06)"/>';
+ s += '<radialGradient id="g' + h + '" cx="50%" cy="30%" r="70%"><stop offset="0" stop-color="rgba(255,226,160,.35)"/><stop offset="1" stop-color="rgba(0,0,0,0)"/></radialGradient><rect width="80" height="96" fill="url(#g' + h + ')"/>';
+ var sil = '<g fill="#0b1017" stroke="rgba(233,180,76,.55)" stroke-width="1.2">';
+ if (v === 1) sil += '<path d="M22 46 C19 18 61 18 58 46 L61 70 L50 64 L50 40 C46 33 34 33 30 40 L30 64 L19 70Z"/>';
+ sil += '<path d="M6 97 C8 74 25 66 40 66 C55 66 72 74 74 97Z"/><rect x="34" y="54" width="12" height="14" stroke="none"/><ellipse cx="40" cy="42" rx="14" ry="17"/>';
+ if (v === 0) sil += '<ellipse cx="40" cy="28" rx="25" ry="4.5"/><path d="M27 28 C26 12 54 12 53 28Z"/>';
+ if (v === 2) sil += '<circle cx="40" cy="20" r="7"/><path d="M26 38 C26 22 54 22 54 38 C48 30 32 30 26 38Z"/>';
+ if (v === 3) sil += '<path d="M25 33 C26 19 54 19 55 33Z"/><rect x="23" y="31" width="34" height="4" rx="2"/>';
+ sil += '</g>';
+ return '<svg class="av" viewBox="0 0 80 96" aria-hidden="true">' + s + sil + '<rect x="24" y="80" width="32" height="11" fill="#e9dfc8"/><text x="40" y="88.5" font-size="8" font-family="Courier Prime,monospace" font-weight="700" text-anchor="middle" fill="#251d14">' + (1000 + h % 9000) + '</text></svg>';
+}
+function charByName(name) { return (S.characters || []).filter(function (c) { return c.name === name; })[0]; }
+function charById(id) { return (S.characters || []).filter(function (c) { return c.id === id; })[0]; }
 
 function connect() {
  clearTimeout(timer); timer = null;
- if (!code) { $('main').innerHTML = '<div class="card">' + esc(t().gone) + '</div>'; return; }
+ if (!code) { $('main').innerHTML = '<div class="folder hold"><span class="tabtxt">DETECTIVES</span><h2>' + esc(t().gone) + '</h2></div>'; return; }
  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
  var dir = location.pathname.replace(/[^\/]*$/, '');
  var sock;
@@ -119,116 +538,262 @@ function connect() {
 }
 function schedule() { if (timer) return; timer = setTimeout(connect, Math.min(5000, 1000 + 1000 * retry++)); }
 function banner(on) { var b = $('banner'); b.textContent = t().reconnecting; b.classList.toggle('on', !!on); }
-document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); } });
+document.addEventListener('visibilitychange', function () { if (!DEMO && document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); } });
 
 function handle(m) {
  if (m.type === 'welcome') { save(m.player); joined = true; }
  else if (m.type === 'forget') { forget(); joined = false; render(); }
- else if (m.type === 'error') { if (m.message === 'join') joined = false; alert(m.message === 'closed' ? t().errClosed : m.message === 'name' ? t().errName : m.message); render(); }
+ else if (m.type === 'error') { if (m.message === 'join') joined = false; toast(m.message === 'closed' ? t().errClosed : m.message === 'name' ? t().errName : m.message); render(); }
  else if (m.type === 'state') {
-  var before = S && S.phase;
+  var before = S && S.phase, beforeTurn = S && S.turn;
   S = m; lang = m.language === 'en' ? 'en' : 'es'; document.documentElement.lang = lang;
   if (m.you) joined = true;
   if (before !== m.phase && m.phase === 'turn' && can('act')) { try { if (navigator.vibrate) navigator.vibrate([150, 80, 150]); } catch (e) {} }
   if (m.phase !== 'accuse') choice = {suspect: null, motive: null};
+  if (before !== m.phase || beforeTurn !== m.turn) announce(before);
   render();
  }
 }
+function announce(before) {
+ var x = t(), p = S.phase, line = '';
+ if (p === 'turn') line = can('act') ? x.yourTurn + ' ' + x.yourTurnHint : x.turnOf + ' ' + (S.turn || '');
+ else if (p === 'clue') line = x.newClue + ': ' + (S.message || '');
+ else if (p === 'accuse') line = x.accuse;
+ else if (p === 'reveal') line = x.truth;
+ else if (p === 'over' && S.result) line = x.culprit + ': ' + S.result.culprit + '. ' + (S.result.you_right ? x.right : x.wrong);
+ else if (p === 'paused') line = x.paused;
+ else if (p === 'asking' && S.you && S.turn === S.you.name) line = x.listening;
+ if (line) say(line);
+ var big = {turn: 1, accuse: 1, reveal: 1, over: 1, paused: 1, intro: 1, lobby: 1};
+ if (before && before !== p && big[p] && !(p === 'turn' && !can('act'))) { try { window.scrollTo({top: 0, behavior: 'smooth'}); } catch (e) { window.scrollTo(0, 0); } }
+}
+
+function roleCard(big) {
+ var x = t(), r = S.you.role;
+ if (!r) return '';
+ return '<button type="button" class="flip' + (ui.flipped ? ' open' : '') + '" id="flip" aria-pressed="' + ui.flipped + '" aria-label="' + esc(x.role) + '">' +
+  '<span class="inner"><span class="face front"><span><span class="stamp" style="font-size:16px">' + esc(x.topSecret) + '</span><h2 style="margin-top:14px">' + esc(x.role) + '</h2></span>' +
+  '<span class="seal">?</span><span class="tapnote">' + ICON.lens.replace('aria-hidden', 'width="18" height="18" aria-hidden') + esc(x.tapOpen) + '</span></span>' +
+  '<span class="face back"><span class="stamp" style="position:absolute;right:16px;top:16px;font-size:15px">' + esc(x.topSecret) + '</span><span class="tapnote">' + esc(x.role) + '</span><h2>' + esc(r.name) + '</h2><p style="font-size:17px;line-height:1.55">' + esc(r.text) + '</p><span class="tapnote">' + esc(x.tapClose) + '</span></span></span></button>';
+}
+function roundBar() {
+ if (!S.round || !S.rounds) return '';
+ var x = t(), bars = '';
+ for (var i = 1; i <= S.rounds; i++) bars += '<i class="' + (i <= S.round ? 'on' : '') + '"></i>';
+ return '<div class="round"><span>' + esc(x.round) + ' ' + S.round + ' ' + esc(x.of) + ' ' + S.rounds + '</span><span class="bar" aria-hidden="true">' + bars + '</span></div>';
+}
+function roster(mark) {
+ return '<ul class="tags">' + S.players.map(function (p) {
+  var me = S.you && p.name === S.you.name;
+  var cls = (me ? 'you ' : '') + (mark === 'turn' && p.turn ? 'turn ' : '') + (mark === 'accused' && p.accused ? 'done' : '');
+  return '<li class="' + cls + '"><span class="dot"></span>' + esc(p.name) + (me ? ' <small>(' + esc(t().you) + ')</small>' : '') + '</li>';
+ }).join('') + '</ul>';
+}
 
 function render() {
- var x = t(), main = '', act = '', book = '';
+ var x = t(), main = '', act = '', book = '', showAsk = false, kids = !!(S && S.kids);
+ document.body.classList.toggle('kids', kids);
+ document.body.classList.toggle('tense', !!(S && S.phase === 'accuse'));
+ var meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = kids ? '#ffd35a' : '#141d27';
  $('me').textContent = S && S.you ? S.you.name : '';
- var showAsk = false;
+ $('caseno').textContent = code ? x.caseNo + ' ' + code.toUpperCase() : '';
  if (!S || (!S.you && can('join'))) {
-  main = '<div class="card"><h1>' + esc(x.join) + '</h1><input type="text" id="name" maxlength="16" placeholder="' + esc(x.name) + '" autocomplete="nickname"><button id="enter">' + esc(x.enter) + '</button></div>';
+  main = '<form class="folder cover" id="joinForm"' + fx('join') + '><span class="tabtxt">' + esc(x.caseNo) + ' ' + esc(code.toUpperCase()) + '</span>' +
+   '<span class="stamp">' + esc(x.topSecret) + '</span><div class="big">DETEC<br>TIVES</div><h2>' + esc(S && S.title && S.title !== 'Detectives' ? S.title : x.join) + '</h2>' +
+   '<p class="dim" style="margin-top:8px">' + esc(x.joinLead) + '</p><label class="label" for="name" style="margin-top:18px">' + esc(x.name) + '</label>' +
+   '<input type="text" id="name" maxlength="16" placeholder="' + esc(x.name) + '" autocomplete="nickname" enterkeyhint="go"><button class="btn" id="enter" type="submit">' + esc(x.enter) + ICON.arrow + '</button></form>';
  } else if (!S.you) {
-  main = '<div class="card">' + esc(x.errClosed) + '</div>';
+  main = '<div class="folder hold"><span class="tabtxt">' + esc(x.caseNo) + '</span><span class="stamp" style="font-size:26px">' + esc(x.errClosed) + '</span></div>';
  } else if (S.phase === 'paused') {
-  main = '<div class="card"><h1>' + esc(x.paused) + '</h1><p class="dim">' + esc(x.pausedHint) + '</p><button id="resume">' + esc(x.resume) + '</button></div>';
+  main = '<div class="paper hold rise"' + fx('paused') + '><svg class="reel" viewBox="0 0 96 96" aria-hidden="true"><g><circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" stroke-width="5"/>' +
+   '<circle cx="48" cy="48" r="7" fill="currentColor"/><circle cx="48" cy="24" r="10" fill="currentColor"/><circle cx="48" cy="72" r="10" fill="currentColor"/><circle cx="24" cy="48" r="10" fill="currentColor"/><circle cx="72" cy="48" r="10" fill="currentColor"/></g></svg>' +
+   '<h1>' + esc(x.paused) + '</h1><p class="dim" style="margin:10px 0 20px">' + esc(x.pausedHint) + '</p><button class="btn" id="resume">' + ICON.play + esc(x.resume) + '</button></div>';
  } else if (S.phase === 'lobby') {
-  main = '<div class="card"><h2>' + esc(x.players) + '</h2><p>' + S.players.map(function (p) { return esc(p.name); }).join(', ') + '</p>' +
-   '<label class="opt"><input type="checkbox" id="kids"' + (S.kids ? ' checked' : '') + '> ' + esc(x.kids) + '</label>' +
-   '<button id="start">' + esc(x.start) + '</button><p class="dim" style="margin-top:8px">' + esc(x.waiting) + '</p></div>';
+  main = '<div class="rise"' + fx('lobby') + '><h1 style="margin:8px 0 6px">' + esc(x.players) + '</h1><p class="hint">' + esc(x.waiting) + '</p>' + roster() +
+   '<label class="switch"><input type="checkbox" id="kids"' + (S.kids ? ' checked' : '') + '><span class="track"></span><span><b>' + esc(x.kids) + '</b><small>' + esc(x.kidsHint) + '</small></span></label>' +
+   '<button class="btn" id="start">' + ICON.play + esc(x.start) + '</button></div>';
  } else {
-  main += '<div class="card"><h1>' + esc(S.title) + '</h1>' + (S.round ? '<p class="dim">' + esc(x.round) + ' ' + S.round + '/' + S.rounds + '</p>' : '') + (S.intro && S.phase === 'intro' ? '<p>' + esc(S.intro) + '</p>' : '') + '</div>';
-  if (S.you.role) main += '<div class="card role"><h2>' + esc(x.role) + '</h2><p><b>' + esc(S.you.role.name) + '</b></p><p class="dim">' + esc(S.you.role.text) + '</p></div>';
-  if (S.message) main += '<div class="msg">' + esc(S.message) + '</div>';
-  if (S.phase === 'turn' || S.phase === 'asking' || S.phase === 'answering' || S.phase === 'clue') {
+  var p = S.phase, live = p === 'turn' || p === 'asking' || p === 'answering' || p === 'clue';
+  if (p === 'intro') {
+   main += '<div class="folder rise"' + fx('intro') + '><span class="tabtxt">' + esc(x.caseNo) + ' ' + esc(code.toUpperCase()) + '</span><h1 style="margin:0 0 14px">' + esc(S.title) + '</h1>' +
+    (S.intro ? '<p class="casetext">' + esc(S.intro) + '</p>' : '') + '<p class="dim" style="margin:12px 0 0;font-size:14px">' + esc(x.listenRichie) + '</p></div>';
+   main += '<div class="rise"' + fx('intro', 500) + '>' + roleCard(true) + '</div>';
+  } else if (live) {
+   main += roundBar();
    if (can('act')) {
     showAsk = true;
-    act += '<div class="card mine"><p class="turn">' + esc(x.yourTurn) + '</p></div>';
-    act += '<div class="card"><h2>' + esc(x.people) + '</h2><div class="list">' + S.characters.map(function (c) {
-     return '<div class="row"><div><span class="who">' + esc(c.name) + '</span>' + (c.kind === 'witness' ? ' <small>(' + esc(x.witness) + ')</small>' : '') + '<br><small>' + esc(c.about) + '</small></div><button data-ask="' + esc(c.id) + '">' + esc(x.ask) + '</button></div>';
-    }).join('') + '</div></div>';
-    act += '<div class="card"><h2>' + esc(x.clues) + '</h2>' + (S.available.length ? '<div class="list">' + S.available.map(function (c) {
-     return '<div class="row"><div class="who">' + esc(c.title) + '</div><button class="ghost" data-examine="' + esc(c.id) + '">' + esc(x.examine) + '</button></div>';
-    }).join('') + '</div>' : '<p class="dim">' + esc(x.noClues) + '</p>') + '</div>';
+    main += '<section class="hero" id="hero"' + fx('turn:' + S.round + ':' + S.turn) + '><h1>' + esc(x.yourTurn) + '</h1><p>' + esc(x.yourTurnHint) + '</p>' +
+     '<svg class="clock" viewBox="0 0 64 64" aria-hidden="true"><circle class="bgc" cx="32" cy="32" r="27"/><circle class="fg" id="clockfg" cx="32" cy="32" r="27" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/><text id="secs" x="32" y="40" text-anchor="middle"></text></svg></section>';
+    act += '<div class="sec"><h2>' + esc(x.people) + '</h2></div><div class="people">' + S.characters.map(function (c) {
+     var w = c.kind === 'witness';
+     return '<button class="suspect' + (w ? ' witness' : '') + '" data-ask="' + esc(c.id) + '">' + avatar(c.id) + '<span>' + (w ? '<span class="kind">' + esc(x.witness) + '</span>' : '') + '<h3>' + esc(c.name) + '</h3><p class="about">' + esc(c.about) + '</p>' +
+      '<span class="go">' + ICON.ask + esc(x.ask) + '</span></span></button>';
+    }).join('') + '</div>';
+    act += '<div class="sec"><h2>' + esc(x.clues) + '</h2></div>' + (S.available.length ? '<div class="tagsx">' + S.available.map(function (c) {
+     return '<button class="ev" data-examine="' + esc(c.id) + '"><b>' + esc(c.title) + '</b><span class="go">' + ICON.lens + esc(x.examine) + '</span></button>';
+    }).join('') + '</div>' : '<p class="empty">' + esc(x.noClues) + '</p>');
+   } else if (p === 'clue') {
+    var latest = S.clues.filter(function (c) { return c.title === S.message; }).pop() || S.clues[S.clues.length - 1];
+    if (latest) main += '<article class="paper newclue"' + fx('clue:' + latest.id) + '><span class="stamp">' + esc(x.newClue) + '</span><h2>' + esc(latest.title) + '</h2><p style="font-size:18px;line-height:1.55;margin:0">' + esc(latest.text) + '</p>' +
+     (S.turn ? '<p class="dim" style="margin:12px 0 0;font-size:14px">' + esc(x.foundBy) + ' ' + esc(S.turn) + '</p>' : '') + '</article>';
    } else {
-    var line = S.phase === 'asking' && S.turn === S.you.name ? x.listening : S.phase === 'answering' ? x.thinking : x.turnOf + ' ' + (S.turn || '');
-    act += '<div class="card"><p class="turn">' + esc(line) + '</p></div>';
+    var mine = S.you && S.turn === S.you.name;
+    if (p === 'asking' && mine) {
+     main += '<section class="listen rise"' + fx('asking:' + S.turn) + '><div class="row"><span class="mic">' + ICON.mic + '</span><h2 style="color:var(--on)">' + esc(x.listening) + '</h2></div></section>';
+    } else if (p === 'answering') {
+     main += '<section class="listen rise"' + fx('answering:' + S.turn + S.notes.length) + '><span class="lbl">' + esc(S.turn || '') + '</span><div class="who">' + esc(x.thinking) + '</div><div class="row"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="hint">' + esc(x.thinkingHint) + '</span></div></section>';
+    } else {
+     main += '<section class="listen rise"' + fx('wait:' + S.round + ':' + S.turn) + '><span class="lbl">' + esc(x.turnOf) + '</span><div class="who">' + esc(S.turn || '') + '</div>' +
+      '<div class="row"><span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="hint">' + esc(p === 'asking' ? (S.turn || '') + ' ' + x.asking : x.listenHint) + '</span></div></section>';
+    }
+    main += roster('turn');
    }
-   act += '<button class="ghost" id="vote"' + (can('vote') ? '' : ' disabled') + '>' + esc(can('vote') ? x.vote : x.voted) + ' (' + S.votes.yes + '/' + S.votes.needed + ')</button><div style="height:12px"></div>';
-  } else if (S.phase === 'accuse') {
+   if (S.message && p !== 'clue') main += '<div class="msg">' + esc(S.message) + '</div>';
+   var pips = '';
+   for (var i = 0; i < S.votes.needed; i++) pips += '<i class="' + (i < S.votes.yes ? 'on' : '') + '"></i>';
+   act += '<div class="vote"><div class="pips" aria-hidden="true">' + pips + '<span>' + S.votes.yes + '/' + S.votes.needed + ' ' + esc(x.votes) + '</span></div>' +
+    '<button class="btn ' + (can('vote') ? 'red' : 'ghost') + '" id="vote"' + (can('vote') ? '' : ' disabled') + '>' + esc(can('vote') ? x.vote : x.voted) + ' (' + S.votes.yes + '/' + S.votes.needed + ')</button>' +
+    '<p class="hint" style="margin:10px 0 0;font-size:14px">' + esc(x.voteHint) + '</p></div>';
+  } else if (p === 'accuse') {
+   var done = S.players.filter(function (q) { return q.accused; }).length;
    if (can('accuse')) {
     var suspects = S.characters.filter(function (c) { return c.kind === 'suspect'; });
-    act += '<div class="card mine"><h2>' + esc(x.accuse) + '</h2>' + suspects.map(function (c) {
-     return '<label class="opt"><input type="radio" name="suspect" value="' + esc(c.id) + '"' + (choice.suspect === c.id ? ' checked' : '') + '> ' + esc(c.name) + '</label>';
-    }).join('') + '<h2 style="margin-top:12px">' + esc(x.why) + '</h2>' + S.motives.map(function (m) {
-     return '<label class="opt"><input type="radio" name="motive" value="' + esc(m.id) + '"' + (choice.motive === m.id ? ' checked' : '') + '> ' + esc(m.text) + '</label>';
-    }).join('') + '<button id="accuse"' + (choice.suspect ? '' : ' disabled') + '>' + esc(x.send) + '</button></div>';
+    main += '<div class="accuse-head"' + fx('accuse') + '><h1>' + esc(x.accuse) + '</h1><p class="hint" style="margin:6px 0 0">' + done + '/' + S.players.length + ' ' + esc(x.accusedOf) + '</p></div>';
+    act += '<fieldset style="border:0;padding:0;margin:0"><legend class="sr">' + esc(x.accuse) + '</legend><div class="lineup">' + suspects.map(function (c, i) {
+     return '<label class="pick rise"' + fx('accuse', 200 + i * 90) + '><input type="radio" name="suspect" value="' + esc(c.id) + '"' + (choice.suspect === c.id ? ' checked' : '') + '>' + avatar(c.id) + '<b>' + esc(c.name) + '</b>' +
+      '<svg class="ring" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M50 3 C80 2 98 18 97 50 C96 82 78 97 50 97 C20 97 3 80 3 50 C3 22 22 5 54 6"/></svg></label>';
+    }).join('') + '</div></fieldset>';
+    act += '<div class="sec"><h2>' + esc(x.why) + '</h2><span class="hint">' + esc(x.whyHint) + '</span></div><fieldset style="border:0;padding:0;margin:0"><legend class="sr">' + esc(x.why) + '</legend><div class="motives">' + S.motives.map(function (m) {
+     return '<label class="motive"><input type="radio" name="motive" value="' + esc(m.id) + '"' + (choice.motive === m.id ? ' checked' : '') + '><span class="box"></span><span>' + esc(m.text) + '</span></label>';
+    }).join('') + '</div></fieldset>';
+    act += '<div class="accuse-go"><button class="btn red" id="accuse"' + (choice.suspect ? '' : ' disabled') + '>' + ICON.seal + esc(x.send) + '</button><p class="hint" id="pickFirst"' + (choice.suspect ? ' hidden' : '') + '>' + esc(x.pickFirst) + '</p></div>';
    } else {
-    act += '<div class="card"><p class="turn">' + esc(x.sent) + '</p></div>';
+    main += sealed(x.sent) + roster('accused') + '<p class="hint" style="margin-top:8px">' + done + '/' + S.players.length + ' ' + esc(x.accusedOf) + '</p>';
    }
-  } else if (S.phase === 'over' && S.result) {
-   var r = S.result;
-   act += '<div class="card mine"><h2>' + esc(x.over) + '</h2><p>' + esc(x.culprit) + ': <b>' + esc(r.culprit) + '</b></p><p>' + esc(x.motive) + ': ' + esc(r.motive) + '</p>' +
-    '<p class="turn ' + (r.you_right ? 'ok' : 'bad') + '">' + esc(r.you_right ? x.right : x.wrong) + '</p><p class="dim">' + esc(x.solvers) + ': ' + esc(r.solvers.length ? r.solvers.join(', ') : x.nobody) + '</p></div>';
+  } else if (p === 'reveal') {
+   main += '<section class="spot rise"' + fx('reveal') + '><h1>' + esc(x.truth) + '</h1><p style="margin-top:10px">' + esc(x.truthHint) + '</p><span class="wave" style="justify-content:center;margin-top:12px" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></section>';
+   if (S.accused) main += sealed('');
+  } else if (p === 'over' && S.result) {
+   var r = S.result, cc = charByName(r.culprit);
+   main += '<h1 class="step" style="margin:4px 0 14px;color:var(--on)"' + fx('over') + '>' + esc(x.over) + '</h1>';
+   main += '<section class="paper step verdict"' + fx('over', 500) + '>' + avatar(cc ? cc.id : r.culprit) + '<div><span class="dim" style="font-weight:700;font-size:14px">' + esc(x.culprit) + '</span><h1>' + esc(r.culprit) + '</h1><span class="stamp">' + esc(x.guilty) + '</span></div></section>';
+   main += '<section class="paper step"' + fx('over', 2100) + '><span class="dim" style="font-weight:700;font-size:14px">' + esc(x.motive) + '</span><h2 style="margin-top:4px">' + esc(r.motive) + '</h2></section>';
+   main += '<section class="paper step result ' + (r.you_right ? 'right' : 'wrong') + '"' + fx('over', 3600) + '><h1>' + esc(r.you_right ? x.right : x.wrong) + '</h1><p class="hint" style="margin:8px 0 0">' + esc(r.you_right ? x.rightHint : x.wrongHint) + '</p></section>';
+   var both = r.motive_right || [];
+   main += '<section class="paper step"' + fx('over', 4800) + '><span class="dim" style="font-weight:700;font-size:14px">' + esc(x.solvers) + '</span>' +
+    (r.solvers.length ? '<ul class="names">' + r.solvers.map(function (n) { return '<li class="' + (both.indexOf(n) >= 0 ? 'both' : '') + '">' + esc(n) + '</li>'; }).join('') + '</ul>' +
+     (both.length ? '<p class="dim" style="margin:10px 0 0;font-size:13px">' + esc(x.motiveToo) + '</p>' : '') : '<h2 style="margin-top:4px">' + esc(x.nobody) + '</h2>') + '</section>';
+  } else {
+   main += '<div class="folder"><span class="tabtxt">' + esc(x.caseNo) + '</span><h1>' + esc(S.title) + '</h1>' + roundBar() + '</div>';
+   if (S.message) main += '<div class="msg">' + esc(S.message) + '</div>';
   }
-  book = '<div class="card"><h2>' + esc(x.evidence) + '</h2>' + (S.clues.length ? S.clues.map(function (c) {
-   return '<div class="note"><b>' + esc(c.title) + '</b><br>' + esc(c.text) + '</div>';
-  }).join('') : '<p class="dim">' + esc(x.none) + '</p>') + '</div>';
-  book += '<div class="card"><h2>' + esc(x.said) + '</h2>' + (S.notes.length ? S.notes.slice().reverse().map(function (n) {
-   return '<div class="note"><small>' + esc(n.asker) + ' → ' + esc(n.who) + '</small><br><i>«' + esc(n.question) + '»</i><br>' + esc(n.answer) + '</div>';
-  }).join('') : '<p class="dim">' + esc(x.none) + '</p>') + '</div>';
+  if (p !== 'intro') book = notebook();
  }
  var typing = document.activeElement && document.activeElement.id === 'name' && main.indexOf('id="enter"') >= 0;
  if (!typing) $('main').innerHTML = main;
  $('act').innerHTML = act; $('book').innerHTML = book;
- $('ask').style.display = showAsk ? '' : 'none';
- $('askTitle').textContent = x.question; $('askHint').textContent = x.askHint;
+ $('ask').classList.toggle('on', showAsk);
+ $('askTitle').textContent = x.question; $('askHint').textContent = x.askHint; $('question').placeholder = x.question + '…';
  if (!showAsk) $('question').value = '';
  tick();
 }
+function sealed(head) {
+ var x = t(), a = S.accused, c = a && charById(a.suspect), m = a && a.motive && S.motives.filter(function (q) { return q.id === a.motive; })[0];
+ return '<section class="paper envelope"' + fx('sealed') + '>' + (head ? '<p class="dim" style="font-weight:700">' + esc(head) + '</p>' : '') + '<span class="stamp">' + esc(x.sealed) + '</span>' +
+  (c ? '<div class="dim" style="font-size:14px">' + esc(x.yourPick) + '</div><div class="mine">' + esc(c.name) + '</div>' + (m ? '<div class="why">' + esc(m.text) + '</div>' : '') : '') + '</section>';
+}
+function notebook() {
+ var x = t(), tab = ui.tab, fresh = S.clues.length > ui.clues && tab !== 'evidence';
+ if (tab === 'evidence') ui.clues = S.clues.length;
+ if (tab === 'role' && !S.you.role) tab = ui.tab = 'evidence';
+ var body = '';
+ if (tab === 'evidence') {
+  body = S.clues.length ? S.clues.map(function (c, i) {
+   var last = i === S.clues.length - 1;
+   return '<div class="card' + (last ? ' latest' : '') + '"><span class="pin"></span><h3>' + esc(c.title) + '</h3><p>' + esc(c.text) + '</p></div>';
+  }).reverse().join('') : '<p class="nothing">' + esc(x.noneClues) + '</p>';
+ } else if (tab === 'said') {
+  body = S.notes.length ? S.notes.slice().reverse().map(function (n) {
+   return '<div class="said"><div class="meta">' + esc(n.asker) + ICON.arrow + esc(n.who) + '</div><p class="q">«' + esc(n.question) + '»</p><p class="a">' + esc(n.answer) + '</p></div>';
+  }).join('') : '<p class="nothing">' + esc(x.noneSaid) + '</p>';
+ } else {
+  body = roleCard(false);
+ }
+ function tb(id, label, n, hot) { return '<button role="tab" data-tab="' + id + '" aria-selected="' + (tab === id) + '">' + esc(label) + (n != null ? '<span class="n' + (hot ? ' fresh' : '') + '">' + n + '</span>' : '') + '</button>'; }
+ return '<section class="book" aria-label="' + esc(x.book) + '"><div class="sec" style="margin-top:0"><h2>' + esc(x.book) + '</h2></div><div class="tabs" role="tablist">' + tb('evidence', x.evidence, S.clues.length, fresh) + tb('said', x.said, S.notes.length) +
+  (S.you.role ? tb('role', x.myRole) : '') + '</div><div class="paper noline" role="tabpanel">' + body + '</div></section>';
+}
 
 function tick() {
- var el = $('timer'), bar = el.firstChild;
+ var el = $('fuse'), bar = el.firstChild;
  if (!S || !S.deadline || !S.you) { el.classList.remove('on'); return; }
  var left = S.deadline - Date.now();
  el.classList.toggle('on', left > 0);
  if (!el.dataset.total || el.dataset.deadline !== String(S.deadline)) { el.dataset.total = Math.max(1, left); el.dataset.deadline = String(S.deadline); }
- bar.style.width = Math.max(0, Math.min(100, 100 * left / el.dataset.total)) + '%';
+ var pct = Math.max(0, Math.min(100, 100 * left / el.dataset.total)), hot = left > 0 && left < 10000;
+ bar.style.width = pct + '%'; el.classList.toggle('hot', hot);
+ var fg = $('clockfg'), secs = $('secs'), hero = $('hero');
+ if (fg) fg.setAttribute('stroke-dashoffset', String(100 - pct));
+ if (secs) secs.textContent = left > 0 ? Math.ceil(left / 1000) : '';
+ if (hero) hero.classList.toggle('hot', hot);
 }
 setInterval(tick, 250);
 
+function join() { var name = ($('name').value || '').trim(); if (name) send({type: 'join', name: name, team: 'red', player: load() || null}); else { toast(t().errName); $('name').focus(); } }
+document.addEventListener('submit', function (e) { if (e.target.id === 'joinForm') { e.preventDefault(); join(); } });
 document.addEventListener('click', function (e) {
  var el = e.target.closest ? e.target.closest('button') : null;
  if (!el || el.disabled) return;
- if (el.id === 'enter') { var name = ($('name').value || '').trim(); if (name) send({type: 'join', name: name, team: 'red', player: load() || null}); }
+ if (el.id === 'enter') { e.preventDefault(); join(); }
+ else if (el.id === 'flip') { ui.flipped = !ui.flipped; el.classList.toggle('open', ui.flipped); el.setAttribute('aria-pressed', String(ui.flipped)); }
+ else if (el.getAttribute('data-tab')) { ui.tab = el.getAttribute('data-tab'); $('book').innerHTML = notebook(); var b = document.querySelector('[data-tab="' + ui.tab + '"]'); if (b) b.focus(); }
  else if (el.id === 'start') { if (send({type: 'start'})) el.disabled = true; }
  else if (el.id === 'resume') { if (send({type: 'resume'})) el.disabled = true; }
  else if (el.id === 'vote') { if (send({type: 'vote'})) el.disabled = true; }
  else if (el.id === 'accuse') { if (choice.suspect && send({type: 'accuse', suspect: choice.suspect, motive: choice.motive})) el.disabled = true; }
- else if (el.getAttribute('data-ask')) { if (send({type: 'ask', id: el.getAttribute('data-ask'), text: $('question').value || ''})) { $('question').value = ''; el.disabled = true; } }
- else if (el.getAttribute('data-examine')) { if (send({type: 'examine', id: el.getAttribute('data-examine')})) el.disabled = true; }
+ else if (el.getAttribute('data-ask')) { if (send({type: 'ask', id: el.getAttribute('data-ask'), text: $('question').value || ''})) { $('question').value = ''; lockActs(); } }
+ else if (el.getAttribute('data-examine')) { if (send({type: 'examine', id: el.getAttribute('data-examine')})) lockActs(); }
 });
+function lockActs() { Array.prototype.forEach.call(document.querySelectorAll('[data-ask],[data-examine]'), function (b) { b.disabled = true; }); }
 document.addEventListener('change', function (e) {
  var el = e.target;
- if (el.id === 'kids') { if (!send({type: 'kids', on: !!el.checked})) el.checked = !!(S && S.kids); }
- else if (el.name === 'suspect') { choice.suspect = el.value; var b = $('accuse'); if (b) b.disabled = false; }
+ if (el.id === 'kids') { if (!send({type: 'kids', on: !!el.checked})) el.checked = !!(S && S.kids); else if (DEMO) { S.kids = !!el.checked; render(); } }
+ else if (el.name === 'suspect') { choice.suspect = el.value; var b = $('accuse'); if (b) b.disabled = false; var h = $('pickFirst'); if (h) h.hidden = true; try { if (navigator.vibrate) navigator.vibrate(20); } catch (x) {} }
  else if (el.name === 'motive') { choice.motive = el.value; }
 });
+
+// ?demo=<phase>[&kids=1][&lang=en]: sample states for looking at the screens without a game (no socket is opened).
+function demo(phase) {
+ var en = params.get('lang') === 'en', kids = params.get('kids') === '1', L = function (es, e) { return en ? e : es; };
+ var chars = kids ? [['misifu', 'suspect', L('Misifú, el gato', 'Misifú the cat'), L('Un gato peludo y flojo al que le encanta la leche', 'A fluffy, lazy cat who loves milk')], ['abuela', 'suspect', L('La abuela', 'Grandma'), L('La mejor cocinera de la familia', 'The best baker in the family')], ['richie', 'suspect', L('Richie, el robot', 'Richie the robot'), L('¡Yo! Un robotito que cuidaba las galletas', 'Me! A little robot guarding the cookies')], ['pancho', 'suspect', L('El tío Pancho', 'Uncle Pancho'), L('Un tío grandote con un bigotote, a dieta', 'A big uncle with a big mustache, on a diet')], ['pepe', 'witness', L('El loro Pepe', 'Pepe the parrot'), L('Un loro verde que repite todo lo que oye', 'A green parrot who repeats everything')]]
+  : [['marco', 'suspect', 'Marco Bellini', L('El mago contratado para entretener a los invitados', 'The magician hired to entertain the guests')], ['lucia', 'suspect', 'Lucía Herrera', L('La asistente de Beatriz, con vestido negro y pañuelo rojo', "Beatriz's assistant, in a black dress and a red scarf")], ['ricardo', 'suspect', 'Ricardo Lamas', L('El sobrino y heredero, siempre corto de dinero', 'The nephew and heir, always short of money')], ['elena', 'suspect', 'Elena Vidal', L('La agente de seguros que aseguró el collar', 'The insurance agent who insured the necklace')], ['coronel', 'suspect', L('Coronel Ferrán Ortiz', 'Colonel Ferrán Ortiz'), L('Un coronel retirado que colecciona piedras preciosas', 'A retired colonel who collects precious stones')], ['samuel', 'witness', L('Samuel, el barman', 'Samuel, the bartender'), L('Sirvió tragos toda la noche desde la barra', 'Served drinks all night from the bar')]];
+ var clues = [{id: 'fusebox', title: L('La caja de fusibles', 'The fuse box'), text: L('No fue un accidente: hay un temporizador de cocina pegado al interruptor general, puesto para las 10:31.', 'No accident: a kitchen timer is taped to the main switch, set for 10:31.')}, {id: 'dots', title: L('Puntos en el piso', 'Dots on the floor'), text: L('Puntitos de cinta fosforescente desde el pasillo de servicio directo a la vitrina.', 'Tiny glow-in-the-dark dots of tape from the service corridor straight to the glass case.')}];
+ var you = {player: 'p1', name: 'Eduardo', role: phase === 'lobby' ? null : {name: L('Detective · testigo secreto', 'Detective · secret witness'), text: L('Viste a alguien meterse al pasillo de servicio con algo que hacía tictac. Solo un destello de un pañuelo rojo. Decide si lo cuentas o te lo guardas.', 'You saw someone slip into the service corridor with something that ticked. Only a flash of a red scarf. Your call: share it or keep it to yourself.')}};
+ var st = {type: 'state', phase: phase, language: en ? 'en' : 'es', title: kids ? L('¿Quién se comió las galletas?', 'Who Ate the Cookies?') : L('Apagón en la gala', 'Blackout at the Gala'),
+  intro: L('Una cena benéfica en el penthouse de Beatriz Lamas. A las diez y media se fue la luz durante dos minutos. Cuando volvió, el Corazón de los Andes, un famoso collar de esmeraldas, ya no estaba en su vitrina.', "A charity dinner in Beatriz Lamas's penthouse. At half past ten the lights went out for two minutes. When they came back, the Heart of the Andes, a famous emerald necklace, was gone from its glass case."),
+  kids: kids, you: you, players: [{name: 'Eduardo', turn: phase === 'turn', accused: phase === 'sent'}, {name: 'Ana', turn: phase === 'wait', accused: true}, {name: 'Luis', turn: false, accused: false}, {name: 'Sofía', turn: false, accused: false}],
+  round: 2, rounds: 4, turn: phase === 'wait' || phase === 'answering' ? 'Ana' : 'Eduardo', characters: chars.map(function (c) { return {id: c[0], kind: c[1], name: c[2], about: c[3]}; }),
+  clues: clues, available: [{id: 'pawn', title: L('Una boleta de empeño', 'A pawn ticket')}, {id: 'offer', title: L('La carta del coronel', "The colonel's letter")}],
+  notes: [{asker: 'Ana', who: 'Samuel', question: L('¿Quién estaba cerca de la vitrina?', 'Who was near the glass case?'), answer: L('Con la luz apagada no vi caras. Pero algo rojo pasó rápido hacia el pasillo.', "With the lights out I couldn't see faces. But something red moved fast toward the corridor.")}],
+  votes: {yes: 1, needed: 3}, motives: [{id: 'debts', text: L('Para pagar las deudas de un familiar', "To pay a relative's debts")}, {id: 'revenge', text: L('Venganza contra Beatriz', 'Revenge against Beatriz')}, {id: 'insurance', text: L('Para cobrar el seguro', 'To cash in the insurance')}],
+  accused: phase === 'sent' || phase === 'reveal' ? {suspect: 'lucia', motive: 'debts'} : null, deadline: phase === 'turn' ? Date.now() + 45000 : null, can: [], message: null, result: null};
+ if (kids) st.accused = st.accused && {suspect: 'pancho', motive: 'debts'};
+ var map = {join: 'lobby', closed: 'lobby', wait: 'turn', sent: 'accuse'};
+ st.phase = map[phase] || phase;
+ if (phase === 'join') { st.you = null; st.can = ['join']; st.title = 'Detectives'; }
+ if (phase === 'closed') { st.you = null; }
+ if (phase === 'lobby') st.can = ['start', 'settings'];
+ if (phase === 'turn') st.can = ['act', 'vote'];
+ if (phase === 'wait' || phase === 'asking' || phase === 'answering') st.can = ['vote'];
+ if (phase === 'clue') { st.message = clues[1].title; st.turn = 'Ana'; }
+ if (phase === 'accuse') st.can = ['accuse'];
+ if (phase === 'paused') st.can = ['resume'];
+ if (phase === 'over') st.result = {culprit: kids ? L('El tío Pancho', 'Uncle Pancho') : 'Lucía Herrera', motive: kids ? L('Olían demasiado rico para aguantarse', 'They smelled too good to resist') : L('Para pagar las deudas de un familiar', "To pay a relative's debts"), solvers: ['Eduardo', 'Ana'], motive_right: ['Eduardo'], you_right: params.get('right') !== '0'};
+ joined = true;
+ handle(st);
+}
 render();
-connect();
+if (DEMO) { if (!code) code = 'KWZRTB'; demo(DEMO); } else connect();
 </script>
 </body>
 </html>
