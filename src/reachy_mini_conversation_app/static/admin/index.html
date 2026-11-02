@@ -68,6 +68,10 @@
       <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 2.7-1.6 3.9-2.7 4.9-.9.8-1.2 1.6-1.5 2.9a2.8 2.8 0 0 1-5.3.5"/><path d="M10 9.8a2.2 2.2 0 0 1 4.4 0c0 1.2-.8 1.7-1.6 2.3"/></symbol>
       <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5V9H9"/><path d="m10.5 9.5 4 2.5-4 2.5z"/></symbol>
       <symbol id="i-game" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/><circle cx="15" cy="15" r="1"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+      <symbol id="i-kid" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9 10v.5M15 10v.5M8.5 14.5c2 2 5 2 7 0M10 3.8c.3 1.4 1.2 2.2 2.6 2.2"/></symbol>
       <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2.4 2.8-.6.6 2.8 2.4 1.6-1.3 2.5 1.3 2.5-2.4 1.6-.6 2.8-2.8-.6L12 21.2l-1.6-2.4-2.8.6-.6-2.8-2.4-1.6L5.9 12 4.6 9.5 7 7.9l.6-2.8 2.8.6z"/></symbol>
     </defs>
   </svg>
@@ -135,8 +139,7 @@
           <button id="false-wake" class="pill soft" type="button">Woke for nothing</button>
         </div>
       </div>
-      <h3 class="section-title" id="games-title" hidden>Games</h3>
-      <div class="panel games" id="games" hidden></div>
+      <div id="now-playing" class="now-slot" hidden></div>
 
       <h3 class="section-title">Health</h3>
       <div id="health" class="health"></div>
@@ -187,6 +190,28 @@
       <button id="look-up" class="pill soft center" type="button" hidden><svg class="icon"><use href="#i-lift"/></svg>Lift his head</button>
     </section>
 
+    <section id="view-games" class="view" hidden>
+      <div id="games-now" class="now-slot" hidden></div>
+      <div class="game-options">
+        <div class="segmented" role="tablist" aria-label="Language">
+          <button type="button" role="tab" data-lang="es" aria-selected="true">Español</button>
+          <button type="button" role="tab" data-lang="en" aria-selected="false">English</button>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <svg class="icon"><use href="#i-kid"/></svg>
+            <div class="row-text">
+              <span class="row-label">Kids mode</span>
+              <span class="row-sub">Kids' clues, words and cases in the party games</span>
+            </div>
+            <button id="kids-mode" class="switch" role="switch" type="button" aria-checked="false" aria-label="Kids mode"></button>
+          </div>
+        </div>
+      </div>
+      <p id="games-note" class="notice" hidden></p>
+      <div id="game-list" class="game-list"></div>
+    </section>
+
     <section id="view-gallery" class="view" hidden>
       <label class="search">
         <svg class="icon"><use href="#i-search"/></svg>
@@ -216,6 +241,7 @@
 
   <nav class="tabs">
     <a href="#home" data-tab="home"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+    <a href="#games" data-tab="games"><svg class="icon"><use href="#i-game"/></svg>Games</a>
     <a href="#people" data-tab="people"><svg class="icon"><use href="#i-people"/></svg>People</a>
     <a href="#camera" data-tab="camera"><svg class="icon"><use href="#i-camera"/></svg>Camera</a>
     <a href="#gallery" data-tab="gallery"><svg class="icon"><use href="#i-gallery"/></svg>Gallery</a>

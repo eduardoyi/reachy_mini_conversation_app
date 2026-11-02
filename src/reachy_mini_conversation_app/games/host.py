@@ -129,8 +129,12 @@ class GameHost:
             "state": self._state.value,
             "game": context.info.key if context is not None and self.active else None,
             "progress": context.progress if context is not None and self.active else "",
+            "kids": context.kids if context is not None and self.active else False,
+            "join_url": context.join_url if context is not None and self.active else "",
             "games": [
-                {"key": game.key, "title": game.title} for game in GAMES.values() if game.key in self._factories
+                {"key": game.key, "title": game.title, "pitch": game.pitch}
+                for game in GAMES.values()
+                if game.key in self._factories
             ],
         }
 
@@ -176,7 +180,7 @@ class GameHost:
             self._set_state(GameState.IDLE)
         return QuickReply(None, language, "game")
 
-    def start(self, key: str, language: str) -> str | None:
+    def start(self, key: str, language: str, kids: bool = False) -> str | None:
         """Start game ``key`` now (a yes, Gemini or the admin app); return why it cannot start instead."""
         factory = self._factories.get(key)
         if factory is None:
@@ -185,7 +189,7 @@ class GameHost:
             self.end("another game", say=False)
         game = factory()
         services = self._services
-        context = GameContext(info=game.info, language=language, services=services)
+        context = GameContext(info=game.info, language=language, services=services, kids=kids)
         context.resume = lambda: self.resume(say=True)
         context.active_at = services.clock()
         self._game, self._context, self._language = game, context, language
@@ -193,7 +197,7 @@ class GameHost:
         self._spawn(services.pause_music(), "game-pause-music")
         self._set_state(GameState.PLAYING)
         self._task = asyncio.get_running_loop().create_task(self._play(game, context), name=f"game-{key}")
-        logger.info("Game started: %s (%s)", key, language)
+        logger.info("Game started: %s (%s%s)", key, language, ", kids" if kids else "")
         return None
 
     async def _play(self, game: Game, context: GameContext) -> None:

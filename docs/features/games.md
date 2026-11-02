@@ -51,8 +51,11 @@ Detectives, the mystery party game played on phones, also runs on the host and h
 - **Starting through Gemini:** the `play_game` tool is always offered. Gemini must read a game's rules
   (`action=rules`) before it may start it (`action=start`, refused otherwise or after 5 minutes), so it always
   asks first; then it says "¡Vamos!" and ends the conversation, and the game runs locally.
-- **Starting from the phone:** the admin app's Home tab has a Games panel; Play starts a game at once (the tap
-  is the yes) and wakes Reachy if he sleeps.
+- **Starting from the phone:** the admin app's Games tab has a card per game; Play starts it at once (the tap
+  is the yes) in the language and Kids mode chosen there, and wakes Reachy if he sleeps. Kids mode reaches the
+  game as `GameContext.kids` (the phone lobby can still switch it). Voice starts work as before, without kids
+  mode. While a game runs, Home and the Games tab show it with Pause or Resume, End, and its join QR code
+  (`GameContext.join_url`, drawn by the admin server at `GET /api/game/qr`).
 - **Language:** the game speaks the language it was asked for in.
 - **While a game plays:** Spotify is paused (and not resumed afterwards), the game owns the e-ink screen (the
   music card waits), other announcements (Maribel's replies) wait until the game is paused or over, and the
@@ -128,7 +131,7 @@ flowchart LR
   Quick[Quick command: juguemos a X] -->|offer, addressed| Host
   Gate[Wake no quick command took] -->|cloud gate| Host
   Tool[Gemini play_game rules then start] --> Host
-  Admin[Admin app Games panel] -->|control API /game| Host
+  Admin[Admin app Games tab] -->|control API /game| Host
   Host[GameHost: asking, playing, paused] --> Game[ColorHunt.play]
   Host --> Services[GameServices: speak, ask, show, tune, head, music, camera, Jev]
   Game --> Services
@@ -164,7 +167,7 @@ flowchart LR
 | Jev client | `jev.py` | `ask(client, api_key, model, state, questions, images, feature)`, `sized_jpeg`, `JevError` |
 | Tool | `tools/play_game.py` | `play_game(game, action=rules|start, language)`; direct (not a skill); added with `games_configured()` |
 | Screens | `eink_display.py` | `render_game_prompt(word, stars, total, caption)`, `render_game_picture(picture, word, stars, total, caption)`, `render_game_paused(title, language)`; screen owner `game`; `game_picture(subject)` (kept only, never waits), `draw_game_pictures(subjects)`, `GAME_PICTURES_DIR` |
-| Admin | `control_api.py` `/status` (`game`), `POST /game`; `admin/server.py` `POST /api/game` (audited); `static/admin` Games panel | |
+| Admin | `control_api.py` `/status` (`game`), `POST /game`; `admin/server.py` `POST /api/game` (audited), `GET /api/game/qr`; `static/admin` Games tab and Now playing card | |
 | Config | `HYBRID_RUNTIME_ENABLED`, `QUICK_COMMANDS_ENABLED`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` | Games need all three flags/keys; the color hunt also needs the camera |
 
 ## Extension guide

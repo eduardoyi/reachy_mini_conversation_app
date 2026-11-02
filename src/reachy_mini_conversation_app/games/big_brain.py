@@ -476,6 +476,7 @@ class BigBrain(Game):
     async def play(self, context: GameContext) -> None:
         """Host one show."""
         self._context = context
+        self._kids = context.kids
         self._judge = Judge(self._setup.data_dir / "big-brain" / "rulings.json", context.services.jev)
         bank_path = self._setup.bank
         try:
@@ -492,6 +493,7 @@ class BigBrain(Game):
             public_url=self._setup.public_url,
         )
         await self._phones.start()
+        context.join_url = self._phones.url()
         watcher = asyncio.get_running_loop().create_task(self._watch_pause(), name="big-brain-pause")
         try:
             if not await self._lobby():

@@ -47,10 +47,17 @@ class ControlAPI:
         self.privacy: dict[str, Any] = {"on": False, "since": None}
         self.change_status = 200
         self.faces = [{"id": "adriana", "name": "Adriana", "samples": 2, "photos": ["1.jpg"]}]
+        self.game: dict[str, Any] | None = None
 
     def status(self) -> dict[str, Any]:
         """Return the app's status as the real control API shapes it."""
-        return {"mode": "conversation", "sleeping": False, "privacy": self.privacy, "calls_linked": True}
+        return {
+            "mode": "conversation",
+            "sleeping": False,
+            "privacy": self.privacy,
+            "calls_linked": True,
+            "game": self.game,
+        }
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         """Answer one control API request (or fail to connect while down)."""
@@ -978,13 +985,21 @@ def test_memory_is_relayed_and_changes_audited_without_their_text(admin: Admin) 
 def test_game_actions_are_relayed_and_audited(admin: Admin) -> None:
     """Starting a game from the phone reaches the app and the activity log names the game."""
     with admin.client() as client:
-        assert (
-            client.post("/api/game", json={"action": "start", "game": "colors"}, headers=SAME_ORIGIN).status_code
-            == 200
-        )
+        start = {"action": "start", "game": "sheeple", "language": "en", "kids": True}
+        assert client.post("/api/game", json=start, headers=SAME_ORIGIN).status_code == 200
         assert client.post("/api/game", json={"action": "end"}, headers=SAME_ORIGIN).status_code == 200
     assert admin.control.calls("/game") == [
-        {"action": "start", "game": "colors", "language": None},
-        {"action": "end", "game": None, "language": None},
+        {"action": "start", "game": "sheeple", "language": "en", "kids": True},
+        {"action": "end", "game": None, "language": None, "kids": False},
     ]
-    assert [entry["action"] for entry in admin.audit()] == ["game end", "game start colors"]
+    assert [entry["action"] for entry in admin.audit()] == ["game end", "game start sheeple"]
+
+
+def test_the_join_qr_shows_only_while_a_game_takes_phones(admin: Admin) -> None:
+    """Home shows the playing game's join code for late guests; without one there is nothing to show."""
+    with admin.client() as client:
+        assert client.get("/api/game/qr").status_code == 404
+        admin.control.game = {"state": "playing", "game": "sheeple", "join_url": "https://x.ts.net/bigbrain/?c=ABCDEF"}
+        qr = client.get("/api/game/qr")
+    assert qr.status_code == 200 and qr.headers["content-type"].startswith("image/svg+xml")
+    assert qr.text.startswith("<svg") and "h1v1h-1z" in qr.text

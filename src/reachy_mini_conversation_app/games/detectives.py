@@ -450,6 +450,7 @@ class Detectives(Game):
     async def play(self, context: GameContext) -> None:
         """Run one game."""
         self._context = context
+        self._kids = context.kids
         try:
             cases = await asyncio.to_thread(load_cases, self._setup.cases_dir)
         except (CaseError, OSError) as error:
@@ -467,6 +468,7 @@ class Detectives(Game):
             page=PAGE,
         )
         await self._phones.start()
+        context.join_url = self._phones.url()
         watcher = asyncio.get_running_loop().create_task(self._watch_pause(), name="detectives-pause")
         try:
             await self._lobby()

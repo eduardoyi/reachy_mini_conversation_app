@@ -199,3 +199,16 @@ def qr_matrix(text: str) -> list[list[bool]]:
             best, best_score = modules, score
     assert best is not None
     return best
+
+
+def qr_svg(text: str, quiet: int = 2) -> str:
+    """Return the QR code for ``text`` as an SVG drawing, dark modules on white with a ``quiet``-module margin."""
+    modules = qr_matrix(text)
+    size = len(modules) + 2 * quiet
+    path = "".join(
+        f"M{x + quiet} {y + quiet}h1v1h-1z" for y, row in enumerate(modules) for x, dark in enumerate(row) if dark
+    )
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" shape-rendering="crispEdges">'
+        f'<rect width="{size}" height="{size}" fill="#fff"/><path d="{path}" fill="#000"/></svg>'
+    )

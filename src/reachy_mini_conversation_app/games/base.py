@@ -99,6 +99,10 @@ class GameContext:
     active_at: float = 0.0
     # Play on after a pause, as "sigue" would (a phone's Continue button); the host sets it.
     resume: Callable[[], None] = lambda: None
+    # Start in kids mode (chosen in the admin app); the phone lobby can still change it.
+    kids: bool = False
+    # The address phones open to join (the QR code), for the admin app; empty for games without phones.
+    join_url: str = ""
 
     async def playing(self) -> None:
         """Return once the game is not paused."""

@@ -179,8 +179,8 @@ function setFill(slider) {
 
 // Tabs ------------------------------------------------------------------------------------------
 
-const views = { home: loadHome, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
-const titles = { people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
+const views = { home: loadHome, games: loadGames, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
+const titles = { games: "Games", people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
 let currentTab = "";
 
 function showTab() {
@@ -295,49 +295,9 @@ function renderHome(status) {
     setFill(slider);
   }
 
-  renderGames(status.app.running ? status.app.game : null, mood);
+  renderNowPlaying($("#now-playing"), status);
   $("#health").replaceChildren(...healthCells(status));
   $("#restart").hidden = !status.can_restart || mood === "off";
-}
-
-// Games: start one from here (the tap is the yes), or pause and end the one he is playing.
-function renderGames(game, mood) {
-  const show = Boolean(game && game.games && game.games.length) && mood !== "private";
-  $("#games").hidden = $("#games-title").hidden = !show;
-  if (!show) return;
-  const on = game.state === "playing" || game.state === "paused";
-  const pill = (label, className, action) => {
-    const button = el("button", { className: `pill small ${className}`, type: "button" }, label);
-    button.onclick = () => run(button, action);
-    return button;
-  };
-  const act = async (action, key) => {
-    await api("/api/game", { method: "POST", body: { action, game: key } });
-    await loadHome();
-  };
-  $("#games").replaceChildren(
-    ...game.games.map((each) => {
-      const name = each.title.en.charAt(0).toUpperCase() + each.title.en.slice(1);
-      const current = on && game.game === each.key;
-      const detail = !current
-        ? `"Juguemos ${each.title.es}"`
-        : game.state === "paused"
-          ? `Paused${game.progress ? ` · ${game.progress}` : ""}`
-          : game.progress || "Playing";
-      const buttons = current
-        ? [
-            game.state === "paused" ? pill("Resume", "sun", () => act("resume")) : pill("Pause", "soft", () => act("pause")),
-            pill("End", "ghost", () => act("end")),
-          ]
-        : [pill("Play", "sun", () => act("start", each.key))];
-      if (!current && on) buttons[0].disabled = true;
-      return el("div", { className: "row" }, [
-        icon("game"),
-        el("div", { className: "row-text" }, [el("span", { className: "row-label" }, name), el("span", { className: "row-sub" }, detail)]),
-        ...buttons,
-      ]);
-    })
-  );
 }
 
 function healthCells(status) {
@@ -401,8 +361,210 @@ async function restart(button) {
 $("#restart").addEventListener("click", (event) => restart(event.currentTarget));
 
 setInterval(() => {
-  if (currentTab === "home" && !document.hidden) loadHome();
+  if (document.hidden) return;
+  if (currentTab === "home") loadHome();
+  if (currentTab === "games") loadGames();
 }, 8000);
+
+// Games -----------------------------------------------------------------------------------------
+
+// The cards: a name, a shelf and what each game needs. Their art is static/admin/games/<key>.webp.
+const GAME_CARDS = {
+  bigbrain: { name: "Big Brain", shelf: "party", facts: ["2–4 teams", "Phones"] },
+  sheeple: { name: "Sheeple", shelf: "party", facts: ["2–4 teams", "Phones"] },
+  scribble: { name: "Scribble Rush", shelf: "party", facts: ["2–3 teams", "Phones", "Paper and pen"] },
+  detectives: { name: "Detectives", shelf: "party", facts: ["Any number", "Phones"] },
+  bigbrain_hp: { name: "Hogwarts", shelf: "editions", facts: ["Harry Potter films"] },
+  bigbrain_lotr: { name: "Middle-earth", shelf: "editions", facts: ["The Lord of the Rings"] },
+  bigbrain_sw: { name: "Galactic", shelf: "editions", facts: ["Star Wars I–VI"] },
+  bigbrain_disney: { name: "Disney", shelf: "editions", facts: ["Disney films"] },
+  colors: { name: "Color Hunt", shelf: "little", facts: ["Camera"] },
+  treasure: { name: "Treasure Hunt", shelf: "little", facts: ["Camera"] },
+  simon: { name: "Simon Says", shelf: "little", facts: ["Camera"] },
+};
+const SHELVES = [
+  ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
+  ["editions", "Big Brain editions", "The same show with a whole board about one world."],
+  ["little", "For little ones", "No phones: kids show Reachy things and he watches."],
+];
+const SAY = { es: (title) => `Juguemos ${title}`, en: (title) => `Let's play ${title}` };
+
+function gamePrefs() {
+  let prefs = {};
+  try {
+    prefs = JSON.parse(localStorage.getItem("reachy-games") || "{}");
+  } catch (error) {
+    // Private browsing or a bad value: the defaults below.
+  }
+  return { language: prefs.language === "en" ? "en" : "es", kids: prefs.kids === true };
+}
+
+function saveGamePrefs(change) {
+  try {
+    localStorage.setItem("reachy-games", JSON.stringify({ ...gamePrefs(), ...change }));
+  } catch (error) {
+    // Not remembered on this phone; the choice still holds until the page reloads.
+  }
+}
+
+function gameName(key, titles) {
+  const card = GAME_CARDS[key];
+  if (card) return card.shelf === "editions" ? `Big Brain: ${card.name}` : card.name;
+  const title = (titles && titles.en) || key;
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function gameArt(key, className = "game-art-img") {
+  const image = el("img", { className, src: `/static/admin/games/${key}.webp`, alt: "", loading: "lazy", decoding: "async" });
+  image.onerror = () => image.remove();
+  return image;
+}
+
+async function gameAction(action, key) {
+  const { language, kids } = gamePrefs();
+  await api("/api/game", { method: "POST", body: action === "start" ? { action, game: key, language, kids } : { action } });
+  await (currentTab === "games" ? loadGames() : loadHome());
+}
+
+// Now playing: the game on, with pause or resume, end, and the join code for whoever arrives late.
+let joinQr = { url: "", node: null };
+
+function renderNowPlaying(slot, status) {
+  const game = status.app.running ? status.app.game : null;
+  const on = Boolean(game && (game.state === "playing" || game.state === "paused") && game.game);
+  slot.hidden = !on;
+  const drawn = on ? JSON.stringify([game.game, game.state, game.progress, game.kids, game.join_url]) : "";
+  if (drawn === slot.dataset.drawn) return;
+  slot.dataset.drawn = drawn;
+  if (!on) return slot.replaceChildren();
+  const paused = game.state === "paused";
+  const titles = (game.games || []).find((each) => each.key === game.game);
+  const pill = (label, iconName, className, action) => {
+    const button = el("button", { className: `pill small ${className}`, type: "button" }, [icon(iconName), label]);
+    button.onclick = () => run(button, action);
+    return button;
+  };
+  const end = async () => {
+    if (await ask({ title: `End ${gameName(game.game, titles && titles.title)}?`, body: "Scores are lost.", yes: "End game", danger: true })) {
+      await gameAction("end");
+    }
+  };
+  let join = null;
+  if (game.join_url) {
+    if (joinQr.url !== game.join_url) {
+      joinQr = { url: game.join_url, node: el("img", { src: `/api/game/qr?u=${encodeURIComponent(game.join_url)}`, alt: "QR code to join the game" }) };
+    }
+    join = el("figure", { className: "now-join" }, [joinQr.node, el("figcaption", {}, "Scan to join")]);
+  }
+  slot.replaceChildren(
+    el("article", { className: `now-card${paused ? " paused" : ""}` }, [
+      gameArt(game.game, "now-art"),
+      el("div", { className: "now-body" }, [
+        el("span", { className: "now-eyebrow" }, [el("i", { className: "now-dot" }), paused ? "Paused" : "Now playing", game.kids ? " · Kids mode" : ""]),
+        el("h3", {}, gameName(game.game, titles && titles.title)),
+        el("p", {}, game.progress || (paused ? "Say “seguimos” or tap Resume." : "Say “pausa” to take a break.")),
+        el("div", { className: "now-actions" }, [
+          paused ? pill("Resume", "play", "sun", () => gameAction("resume")) : pill("Pause", "pause", "soft", () => gameAction("pause")),
+          pill("End", "stop", "ghost", end),
+        ]),
+      ]),
+      join,
+    ])
+  );
+}
+
+async function loadGames() {
+  showGameOptions();
+  const status = await run(null, () => api("/api/status"));
+  if (!status) return;
+  state.status = status;
+  showPrivacy(status.privacy.on);
+  if (currentTab === "games") renderGames(status);
+}
+
+function showGameOptions() {
+  const { language, kids } = gamePrefs();
+  for (const button of document.querySelectorAll("#view-games [data-lang]")) {
+    button.setAttribute("aria-selected", String(button.dataset.lang === language));
+  }
+  $("#kids-mode").setAttribute("aria-checked", String(kids));
+}
+
+for (const button of document.querySelectorAll("#view-games [data-lang]")) {
+  button.addEventListener("click", () => {
+    saveGamePrefs({ language: button.dataset.lang });
+    showGameOptions();
+    if (state.status) renderGames(state.status);
+  });
+}
+
+$("#kids-mode").addEventListener("click", () => {
+  saveGamePrefs({ kids: !gamePrefs().kids });
+  showGameOptions();
+});
+
+function renderGames(status) {
+  renderNowPlaying($("#games-now"), status);
+  const game = status.app.running ? status.app.game : null;
+  const mood = reachyState(status);
+  const blocked = mood === "private" ? "Privacy is on. Turn it off to play." : !status.app.running ? "Reachy isn't running." : !game ? "Games aren't set up on Reachy." : "";
+  $("#games-note").textContent = blocked;
+  $("#games-note").hidden = !blocked;
+  const games = game ? game.games || [] : [];
+  const playing = game && (game.state === "playing" || game.state === "paused") ? game.game : null;
+  const { language } = gamePrefs();
+  // The 8-second refresh redraws only on a change, so the art does not flicker.
+  const drawn = JSON.stringify([games.map((each) => each.key), playing, blocked, language]);
+  if (drawn === renderGames.drawn) return;
+  renderGames.drawn = drawn;
+
+  const play = (each) => {
+    const name = gameName(each.key, each.title);
+    const current = playing === each.key;
+    const button = el("button", { className: "pill small sun", type: "button", disabled: Boolean(blocked) || current }, current ? "Playing" : [icon("play"), "Play"]);
+    button.onclick = () =>
+      run(button, async () => {
+        if (playing && !(await ask({ title: `Start ${name}?`, body: `${gameName(playing)} ends.`, yes: "Start" }))) return;
+        await gameAction("start", each.key);
+        toast(`${name} is starting.`);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    return button;
+  };
+  const facts = (key) => el("ul", { className: "game-facts" }, ((GAME_CARDS[key] || {}).facts || []).map((fact) => el("li", {}, fact)));
+  const say = (each) => el("span", { className: "game-say" }, [icon("mic"), `“${SAY[language](each.title[language] || each.title.en)}”`]);
+
+  const card = (each, shelf) => {
+    const name = gameName(each.key, each.title);
+    const shortName = GAME_CARDS[each.key] ? GAME_CARDS[each.key].name : name;
+    const playingNow = playing === each.key;
+    if (shelf === "editions") {
+      return el("article", { className: `game-tile${playingNow ? " on" : ""}` }, [
+        el("div", { className: "game-art" }, [gameArt(each.key), el("h4", {}, shortName)]),
+        el("div", { className: "game-tile-foot" }, [facts(each.key), play(each)]),
+      ]);
+    }
+    return el("article", { className: `game-card ${shelf}${playingNow ? " on" : ""}` }, [
+      el("div", { className: "game-art" }, [gameArt(each.key), el("h4", {}, shortName)]),
+      el("div", { className: "game-body" }, [
+        el("p", { className: "game-pitch" }, (each.pitch && (each.pitch[language] || each.pitch.en)) || ""),
+        facts(each.key),
+        el("div", { className: "game-foot" }, [say(each), play(each)]),
+      ]),
+    ]);
+  };
+
+  const shelves = SHELVES.map(([shelf, title, hint]) => {
+    const members = games.filter((each) => (GAME_CARDS[each.key] ? GAME_CARDS[each.key].shelf : "party") === shelf);
+    if (!members.length) return null;
+    return el("section", { className: `game-shelf ${shelf}` }, [
+      el("h3", { className: "section-title" }, title),
+      el("p", { className: "hint shelf-hint" }, hint),
+      el("div", { className: `game-${shelf === "editions" ? "tiles" : "cards"}` }, members.map((each) => card(each, shelf))),
+    ]);
+  });
+  $("#game-list").replaceChildren(...shelves.filter(Boolean));
+}
 
 // Wake word -------------------------------------------------------------------------------------
 

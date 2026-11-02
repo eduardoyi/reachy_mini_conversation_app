@@ -147,6 +147,7 @@ class ControlApi:
             return "Privacy is on.", 409
         game = str(payload.get("game") or "")
         language = "en" if payload.get("language") == "en" else "es"
+        kids = payload.get("kids") is True
 
         def act() -> str | None:
             if action == "start":
@@ -154,7 +155,7 @@ class ControlApi:
                     self._deps.movement_manager.wake_up()
                     if self._runtime is not None:
                         self._runtime.set_asleep(False)
-                problem: str | None = host.start(game, language)
+                problem: str | None = host.start(game, language, kids)
                 return problem
             if action == "pause":
                 host.pause()

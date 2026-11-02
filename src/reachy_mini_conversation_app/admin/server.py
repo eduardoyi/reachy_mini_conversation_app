@@ -34,6 +34,7 @@ from starlette.background import BackgroundTask
 from starlette.staticfiles import StaticFiles
 
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.qr_code import qr_svg
 from reachy_mini_conversation_app.whatsapp import WhatsAppLink
 from reachy_mini_conversation_app.admin.wake import WakeWord, WakeReminder
 from reachy_mini_conversation_app.json_lines import JsonLines
@@ -538,8 +539,23 @@ def create_app(
         if isinstance(payload, Response):
             return payload
         action, game = payload.get("action"), payload.get("game")
-        body = {"action": action, "game": game, "language": payload.get("language")}
+        body = {
+            "action": action,
+            "game": game,
+            "language": payload.get("language"),
+            "kids": payload.get("kids") is True,
+        }
         return await control(request, "/game", f"game {action}" + (f" {game}" if action == "start" else ""), body)
+
+    @app.get("/api/game/qr")
+    async def _game_qr() -> Response:
+        # The join code of the game playing now, for guests who arrive late; 404 when no game takes phones.
+        app_status = await link.status()
+        game = app_status.get("game") if app_status else None
+        url = game.get("join_url") if isinstance(game, dict) else None
+        if not isinstance(url, str) or not url:
+            return Response(status_code=404, headers=_NO_STORE)
+        return Response(qr_svg(url), media_type="image/svg+xml", headers=_NO_STORE)
 
     @app.post("/api/look-up")
     async def _look_up(request: Request) -> Response:

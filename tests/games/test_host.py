@@ -250,7 +250,20 @@ async def test_status_and_unknown_games(room) -> None:
     assert host.start("chess", "es") == "There is no game 'chess'."
     await _playing(reachy, host)
     status = host.status()
-    assert (status["state"], status["game"]) == ("playing", "colors")
+    assert (status["state"], status["game"], status["kids"], status["join_url"]) == ("playing", "colors", False, "")
+    assert status["games"][0]["pitch"]["es"].startswith("Yo digo un color")
+
+
+@pytest.mark.asyncio
+async def test_the_admin_app_can_start_in_kids_mode(room) -> None:
+    """A start from the admin app carries kids mode to the game; its join address shows in the status."""
+    reachy, host, made = room
+    host.start("colors", "en", kids=True)
+    await ticks(0.05)
+    context = host._context
+    assert context is not None and context.kids and context.language == "en"
+    context.join_url = "https://x.ts.net/?c=ABCDEF"
+    assert host.status()["kids"] is True and host.status()["join_url"] == "https://x.ts.net/?c=ABCDEF"
 
 
 def test_every_host_line_is_cached() -> None:

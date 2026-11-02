@@ -294,8 +294,8 @@ class _Games:
     def status(self) -> dict[str, Any]:
         return {"state": "idle", "game": None, "progress": "", "games": [{"key": "colors", "title": {}}]}
 
-    def start(self, key: str, language: str) -> str | None:
-        self.actions.append(("start", key, language))
+    def start(self, key: str, language: str, kids: bool = False) -> str | None:
+        self.actions.append(("start", key, language, *(["kids"] if kids else [])))
         return None if key == "colors" else f"There is no game {key!r}."
 
     def pause(self) -> None:
@@ -332,9 +332,17 @@ def test_games_start_pause_and_end_from_the_phone(switch: PrivacySwitch, runtime
     movement.wake_up.assert_called_once()
     assert client.post("/game", json={"action": "pause"}, headers=AUTH).status_code == 200
     assert client.post("/game", json={"action": "end"}, headers=AUTH).status_code == 200
+    kids = {"action": "start", "game": "colors", "language": "en", "kids": True}
+    assert client.post("/game", json=kids, headers=AUTH).status_code == 200
     refused = client.post("/game", json={"action": "start", "game": "chess"}, headers=AUTH)
     assert refused.status_code == 400 and "chess" in refused.json()["error"]
-    assert games.actions == [("start", "colors", "es"), ("pause",), ("end",), ("start", "chess", "es")]
+    assert games.actions == [
+        ("start", "colors", "es"),
+        ("pause",),
+        ("end",),
+        ("start", "colors", "en", "kids"),
+        ("start", "chess", "es"),
+    ]
     switch.set(True)
     assert client.post("/game", json={"action": "start", "game": "colors"}, headers=AUTH).status_code == 409
 

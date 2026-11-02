@@ -469,6 +469,7 @@ class ScribbleRush(Game):
     async def play(self, context: GameContext) -> None:
         """Play one game."""
         self._context = context
+        self._kids = context.kids
         self._phones = Phones(
             self._setup.port,
             self.snapshot,
@@ -478,6 +479,7 @@ class ScribbleRush(Game):
             page=PAGE,
         )
         await self._phones.start()
+        context.join_url = self._phones.url()
         watcher = asyncio.get_running_loop().create_task(self._watch_pause(), name="scribble-pause")
         try:
             if not await self._lobby():

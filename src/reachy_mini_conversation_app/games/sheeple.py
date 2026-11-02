@@ -444,6 +444,7 @@ class Sheeple(Game):
     async def play(self, context: GameContext) -> None:
         """Host one game."""
         self._context = context
+        self._kids = context.kids
         setup = self._setup
         self._judge = Judge(setup.folder / "rulings.json", context.services.jev)
         try:
@@ -461,6 +462,7 @@ class Sheeple(Game):
             page=PAGE,
         )
         await self._phones.start()
+        context.join_url = self._phones.url()
         watcher = asyncio.get_running_loop().create_task(self._watch_pause(), name="sheeple-pause")
         history = setup.folder / "history.json"
         try:

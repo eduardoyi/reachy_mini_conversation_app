@@ -13,7 +13,7 @@ class _Host:
     def __init__(self) -> None:
         self.started: list[tuple[str, str]] = []
 
-    def start(self, key: str, language: str) -> str | None:
+    def start(self, key: str, language: str, kids: bool = False) -> str | None:
         self.started.append((key, language))
         return None
 
