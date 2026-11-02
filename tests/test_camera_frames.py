@@ -97,6 +97,25 @@ def test_jpeg_encode_and_decode_keep_colours_and_size() -> None:
         assert np.allclose(decoded[height // 2, 3 * width // 4], (0, 0, 0), atol=40)
 
 
+def test_jpeg_encode_keeps_full_black_and_white_for_phones() -> None:
+    """Black stays 0 and white 255 in a standard reader (TV range made photos grey: black 16, white 235)."""
+    pytest.importorskip("gi")
+    import io
+
+    from PIL import Image
+
+    image = np.zeros((48, 64, 3), np.uint8)
+    image[:, 32:] = 255
+    jpeg = encode_jpeg(image, quality=95)
+    assert jpeg is not None
+
+    read = np.asarray(Image.open(io.BytesIO(jpeg)).convert("RGB")).astype(np.float32)
+    assert read[:, :28].mean() < 3
+    assert read[:, 36:].mean() > 252
+    decoded = decode_image(jpeg)
+    assert decoded is not None and decoded[:, :28].mean() < 3 and decoded[:, 36:].mean() > 252
+
+
 def test_decode_image_reads_png_and_rejects_garbage() -> None:
     """PNG uploads decode too; bytes that are not an image return None."""
     gi = pytest.importorskip("gi")

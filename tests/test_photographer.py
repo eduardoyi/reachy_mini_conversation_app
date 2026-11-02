@@ -91,6 +91,7 @@ def encoded(monkeypatch: pytest.MonkeyPatch) -> list[NDArray[np.uint8]]:
         return b"jpeg"
 
     monkeypatch.setattr(photographer, "encode_jpeg", encode)
+    monkeypatch.setattr(photographer, "enhance_photo", lambda frame: frame)
     return chosen
 
 
@@ -195,6 +196,34 @@ def test_the_burst_waits_between_frames(encoded: list[NDArray[np.uint8]]) -> Non
     fake_time = FakeTime()
     _take(Camera([_sharp(i) for i in range(BURST_FRAMES)]), _no_faces(), fake_time)
     assert fake_time.waits == [photographer.BURST_INTERVAL_S] * (BURST_FRAMES - 1)
+
+
+def test_the_chosen_frame_is_enhanced_before_encoding(
+    encoded: list[NDArray[np.uint8]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What is sent is the touched-up frame, not the raw one."""
+    frames: list[Any] = [_sharp(i) for i in range(BURST_FRAMES)]
+    touched_up = np.zeros_like(frames[0])
+    monkeypatch.setattr(photographer, "enhance_photo", lambda frame: touched_up)
+
+    _take(Camera(frames), _no_faces())
+    assert encoded[0] is touched_up
+
+
+def test_a_failed_enhancement_sends_the_photo_as_taken(
+    encoded: list[NDArray[np.uint8]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A touch-up error never costs the photo."""
+
+    def broken(frame: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        raise ValueError("bad frame")
+
+    frames: list[Any] = [_blurred(i) for i in range(BURST_FRAMES)]
+    frames[1] = _sharp(1)
+    monkeypatch.setattr(photographer, "enhance_photo", broken)
+
+    assert _take(Camera(frames), _no_faces()) == b"jpeg"
+    assert encoded[0] is frames[1]
 
 
 def test_a_failed_encode_is_tried_once_more(monkeypatch: pytest.MonkeyPatch) -> None:

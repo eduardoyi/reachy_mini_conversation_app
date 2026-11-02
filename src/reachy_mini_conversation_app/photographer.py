@@ -1,7 +1,7 @@
 """Take a photo for people and share it: a short burst, keeping the frame with the most faces, then the sharpest.
 
 Children rarely hold still for a countdown; of a few frames a tenth of a second apart, one usually has
-everyone in it and less blur. The photo goes on the e-ink screen and to the WhatsApp photos group, from
+everyone in it and less blur. The kept frame is touched up (``photo_enhance``) before it is encoded. The photo goes on the e-ink screen and to the WhatsApp photos group, from
 the "take a picture" quick command or Gemini's ``take_photo`` tool. Nothing is written to disk.
 """
 
@@ -20,6 +20,7 @@ from reachy_mini_conversation_app import activity_log, photo_archive
 from reachy_mini_conversation_app.whatsapp import SEND_DEADLINE_S, SendResult
 from reachy_mini_conversation_app.eink_display import render_photo
 from reachy_mini_conversation_app.camera_frames import encode_jpeg, capture_frame
+from reachy_mini_conversation_app.photo_enhance import enhance_photo
 from reachy_mini_conversation_app.tools.show_on_display import PHOTO_ON_SCREEN_S
 
 
@@ -120,10 +121,13 @@ def take_photo(
         return None
     scored = [((faces.count(frame) or 0), sharpness(frame), index) for index, frame in enumerate(frames)]
     face_count, _, best = max(scored)
+    try:
+        photo = enhance_photo(frames[best])
+    except Exception as error:  # a touch-up must never cost the photo
+        logger.warning("Photo enhancement failed; sending it as taken: %s", error)
+        photo = frames[best]
     # The encoder's pull can time out on a busy computer; once more before giving up.
-    jpeg = encode_jpeg(frames[best], quality=PHOTO_JPEG_QUALITY) or encode_jpeg(
-        frames[best], quality=PHOTO_JPEG_QUALITY
-    )
+    jpeg = encode_jpeg(photo, quality=PHOTO_JPEG_QUALITY) or encode_jpeg(photo, quality=PHOTO_JPEG_QUALITY)
     if jpeg is None:
         logger.warning("Photo: the frame could not be encoded")
         return None

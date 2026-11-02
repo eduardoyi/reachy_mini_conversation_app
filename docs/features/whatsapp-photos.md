@@ -1,7 +1,7 @@
 # Feature: Photos and messages to WhatsApp
 
 - Status: `in-progress` (live check of the quick command passed on the Mac mini 2026-10-29; `take_photo` from Gemini not yet tried live)
-- Last updated: 2026-10-29
+- Last updated: 2026-11-02
 - Plans: [Photos to the family WhatsApp group](../plans/whatsapp-photos.md),
   [Voice messages and photos to family groups](../plans/whatsapp-family-messages.md)
 
@@ -35,6 +35,13 @@ video, replies, and messages from a Gemini conversation.
 - **Countdown.** Reachy says "Three!", "Two!", "One!" in the request's language, about one second apart
   (cached phrases play without Gemini's padding silence; before that, a beat ran about 1.8 s), waits 0.4 s for his head to settle, and takes up to five frames 0.12 s
   apart. The frame with the most faces wins, then the sharpest.
+- **Touch-up.** The kept frame is touched up before it is shown and sent (`photo_enhance`): levels
+  stretched (the camera lifts its blacks to grey), dim mid-tones brightened (gamma down to 0.55, at most
+  a 2.5x stretch), the shadows' faint green neutralised and their colour turned down, colour noise
+  blurred, brightness sharpened. A well-lit photo barely changes; a frame with almost no tonal range (a
+  wall, a covered lens) is left alone; a touch-up error sends the photo as taken. About 0.1 s for
+  1920x1080. The JPEG is full range (black 0, white 255); until 2026-11-02 it was TV range (16 to 235),
+  which phones show grey.
 - **Preview.** With the TRMNL set up, the photo goes on the screen for 10 minutes (within about five
   minutes when the screen is asleep; the now-playing card may replace it while music plays).
 - **Sent.** "Sent!" ("¡Enviada!", "Inviata!", "Enviada!"). The photo arrives in the group fitted to
@@ -203,7 +210,9 @@ flowchart LR
 | File | Scenarios |
 |------|-----------|
 | `tests/test_whatsapp.py` | `phone`, `hd=true`, the `image` part's name and type, basic auth; refused (400, `code` not SUCCESS, 500) not retried; one retry on `ConnectError` and `ConnectTimeout`; read timeout and deadline are `UNSURE`, sent once; logs hold neither the group nor the password; status logged in / no device / unreachable; groups; pairing creates the device slot; the `groups` command and missing settings |
-| `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more |
+| `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more; the chosen frame is touched up before encoding, and sent as taken if the touch-up fails |
+| `tests/test_photo_enhance.py` | A dark grey photo gets real blacks and brighter mid-tones; colours stay in BGR order and get richer; a green shadow tint is neutralised; a well-exposed photo barely changes; a frame with almost no range is left alone |
+| `tests/test_camera_frames.py` (photos) | `test_jpeg_encode_keeps_full_black_and_white_for_phones` |
 | `tests/test_quick_commands.py` | Messages: grammar with and without a name, Maribel's left alone; prompt, recording with antennas perked, voice note to the group; nothing said, not sent, unsure; a picture to his group; "who?" and its answers (known, unknown, cancel), nothing sent to an unknown name; no contacts or WhatsApp → conversation; outcome phrases cached. Photos: the grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
 | `tests/test_moves.py` (touches) | A sudden push is one touch and staying pushed is not more; a small tilt counts and the untouched jitter does not; a moving command or a fresh hold never counts; touches counted only while held still |

@@ -150,8 +150,11 @@ def encode_jpeg(frame_bgr: Any, quality: int = MODEL_FRAME_JPEG_QUALITY) -> byte
         pipeline = Gst.parse_launch(
             f'appsrc name=src caps="video/x-raw,format=BGR,width={width},height={height},framerate=0/1" ! '
             # jpegenc also takes BGR, but then writes an RGB-coded JPEG, which GStreamer's own decoder
-            # (decode_image) misreads as green; standard YCbCr reads back correctly everywhere.
-            f"videoconvert ! video/x-raw,format=I420 ! jpegenc quality={quality} ! appsink name=sink sync=false"
+            # (decode_image) misreads as green; standard YCbCr reads back correctly everywhere. Full range
+            # (colorimetry 1:4:0:0), as JPEG viewers read it: plain I420 is TV range, black 16 and white 235,
+            # which made every photo look grey and dull.
+            "videoconvert ! video/x-raw,format=I420,colorimetry=1:4:0:0 ! "
+            f"jpegenc quality={quality} ! appsink name=sink sync=false"
         )
         try:
             pipeline.set_state(Gst.State.PLAYING)
