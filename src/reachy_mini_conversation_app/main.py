@@ -1008,6 +1008,9 @@ def run(
         if deps.tv is not None:
             tv = deps.tv
             hybrid_runtime.set_strict_wake(lambda: bool(tv.reported_on))
+        if deps.now_playing is not None:
+            now_playing = deps.now_playing
+            hybrid_runtime.set_music_playing(lambda: bool(now_playing.playing))
         deps.expect_answer = hybrid_runtime.expect_answer
         deps.record_message = hybrid_runtime.record_message
         if wake_clips is not None:

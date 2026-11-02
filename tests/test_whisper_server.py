@@ -216,6 +216,12 @@ def test_qwen_that_cannot_load_falls_back_to_whisper(monkeypatch: pytest.MonkeyP
     assert isinstance(engine, _Whisper) and engine.model_id == "openai/whisper-small"
 
 
+def test_the_room_model_gets_no_richie_in_its_hint() -> None:
+    """The room model wakes him by itself, so "Richie" is not offered to it; the request model keeps it."""
+    assert whisper_server.name_hints({}) == ("Reachy, Maribel", "Reachy, Richie, Maribel")
+    assert whisper_server.name_hints({"STT_ROOM_NAME_HINT": " Reachy ", "STT_NAME_HINT": ""}) == ("Reachy", "")
+
+
 def test_qwen_loads_in_place_of_whisper_and_answers_to_its_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """The engine setting picks Qwen; the app keeps asking for the Whisper name."""
 

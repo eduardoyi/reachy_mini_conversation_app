@@ -128,6 +128,11 @@ class NowPlaying:
         self._stopped_at: float | None = None
         self._requested_screen: str | None = None
 
+    @property
+    def playing(self) -> bool:
+        """Whether music played on Reachy's speaker at the last look (at most 30 s ago)."""
+        return self._last_id is not None
+
     def refresh_soon(self) -> None:
         """Check Spotify now (after Reachy plays, resumes, pauses or skips); safe from any thread."""
         loop = self._loop

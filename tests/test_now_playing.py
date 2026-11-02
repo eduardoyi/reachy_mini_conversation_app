@@ -287,6 +287,25 @@ async def test_when_the_music_stops_the_card_stays_two_minutes(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_the_watcher_says_whether_music_played_at_its_last_look(tmp_path: Path) -> None:
+    """Nothing is known before the first look; then it follows Spotify, paused or stopped meaning not playing."""
+    room = _Room(tmp_path)
+    assert room.watcher.playing is False
+    await room.watcher.check()
+    assert room.watcher.playing is True
+
+    room.playback = {**_track(), "is_playing": False}
+    room.clock.now += 10
+    await room.watcher.check()
+    assert room.watcher.playing is False
+
+    room.playback = None
+    room.clock.now += 10
+    await room.watcher.check()
+    assert room.watcher.playing is False
+
+
+@pytest.mark.asyncio
 async def test_music_never_replaces_a_requested_screen_when_nothing_plays(tmp_path: Path) -> None:
     """Without music the watcher leaves requested screens and the resting card alone."""
     room = _Room(tmp_path)

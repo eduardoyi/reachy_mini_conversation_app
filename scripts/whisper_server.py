@@ -28,8 +28,9 @@ the app is unchanged. Measured 2026-10-29 on the mini: the 0.6B model took 0.17 
 (whisper-small 0.44 s) with a third of its errors on noisy requests; the 1.7B model matched turbo's
 accuracy in 0.36 s (turbo 1.62 s). Both get Reachy's and Maribel's names as a hint, which lets them hear
 "Richie" where Whisper heard "Reggie", but on unclear audio they sometimes return the hint itself; a run
-of two or more different hint words is removed. A Qwen model that cannot load (``mlx-qwen3-asr`` not
-installed, say) is replaced by its Whisper model.
+of two or more different hint words is removed. A single hint word is not, and the room model's woke
+Reachy for nothing, so the room model's hint leaves out "Richie" (2026-11-02). A Qwen model that cannot
+load (``mlx-qwen3-asr`` not installed, say) is replaced by its Whisper model.
 
 Run it with the Python of the ``transformers`` uv tool (it has torch, librosa and FastAPI; Qwen also needs
 ``uv pip install --python <that python> mlx-qwen3-asr==0.4.4``):
@@ -48,7 +49,7 @@ import argparse
 import contextlib
 import unicodedata
 from typing import Any, Protocol
-from collections.abc import AsyncIterator
+from collections.abc import Mapping, AsyncIterator
 
 
 logger = logging.getLogger("whisper_server")
@@ -65,6 +66,10 @@ LOOP_RETRY_REPETITION_PENALTY = 1.3
 DEFAULT_QWEN_MODEL = "moona3k/mlx-qwen3-asr-0.6b-8bit"
 DEFAULT_QWEN_REQUEST_MODEL = "moona3k/mlx-qwen3-asr-1.7b-8bit"
 DEFAULT_NAME_HINT = "Reachy, Richie, Maribel"
+# The room model listens all day and wakes Reachy by itself, so it gets no "Richie" to fall back on: on
+# 2026-11-01's speech-path wakes, dropping it took the false ones it re-heard from 13 of 39 to 8, and the
+# real calls from 10 of 16 to 9. "Richie" still counts as his name when it is heard.
+DEFAULT_ROOM_NAME_HINT = "Reachy, Maribel"
 # Qwen raises on clips this short (0.01 s background clips happen).
 MIN_CLIP_S = 0.1
 QWEN_LANGUAGE_NAMES = {"en": "English", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "fr": "French"}
@@ -248,6 +253,14 @@ class QwenTranscriber:
         }
 
 
+def name_hints(env: Mapping[str, str]) -> tuple[str, str]:
+    """Return the room model's and the request model's name hints (``STT_ROOM_NAME_HINT``, ``STT_NAME_HINT``)."""
+    return (
+        env.get("STT_ROOM_NAME_HINT", DEFAULT_ROOM_NAME_HINT).strip(),
+        env.get("STT_NAME_HINT", DEFAULT_NAME_HINT).strip(),
+    )
+
+
 def load_engine(engine: str, whisper_model: str, qwen_model: str, languages: tuple[str, ...], hint: str) -> Engine:
     """Load Qwen in place of ``whisper_model`` when asked, else (or if Qwen cannot load) the Whisper model."""
     if engine == "qwen":
@@ -361,11 +374,11 @@ def main() -> None:
         logger.warning("Unknown speech engine %r; using Whisper", args.engine)
         engine = "whisper"
     languages = parse_languages(os.getenv("WHISPER_LANGUAGES"))
-    hint = os.getenv("STT_NAME_HINT", DEFAULT_NAME_HINT).strip()
-    transcriber = load_engine(engine, args.model, args.qwen_model, languages, hint)
+    room_hint, request_hint = name_hints(os.environ)
+    transcriber = load_engine(engine, args.model, args.qwen_model, languages, room_hint)
     request_transcriber = None
     if args.request_model and args.request_model != args.model:
-        request_transcriber = load_engine(engine, args.request_model, args.qwen_request_model, languages, hint)
+        request_transcriber = load_engine(engine, args.request_model, args.qwen_request_model, languages, request_hint)
         logger.info("Requests to Reachy use %s", request_transcriber.model_id)
     import uvicorn
 

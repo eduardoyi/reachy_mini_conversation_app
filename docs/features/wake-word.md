@@ -3,7 +3,7 @@
 > Current experiment (2026-09-08): the user explicitly authorized local training on the 80 existing usable household recordings. Those sources are training-only now; fresh independent validation is required. Household-derived features/models stay private and outside cloud-training mounts. Earlier evaluation-only statements below describe the prior protocol.
 
 - Status: `in-progress`
-- Last updated: 2026-10-31
+- Last updated: 2026-11-02
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -444,6 +444,7 @@ latency remain unmeasured.
 | 2026-10-29 | `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD` adds a second head on official33's features (a private "Ri-chi" head trained on household clips and macOS voices), scaled onto official33's threshold by `LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD`; the wake log names the head. Results in [missed-calls-spanish-richi.md](../plans/missed-calls-spanish-richi.md). |
 | 2026-10-30 | Stricter waking while the TV is on (`HybridRuntime.set_strict_wake`, fed by `AndroidTV.reported_on`): the extra "Richie" head is muted (`OpenWakeWordDetector.set_extra_heads_muted`) and a name in the room transcript is ignored ("TV on; ignoring the name in the room transcript"), so only official33 or an antenna touch wakes him. During *The Silence of the Lambs* the Richie head fired about 80 times in an hour, mostly rejected by the name check, but it and the transcript path woke him about ten times in 35 minutes (on lines like "Clarice…", and "reach" heard in dialogue); official33 never fired on the film. |
 | 2026-10-31 | Wake learning ([wake-learning.md](wake-learning.md)): `OpenWakeWordDetector` gains shadow heads (`shadow_head`, scored and reported as `WakeScoreEvent`s but never waking), a `frame_observer` for the feature log, `rearm()` (a rejected wake no longer costs a reset and the 3 s cooldown), and detections that name the head with every head's raw score. The event observer now gets near misses and shadow fires only; wakes are recorded by the runtime. A `missed` quick command ("you didn't hear me", "no me escuchaste") marks a call he missed. |
+| 2026-11-02 | Transcript wakes for nothing. On 2026-11-01 the room transcript woke him 62 times: 23 led to a request, 25 were marked "woke for nothing" and 14 more had nobody say more than one thing to him. Replayed on the mini, the room model (Qwen 0.6B) heard the name in none of the 39 without its name hint; the hint makes it write a name it cannot make out. The wake model scored near 0 on real and false alike, and the request model as a second opinion kept 6 of 16 real calls, so neither can vet them. Two changes: the room model's hint drops "Richie" (`STT_ROOM_NAME_HINT`, default `Reachy, Maribel`), and while Spotify plays (`HybridRuntime.set_music_playing`, fed by `NowPlaying.playing`) the name in the room transcript is ignored ("Music playing; ignoring the name in the room transcript", `why: "music"`): music was on for 8 of the 39 and for none of the 23. |
 
 ## Custom training preflight evidence
 

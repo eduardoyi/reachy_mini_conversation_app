@@ -697,6 +697,7 @@ class HybridRuntime:
         # While it returns True (a game is playing), announcements other than the game's own wait.
         self._announcement_hold: Callable[[], bool] | None = None
         self._strict_wake: Callable[[], bool] | None = None
+        self._music_playing: Callable[[], bool] | None = None
         self._inactivity_timeout_s = float(inactivity_timeout_s)
         self._wake_followup_timeout_s = float(wake_followup_timeout_s)
         self._clock = clock
@@ -1096,6 +1097,14 @@ class HybridRuntime:
         if mute is not None:
             mute(strict)
 
+    def set_music_playing(self, playing: Callable[[], bool] | None) -> None:
+        """While ``playing()`` (Spotify plays), the name picked out of the room transcript does not wake Reachy.
+
+        The wake model still does. On 2026-11-01 music was on for 8 of the 39 transcript wakes for nothing,
+        and for none of the 23 real ones.
+        """
+        self._music_playing = playing
+
     def record_provider_traffic(self, kind: TrafficKind, byte_count: int) -> None:
         """Record media only after a provider confirms a successful send."""
         if byte_count <= 0:
@@ -1255,6 +1264,11 @@ class HybridRuntime:
         if strict is not None and self._acoustic_wake_detector is not None and strict():
             logger.info("TV on; ignoring the name in the room transcript")
             self._note_wake(name_event, outcome="ignored", why="tv")
+            return
+        music = self._music_playing
+        if music is not None and self._acoustic_wake_detector is not None and music():
+            logger.info("Music playing; ignoring the name in the room transcript")
+            self._note_wake(name_event, outcome="ignored", why="music")
             return
         with self._lifecycle_lock:
             asleep = self._asleep

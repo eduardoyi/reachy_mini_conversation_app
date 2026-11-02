@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-10-29
+- Last updated: 2026-11-02
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -901,9 +901,13 @@ not kept. The log says `Name heard N s into an open segment; transcribing it now
 answers to their names, so the app and its `LOCAL_STT_*` settings do not change:
 - the room: `moona3k/mlx-qwen3-asr-0.6b-8bit` for `openai/whisper-small` (`--qwen-model`);
 - requests: `moona3k/mlx-qwen3-asr-1.7b-8bit` for `openai/whisper-large-v3-turbo` (`--qwen-request-model`);
-- both get `STT_NAME_HINT` (default `Reachy, Richie, Maribel`; empty for none) as context, and a run of two
-  or more different hint words in the text, which Qwen returns on some unclear audio, is removed
-  (`echo=True` in the log line);
+- the request model gets `STT_NAME_HINT` (default `Reachy, Richie, Maribel`; empty for none) as context,
+  the room model `STT_ROOM_NAME_HINT` (default `Reachy, Maribel`), and a run of two or more different
+  hint words in the text, which Qwen returns on some unclear audio, is removed (`echo=True` in the log
+  line). A single hint word is not, and the room model wakes Reachy by itself, so its hint has no
+  "Richie" (2026-11-02: replaying 2026-11-01's transcript wakes, it took the false ones re-heard from 13
+  of 39 to 8, and the real calls from 10 of 16 to 9; with no name in the hint, 0 false and 3 real).
+  "Richie" still counts as his name when it is heard;
 - clips under 0.1 s return no text; a request's `language` is forced by name, otherwise Qwen detects it
   (it cannot be limited to `WHISPER_LANGUAGES`; `LOCAL_STT_LATIN_ONLY` still drops non-Latin text);
 - a Qwen model that cannot load (`mlx-qwen3-asr` missing from the `transformers` tool's Python, say) is

@@ -1,7 +1,7 @@
 # Feature: TV control (Android TV)
 
 - Status: `in-progress` (paired and checked live on the Mi TV P1; not yet tried in a conversation)
-- Last updated: 2026-10-18
+- Last updated: 2026-11-02
 
 ## Overview
 
@@ -23,7 +23,8 @@ protocol and could be paired the same way.
 - An app that does not open within 4 s is reported as probably not installed, not as done.
 - While the TV is on, Reachy wakes only to "Reachy" (the main wake model) or an antenna touch,
   not to the "Richie" model or his name picked out of the room transcript: films kept waking him
-  (2026-10-30). See [wake-word.md](wake-word.md).
+  (2026-10-30). While Spotify plays, his name in the room transcript is ignored too, but the
+  "Richie" model still listens. See [wake-word.md](wake-word.md).
 
 ## Setup
 
