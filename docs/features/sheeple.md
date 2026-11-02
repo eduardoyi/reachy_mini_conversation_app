@@ -1,7 +1,7 @@
 # Feature: Sheeple (survey party game)
 
 - Status: `in-progress` (built and tested 2026-11-01; deployed to the Mac mini with the survey bank; not yet played)
-- Last updated: 2026-11-01
+- Last updated: 2026-11-02 (three misses a board; a beep before each spoken answer)
 - Plan: [party-games.md](../plans/party-games.md) ("Sheeple", "Surveys (Sheeple)")
 - Part of: [games.md](games.md) (the shared game host); phones, judging and screens borrowed from
   [big-brain.md](big-brain.md)
@@ -26,10 +26,11 @@ default, with a kids mode.
    then reveals the answers from the least to the most popular (the TRMNL redraws each one, with a drumroll
    before number 1) and names who said each one. Each guess scores its answer's count for the player and their team.
 5. **Team round:** the team whose turn it is sees a big "¡Responder!" button. The first player of that team to
-   tap it is the only one Richie listens to ("¿Ana?"). A hit reveals the answer, scores its count for the team
-   and keeps the turn. A miss (not on the board, already on the board, silence, or nobody tapping within 25 s)
-   passes the turn to the next team. The board ends when it is cleared or after six misses. Richie then reads
-   out the answers still hidden.
+   tap it is the only one Richie listens to: he says "¿Ana?", then a short beep, and only then listens. Her phone
+   says "Espera tu nombre y el bip…" until the beep and "¡Dilo en voz alta!" (with a buzz) once it has played. A
+   hit reveals the answer, scores its count for the team and keeps the turn. A miss (not on the board, already on
+   the board, silence, or nobody tapping within 25 s) passes the turn to the next team. The board ends when it is
+   cleared or after three misses. Richie then reads out the answers still hidden.
 6. **End:** the winning team (or a tie) on the TRMNL and the phones, "la oveja mayor" (the player whose flock
    guesses scored most), fanfare and applause when Big Brain's sounds are there, and the phones' page stays up 30 s.
 7. Pause, quit and "¿lo terminamos?" work as in every game. A phone's "¡Seguimos!" plays on after a pause.
@@ -42,7 +43,7 @@ default, with a kids mode.
 - `games/sheeple_screens.py`: `render_survey`, the TRMNL board (round, question, a slot per answer in two
   columns, whose turn it is and the misses, and the scores). Hidden answers are dark-grey bars with their number;
   revealed ones show the answer and its count on a black tab; the team on turn has a black score tile tagged
-  "Turno", and the misses are six boxes crossed out one by one. Joining and the winner reuse Big Brain's
+  "Turno", and the misses are three boxes crossed out one by one. Joining and the winner reuse Big Brain's
   `render_join` (with `title="SHEEPLE"`) and `render_winner`.
 - `static/sheeple/index.html`: the phones' page (one WebSocket to the game). It shows the join form, the
   lobby, the question with the answer slots, the guess form, the "Responder" button, who is answering, the
@@ -51,8 +52,10 @@ default, with a kids mode.
   through `page=`), `Judge`/`matches`/`plain`, `load_bank`/`read_history`/`remember`, `Sounds`, `team_name`,
   `START_WORDS`. The only change to a Big Brain file is a backward-compatible `title=` keyword on `render_join`.
 - Speech: Richie's normal voice through `GameContext.say` (announcements), with no recorded clips. To listen
-  to one player, Richie says "¿Ana?" and then plays a moment of silence through `services.say_audio` with a
-  6 s start window, as Big Brain does. Without `say_audio`, `services.ask` is used.
+  to one player, Richie says "¿Ana?" and then plays a beep (`big_brain_audio.beep`: 880 Hz, 0.18 s) through
+  `services.say_audio` with a 6 s start window, so listening opens as the beep ends. The snapshot's `listening`
+  is true from then until the answer, which is what turns the speaker's phone to "talk now". Without
+  `say_audio`, `services.ask` is used.
 
 ### Judging
 
@@ -108,7 +111,7 @@ Only one game plays at a time, so Sheeple shares Big Brain's phone port and publ
 
 ## Tests
 
-`tests/games/test_sheeple.py` (16 tests):
+`tests/games/test_sheeple.py` (18 tests):
 
 - boards: one language, answers sorted, both languages accepted, quick boards and short boards left out;
   kids mode filters; boards played lately last.
@@ -119,6 +122,8 @@ Only one game plays at a time, so Sheeple shares Big Brain's phone port and publ
 - a whole six-board game with two pretend phones on the real game host: typed flock guesses (English
   answer in a Spanish game), team turns with a miss passing the turn, the last board doubled, the winner,
   the flock ranking and the history file.
+- a game where nobody hits: each team board ends at its third miss; a beep plays before every spoken answer and
+  the speaker's phone says "talk" only while Reachy listens.
 - every fixed line goes to the speech cache.
 
 Also covered: `tests/tools/test_play_game.py` (the game list) and Big Brain's tests (unchanged
@@ -135,5 +140,8 @@ answers, timing of the reveals, the "Responder" button on real phones), and the 
 
 ## Changelog
 
+- 2026-11-02: After the household played it: a team board ends after three misses, not six (it dragged on), and a
+  beep before each spoken answer, with the speaker's phone waiting for it (players spoke over "¿Ana?", because
+  the phone said "¡Dilo en voz alta!" as soon as they tapped).
 - 2026-11-02: Redesigned board: the shared game header with a sheep and a wool edge, answer bars, Big Brain's
   team tiles and a misses box (see [games.md](games.md#what-the-screens-look-like)).

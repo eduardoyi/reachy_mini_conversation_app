@@ -21,7 +21,7 @@ from dataclasses import field, dataclass
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.games.catalog import DETECTIVES, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
-from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Sounds, Speech
+from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Sounds, Speech, beep, join, silence
 from reachy_mini_conversation_app.games.detectives_case import (
     CASES_DIR,
     Case,
@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 PAGE: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "detectives" / "index.html"
 TURN_S: Final[float] = 60.0
 QUESTION_S: Final[float] = 25.0  # from the end of Richie's "what do you ask?" to the question's text
+QUESTION_START_S: Final[float] = 10.0  # from the beep to the player starting to speak; silence is no question
 WITNESS_S: Final[float] = 15.0
 ACCUSE_S: Final[float] = 90.0
 LOBBY_REMINDER_S: Final[float] = 75.0
@@ -202,6 +203,7 @@ class Detectives(Game):
         self._result: _Result | None = None
         self._message: str | None = None
         self._deadline: float | None = None
+        self._listening = False  # the beep played: the player on turn may ask now
         self._event = asyncio.Event()
 
     @classmethod
@@ -290,6 +292,7 @@ class Detectives(Game):
             "deadline": deadline,
             "can": can,
             "message": self._message,
+            "listening": self._listening,
             "result": self._solution(player) if self._result is not None else None,
         }
 
@@ -423,11 +426,25 @@ class Detectives(Game):
                 heard.set_result(said)
             return QuickReply(None, context.language, "game")
 
-        context.services.ask(text, context.language, answer)
+        say_audio = context.services.say_audio
+        if say_audio is not None:
+            # A beep after the line opens the listening, and only then does the phone say "ask now": players
+            # spoke over Richie's line in Big Brain and Sheeple (2026-11-02).
+            await context.say(text)
+            self._listening = True
+            self._changed()
+            await say_audio(RATE, join(silence(0.05), beep()), "", context.language, answer, listen_s=QUESTION_START_S)
+        else:
+            self._listening = True
+            self._changed()
+            context.services.ask(text, context.language, answer)
         try:
             said = await asyncio.wait_for(heard, QUESTION_S)
         except asyncio.TimeoutError:
             return ""
+        finally:
+            self._listening = False
+            self._changed()
         return "" if said == UNCLEAR_ANSWER else said.strip()
 
     def _show(self, png: bytes) -> None:

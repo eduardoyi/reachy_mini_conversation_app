@@ -238,6 +238,25 @@ async def test_richie_says_the_line_when_there_is_no_voice_or_it_fails(
 # Phones and screens ----------------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_a_spoken_question_waits_for_the_beep(tmp_path: Path) -> None:
+    """Richie asks, then a beep opens the listening; the phone says "ask now" only from the beep (2026-11-02)."""
+    reachy = FakeReachy(recorded=True)
+    game = Detectives(DetectivesSetup(data_dir=tmp_path, port=0, witness=None))
+    context = GameContext(info=DETECTIVES, language="en", services=reachy.services)
+    context.running.set()
+    game._context = context
+    listening = asyncio.create_task(game._listen("Ana, what do you ask Valeria?"))
+    for _ in range(100):
+        if reachy.clip_answers:
+            break
+        await asyncio.sleep(0.01)
+    assert reachy.said == ["Ana, what do you ask Valeria?"] and game._listening
+    assert reachy.clip_listen == [detectives.QUESTION_START_S] and reachy.clips[-1][1] > 0
+    await reachy.clip_answers[-1]("Where were you at nine?")
+    assert await listening == "Where were you at nine?" and not game._listening
+
+
 def test_the_phones_get_the_detectives_page() -> None:
     """The shared phone server serves Detectives' own page with the game's code."""
     phones = Phones(0, lambda player: {}, lambda player, message: None, lambda: True, code="ABCDEF", clock=lambda: 0.0, page=PAGE)  # fmt: skip

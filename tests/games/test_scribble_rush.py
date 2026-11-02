@@ -1,11 +1,14 @@
 """Scribble Rush: the word lists, judging Richie's guesses, the vision call and whole games on a pretend Reachy."""
 
+import io
 import random
 import asyncio
 from typing import Any
 from collections import defaultdict
 
+import numpy as np
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from .fakes import FakeReachy, frame
@@ -26,6 +29,7 @@ from reachy_mini_conversation_app.games.scribble_rush import (
 from reachy_mini_conversation_app.games.scribble_words import CATEGORIES, KIDS_WORDS, ADULT_WORDS, Word
 from reachy_mini_conversation_app.games.big_brain_judge import plain
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
+from reachy_mini_conversation_app.games.scribble_screens import render_track
 
 
 def _word(es: str) -> Word:
@@ -137,6 +141,23 @@ async def test_the_vision_model_sees_the_category_never_the_word_and_its_use_is_
     prompt = sent[0]["contents"][0]
     assert "movie" in prompt and "Spanish" in prompt and "titanic" not in prompt.lower()
     assert recorded == [("scribble_guess", "gemini-3.8-flash", {"input_text": 300, "output_text": 40, "thinking": 20})]
+
+
+def test_the_track_shows_the_category_as_a_big_label() -> None:
+    """The category is a black label in front of the drawer and round (players missed it in the caption, 2026-11-02)."""
+    lanes = [("Rojo", 3), ("Azul", 0), ("Verde", 7)]
+    tagged = render_track(
+        "ROJO DIBUJA", "Sofía · Ronda 6 de 6", lanes, 24, turn="Rojo", tag="CATEGORÍA: PERSONAJE U OFICIO"
+    )
+    untagged = render_track("ROJO DIBUJA", "Sofía · Ronda 6 de 6", lanes, 24, turn="Rojo")
+
+    def black(png: bytes) -> int:
+        """Black pixels on the caption's band."""
+        image = Image.open(io.BytesIO(png)).convert("L")
+        assert image.size == (800, 480)
+        return int((np.asarray(image.crop((0, 100, 800, 170))) < 40).sum())
+
+    assert black(tagged) > black(untagged) + 5000
 
 
 def test_the_phones_get_the_scribble_page_and_the_start_phrases_name_the_game() -> None:

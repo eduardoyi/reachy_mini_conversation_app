@@ -197,7 +197,8 @@ game is in. Judging is predictable:
 - Flock rounds (everyone at once, no voices): each player types their guess on the phone; Richie reveals the
   answers from the least to the most popular; each player scores the count of the answer they hit.
 - Team rounds: teams alternate one guess at a time, the captain saying it after the team confers quietly;
-  a hit scores its count for that team, a miss passes the turn, until the board is cleared or six misses.
+  a hit scores its count for that team, a miss passes the turn, until the board is cleared or three misses
+  (six until 2026-11-02: too long).
   (Deliberately not the show's face-off, strikes and steal.)
 - Bonus: "¿Qué contestó Richie?" (Richie answered too, in character).
 - Wrong guesses: buzzer, antennas drop, lights flash red.
@@ -499,3 +500,9 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   Kokoro, the only fast one, sounded poor. ElevenLabs instead: 15 voices designed from per-character descriptions
   (`scripts/detectives_voices.py`, ids in the case files), answers voiced live on Eleven v4 Turbo with audio tags
   from a fixed list, first sentence first (about 3–4 s from the question to the voice), Richie still narrating.
+- 2026-11-02: After the household played Sheeple and Scribble Rush: Sheeple's team boards end at three misses (six
+  dragged), and a beep opens each spoken answer, the speaker's phone saying "talk" only then (they spoke over
+  the name). Big Brain and Detectives got the same beep and "talk now" phone (the same problem in Big Brain;
+  Detectives' phone said "Richie is listening" while he was still asking). Big Brain's "¡Correcto!" card clears at
+  the next pick and before the final, and an empty board no longer asks for a pick. Scribble Rush shows the
+  category as a big label on the TRMNL and the phones. Not yet played again.

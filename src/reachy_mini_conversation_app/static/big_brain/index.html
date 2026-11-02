@@ -389,7 +389,7 @@ var T = {
   lobbyWait: 'Esperando a los demás…', start: '¡Empezar!', errClosed: 'El juego ya empezó', errName: 'Escribe tu nombre y escoge un equipo', startHint: 'Cuando estén todos', kidsMode: 'Modo niños', pickHint: '¡Escoge una casilla!',
   waitPick: function (t) { return 'Esperando a que el equipo ' + t + ' escoja'; },
   waitPickAny: 'Esperando a que escojan una casilla', wait: 'Espera…', buzz: '¡YA!', locked: 'Bloqueado',
-  sayIt: '¡Responde en voz alta!', answering: function (n, t) { return n + ' (' + t + ') está respondiendo…'; },
+  sayIt: '¡Responde en voz alta!', waitBeep: 'Espera el bip… y responde', answering: function (n, t) { return n + ' (' + t + ') está respondiendo…'; },
   yourAnswer: 'Tu respuesta', send: 'Enviar', sent: 'Enviado', canResend: 'Puedes cambiarla antes de que acabe el tiempo.',
   watch: 'Mira la pantalla y escucha a Richie.', bet: 'Tu apuesta', half: 'Mitad', max: 'Máx.', zero: '0',
   maxBet: function (m) { return 'Puedes apostar de 0 a ' + m; }, betSent: function (b) { return 'Apuesta enviada: ' + b; },
@@ -415,7 +415,7 @@ var T = {
   lobbyWait: 'Waiting for everyone…', start: 'Start!', errClosed: 'The game already started', errName: 'Type your name and pick a team', startHint: "When everyone's in", kidsMode: 'Kids mode', pickHint: 'Pick a square!',
   waitPick: function (t) { return 'Waiting for ' + t + ' team to pick'; },
   waitPickAny: 'Waiting for a square to be picked', wait: 'Wait…', buzz: 'BUZZ!', locked: 'Locked out',
-  sayIt: 'Say your answer out loud!', answering: function (n, t) { return n + ' (' + t + ') is answering…'; },
+  sayIt: 'Say your answer out loud!', waitBeep: 'Wait for the beep… then answer', answering: function (n, t) { return n + ' (' + t + ') is answering…'; },
   yourAnswer: 'Your answer', send: 'Send', sent: 'Sent', canResend: 'You can change it until time runs out.',
   watch: 'Watch the screen and listen to Richie.', bet: 'Your bet', half: 'Half', max: 'Max', zero: '0',
   maxBet: function (m) { return 'You can bet 0 to ' + m; }, betSent: function (b) { return 'Bet sent: ' + b; },
@@ -446,7 +446,7 @@ var ICON = {
 var code = (new URLSearchParams(location.search).get('c') || '').trim();
 var STORE = 'bigbrain:' + code;
 var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
-var S = null, ws = null, retry = 0, timer = null, cache = {}, lastMsg = null, lastPhase = null;
+var S = null, ws = null, retry = 0, timer = null, cache = {}, lastMsg = null, lastPhase = null, talking = false;
 var draft = {name: '', team: null, answer: '', bet: ''};
 var sent = {answer: null, bet: null}, buzzLock = false, pickLock = false, voteLock = false, startLock = false;
 var dl = {key: null, total: 1};
@@ -514,8 +514,11 @@ function handle(m) {
   if (m.phase !== lastPhase) {
    sent = {answer: null, bet: null}; draft.answer = ''; draft.bet = ''; lastPhase = m.phase;
    if (m.phase === 'board' && m.can && m.can.indexOf('pick') >= 0) buzzv([120, 80, 120]);
-   if (m.phase === 'answering' && m.you && m.buzzed && m.buzzed.name === m.you.name && m.buzzed.team === m.you.team) buzzv([60, 40, 160]);
   }
+  // Your phone says "answer now" (and buzzes) only once the beep played and Richie listens.
+  var talk = !!(m.listening && m.phase === 'answering' && m.you && m.buzzed && m.buzzed.name === m.you.name && m.buzzed.team === m.you.team);
+  if (talk && !talking) buzzv([60, 40, 160]);
+  talking = talk;
   trackScores(before);
   buzzLock = false; pickLock = false; voteLock = false; startLock = false;
   render();
@@ -595,7 +598,7 @@ function announce() {
  var L = t(), s = '', p = S && S.you ? S.phase : '';
  if (p === 'board') s = can('pick') ? L.myTurn : S.control ? L.notMyTurn(tname(S.control)) : L.waitPickAny;
  else if (p === 'buzzing') s = can('buzz') ? L.buzz : L.locked;
- else if (p === 'answering' && S.buzzed) s = S.buzzed.name === S.you.name && S.buzzed.team === S.you.team ? L.sayIt : L.answering(S.buzzed.name, tname(S.buzzed.team));
+ else if (p === 'answering' && S.buzzed) s = S.buzzed.name === S.you.name && S.buzzed.team === S.you.team ? (S.listening ? L.sayIt : L.waitBeep) : L.answering(S.buzzed.name, tname(S.buzzed.team));
  else if (p === 'everyone' || p === 'final_answer') s = can('answer') ? L.yourAnswer : '';
  else if (p === 'final_bet') s = L.finalTitle;
  else if (p === 'paused') s = L.paused;
@@ -742,7 +745,7 @@ function stageHtml() {
     buzzer(on, can('buzz') ? L.buzz : L.locked, !!(c && c.text), on ? 'live' : can('buzz') ? 'sent' : 'locked', on || can('buzz') || S.buzzed ? '' : L.lockedNote);
   case 'answering':
    var b = S.buzzed, me = b && b.name === S.you.name && b.team === S.you.team;
-   var who = me ? '<div class="say" ' + ts(b.team) + '><div class="mic" aria-hidden="true">' + ICON.mic + '</div><b>' + esc(L.sayIt) + '</b></div>'
+   var who = me ? '<div class="say" ' + ts(b.team) + '>' + (S.listening ? '<div class="mic" aria-hidden="true">' + ICON.mic + '</div>' : '') + '<b>' + esc(S.listening ? L.sayIt : L.waitBeep) + '</b></div>'
     : b ? '<div class="who" ' + ts(b.team) + '><span class="av" aria-hidden="true">' + initial(b.name) + '</span><p><b>' + esc(b.name) + '</b>' +
       tail(L.answering('', tname(b.team)).replace(/^ /, '').replace(/…$/, '')) + '</p></div>' : '';
    return (me ? who : '') + (c ? screen(clueHead(false) + clueText()) : '') + (me ? '' : who);

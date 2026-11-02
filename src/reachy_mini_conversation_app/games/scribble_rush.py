@@ -157,10 +157,9 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
 _SQUARES: Final[dict[str, tuple[str, str]]] = {"es": ("una casilla", "{n} casillas"), "en": ("one square", "{n} squares")}  # fmt: skip
 _SCREEN: Final[dict[str, dict[str, str]]] = {
     "draws": {"es": "{team} DIBUJA", "en": "{team} DRAWS"},
-    "turn": {
-        "es": "{player} · {category} · Ronda {round} de {rounds}",
-        "en": "{player} · {category} · Round {round} of {rounds}",
-    },  # fmt: skip
+    "turn": {"es": "{player} · Ronda {round} de {rounds}", "en": "{player} · Round {round} of {rounds}"},
+    # Big on the screen while a team draws: players missed it as part of the caption (2026-11-02).
+    "category": {"es": "CATEGORÍA: {category}", "en": "CATEGORY: {category}"},
     "looking": {"es": "¿Qué será?", "en": "What could it be?"},
     "was": {"es": "ERA: {word}", "en": "IT WAS: {word}"},
     "moved": {"es": "{team} +{squares}", "en": "{team} +{squares}"},
@@ -511,10 +510,10 @@ class ScribbleRush(Game):
     def _lanes(self) -> list[tuple[str, int]]:
         return [(team_name(team, self._language), self._squares.get(team, 0)) for team in self._teams_playing()]
 
-    def _show_track(self, title: str, caption: str) -> None:
+    def _show_track(self, title: str, caption: str, *, tag: str | None = None) -> None:
         if self._context is not None:
             turn = team_name(self._team, self._language) if self._team else None
-            self._context.show(render_track(title, caption, self._lanes(), GOAL, turn=turn))
+            self._context.show(render_track(title, caption, self._lanes(), GOAL, turn=turn, tag=tag))
 
     async def _lobby(self) -> bool:
         """Show the join screen until someone starts the game."""
@@ -571,8 +570,9 @@ class ScribbleRush(Game):
         name = team_name(team, language)
         context.progress = f"Round {self._round} of {ROUNDS}: {team} draws"
         category = category_name(self._word.category, language)
-        caption = _SCREEN["turn"][language].format(player=drawer.name, category=category, round=self._round, rounds=ROUNDS)  # fmt: skip
-        self._show_track(_SCREEN["draws"][language].format(team=name.upper()), caption)
+        caption = _SCREEN["turn"][language].format(player=drawer.name, round=self._round, rounds=ROUNDS)
+        tag = _SCREEN["category"][language].format(category=category.upper())
+        self._show_track(_SCREEN["draws"][language].format(team=name.upper()), caption, tag=tag)
         self._changed()
         await self._say("turn", player=drawer.name, team=name)
         context.played()

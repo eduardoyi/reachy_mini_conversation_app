@@ -29,18 +29,18 @@ _TEXT: Final[dict[str, dict[str, str]]] = {
     "misses": {"es": "Fallos", "en": "Misses"},
     "turn": {"es": "Turno", "en": "Turn"},
 }
-_MISSES: Final[int] = 6  # the game's limit, one box each
+_MISSES: Final[int] = 3  # the game's limit (sheeple.MISSES), one box each
 
 # One answer slot: its text and count once revealed, None while hidden.
 Slot = tuple[str, int] | None
 
 
 def _misses(draw: ImageDraw.ImageDraw, misses: int, label: str, box: tuple[int, int, int, int]) -> None:
-    """Draw ``label`` over six boxes, the first ``misses`` crossed out, inside ``box``."""
+    """Draw ``label`` over a box per miss allowed, the first ``misses`` crossed out, inside ``box``."""
     left, top, right, bottom = box
     draw.rounded_rectangle(box, radius=16, outline=0, width=4)
     draw.text(((left + right) / 2, top + 26), label.upper(), font=_display_font(22), fill=0, anchor="ms")
-    side, gap = 24, 6
+    side, gap = 30, 8
     first = (left + right - _MISSES * side - (_MISSES - 1) * gap) / 2
     y = top + 36
     for index in range(_MISSES):

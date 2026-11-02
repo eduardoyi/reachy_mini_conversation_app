@@ -201,13 +201,18 @@ class _Room:
                     game.on_message(player, {"type": "speak"})
 
 
-@pytest.mark.asyncio
-async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Six boards, flock and team in turn, the last double; red hits every time and wins; boards are kept.
+class _Played:
+    """What a whole pretend game left: the game, Reachy, and each spoken answer's listener, beep and phone."""
 
-    Flock rounds score each typed guess (the English "the fridge" in a Spanish game); in team rounds blue's
-    miss passes the turn and red clears the board aloud, one listener at a time.
-    """
+    def __init__(self, game: Sheeple, reachy: FakeReachy, room: _Room) -> None:
+        self.game, self.reachy, self.room = game, reachy, room
+        self.listened: list[str] = []
+        self.loudest: list[int] = []  # the loudest sample of what played before each answer
+        self.told_to_talk: list[bool] = []  # the speaker's phone said "talk now" while Reachy listened
+
+
+async def _play_a_whole_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, red_hits: bool = True) -> _Played:
+    """Play six boards on the real host with two phones; red names hidden answers aloud when ``red_hits``."""
     for name, value in {"FLOCK_S": 1.0, "TURN_S": 1.0, "ANSWER_S": 1.0, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
         monkeypatch.setattr(sheeple, name, value)
 
@@ -225,7 +230,7 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
 
     reachy.services.jev = jev
     games: list[Sheeple] = []
-    listened: list[str] = []
+    played: list[_Played] = []
 
     async def say_audio(
         rate: int, samples: np.ndarray, text: str, language: str, answer: Any, *, listen_s: float | None = None
@@ -233,9 +238,11 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
         game = games[0]
         if answer is None or game._speaker is None or game._survey is None:
             return
-        listened.append(game._speaker.name)
+        played[0].listened.append(game._speaker.name)
+        played[0].loudest.append(int(np.abs(samples).max()))
+        played[0].told_to_talk.append(game.snapshot(game._speaker)["listening"])
         hidden = next(a for a in game._survey.answers if not a.shown)
-        said = hidden.accept[0] if game._speaker.team == "red" else "un dinosaurio"
+        said = hidden.accept[0] if red_hits and game._speaker.team == "red" else "un dinosaurio"
         asyncio.get_running_loop().create_task(answer(said))
 
     reachy.services.say_audio = say_audio
@@ -248,6 +255,7 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
     host.start("sheeple", "es")
     await asyncio.sleep(0.1)
     room = _Room(games[0])
+    played.append(_Played(games[0], reachy, room))
     room.join()
     playing = asyncio.get_running_loop().create_task(room.play())
     try:
@@ -257,8 +265,19 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
             await asyncio.sleep(0.05)
     finally:
         playing.cancel()
-    game = games[0]
-    assert host.state is GameState.IDLE and game._phase == "over"
+    assert host.state is GameState.IDLE and games[0]._phase == "over"
+    return played[0]
+
+
+@pytest.mark.asyncio
+async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Six boards, flock and team in turn, the last double; red hits every time and wins; boards are kept.
+
+    Flock rounds score each typed guess (the English "the fridge" in a Spanish game); in team rounds blue's
+    miss passes the turn and red clears the board aloud, one listener at a time.
+    """
+    played = await _play_a_whole_game(tmp_path, monkeypatch)
+    game, reachy, room, listened = played.game, played.reachy, played.room, played.listened
     assert len(game._surveys) == sheeple.ROUNDS
     # Flock rounds 1, 3 and 5: Ana's "the fridge" scores 41 each; red clears the three team boards, the last doubled.
     assert game._points == {"p1": 41 * 3}
@@ -269,6 +288,28 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
     assert any(line.startswith("¡Gana el equipo Rojo") for line in reachy.said)
     assert len(read_history(tmp_path / "sheeple" / "history.json")) == sheeple.ROUNDS
     assert game.snapshot(room.red)["sheep"][0]["name"] == "Ana"
+
+
+@pytest.mark.asyncio
+async def test_a_team_board_ends_after_three_misses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nobody hits: each of the three team boards ends at its third miss (six made a board drag on, 2026-11-02)."""
+    played = await _play_a_whole_game(tmp_path, monkeypatch, red_hits=False)
+    said = played.reachy.said
+    assert sheeple.MISSES == 3
+    assert sum("Van 3 de tres fallos." in line for line in said) == 3
+    assert not any("Van 4 de" in line for line in said)
+    assert len(played.listened) == 3 * 3
+
+
+@pytest.mark.asyncio
+async def test_a_beep_opens_each_spoken_answer_and_the_phone_says_talk_then(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Players spoke over "¿Ana?" (2026-11-02): a beep plays before Reachy listens, and only then the phone says talk."""
+    played = await _play_a_whole_game(tmp_path, monkeypatch)
+    assert played.loudest and all(peak > 5000 for peak in played.loudest)
+    assert all(played.told_to_talk)
+    assert played.game.snapshot(played.room.red)["listening"] is False
 
 
 def test_every_fixed_line_is_offered_to_the_speech_cache() -> None:

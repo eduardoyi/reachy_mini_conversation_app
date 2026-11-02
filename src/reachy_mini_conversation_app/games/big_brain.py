@@ -28,7 +28,16 @@ from reachy_mini_conversation_app.games.catalog import (
     words,
 )
 from reachy_mini_conversation_app.quick_commands import QuickReply
-from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, join, silence
+from reachy_mini_conversation_app.games.big_brain_audio import (
+    RATE,
+    Audio,
+    Clips,
+    Sounds,
+    Speech,
+    beep,
+    join,
+    silence,
+)
 from reachy_mini_conversation_app.games.big_brain_board import (
     POINTS,
     Clue,
@@ -161,6 +170,7 @@ class BigBrain(Game):
         self._answer_shown = False  # the answer is on the TRMNL, so the phones show it too
         self._locked: set[str] = set()
         self._buzz: Player | None = None
+        self._listening = False  # the beep played: the player who buzzed may answer now
         self._pick: tuple[int, int] | None = None
         self._typed: dict[str, str] = {}  # player id (everyone) or team (final) -> text
         self._bets: dict[str, int] = {}
@@ -211,7 +221,7 @@ class BigBrain(Game):
         else:
             if self._phase == "lobby":
                 can += ["start", "settings"]
-            elif self._phase == "board" and player.team == self._control:
+            elif self._phase == "board" and player.team == self._control and self._board and self._board.left:
                 can.append("pick")
             elif self._phase == "buzzing" and player.team not in self._locked and self._buzz is None:
                 can.append("buzz")
@@ -274,6 +284,7 @@ class BigBrain(Game):
             "control": self._control,
             "clue": clue,
             "buzzed": {"name": self._buzz.name, "team": self._buzz.team} if self._buzz else None,
+            "listening": self._listening,
             "deadline": deadline,
             "can": can,
             "max_bet": max_bet,
@@ -378,11 +389,19 @@ class BigBrain(Game):
                 heard.set_result(said)
             return QuickReply(None, context.language, "game")
 
-        await say_audio(RATE, samples, text, context.language, answer, listen_s=ANSWER_START_S)
+        # Players answered over Richie's line (2026-11-02): it plays first, then a beep opens the listening and
+        # the player's phone says "answer now".
+        await say_audio(RATE, samples, text, context.language, None)
+        self._listening = True
+        self._changed()
         try:
+            await say_audio(RATE, join(silence(0.05), beep()), "", context.language, answer, listen_s=ANSWER_START_S)
             return await asyncio.wait_for(heard, ANSWER_S) or None
         except asyncio.TimeoutError:
             return None
+        finally:
+            self._listening = False
+            self._changed()
 
     @property
     def _title(self) -> str:
@@ -601,6 +620,8 @@ class BigBrain(Game):
         leader: str | None = None
         while board.left:
             self._phase, self._clue, self._pick = "board", None, None
+            if not self._overruled:
+                self._message = None  # the last square's "¡Correcto!" ends with it (2026-11-02)
             self._clue_shown, self._buzz, self._locked = False, None, set()
             self._show_board()
             if first:
@@ -609,6 +630,8 @@ class BigBrain(Game):
             if self._overruled:
                 self._overruled = False
                 await self._say("overruled", sounds=("correct",))
+                self._message = None
+                self._changed()
             # The team is named, so the room knows whose phone the board is on.
             team_pick = f"pick_{self._control}"
             await self._say(team_pick if self._clips.has(team_pick, self._language) else "pick")
@@ -625,7 +648,7 @@ class BigBrain(Game):
             if leader is not None and new_leader is not None and new_leader != leader and board.left:
                 await self._say("lead_change")
             leader = new_leader or leader
-        self._phase = "board"
+        self._phase, self._message = "board", None
         self._show_board()
         self._changed()
         await self._say("board_done")
@@ -798,6 +821,7 @@ class BigBrain(Game):
         clue = board.final
         self._clue, self._clue_shown, self._vote, self._answer_shown = clue, False, None, False
         self._phase, self._bets, self._typed, self._reveal = "final_bet", {}, {}, []
+        self._message = None
         self._show(render_final(board.final_category, self._scoreboard(), language, step="bet"))
         self._changed()
         await self._say("final_intro", sounds=("final",))

@@ -305,8 +305,8 @@ var T = {
   round: function (n, o) { return 'Ronda ' + n + ' de ' + o; }, flock: 'Todos responden', team: 'Por equipos', double: 'Puntos dobles',
   asked: '100 gringos respondieron:', yourAnswer: '¿Qué dijo la mayoría?', send: 'Enviar', sent: 'Enviado',
   canResend: 'Puedes cambiarla antes de que acabe el tiempo.', speak: '¡Responder!', speakSub: 'Toca y dile tu respuesta a Richie',
-  yourTurn: 'Le toca a tu equipo', watch: 'Atentos al tablero', you: 'Tú', misses: function (n) { return n + ' de 6 fallos'; },
-  turnOf: function (t) { return 'Turno del equipo ' + t; }, sayIt: '¡Dilo en voz alta!', answering: function (n) { return n + ' está respondiendo…'; },
+  yourTurn: 'Le toca a tu equipo', watch: 'Atentos al tablero', you: 'Tú', misses: function (n) { return n + ' de 3 fallos'; },
+  turnOf: function (t) { return 'Turno del equipo ' + t; }, sayIt: '¡Dilo en voz alta!', waitBeep: 'Espera tu nombre y el bip…', waitBeepSub: 'Habla después del bip', answering: function (n) { return n + ' está respondiendo…'; },
   hit: function (r) { return '¡Salió! Puesto ' + r; }, miss: 'No salió en la encuesta', yourGuess: 'Tu respuesta:',
   listen: 'Escucha a Richie…', winner: 'Gana el equipo', winners: '¡Empate! Ganan', sheep: 'Ovejas del rebaño', pts: 'pts',
   topSheep: 'La oveja mayor', topSheepSub: 'La que más pensó como el rebaño', tagline: 'Piensa como el rebaño',
@@ -322,8 +322,8 @@ var T = {
   round: function (n, o) { return 'Round ' + n + ' of ' + o; }, flock: 'Everyone answers', team: 'Team by team', double: 'Double points',
   asked: 'We asked 100 people:', yourAnswer: 'What did most people say?', send: 'Send', sent: 'Sent',
   canResend: 'You can change it until time runs out.', speak: 'Answer!', speakSub: 'Tap, then tell Richie your answer',
-  yourTurn: "Your team's turn", watch: 'Watch the board', you: 'You', misses: function (n) { return n + ' of 6 misses'; },
-  turnOf: function (t) { return t + " team's turn"; }, sayIt: 'Say it out loud!', answering: function (n) { return n + ' is answering…'; },
+  yourTurn: "Your team's turn", watch: 'Watch the board', you: 'You', misses: function (n) { return n + ' of 3 misses'; },
+  turnOf: function (t) { return t + " team's turn"; }, sayIt: 'Say it out loud!', waitBeep: 'Wait for your name and the beep…', waitBeepSub: 'Talk after the beep', answering: function (n) { return n + ' is answering…'; },
   hit: function (r) { return 'On the board! Number ' + r; }, miss: 'Not in the survey', yourGuess: 'Your answer:',
   listen: 'Listen to Richie…', winner: 'The winner is', winners: "It's a tie! Winners:", sheep: 'The flock', pts: 'pts',
   topSheep: 'Top sheep', topSheepSub: 'Thought most like the flock', tagline: 'Think like the flock',
@@ -331,6 +331,7 @@ var T = {
  }
 };
 var KEYS = ['red', 'blue', 'green', 'yellow'];
+var MISSES = 3; // a team board ends at this many (sheeple.MISSES)
 // [colour, text on it, darker edge]
 var TC = {red: ['#ec3a4f', '#fff', '#9c1428'], blue: ['#2b6ff0', '#fff', '#133e99'], green: ['#2fc073', '#0b2a1b', '#157a43'], yellow: ['#ffd43b', '#2a2000', '#b08600']};
 var QS = new URLSearchParams(location.search);
@@ -339,7 +340,7 @@ var code = demo ? 'DEMO' : (QS.get('c') || '').trim();
 var STORE = 'sheeple:' + code;
 var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
 var RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-var S = null, ws = null, retry = 0, timer = null, cache = {}, lastPhase = null, lastRound = null;
+var S = null, ws = null, retry = 0, timer = null, cache = {}, lastPhase = null, lastRound = null, talking = false;
 var draft = {name: '', team: null, answer: ''}, lock = false;
 var dl = {key: null, total: 1}, prevScores = null, bd = {key: null, items: []};
 function $(id) { return document.getElementById(id); }
@@ -395,6 +396,9 @@ function handle(m) {
    lastPhase = m.phase;
    if (can('speak')) { buzz([120, 80, 120]); announce(t().yourTurn + '. ' + t().speakSub); }
   }
+  var talk = !!(m.listening && m.speaker && m.you && m.speaker.name === m.you.name && m.speaker.team === m.you.team);
+  if (talk && !talking) { buzz(200); announce(t().sayIt); }
+  talking = talk;
   lock = false;
   render();
   if (entered && had && m.you) effects(m.phase);
@@ -513,7 +517,8 @@ function stageHtml() {
   '</span><span class="t2">' + esc(L.speak) + '</span><span class="t3">' + esc(L.speakSub) + '</span></button>';
  else if (p === 'answering' && S.speaker) {
   var me = S.speaker.name === S.you.name && S.speaker.team === S.you.team;
-  h += me ? '<div class="say" ' + ts(S.speaker.team) + '><div class="waves" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><b>' + esc(L.sayIt) + '</b></div>'
+  if (me && !S.listening) h += '<div class="wait" ' + ts(S.speaker.team) + '>' + sheep() + '<div><b>' + esc(L.waitBeep) + '</b><small>' + esc(L.waitBeepSub) + '</small></div></div>';
+  else h += me ? '<div class="say" ' + ts(S.speaker.team) + '><div class="waves" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><b>' + esc(L.sayIt) + '</b></div>'
    : '<div class="wait" ' + ts(S.speaker.team) + '>' + sheep() + '<div><b>' + esc(L.answering(S.speaker.name)) + '</b><small>' + esc(L.watch) + '</small></div></div>';
  } else if (S.turn && (p === 'team')) h += '<div class="wait" ' + ts(S.turn) + '>' + sheep() + '<div><b>' + esc(L.turnOf(tname(S.turn))) + '</b><small>' + esc(L.watch) + '</small></div></div>';
  var r = S.round || {};
@@ -532,9 +537,9 @@ function stageHtml() {
  }
  h += '</div>';
  if (S.misses != null) {
-  var mm = Math.min(6, S.misses);
+  var mm = Math.min(MISSES, S.misses);
   h += '<div class="misses" role="img" aria-label="' + esc(L.misses(S.misses)) + '">';
-  for (var i = 0; i < 6; i++) h += '<i class="' + (i < mm ? 'x' + (i === mm - 1 && p === 'miss' ? ' new' : '') : '') + '">✗</i>';
+  for (var i = 0; i < MISSES; i++) h += '<i class="' + (i < mm ? 'x' + (i === mm - 1 && p === 'miss' ? ' new' : '') : '') + '">✗</i>';
   h += '</div>';
  }
  return h;
@@ -671,7 +676,7 @@ document.addEventListener('change', function (e) {
  if (!can('settings') || !send({type: 'kids', on: !!e.target.checked})) e.target.checked = !!(S && S.kids);
 });
 
-// ?demo=<join|lobby|listen|intro|flock|sent|reveal|team|speak|answering|say|hit|miss|paused|over|busy>&lang=en
+// ?demo=<join|lobby|listen|intro|flock|sent|reveal|team|speak|answering|beep|say|hit|miss|paused|over|busy>&lang=en
 // shows sample states with no game running (for checking the design).
 function runDemo(p) {
  var en = QS.get('lang') === 'en', N = T[en ? 'en' : 'es'].names;
@@ -691,7 +696,8 @@ function runDemo(p) {
   intro: base('intro', {}), flock: base('flock', {can: ['answer'], deadline: Date.now() + 22000}),
   sent: base('flock', {can: ['answer'], deadline: Date.now() + 4000, guess: {text: 'Tacos', rank: null}}),
   team: base('team', team), speak: base('team', Object.assign({}, team, {turn: 'red', can: ['speak'], deadline: Date.now() + 18000})),
-  answering: base('answering', Object.assign({}, team, {speaker: {name: 'Eva', team: 'blue'}})), say: base('answering', Object.assign({}, team, {turn: 'red', speaker: {name: 'Ana', team: 'red'}})),
+  answering: base('answering', Object.assign({}, team, {speaker: {name: 'Eva', team: 'blue'}})), say: base('answering', Object.assign({}, team, {turn: 'red', speaker: {name: 'Ana', team: 'red'}, listening: true})),
+  beep: base('answering', Object.assign({}, team, {turn: 'red', speaker: {name: 'Ana', team: 'red'}})),
   hit: base('hit', Object.assign({}, team, {shown: [2, 3, 5], speaker: {name: 'Eva', team: 'blue'}, message: 'Eva: Tacos +28'})),
   miss: base('miss', Object.assign({}, team, {misses: 3, turn: 'green', message: 'Eva: «Sopa» ✗'})),
   paused: base('paused', {can: ['resume']}), over: base('over', {round: null, question: null, sheep: [{name: 'Sofía', team: 'blue', points: 71}, {name: 'Ana', team: 'red', points: 52}, {name: 'Luis', team: 'red', points: 32}, {name: 'Pablo', team: 'green', points: 0}]})

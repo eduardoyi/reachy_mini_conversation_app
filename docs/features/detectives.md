@@ -32,8 +32,9 @@ lights and noir music are not built.
 4. **Turns:** rounds go round the players in the order they joined; the TRMNL board shows the suspects, the evidence
    found, the round and whose turn it is. The player on turn has 60 s and a glowing phone with two choices:
    - **Question someone:** tap a suspect or witness. A question typed in the box is used as it is; with the box
-     empty Richie says "Ana, what do you ask Valeria?" and listens to the next thing said (only then, so one voice
-     at a time). The question and the answer appear on the TRMNL and in every phone's notebook, and the character
+     empty Richie says "Ana, what do you ask Valeria?", a short beep plays, and only then does he listen (one voice
+     at a time; up to 10 s for the question to start). Ana's phone says "Espera el bip… y haz tu pregunta" until
+     the beep and "Richie te escucha" (with a buzz) from it. The question and the answer appear on the TRMNL and in every phone's notebook, and the character
      answers in their own voice (two or three sentences, in character, acted with audio tags). Their first
      sentence starts about 3–4 s after the question; Richie says it instead when their voice cannot be made.
    - **Examine a clue:** tap one of the clues open this round (each clue has the round it opens in). It goes up on
@@ -189,6 +190,8 @@ questions are heard through `GameServices.ask`.
 
 ## Changelog
 
+- 2026-11-02: A beep opens the listening for a spoken question, and the phone says "Richie is listening" only
+  from then (before, it said so while Richie was still asking; players spoke over him in Big Brain and Sheeple).
 - 2026-11-02: Each character speaks in their own ElevenLabs voice, with audio tags, first sentence first;
   Richie keeps narrating. Open-source voices were tried first on the mini (Qwen3-TTS, VoxCPM2, Chatterbox,
   Kokoro): the good ones took 1.5–3.5 times as long as the audio to make, and Kokoro sounded poor.

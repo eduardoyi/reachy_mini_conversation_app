@@ -62,7 +62,8 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;pa
 .title.tc{color:var(--tc)}
 .sub{color:var(--ink2);font-size:21px;margin:6px auto;text-align:center;max-width:30ch;text-wrap:balance}
 .sub b{color:var(--ink);font-weight:400}
-.cat{display:inline-block;font-family:var(--mk);font-size:16px;background:var(--ink);color:#fff;padding:4px 12px 5px;border-radius:var(--r2);transform:rotate(-2deg)}
+.cat{display:inline-block;font-family:var(--mk);font-size:26px;line-height:1.1;background:var(--ink);color:#fff;padding:6px 16px 8px;border-radius:var(--r2);transform:rotate(-2deg);margin:4px 0 8px}
+.cat small{display:block;font-family:var(--hand);font-size:14px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;margin-bottom:1px}
 .center{text-align:center}
 
 /* Buttons */
@@ -288,7 +289,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;pa
 <script>
 var T = {
  es: {join: 'Únete al juego', name: 'Tu nombre', team: 'Tu equipo', go: '¡Entrar!', start: '¡Empezar!', kids: 'Modo niños (palabras fáciles)',
-  waitStart: 'Cuando estén todos, denle a empezar.', drawYou: '¡Te toca dibujar!', draw: 'Dibuja en un papel:', done: '¡Listo! Enseñárselo a Richie',
+  waitStart: 'Cuando estén todos, denle a empezar.', drawYou: '¡Te toca dibujar!', category: 'Categoría', draw: 'Dibuja en un papel:', done: '¡Listo! Enseñárselo a Richie',
   skip: 'Otra palabra', drawing: '{name} está dibujando', holdUp: '¡Levanta el dibujo frente a la cámara de Richie!', holding: '¡A mostrarle el dibujo a Richie!',
   guessing: 'Richie está adivinando…', was: 'Era:', paused: 'Juego en pausa', resume: 'Seguir jugando', over: '¡Fin del juego!',
   round: 'Ronda {r} de {n}', errName: 'Escribe tu nombre y escoge un equipo.', errClosed: 'El juego ya empezó.', reconnecting: 'Reconectando…',
@@ -298,7 +299,7 @@ var T = {
   gotIt: '¡Richie lo adivinó!', missed: 'Richie no lo adivinó', blind: 'Richie no vio el dibujo', wins: '¡Gana el equipo {team}!', tie: '¡Empate!',
   kidsOn: 'Modo niños', race: 'La carrera', watch: 'Mira la carrera desde aquí.'},
  en: {join: 'Join the game', name: 'Your name', team: 'Your team', go: 'Join!', start: 'Start!', kids: 'Kids mode (easy words)',
-  waitStart: 'When everyone is in, press start.', drawYou: 'Your turn to draw!', draw: 'Draw on paper:', done: 'Done! Show Richie',
+  waitStart: 'When everyone is in, press start.', drawYou: 'Your turn to draw!', category: 'Category', draw: 'Draw on paper:', done: 'Done! Show Richie',
   skip: 'Another word', drawing: '{name} is drawing', holdUp: 'Hold your drawing up to Richie\'s camera!', holding: 'Time to show Richie the drawing!',
   guessing: 'Richie is guessing…', was: 'It was:', paused: 'Game paused', resume: 'Keep playing', over: 'Game over!',
   round: 'Round {r} of {n}', errName: 'Type your name and pick a team.', errClosed: 'The game has already started.', reconnecting: 'Reconnecting…',
@@ -320,6 +321,10 @@ var seenGuesses = [], lastSec = -1;
 function $(id) { return document.getElementById(id); }
 function lang() { return (S && S.language) || (/^es/i.test(navigator.language || '') ? 'es' : 'en'); }
 function t() { return T[lang()]; }
+// The word's category as a big label ("Categoría / animal"); empty without one. `more` adds classes and attributes.
+function catHTML(more) {
+ return S.category ? '<span class="cat' + more + '"><small>' + esc(t().category) + '</small>' + esc(S.category) + '</span>' : '';
+}
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 function col(k) { return TC[k] || '#555'; }
 function tc(k) { return 'style="--tc:' + col(k) + '"'; }
@@ -513,8 +518,8 @@ var SCENES = {
   var k = S.you.team;
   var h = '<section class="center"><h1 class="title slap">' + t().drawYou + '</h1>' +
    '<div class="secret" ' + tc(k) + '><div class="card3"><div class="face front sk"><span class="tape" aria-hidden="true"></span>' +
-   '<p class="small">' + t().draw + '</p><p class="word" style="--ws:' + wsize(S.word) + 'px"><span>' + esc(S.word) + '</span></p>' +
-   (S.category ? '<span class="cat">' + esc(S.category) + '</span>' : '') + '</div><div class="face back sk" aria-hidden="true">?</div></div></div>' +
+   catHTML('') + '<p class="small">' + t().draw + '</p><p class="word" style="--ws:' + wsize(S.word) + 'px"><span>' + esc(S.word) + '</span></p>' +
+   '</div><div class="face back sk" aria-hidden="true">?</div></div></div>' +
    '<p class="shh">' + EYE + t().onlyYou + '</p>' + timerHTML(false);
   if (can('done')) h += '<button type="button" class="btn big sk" data-act="done">' + t().done + '</button>';
   if (can('skip')) h += '<button type="button" class="btn ghost sk" data-act="skip">' + t().skip + '</button>';
@@ -523,7 +528,7 @@ var SCENES = {
  watch: function () {
   var d = S.drawer || {name: '', team: S.turn};
   return '<section class="center" ' + tc(d.team) + '><h1 class="title tc slap">' + fill(t().drawing, {name: d.name}) + '</h1>' +
-   (S.category ? '<span class="cat pop" style="--d:.15s">' + esc(S.category) + '</span>' : '') +
+   catHTML(' pop" style="--d:.15s') +
    '<div class="pad sk pop" style="--d:.2s">' + scribble(d.team) + '</div>' + (S.phase === 'drawing' ? timerHTML(true) : '') + '<p class="sub">' + t().cheer + '</p></section>';
  },
  show: function () {

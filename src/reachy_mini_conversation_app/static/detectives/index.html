@@ -436,7 +436,7 @@ var T = {
   noneSaid: 'Nadie ha declarado todavía.', culprit: 'El culpable', motive: 'Motivo', right: '¡Lo resolviste!', wrong: 'Esta vez no.',
   rightHint: 'Buen ojo, detective.', wrongHint: 'El culpable se te escapó.', solvers: 'Lo resolvieron', motiveToo: 'en rojo: también acertaron el motivo', nobody: 'Nadie',
   witness: 'Testigo', suspect: 'Sospechoso', over: 'Caso cerrado', guilty: 'Culpable', reconnecting: 'Reconectando…', errClosed: 'El caso ya empezó.',
-  errName: 'Escribe tu nombre.', listening: 'Richie te escucha: haz tu pregunta en voz alta.', asking: 'está interrogando', thinking: 'Pensando…',
+  errName: 'Escribe tu nombre.', listening: 'Richie te escucha: haz tu pregunta en voz alta.', waitBeep: 'Espera el bip… y haz tu pregunta.', asking: 'está interrogando', thinking: 'Pensando…',
   thinkingHint: 'Escucha la respuesta.', newClue: 'Nueva prueba', foundBy: 'La examinó', truth: 'La verdad', truthHint: 'Richie está contando lo que pasó. Escucha…',
   tapOpen: 'Toca para abrirlo. Que nadie más lo vea.', tapClose: 'Toca para cerrarlo.', listenRichie: 'Escucha a Richie: él te cuenta el caso.',
   gone: 'Este juego ya terminó.', you: 'tú', of: 'de', secs: 's'},
@@ -454,7 +454,7 @@ var T = {
   noneSaid: 'Nobody has talked yet.', culprit: 'The culprit', motive: 'Motive', right: 'You solved it!', wrong: 'Not this time.',
   rightHint: 'Sharp eyes, detective.', wrongHint: 'The culprit slipped past you.', solvers: 'Solved by', motiveToo: 'in red: got the motive too', nobody: 'Nobody',
   witness: 'Witness', suspect: 'Suspect', over: 'Case closed', guilty: 'Guilty', reconnecting: 'Reconnecting…', errClosed: 'The case has already started.',
-  errName: 'Type your name.', listening: 'Richie is listening: ask your question out loud.', asking: 'is asking a question', thinking: 'Thinking…',
+  errName: 'Type your name.', listening: 'Richie is listening: ask your question out loud.', waitBeep: 'Wait for the beep… then ask your question.', asking: 'is asking a question', thinking: 'Thinking…',
   thinkingHint: 'Listen to the answer.', newClue: 'New evidence', foundBy: 'Examined by', truth: 'The truth', truthHint: 'Richie is telling what happened. Listen…',
   tapOpen: "Tap to open. Don't let anyone else see.", tapClose: 'Tap to close it.', listenRichie: 'Listen to Richie: he reads you the case.',
   gone: 'This game is over.', you: 'you', of: 'of', secs: 's'}
@@ -464,7 +464,7 @@ var code = (params.get('c') || '').trim();
 var DEMO = params.get('demo');
 var STORE = 'detectives:' + code;
 var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
-var S = null, ws = null, retry = 0, timer = null, joined = false, choice = {suspect: null, motive: null};
+var S = null, ws = null, retry = 0, timer = null, joined = false, choice = {suspect: null, motive: null}, talking = false;
 var ui = {tab: 'evidence', flipped: false, seen: {}, clues: 0, phase: null, said: null};
 function $(id) { return document.getElementById(id); }
 function t() { return T[lang]; }
@@ -550,6 +550,10 @@ function handle(m) {
   if (m.you) joined = true;
   if (before !== m.phase && m.phase === 'turn' && can('act')) { try { if (navigator.vibrate) navigator.vibrate([150, 80, 150]); } catch (e) {} }
   if (m.phase !== 'accuse') choice = {suspect: null, motive: null};
+  // "Ask now" (with a buzz) only once the beep played and Richie listens.
+  var talk = !!(m.listening && m.phase === 'asking' && m.you && m.turn === m.you.name);
+  if (talk && !talking) { try { if (navigator.vibrate) navigator.vibrate([60, 40, 160]); } catch (e) {} say(t().listening); }
+  talking = talk;
   if (before !== m.phase || beforeTurn !== m.turn) announce(before);
   render();
  }
@@ -562,7 +566,7 @@ function announce(before) {
  else if (p === 'reveal') line = x.truth;
  else if (p === 'over' && S.result) line = x.culprit + ': ' + S.result.culprit + '. ' + (S.result.you_right ? x.right : x.wrong);
  else if (p === 'paused') line = x.paused;
- else if (p === 'asking' && S.you && S.turn === S.you.name) line = x.listening;
+ else if (p === 'asking' && S.you && S.turn === S.you.name) line = S.listening ? x.listening : x.waitBeep;
  if (line) say(line);
  var big = {turn: 1, accuse: 1, reveal: 1, over: 1, paused: 1, intro: 1, lobby: 1};
  if (before && before !== p && big[p] && !(p === 'turn' && !can('act'))) { try { window.scrollTo({top: 0, behavior: 'smooth'}); } catch (e) { window.scrollTo(0, 0); } }
@@ -639,7 +643,7 @@ function render() {
    } else {
     var mine = S.you && S.turn === S.you.name;
     if (p === 'asking' && mine) {
-     main += '<section class="listen rise"' + fx('asking:' + S.turn) + '><div class="row"><span class="mic">' + ICON.mic + '</span><h2 style="color:var(--on)">' + esc(x.listening) + '</h2></div></section>';
+     main += '<section class="listen rise"' + fx('asking:' + S.turn) + '><div class="row">' + (S.listening ? '<span class="mic">' + ICON.mic + '</span>' : '') + '<h2 style="color:var(--on)">' + esc(S.listening ? x.listening : x.waitBeep) + '</h2></div></section>';
     } else if (p === 'answering') {
      main += '<section class="listen rise"' + fx('answering:' + S.turn + S.notes.length) + '><span class="lbl">' + esc(S.turn || '') + '</span><div class="who">' + esc(x.thinking) + '</div><div class="row"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="hint">' + esc(x.thinkingHint) + '</span></div></section>';
     } else {

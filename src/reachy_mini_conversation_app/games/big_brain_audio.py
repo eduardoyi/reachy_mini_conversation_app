@@ -67,6 +67,14 @@ def silence(seconds: float) -> Audio:
     return np.zeros(int(RATE * seconds), dtype=np.int16)
 
 
+def beep(seconds: float = 0.18, hz: float = 880.0, level: float = 0.35) -> Audio:
+    """Return a short sine beep with soft edges (no click), ``level`` of full scale."""
+    times = np.arange(int(RATE * seconds)) / RATE
+    edge = np.minimum(1.0, np.minimum(times, seconds - times) / 0.01)
+    samples: Audio = (np.sin(2 * np.pi * hz * times) * edge * level * 32767).astype(np.int16)
+    return samples
+
+
 def join(*pieces: Audio, gap_s: float = 0.15) -> Audio:
     """Return the pieces one after another with a short gap between them."""
     parts: list[Audio] = []

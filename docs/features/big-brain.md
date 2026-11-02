@@ -2,7 +2,7 @@
 
 - Status: `in-progress` (built and tested 2026-11-01; deployed to the Mac mini 2026-11-01 13:45; first played
   2026-11-01 15:01, two teams; fixes from that game below)
-- Last updated: 2026-11-01
+- Last updated: 2026-11-02 (a beep before each spoken answer; the result card clears)
 - Plan: [party-games.md](../plans/party-games.md) ("Big Brain build")
 - Part of: [games.md](games.md) (the shared game host)
 
@@ -27,8 +27,9 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
    control ("Red team, it's your pick!"); its phones buzz and show a glowing "Your team's pick!" over the board,
    while the other phones show whose pick it is over a dimmed board. After 40 s Richie picks one himself.
 4. **A clue:** the TRMNL shows it large while Richie reads it in the host voice; then the buzzers unlock for 8 s.
-   The first buzz wins (its sound and the team's name), and only that player answers aloud; Richie listens only
-   then, for up to 6 s for the answer to start (silence is a miss at once; speech he could not make out gets one
+   The first buzz wins (its sound and the team's name), and only that player answers aloud. After Richie's
+   line a short beep plays and only then does he listen, for up to 6 s for the answer to start; that player's
+   phone says "Espera el bip… y responde" until the beep and "¡Responde en voz alta!" (with a buzz) from it (silence is a miss at once; speech he could not make out gets one
    "say that again?"). Right: the points, the next pick, a cheer (a streak and the 800 row get their own lines). Wrong: the
    points are lost (not in kids mode, nor on a double), that team is locked out and the others get 6 s more.
    Nobody: "time's up", and the answer on the TRMNL and in his voice.
@@ -176,6 +177,10 @@ big-brain/rulings.json          Jev's and the room's rulings
 
 ## Changelog
 
+- 2026-11-02: After the household played the Disney edition: a beep after Richie's "¿Sí?" opens the listening,
+  and the phone says "answer now" only from then (players answered over his line); the "¡Correcto!" card goes
+  when the next pick starts and before the final (it stayed on); nobody is asked to pick once the board is empty
+  (the last team saw "¡Les toca escoger!" for a moment before the final).
 - 2026-11-02: Redesigned TRMNL screens (see [games.md](games.md#what-the-screens-look-like)): a black header
   with the bulb and marquee bulbs; the board's values as black tiles that turn hatched once played, the category
   on a grey band over each clue, hidden squares on a notched ribbon, the answer in a framed card, a tick or cross

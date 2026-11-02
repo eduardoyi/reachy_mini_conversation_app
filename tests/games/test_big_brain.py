@@ -379,7 +379,9 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     """Two teams play the board and the final; red wins; clues are kept.
 
     A phone plays on after a pause; red's first answer cannot be read, so Richie asks again; the second is ruled
-    wrong and blue's vote ends that square at once; the bets end as soon as both teams bet.
+    wrong and blue's vote ends that square at once; the bets end as soon as both teams bet. Each spoken answer
+    opens with a beep after Richie's line, and only then does the phone say "answer now"; "¡Correcto!" goes when
+    the next pick starts, and nobody is asked to pick once the board is empty (2026-11-02).
     """
     for name, value in {"PICK_S": 1.0, "BUZZ_S": 0.5, "REBUZZ_S": 0.3, "ANSWER_S": 1.0, "EVERYONE_S": 0.3,
                         "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "FINAL_ANSWER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
@@ -397,12 +399,15 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     games: list[BigBrain] = []
     played: list[tuple[str, bool]] = []
     given: list[str] = []
+    beeps: list[tuple[int, bool]] = []  # each listening clip: its loudest sample, and the phone saying "answer now"
 
     async def say_audio(
         rate: int, samples: np.ndarray, text: str, language: str, answer: Any, *, listen_s: float | None = None
     ) -> None:
         played.append((text, answer is not None))
         game = games[0]
+        if answer is not None and game._buzz is not None:
+            beeps.append((int(np.abs(samples).max()), game.snapshot(game._buzz)["listening"]))
         if answer is not None and game._buzz is not None and game._clue is not None:
             said = [UNCLEAR_ANSWER, "Algo raro"][len(given)] if len(given) < 2 else game._clue.accept[0]
             given.append(said)
@@ -432,6 +437,14 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(games[0], "_counted_now", spy)
     playing = asyncio.get_running_loop().create_task(room.play())
+    seen: list[dict[str, Any]] = []  # what red's phone showed, every 10 ms
+
+    async def watch() -> None:
+        while True:
+            seen.append({**games[0].snapshot(room.red), "left": games[0]._board.left if games[0]._board else None})
+            await asyncio.sleep(0.01)
+
+    watching = asyncio.get_running_loop().create_task(watch())
     try:
         for _ in range(900):
             if host.state is GameState.IDLE:
@@ -439,9 +452,16 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
             await asyncio.sleep(0.05)
     finally:
         playing.cancel()
+        watching.cancel()
     game = games[0]
     assert host.state is GameState.IDLE
     assert game._phase == "over"
+    assert beeps and all(peak > 5000 and talk_now for peak, talk_now in beeps)
+    assert not any(s["listening"] for s in seen if s["phase"] != "answering")
+    picking = [s for s in seen if "pick" in s["can"]]
+    assert picking and not any(s["left"] == 0 for s in picking)
+    assert not any((s["message"] or "").startswith("¡Correcto") for s in picking)
+    assert not any(s["message"] for s in seen if s["phase"].startswith("final"))
     assert (
         given[:3] == [UNCLEAR_ANSWER, "Algo raro", given[2]]
         and len(counted) == 1

@@ -4,7 +4,7 @@ Players join by scanning the QR code on the TRMNL, as in Big Brain. Each board i
 in the US, its answers hidden and ranked by how many said them. Flock rounds: every phone types a guess at once,
 Richie reveals the answers from the least to the most popular, and each guess scores the people who gave its
 answer (for the player's team). Team rounds: the team whose turn it is taps "answer" on a phone and that player
-alone says a guess aloud; a hit scores and keeps the turn, a miss passes it, and six misses end the board. Six
+alone says a guess aloud; a hit scores and keeps the turn, a miss passes it, and three misses end the board. Six
 boards, flock and team in turn, the last one double, then the winning team. Richie speaks in his own voice.
 """
 
@@ -20,7 +20,7 @@ from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameCo
 from reachy_mini_conversation_app.games.catalog import SHEEPLE, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain import START_WORDS, team_name
-from reachy_mini_conversation_app.games.big_brain_audio import RATE, Sounds, silence
+from reachy_mini_conversation_app.games.big_brain_audio import RATE, Sounds, beep, join, silence
 from reachy_mini_conversation_app.games.big_brain_board import remember, load_bank, read_history
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling, plain, matches
 from reachy_mini_conversation_app.games.big_brain_lines import TEAMS
@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 PAGE: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "sheeple" / "index.html"
 ROUNDS: Final[int] = 6
-MISSES: Final[int] = 6
+# Six made a team board drag on (2026-11-02); sheeple_screens draws one box each.
+MISSES: Final[int] = 3
 MIN_ANSWERS: Final[int] = 3
 FLOCK_S: Final[float] = 30.0
 TURN_S: Final[float] = 25.0  # for the team to tap "answer"
@@ -76,7 +77,7 @@ _LINES: Final[dict[str, dict[str, str]]] = {
     "hit": {"es": "¡Está! {answer}, con {count}.", "en": "It's there! {answer}, with {count}."},
     "already": {"es": "Esa ya está en el tablero.", "en": "That one is already on the board."},
     "not_there": {"es": "¡No está!", "en": "Not there!"},
-    "miss": {"es": "Van {misses} de seis fallos.", "en": "That's {misses} of six misses."},
+    "miss": {"es": "Van {misses} de tres fallos.", "en": "That's {misses} of three misses."},
     "no_answer": {"es": "No te oí. Cuenta como fallo.", "en": "I didn't hear you. That's a miss."},
     "too_slow": {"es": "Se acabó el tiempo del equipo.", "en": "The team ran out of time."},
     "cleared": {"es": "¡Tablero limpio!", "en": "Board cleared!"},
@@ -217,6 +218,7 @@ class Sheeple(Game):
         self._turn: str | None = None
         self._first_turn = 0
         self._speaker: Player | None = None
+        self._listening = False  # the speaker heard the beep and may talk now
         self._misses = 0
         self._message: str | None = None
         self._deadline: float | None = None  # in playing seconds
@@ -298,6 +300,7 @@ class Sheeple(Game):
             ),
             "turn": self._turn if self._kind == "team" else None,
             "speaker": {"name": self._speaker.name, "team": self._speaker.team} if self._speaker else None,
+            "listening": self._listening,
             "misses": self._misses if self._kind == "team" else None,
             "guess": guess,
             "sheep": sheep if self._phase == "over" else [],
@@ -377,15 +380,23 @@ class Sheeple(Game):
         await context.playing()
         say_audio = context.services.say_audio
         if say_audio is not None:
-            # A moment of silence opens the listening with its own short wait, as Big Brain does.
+            # A beep opens the listening with its own short wait: players spoke over the name before (2026-11-02).
             await context.say(prompt)
-            await say_audio(RATE, silence(0.1), prompt, context.language, answer, listen_s=ANSWER_START_S)
+            self._listening = True
+            self._changed()
+            await say_audio(
+                RATE, join(silence(0.05), beep()), prompt, context.language, answer, listen_s=ANSWER_START_S
+            )
         else:
+            self._listening = True
+            self._changed()
             context.services.ask(prompt, context.language, answer)
         try:
             said = await asyncio.wait_for(heard, ANSWER_S)
         except asyncio.TimeoutError:
             return ""
+        finally:
+            self._listening = False
         return "" if said == UNCLEAR_ANSWER else said
 
     async def _wait(self, seconds: float) -> bool:
@@ -610,7 +621,7 @@ class Sheeple(Game):
             await self._say(self._line("nobody_hit"))
 
     async def _team(self, board: Survey, times: int) -> None:
-        """Teams take turns saying a guess aloud until the board is clear or six misses."""
+        """Teams take turns saying a guess aloud until the board is clear or three misses."""
         context = self._context
         assert context is not None
         announced: str | None = None

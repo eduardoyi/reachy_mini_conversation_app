@@ -2,7 +2,7 @@
 
 - Status: `in-progress` (first version built and tested with fakes on 2026-11-01; not deployed or played; the
   vision guesses not yet measured on real drawings)
-- Last updated: 2026-11-01
+- Last updated: 2026-11-02 (the category shown big on the TRMNL and the phones)
 - Plan: [party-games.md](../plans/party-games.md) ("Scribble Rush", "Vision guesser")
 - Part of: [games.md](games.md) (the shared game host); phones as in [big-brain.md](big-brain.md)
 
@@ -23,10 +23,12 @@ guesses. Richie says them aloud one by one; the earlier he gets it, the more squ
    green) with their players. Each phone types a name and picks a team; "¡Empezar!" (or "¡empezamos!" in the room)
    starts, and a "Modo niños" switch sits next to it.
 3. **A turn:** teams go in turn from a random first team, each team's players drawing in the order they joined.
-   The TRMNL shows "ROJO DIBUJA", the drawer, the category and the round over the track. Richie calls the drawer
+   The TRMNL shows "ROJO DIBUJA" and, under it, a black "CATEGORÍA: ANIMAL" label beside the drawer and the round,
+   over the track. Richie calls the drawer
    ("¡Ana, del equipo Rojo, te toca dibujar! Mira tu teléfono… ¡ya!"); only the drawer's phone shows the word,
    with an "Otra palabra" button (once a turn; the clock keeps running) and "¡Listo! Enseñárselo a Richie". The
-   other phones show who is drawing, the category and the countdown. A tick-tock speeds up for 20 s (30 s in kids
+   drawer's card has the category as a big black label above the word ("Categoría / animal"), and the other
+   phones show who is drawing, the same label and the countdown. A tick-tock speeds up for 20 s (30 s in kids
    mode).
 4. **Showing:** on "Listo" or when time runs out, Richie says "¡Muéstramelo!", waits 2.5 s for the drawing to be
    held up, takes one camera frame and shows it on the TRMNL ("¿Qué será?") while he says "Mmm… déjame ver…".
@@ -65,7 +67,7 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
   `ADULT_WORDS` (238: actions, movies, Venezuelan sayings, harder things and Venezuelan food, places, characters
   and jobs, sports and games). Each entry is `"Spanish forms / English forms"`, forms separated by `;`, the first
   of each side the word the drawer sees; every form counts as guessed.
-- `games/scribble_screens.py`: `render_track(title, caption, lanes, goal, turn=)`.
+- `games/scribble_screens.py`: `render_track(title, caption, lanes, goal, turn=, tag=)` (`tag`: the category label).
 - `static/scribble/index.html`: the phone page.
 - `games/catalog.py`: `SCRIBBLE_RUSH` (key `scribble`). `main._build_games` enables it when the camera is
   enabled and `GEMINI_API_KEY` is set.
@@ -110,7 +112,8 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 
 ## Testing
 
-- `uv run pytest tests/games/test_scribble_rush.py` (18, all passing on 2026-11-01): word lists (sizes, both
+- `uv run pytest tests/games/test_scribble_rush.py` (19, all passing on 2026-11-02): the category label on the
+  track; word lists (sizes, both
   languages, no shared forms, no adult categories for kids); code judging in both languages with articles,
   plurals and extra words, and a lion not counting for "El Rey León"; one Jev call for unmatched guesses and a
   Jev failure as a miss; reading the vision answer (confidence order, three at most, nonsense rejected); the
@@ -127,5 +130,7 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 
 ## Changelog
 
+- 2026-11-02: The category is a big black label on the TRMNL and both phone views (players didn't notice it as a
+  word in the caption and a small tag; only Richie seemed to know it).
 - 2026-11-02: Redesigned track: the shared game header with a pencil and a checkered edge, team-shaped tokens and
   black progress (see [games.md](games.md#what-the-screens-look-like)).
