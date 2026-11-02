@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.moves import (
     HEAD_RECORDING_COLUMNS,
     ANTENNA_TOUCH_PRESS_RAD,
     GazeTurnMove,
+    PhotoAimMove,
     BreathingMove,
     MovementManager,
     HeadTouchDetector,
@@ -511,6 +512,91 @@ def test_a_photo_that_never_ends_stops_holding_speaker_turns() -> None:
     assert [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)][-1] == pytest.approx(
         np.radians(-90.0)
     )
+
+
+def _aim_pose(yaw_deg: float, pitch_deg: float) -> np.ndarray:
+    return np.asarray(create_head_pose(0, 0, 0, 0, pitch_deg, yaw_deg, degrees=True), dtype=np.float64)
+
+
+def test_a_group_aim_pauses_tracking_and_holds_the_head_on_the_group() -> None:
+    """Aiming at a group pauses the tracker, turns head and body there, and holds through the countdown."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.frame_faces(True)
+    manager.aim_head(_aim_pose(-20.0, -5.0))
+    manager._poll_signals(manager._now())
+
+    assert robot.start_head_tracking.call_args_list == [call(weight=1.0), call(weight=0.0)]
+    _start_next_move(manager, 0.0)
+    move = manager.state.current_move
+    assert isinstance(move, PhotoAimMove) and move.duration == float("inf")
+    head, _, body_yaw = move.evaluate(5.0)
+    assert np.allclose(head, _aim_pose(-20.0, -5.0)) and body_yaw == pytest.approx(np.radians(-20.0))
+
+    manager.set_speaking(True)  # "3, 2, 1"
+    manager.set_speaking(False)
+    manager._poll_signals(manager._now())
+    assert robot.start_head_tracking.call_args_list == [call(weight=1.0), call(weight=0.0)]
+
+
+def test_a_second_aim_replaces_the_first_from_where_the_head_got_to() -> None:
+    """The check after the turn re-aims straight away rather than waiting for the held aim to end."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.frame_faces(True)
+    manager.aim_head(_aim_pose(-20.0, 0.0))
+    manager._poll_signals(manager._now())
+    _start_next_move(manager, 0.0)
+
+    manager.aim_head(_aim_pose(-25.0, 0.0))
+    manager._poll_signals(manager._now())
+    manager._manage_move_queue(1.0)
+
+    move = manager.state.current_move
+    assert isinstance(move, PhotoAimMove) and move.target_yaw == pytest.approx(np.radians(-25.0))
+    assert not [queued for queued in manager.move_queue if isinstance(queued, PhotoAimMove)]
+
+
+def test_the_photo_ending_releases_the_aim_and_eases_back_facing_the_group() -> None:
+    """Tracking the photo started stops; he turns level toward where the group was."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.frame_faces(True)
+    manager.aim_head(_aim_pose(-20.0, -5.0))
+    manager._poll_signals(manager._now())
+    _start_next_move(manager, 0.0)
+
+    manager.frame_faces(False)
+    manager._poll_signals(manager._now())
+
+    assert not isinstance(manager.state.current_move, PhotoAimMove)
+    robot.stop_head_tracking.assert_called_once()
+    turns = [move.target_yaw for move in manager.move_queue if isinstance(move, GazeTurnMove)]
+    assert turns == [pytest.approx(np.radians(-20.0))]
+
+
+def test_a_conversation_keeps_its_tracking_after_a_group_photo() -> None:
+    """Tracking that was on for the conversation is handed back to the tracker, not stopped."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.set_conversation_active(True)
+    manager.frame_faces(True)
+    manager.aim_head(_aim_pose(-20.0, 0.0))
+    manager.frame_faces(False)
+    manager._poll_signals(manager._now())
+
+    assert robot.start_head_tracking.call_args_list == [call(weight=1.0), call(weight=0.0), call(weight=1.0)]
+    robot.stop_head_tracking.assert_not_called()
+
+
+def test_an_aim_after_the_photo_is_ignored() -> None:
+    """A late aim from the framing thread does not move the head once the photo has ended."""
+    robot = _robot_facing(0.0)
+    manager = MovementManager(robot)
+    manager.aim_head(_aim_pose(-20.0, 0.0))
+    manager._poll_signals(manager._now())
+    assert not [move for move in manager.move_queue if isinstance(move, PhotoAimMove)]
+    robot.start_head_tracking.assert_not_called()
 
 
 def test_a_photo_leaves_tracking_someone_turned_on() -> None:

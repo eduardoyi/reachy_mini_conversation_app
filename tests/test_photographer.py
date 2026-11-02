@@ -10,7 +10,15 @@ from numpy.typing import NDArray
 
 from reachy_mini_conversation_app import photographer, photo_archive
 from reachy_mini_conversation_app.whatsapp import SendResult
-from reachy_mini_conversation_app.photographer import BURST_FRAMES, FaceFinder, sharpness, take_photo
+from reachy_mini_conversation_app.photographer import (
+    BURST_FRAMES,
+    GROUP_FACES_AT,
+    FaceFinder,
+    sharpness,
+    take_photo,
+    frame_group,
+    group_aim_point,
+)
 
 
 def _sharp(seed: int) -> NDArray[np.uint8]:
@@ -50,8 +58,8 @@ class Detector:
         self.faces = faces
 
     def detect(self, frame: NDArray[np.uint8]) -> list[object]:
-        """Return one placeholder per face."""
-        return [object()] * self.faces.get(int(frame[0, 0, 0]), 0)
+        """Return one placeholder face per face counted."""
+        return [SimpleNamespace(bbox=(0.0, 0.0, 1.0, 1.0))] * self.faces.get(int(frame[0, 0, 0]), 0)
 
 
 class FakeTime:
@@ -251,3 +259,98 @@ async def test_a_shared_photo_is_kept_for_the_gallery(tmp_path: Path, monkeypatc
     [kept] = tmp_path.glob("*.jpg")
     assert kept.read_bytes() == b"jpeg"
     assert json.loads(kept.with_suffix(".json").read_text())["who"] == "Tío Sergio"
+
+
+class Faces:
+    """Finds the given face boxes (x, y, width, height) in each frame, in turn, at half size as YuNet would."""
+
+    def __init__(self, *found: list[tuple[float, float, float, float]]) -> None:
+        """One list of boxes per frame looked at."""
+        self.found = list(found)
+
+    def detect(self, frame: NDArray[np.uint8]) -> list[object]:
+        """Return the next frame's faces, scaled to the half-size frame."""
+        boxes = self.found.pop(0) if self.found else []
+        return [SimpleNamespace(bbox=tuple(value / 2 for value in box)) for box in boxes]
+
+
+class Aiming:
+    """The robot and movement manager as group framing sees them: frames, look-at maths and aims."""
+
+    def __init__(self, frames: int = 4, fail: bool = False) -> None:
+        """Serve ``frames`` 1920x1080 frames; ``fail`` makes the look-at maths raise."""
+        self.media = Camera([np.zeros((1080, 1920, 3), np.uint8) for _ in range(frames)])
+        self.looked_at: list[tuple[int, int]] = []
+        self.aims: list[Any] = []
+        self.fail = fail
+
+    def look_at_image(self, u: int, v: int, perform_movement: bool = True) -> NDArray[np.float64]:
+        """Record the pixel and return a pose tagged with it."""
+        assert not perform_movement  # the movement manager moves the head, never the SDK directly
+        if self.fail:
+            raise RuntimeError("Camera specs not set.")
+        self.looked_at.append((u, v))
+        pose = np.eye(4)
+        pose[0, 3], pose[1, 3] = u, v
+        return pose
+
+    def aim_head(self, pose: NDArray[np.float64]) -> None:
+        """Record the aim."""
+        self.aims.append(pose)
+
+
+def _frame(robot: Aiming, *found: list[tuple[float, float, float, float]]) -> list[float]:
+    waits: list[float] = []
+    frame_group(robot, robot, FaceFinder(lambda: Faces(*found)), sleep=waits.append)
+    return waits
+
+
+def test_a_group_is_aimed_at_the_middle_of_all_faces_with_room_below() -> None:
+    """Centred across all faces; their middle GROUP_FACES_AT down the frame, so the aim point is below it."""
+    point = group_aim_point([(100, 300, 100, 100), (1500, 500, 200, 200)], 1920, 1080)
+    assert point is not None
+    assert point[0] == pytest.approx((100 + 1700) / 2)
+    assert point[1] == pytest.approx((300 + 700) / 2 + (0.5 - GROUP_FACES_AT) * 1080)
+    assert group_aim_point([(100, 300, 100, 100)], 1920, 1080) is None  # one face: the tracker frames it
+    assert group_aim_point([], 1920, 1080) is None
+
+
+def test_framing_aims_at_the_group_then_checks_it_once_the_head_has_turned() -> None:
+    """The family photo (2026-11-02): aim right at the group; once it sits centred, no second aim."""
+    robot = Aiming()
+    family = [(1040, 360, 200, 200), (1240, 620, 140, 150), (1440, 480, 160, 200), (1690, 690, 180, 180)]
+    centred = [(x - 500, y - 160, w, h) for x, y, w, h in family]
+
+    waits = _frame(robot, family, centred)
+
+    assert robot.looked_at == [(1455, 723)] and len(robot.aims) == 1
+    assert len(waits) == 1
+
+
+def test_framing_aims_again_when_the_group_moved_during_the_turn() -> None:
+    """Still well off centre after the turn: one more aim, and no more after that."""
+    robot = Aiming()
+    group = [(1000, 400, 200, 200), (1600, 400, 200, 200)]
+
+    _frame(robot, group, group, group)
+
+    assert len(robot.aims) == 2
+
+
+@pytest.mark.parametrize("found", [[], [(800, 400, 200, 200)]])
+def test_one_face_or_none_is_left_to_the_tracker(found: list[tuple[float, float, float, float]]) -> None:
+    """Without a group there is nothing to aim at: the head keeps following the face as before."""
+    robot = Aiming()
+    _frame(robot, found)
+    assert robot.aims == []
+
+
+def test_framing_gives_up_quietly_without_a_frame_or_the_look_at_maths() -> None:
+    """No camera frame, or no camera calibration in the app: no aim, and no error for the photo."""
+    no_frames = Aiming(frames=0)
+    _frame(no_frames, [(100, 400, 200, 200), (1600, 400, 200, 200)])
+    assert no_frames.aims == []
+
+    no_maths = Aiming(fail=True)
+    _frame(no_maths, [(100, 400, 200, 200), (1600, 400, 200, 200)])
+    assert no_maths.aims == []

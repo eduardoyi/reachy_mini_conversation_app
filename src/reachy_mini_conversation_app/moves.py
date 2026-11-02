@@ -55,6 +55,8 @@ SPEAKER_TURN_MIN_RAD = np.deg2rad(25.0)
 # While a photo is framed, speaker turns wait (2026-10-29: a turn mid-conversation left him facing away for the
 # photo). A photo whose end never comes (its activation replaced) stops holding them after this.
 PHOTO_FRAMING_MAX_S = 30.0
+# Turning to aim a photo at a group (``aim_head``) eases over this long, then holds until the photo ends.
+PHOTO_AIM_S = 0.8
 SPEAKER_TURN_MIN_DURATION_S = 0.5
 SPEAKER_TURN_MAX_DURATION_S = 1.4
 # Wake cue: on a wake the antennas spring out to an alert V (the pose of the "attentive" emotion) and hold
@@ -244,6 +246,36 @@ class GazeTurnMove(Move):  # type: ignore
             return self._target_head.copy(), None, self.target_yaw
         start_head, start_antennas, start_body_yaw = self._start_pose
         progress = float(np.clip(t / self._duration, 0.0, 1.0))
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        head = linear_pose_interpolation(np.asarray(start_head, dtype=np.float64), self._target_head, eased)
+        body_yaw = start_body_yaw + (self.target_yaw - start_body_yaw) * eased
+        return head, np.asarray(start_antennas, dtype=np.float64), body_yaw
+
+
+class PhotoAimMove(Move):  # type: ignore
+    """Turn head and body to aim the camera (a head pose in the world), then hold it until cleared."""
+
+    def __init__(self, target_head: NDArray[np.float64]) -> None:
+        """Prepare an aim at ``target_head``; the worker calls ``begin`` when the move starts."""
+        self._target_head = np.asarray(target_head, dtype=np.float64).copy()
+        self.target_yaw = head_world_yaw(self._target_head)
+        self._start_pose: FullBodyPose | None = None
+
+    @property
+    def duration(self) -> float:
+        """The aim holds until the photo ends and clears it."""
+        return float("inf")
+
+    def begin(self, start_pose: FullBodyPose) -> None:
+        """Capture the pose the aim starts from."""
+        self._start_pose = clone_full_body_pose(start_pose)
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64] | None, float]:
+        """Ease from the start pose to the target, the body turning with the head, then hold."""
+        if self._start_pose is None:
+            return self._target_head.copy(), None, self.target_yaw
+        start_head, start_antennas, start_body_yaw = self._start_pose
+        progress = float(np.clip(t / PHOTO_AIM_S, 0.0, 1.0))
         eased = progress * progress * (3.0 - 2.0 * progress)
         head = linear_pose_interpolation(np.asarray(start_head, dtype=np.float64), self._target_head, eased)
         body_yaw = start_body_yaw + (self.target_yaw - start_body_yaw) * eased
@@ -528,6 +560,8 @@ class MovementManager:
         self._framing_faces = False
         # Speaker turns wait until then: a photo is being framed.
         self._framing_until = -math.inf
+        # Tracking paused while the head is aimed at a group for a photo, to resume once the photo ends.
+        self._aim_paused_tracking = False
         # Breathing and speaker turns wait until then: the head is held still to read touches on it.
         self._holding_still_until = -math.inf
         self._head_touch = HeadTouchDetector()
@@ -700,6 +734,13 @@ class MovementManager:
         """Follow the face in view and hold speaker turns while a photo is taken; thread-safe."""
         self._command_queue.put(("frame_faces", active))
 
+    def aim_head(self, head_pose: NDArray[np.float64]) -> None:
+        """Turn to ``head_pose`` and hold it, tracking paused, until the photo being framed ends; thread-safe.
+
+        Ignored when no photo is being framed (``frame_faces``).
+        """
+        self._command_queue.put(("aim_head", np.asarray(head_pose, dtype=np.float64).copy()))
+
     def hold_still(self, active: bool) -> None:
         """Stop breathing and speaker turns so the head stays where it is, or let them resume; thread-safe.
 
@@ -821,12 +862,16 @@ class MovementManager:
             self._request_speaker_turn()
         elif command == "frame_faces":
             self._framing_until = self._now() + PHOTO_FRAMING_MAX_S if payload else -math.inf
+            if not payload:
+                self._release_photo_aim()
             if payload and not self._head_tracking:
                 self._set_head_tracking(True)
                 self._framing_faces = True
             elif not payload and self._framing_faces:
                 self._framing_faces = False
                 self._set_head_tracking(False)
+        elif command == "aim_head":
+            self._aim_photo(payload)
         elif command == "ring_antennas":
             self._ringing_since = self._now() if payload else None
         elif command == "hold_still":
@@ -862,8 +907,8 @@ class MovementManager:
         elif command == "set_speaking":
             if payload:
                 self._attentive_until = None  # answering: drop the alert antennas
-            if not self._head_tracking:
-                return
+            if not self._head_tracking or self._aim_paused_tracking:
+                return  # the countdown's "3, 2, 1" must not hand the aimed head back to the tracker
             speaking = bool(payload)
             if self._is_speaking == speaking:
                 return
@@ -914,7 +959,14 @@ class MovementManager:
         if command == "go_to_sleep" and self._peek_until is not None:
             self._peek_until = self._now()  # the next tick lowers the head
             return True
-        if command in ("queue_move", "turn_toward_speaker", "set_listening", "set_head_tracking", "go_to_sleep"):
+        if command in (
+            "queue_move",
+            "turn_toward_speaker",
+            "set_listening",
+            "set_head_tracking",
+            "go_to_sleep",
+            "aim_head",
+        ):
             logger.debug("Asleep; ignoring %s", command)
             return True
         return False
@@ -964,6 +1016,7 @@ class MovementManager:
         self._head_tracking = enabled
         self._track_anchor = None
         self._turn_paused_tracking = False
+        self._aim_paused_tracking = False
         # set_speaking is gated off while disabled, so its state would go stale across a toggle.
         self._is_speaking = False
         try:
@@ -1011,6 +1064,41 @@ class MovementManager:
         self.move_queue.append(GazeTurnMove(yaw))
         self.state.update_activity()
 
+    def _aim_photo(self, head_pose: NDArray[np.float64]) -> None:
+        """Pause tracking and turn to ``head_pose`` at once, replacing an earlier aim (worker thread only)."""
+        if self._now() >= self._framing_until:
+            logger.debug("Photo aim skipped: no photo is being framed")
+            return
+        if self._head_tracking and not self._aim_paused_tracking:
+            try:
+                self.current_robot.start_head_tracking(weight=0.0)
+            except Exception as e:
+                logger.warning("Head-tracking pause for a photo aim failed: %s", e)
+                return
+            self._aim_paused_tracking = True
+        self._track_anchor = None
+        self.move_queue = deque(move for move in self.move_queue if not isinstance(move, PhotoAimMove))
+        if isinstance(self.state.current_move, PhotoAimMove):
+            self.state.current_move = None  # the new aim starts from wherever this one got to
+            self.state.move_start_time = None
+        self.move_queue.appendleft(PhotoAimMove(head_pose))
+        self.state.update_activity()
+
+    def _release_photo_aim(self) -> None:
+        """Drop the photo aim and give the head back to tracking if the aim paused it (worker thread only)."""
+        self.move_queue = deque(move for move in self.move_queue if not isinstance(move, PhotoAimMove))
+        if isinstance(self.state.current_move, PhotoAimMove):
+            self.state.current_move = None
+            self.state.move_start_time = None
+        if not self._aim_paused_tracking:
+            return
+        self._aim_paused_tracking = False
+        if self._head_tracking:
+            try:
+                self.current_robot.start_head_tracking(weight=1.0)
+            except Exception as e:
+                logger.warning("Head-tracking resume after a photo aim failed: %s", e)
+
     def _present_pose(self) -> FullBodyPose:
         """Return the robot's measured head pose and body yaw, falling back to the last command."""
         with self._status_lock:
@@ -1036,6 +1124,10 @@ class MovementManager:
             self._track_anchor = None
             move.begin(self._present_pose())
             self._gaze_yaw = move.target_yaw
+        elif isinstance(move, PhotoAimMove):
+            # After the photo he eases back to facing the group, level.
+            move.begin(self._present_pose())
+            self._gaze_yaw = move.target_yaw
         elif isinstance(move, GotoQueueMove):
             # Explicit head moves (move_head, sweep_look) aim in absolute terms and end facing forward.
             self._gaze_yaw = 0.0
@@ -1048,7 +1140,7 @@ class MovementManager:
         """Clean up after a move finishes or is cleared."""
         if isinstance(move, GazeTurnMove) and self._turn_paused_tracking:
             self._turn_paused_tracking = False
-            if self._head_tracking:
+            if self._head_tracking and not self._aim_paused_tracking:
                 try:
                     self.current_robot.start_head_tracking(weight=1.0)
                 except Exception as e:

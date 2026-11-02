@@ -32,6 +32,7 @@ from reachy_mini_conversation_app.photographer import (
     SHARE_TIMEOUT_S,
     FaceFinder,
     take_photo,
+    start_framing,
     take_and_share,
 )
 from reachy_mini_conversation_app.head_touch_test import (
@@ -1601,8 +1602,8 @@ class QuickCommands:
             whole_request=True,
             beats=COUNTDOWN[language],
             # Face whoever is in view during the countdown, as speaker following only turns for voices far
-            # to the side (2026-10-29: "it didn't move his head to focus on me").
-            before=lambda: movement.frame_faces(True),
+            # to the side (2026-10-29: "it didn't move his head to focus on me"); a group is framed as a whole.
+            before=lambda: start_framing(self._deps, self._faces),
         )
 
     def _head_test(self, language: str) -> QuickReply:

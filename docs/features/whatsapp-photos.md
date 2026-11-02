@@ -32,6 +32,16 @@ video, replies, and messages from a Gemini conversation.
   turns wait (at most `PHOTO_FRAMING_MAX_S`, 30 s), so a voice from the side cannot turn him away from the
   face. Tracking someone had turned on stays on; a conversation that starts mid-photo takes the tracking
   over and ends it. Gemini's `take_photo` frames the same way.
+- **Group framing.** The tracker follows one face (the largest when it locked on, usually whoever was
+  talking), which centred group photos on the speaker and cut others off at the edge. So with two or more
+  faces in view, `photographer.frame_group` pauses the tracker and turns head and body
+  (`MovementManager.aim_head`, a held `PhotoAimMove`) so the box around all the faces is centred across,
+  with their middle 40% of the way down (`GROUP_FACES_AT`) to leave room for bodies. It checks again once
+  the head has turned (0.8 s turn, 0.3 s settle) and aims once more only if the group is still over 6% of
+  the frame off centre. The "3, 2, 1" does not hand the head back to the tracker. When the photo ends, the
+  aim is dropped: he eases back level, facing where the group was, and tracking from a conversation resumes. With
+  one face or none, the tracker frames as before. It cannot zoom out: a group wider than the lens is
+  centred, not fitted.
 - **Countdown.** Reachy says "Three!", "Two!", "One!" in the request's language, about one second apart
   (cached phrases play without Gemini's padding silence; before that, a beat ran about 1.8 s), waits 0.4 s for his head to settle, and takes up to five frames 0.12 s
   apart. The frame with the most faces wins, then the sharpest.
@@ -130,6 +140,7 @@ flowchart LR
 | Server status | `WhatsAppLink.status() -> ServerStatus | None` | `connected`, `logged_in` from `GET /app/status`, GOWA's code and message; None when unreachable |
 | CLI | `python -m reachy_mini_conversation_app.whatsapp status / groups / pair PHONE` | `groups` prints `name<TAB>id` for `WHATSAPP_PHOTOS_CHAT`; `pair` creates the `reachy` device slot on a fresh server and prints the pairing code |
 | Photo | `photographer.take_photo(media, faces) -> bytes | None` | Up to `BURST_FRAMES` (5) frames `BURST_INTERVAL_S` (0.12 s) apart within `BURST_WINDOW_S` (1.5 s), missed frames retried every 30 ms; score `(faces, sharpness)`; JPEG quality 92, one retry of the encode |
+| Framing | `photographer.start_framing(deps, faces)`; `frame_group(robot, movement, faces) -> aims`; `group_aim_point(boxes, w, h)`; `MovementManager.aim_head(pose)` | `start_framing` calls `frame_faces(True)` and runs `frame_group` in a daemon thread (errors logged, never fatal); the pixel goes through `robot.look_at_image(u, v, perform_movement=False)`; `aim_head` is ignored unless a photo is being framed, replaces an earlier aim at once, and is released by `frame_faces(False)` |
 | Share | `photographer.take_and_share(deps, chat, *, faces, take) -> SendResult | None` | Shared by the quick command and the tool; `SHARE_TIMEOUT_S` bounds it from outside |
 | Tool | `tools/take_photo.py`: `take_photo` (optional `to`, a contact name) | `{status: sent / unsure / not_sent, instruction}` or `{error, instruction?}` |
 | Trigger | `quick_commands.parse` → `QuickCommand("photo", language)` | Checked after the negation check and weather, before `_NOT_A_COMMAND_START` |
@@ -210,13 +221,13 @@ flowchart LR
 | File | Scenarios |
 |------|-----------|
 | `tests/test_whatsapp.py` | `phone`, `hd=true`, the `image` part's name and type, basic auth; refused (400, `code` not SUCCESS, 500) not retried; one retry on `ConnectError` and `ConnectTimeout`; read timeout and deadline are `UNSURE`, sent once; logs hold neither the group nor the password; status logged in / no device / unreachable; groups; pairing creates the device slot; the `groups` command and missing settings |
-| `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more; the chosen frame is touched up before encoding, and sent as taken if the touch-up fails |
+| `tests/test_photographer.py` | Sharper scores higher; most faces wins over sharpness; equal faces → sharpest; no detector (failure remembered) and a detection error fall back to sharpness; a running warm-up does not block a photo; missed frames retried until the burst is full; nothing in the window → None; waits between frames; a failed encode tried once more; the chosen frame is touched up before encoding, and sent as taken if the touch-up fails; group framing aims at the middle of all faces with room below, checks once after the turn and aims again only if still off, leaves one face or none to the tracker, and gives up quietly without a frame or the look-at maths |
 | `tests/test_photo_enhance.py` | A dark grey photo gets real blacks and brighter mid-tones; colours stay in BGR order and get richer; a green shadow tint is neutralised; a well-exposed photo barely changes; a frame with almost no range is left alone |
 | `tests/test_camera_frames.py` (photos) | `test_jpeg_encode_keeps_full_black_and_white_for_phones` |
 | `tests/test_quick_commands.py` | Messages: grammar with and without a name, Maribel's left alone; prompt, recording with antennas perked, voice note to the group; nothing said, not sent, unsure; a picture to his group; "who?" and its answers (known, unknown, cancel), nothing sent to an unknown name; no contacts or WhatsApp → conversation; outcome phrases cached. Photos: the grammar in four languages, polite and infinitive forms; edits, negations and questions are not photos; countdown, preview for 10 minutes, sent to the group, nothing before the countdown; not sent and unsure lines; no picture and a stuck camera send nothing; a broken screen still sends; not configured or camera off → conversation; other commands never touch the camera or WhatsApp; every phrase cached |
 | `tests/test_hybrid_runtime.py` | `test_a_countdown_speaks_each_beat_on_schedule_before_the_follow_up` (beats on schedule, last waited out, the conversation never opens), `test_a_superseded_countdown_stops_and_skips_the_follow_up` |
 | `tests/test_moves.py` (touches) | A sudden push is one touch and staying pushed is not more; a small tilt counts and the untouched jitter does not; a moving command or a fresh hold never counts; touches counted only while held still |
-| `tests/test_moves.py` | `test_speaker_turns_wait_while_a_photo_is_framed`, `test_a_photo_that_never_ends_stops_holding_speaker_turns`, `test_a_photo_frames_the_face_then_lets_go`, `test_a_photo_leaves_tracking_someone_turned_on`, `test_a_conversation_started_during_a_photo_ends_its_tracking` |
+| `tests/test_moves.py` | `test_speaker_turns_wait_while_a_photo_is_framed`, `test_a_photo_that_never_ends_stops_holding_speaker_turns`, `test_a_photo_frames_the_face_then_lets_go`, `test_a_photo_leaves_tracking_someone_turned_on`, `test_a_conversation_started_during_a_photo_ends_its_tracking`; group aims: pauses tracking and holds through the countdown's speech, a second aim replaces the first, the end releases it facing the group, a conversation keeps its tracking, a late aim is ignored |
 | `tests/tools/test_take_photo.py` | A photo for a family member goes to their group, framed; an unknown name takes nothing; waits the countdown, sends to the group, each outcome; no picture sends nothing; needs the link, the group and the camera; offered only with WhatsApp photos set up |
 | `tests/test_whatsapp_contacts.py` | Folded names; only named groups (a person's number, missing fields, junk skipped, not logged); missing or broken file; articles and accents; unknown and ambiguous names |
 | `tests/test_voice_notes.py` | A tone encodes to OGG Opus (skipped without GStreamer); empty → None |
@@ -230,6 +241,7 @@ flowchart LR
   ending a message by touch with the children (the detector only replayed the two head-test recordings:
   17 touches in the touch phases, none untouched), the 5 s silence ending, and face framing during the
   countdown.
+- Group framing (2026-11-02): unit-tested and deployed; a live group photo has not yet confirmed the aim.
 - Gemini's `take_photo` in a live conversation.
 - Checked live on 2026-10-29: install, pairing by code, the group listing, the LaunchAgent restart
   keeping the link, and one "tomemos una foto": countdown and settle 6.7 s (beats about 1.8 s each),
