@@ -41,6 +41,14 @@ PHOTO_PREVIEW_S: Final[float] = 1.0
 SHARE_TIMEOUT_S: Final[float] = PHOTO_TAKE_S + PHOTO_PREVIEW_S + SEND_DEADLINE_S + 2.0
 # The photos group's name in the activity log.
 PHOTOS_GROUP: Final[str] = "Reachy photos"
+# Group framing: the faces' middle is put this far down the frame, leaving room below for bodies.
+GROUP_FACES_AT: Final[float] = 0.4
+# One aim, then a check once the head has turned and settled; a second aim only if still this far off.
+GROUP_AIMS: Final[int] = 2
+GROUP_AIM_SETTLE_S: Final[float] = 0.3
+GROUP_AIM_TOLERANCE: Final[float] = 0.06  # of the frame's width and height
+
+Box = tuple[float, float, float, float]
 
 
 def _sdk_detector() -> Any:
@@ -66,6 +74,11 @@ class FaceFinder:
 
     def count(self, frame: NDArray[np.uint8]) -> int | None:
         """Return the number of faces in ``frame``, or None when the detector is unavailable or still loading."""
+        boxes = self.boxes(frame)
+        return None if boxes is None else len(boxes)
+
+    def boxes(self, frame: NDArray[np.uint8]) -> list[Box] | None:
+        """Return each face's ``(x, y, width, height)`` in ``frame`` pixels, or None when the detector is unavailable."""
         # A photo never waits for the warm-up (a model download can take a while).
         if not self._lock.acquire(blocking=False):
             return None
@@ -73,7 +86,12 @@ class FaceFinder:
             detector = self._load_locked()
             if detector is None:
                 return None
-            return len(detector.detect(np.ascontiguousarray(frame[::DETECT_DOWNSCALE, ::DETECT_DOWNSCALE])))
+            faces = detector.detect(np.ascontiguousarray(frame[::DETECT_DOWNSCALE, ::DETECT_DOWNSCALE]))
+            boxes: list[Box] = []
+            for face in faces:
+                x, y, w, h = (float(value) * DETECT_DOWNSCALE for value in face.bbox)
+                boxes.append((x, y, w, h))
+            return boxes
         except Exception as error:
             logger.warning("Face detection failed on a photo frame; choosing by sharpness: %s", error)
             return None
@@ -144,6 +162,72 @@ def take_photo(
 
 # One detector for the process, warmed up at startup (main.py).
 FACES = FaceFinder()
+
+
+def group_aim_point(boxes: list[Box], width: int, height: int) -> tuple[float, float] | None:
+    """Return the pixel to turn the camera's centre to so the faces sit centred, or None for fewer than two faces.
+
+    Centred across, and their middle at ``GROUP_FACES_AT`` down the frame.
+    """
+    if len(boxes) < 2:
+        return None
+    left = min(x for x, _, _, _ in boxes)
+    right = max(x + w for x, _, w, _ in boxes)
+    top = min(y for _, y, _, _ in boxes)
+    bottom = max(y + h for _, y, _, h in boxes)
+    return (left + right) / 2, (top + bottom) / 2 + (0.5 - GROUP_FACES_AT) * height
+
+
+def frame_group(robot: Any, movement: Any, faces: FaceFinder, *, sleep: Callable[[float], None] = time.sleep) -> int:
+    """Aim the head at everyone in view during a photo's countdown; return how many aims were sent.
+
+    Pollen's tracker follows one face, the largest when it locked on (usually whoever was talking), so group photos
+    came out centred on the speaker with the others cut off at the edge (2026-11-02: the group's middle a quarter of
+    the frame to the right). With one face or none the tracker keeps framing as before.
+    """
+    from reachy_mini_conversation_app.moves import PHOTO_AIM_S
+
+    aims = 0
+    for _ in range(GROUP_AIMS):
+        frame = capture_frame(robot.media)
+        if not isinstance(frame, np.ndarray):
+            break
+        height, width = frame.shape[:2]
+        point = group_aim_point(faces.boxes(frame) or [], width, height)
+        if point is None:
+            break
+        u, v = point
+        if (
+            aims
+            and abs(u - width / 2) < GROUP_AIM_TOLERANCE * width
+            and abs(v - height / 2) < GROUP_AIM_TOLERANCE * height
+        ):
+            break
+        # The SDK wants a pixel strictly inside the frame.
+        u, v = float(np.clip(u, 1, width - 2)), float(np.clip(v, 1, height - 2))
+        try:
+            head_pose = robot.look_at_image(int(u), int(v), perform_movement=False)
+        except Exception as error:
+            logger.warning("Photo: could not work out where to aim at the group: %s", error)
+            break
+        movement.aim_head(head_pose)
+        aims += 1
+        logger.info("Photo: aiming at the group, centre (%.0f, %.0f) of %dx%d", u, v, width, height)
+        sleep(PHOTO_AIM_S + GROUP_AIM_SETTLE_S)
+    return aims
+
+
+def start_framing(deps: Any, faces: FaceFinder = FACES) -> None:
+    """Frame the photo for its countdown: follow the face in view, and aim at the whole group when there is one."""
+    deps.movement_manager.frame_faces(True)
+
+    def run() -> None:
+        try:
+            frame_group(deps.reachy_mini, deps.movement_manager, faces)
+        except Exception as error:  # framing must never cost the photo
+            logger.warning("Photo: group framing failed: %s", error)
+
+    threading.Thread(target=run, name="photo-framing", daemon=True).start()
 
 
 async def take_and_share(

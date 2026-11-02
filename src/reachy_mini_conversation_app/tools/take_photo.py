@@ -4,7 +4,7 @@ from typing import Any
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.whatsapp import SendResult
-from reachy_mini_conversation_app.photographer import PHOTOS_GROUP, take_and_share
+from reachy_mini_conversation_app.photographer import PHOTOS_GROUP, start_framing, take_and_share
 from reachy_mini_conversation_app.quick_commands import normalize
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.whatsapp_contacts import find_contact, load_contacts
@@ -55,7 +55,7 @@ class TakePhoto(Tool):
         if not deps.camera_enabled:
             return {"error": "The camera is off."}
         logger.info("Tool call: take_photo to_family=%s", bool(to))
-        deps.movement_manager.frame_faces(True)
+        start_framing(deps)
         try:
             await asyncio.sleep(CAMERA_COUNTDOWN_S)
             result = await take_and_share(deps, chat, who)
