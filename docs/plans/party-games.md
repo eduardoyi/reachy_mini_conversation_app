@@ -3,7 +3,7 @@
 - Status: `in-progress` (designed 2026-10-31 to 2026-11-01; clue bank and host clips made; Big Brain being built)
 - Owner: Eduardo
 - Created: 2026-11-01
-- Last updated: 2026-11-01
+- Last updated: 2026-11-02
 - Builds on: [Games on Reachy](games.md) (the game host, names, the yes before a start, pause and quit)
 
 ## Goal
@@ -494,3 +494,8 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   phones for turns, roles, clues and the secret accusation, Gemini text for witness lines held to one character's
   sheet; feature doc [detectives.md](../features/detectives.md). Searching the house with the camera, dim lights
   and noir music are not built. Not deployed or played.
+- 2026-11-02: Detectives' characters speak in their own voices (Eduardo's ask). Open-source voices on the mini
+  were tried first and dropped: Qwen3-TTS, VoxCPM2 and Chatterbox took 1.5–3.5 times as long as the audio, and
+  Kokoro, the only fast one, sounded poor. ElevenLabs instead: 15 voices designed from per-character descriptions
+  (`scripts/detectives_voices.py`, ids in the case files), answers voiced live on Eleven v4 Turbo with audio tags
+  from a fixed list, first sentence first (about 3–4 s from the question to the voice), Richie still narrating.

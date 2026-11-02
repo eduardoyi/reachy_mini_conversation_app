@@ -11,6 +11,7 @@
     {
       "id": "valeria",
       "kind": "suspect",
+      "voice": {"description": "A woman in her forties with a Venezuelan Spanish accent. Sharp, proud and impatient: crisp, fast, confident speech with a cool edge. Medium-low pitch.", "id": "nIrHKPn3gy1hRnQGS0kK"},
       "name": {"en": "Valeria Montoro", "es": "Valeria Montoro"},
       "about": {"en": "Aurelio's daughter, who runs the winery's money", "es": "La hija de Aurelio, que lleva las cuentas de la bodega"},
       "personality": {
@@ -42,6 +43,7 @@
     {
       "id": "tomas",
       "kind": "suspect",
+      "voice": {"description": "A man in his fifties with a Venezuelan Spanish accent, a warm, chatty chef. Friendly and expressive with nervous energy, quick to laugh. Medium-low, slightly husky voice.", "id": "md3DYVVA3AQ29K3RXagc"},
       "name": {"en": "Tomás Rivas", "es": "Tomás Rivas"},
       "about": {"en": "The chef who cooked the dinner and poured the champagne", "es": "El chef que cocinó la cena y sirvió el champán"},
       "personality": {
@@ -73,6 +75,7 @@
     {
       "id": "ines",
       "kind": "suspect",
+      "voice": {"description": "A woman in her early thirties with a Latin American Spanish accent. Elegant, cool and composed: smooth, soft, measured speech that chooses every word. Medium pitch.", "id": "zjwZOIFgzC769Pcmmtkk"},
       "name": {"en": "Inés Calderón", "es": "Inés Calderón"},
       "about": {"en": "Aurelio's second wife, thirty years younger", "es": "La segunda esposa de Aurelio, treinta años menor"},
       "personality": {
@@ -103,6 +106,7 @@
     {
       "id": "julian",
       "kind": "suspect",
+      "voice": {"description": "A man in his sixties with a Latin American Spanish accent, a family doctor. Calm, kind and reassuring: a deep, warm, slow bedside voice.", "id": "EarNa3mBc7Rrt6ArOQi1"},
       "name": {"en": "Doctor Julián Ferrer", "es": "Doctor Julián Ferrer"},
       "about": {"en": "The family doctor and Aurelio's oldest friend", "es": "El médico de la familia y el amigo más antiguo de Aurelio"},
       "personality": {
@@ -133,6 +137,7 @@
     {
       "id": "rosa",
       "kind": "witness",
+      "voice": {"description": "A woman in her sixties with a Venezuelan Spanish accent, a loyal housekeeper. Chatty, emotional and a bit of a gossip: a warm, expressive, slightly shaky voice.", "id": "54EN6WFsqQUTL9ULPowR"},
       "name": {"en": "Rosa, the housekeeper", "es": "Rosa, el ama de llaves"},
       "about": {"en": "Has worked in the house for twenty years and sees everything", "es": "Trabaja en la casa desde hace veinte años y lo ve todo"},
       "personality": {

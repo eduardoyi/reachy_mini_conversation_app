@@ -26,6 +26,14 @@ class CaseError(ValueError):
 
 
 @dataclass(frozen=True)
+class Voice:
+    """How a character sounds: a description for ElevenLabs' voice design, and the designed voice once made."""
+
+    description: str
+    id: str | None = None  # the account's voice id; None until scripts/detectives_voices.py designs it
+
+
+@dataclass(frozen=True)
 class Character:
     """Someone the detectives can question: a suspect (who may be accused) or a witness."""
 
@@ -39,6 +47,7 @@ class Character:
     secret: Text | None
     lies: Text | None
     fallback: Text  # said when the witness model fails
+    voice: Voice | None = None  # None: Richie says their lines in his own voice
 
 
 @dataclass(frozen=True)
@@ -96,6 +105,18 @@ def _optional_text(value: Any, where: str) -> Text | None:
     return None if value is None else _text(value, where)
 
 
+def _voice(value: Any, where: str) -> Voice | None:
+    if value is None:
+        return None
+    description = value.get("description") if isinstance(value, dict) else None
+    voice_id = value.get("id") if isinstance(value, dict) else None
+    if not isinstance(description, str) or not description.strip():
+        raise CaseError(f"{where}: a voice needs a description")
+    if voice_id is not None and (not isinstance(voice_id, str) or not voice_id.isalnum()):
+        raise CaseError(f"{where}: a voice id is letters and digits")
+    return Voice(description.strip(), voice_id)
+
+
 def _id(value: Any, where: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise CaseError(f"{where}: needs an id")
@@ -131,6 +152,7 @@ def parse_case(raw: Any) -> Case:
             secret=_optional_text(entry.get("secret"), f"{case_id}.{entry.get('id')}.secret"),
             lies=_optional_text(entry.get("lies"), f"{case_id}.{entry.get('id')}.lies"),
             fallback=_text(entry.get("fallback"), f"{case_id}.{entry.get('id')}.fallback"),
+            voice=_voice(entry.get("voice"), f"{case_id}.{entry.get('id')}.voice"),
         )
         for entry in _list(raw.get("characters"), f"{case_id}.characters")
     )

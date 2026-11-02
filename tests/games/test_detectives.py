@@ -8,6 +8,8 @@ import asyncio
 from typing import Any
 from pathlib import Path
 
+import httpx
+import numpy as np
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
@@ -15,9 +17,11 @@ from fastapi.testclient import TestClient
 from .fakes import FakeReachy
 from reachy_mini_conversation_app.games import detectives
 from reachy_mini_conversation_app.qr_code import qr_matrix
+from reachy_mini_conversation_app.games.base import GameContext
 from reachy_mini_conversation_app.games.host import GameHost, GameState
-from reachy_mini_conversation_app.games.catalog import parse_game_request
+from reachy_mini_conversation_app.games.catalog import DETECTIVES, parse_game_request
 from reachy_mini_conversation_app.games.detectives import PAGE, Detectives, DetectivesSetup, read_played
+from reachy_mini_conversation_app.games.big_brain_audio import Speech
 from reachy_mini_conversation_app.games.detectives_case import (
     CASES_DIR,
     LANGUAGES,
@@ -28,7 +32,13 @@ from reachy_mini_conversation_app.games.detectives_case import (
 )
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 from reachy_mini_conversation_app.games.detectives_screens import render_card, render_join, render_board
-from reachy_mini_conversation_app.games.detectives_witness import WitnessError, spoken, witness_instructions
+from reachy_mini_conversation_app.games.detectives_witness import (
+    WitnessError,
+    shown,
+    spoken,
+    split_first,
+    witness_instructions,
+)
 
 
 # The cases -------------------------------------------------------------------------------------------
@@ -112,6 +122,117 @@ def test_a_witness_sees_only_their_own_sheet_and_the_evidence_found() -> None:
 def test_a_long_answer_is_cut_to_three_spoken_sentences() -> None:
     """Markdown and quotes go; at most three sentences are said."""
     assert spoken('**I** was there. "Truly." Ask Rosa! She saw. Nobody else.') == "I was there. Truly. Ask Rosa!"
+
+
+def test_known_audio_tags_stay_for_the_voice_and_never_reach_the_screen() -> None:
+    """The voice acts the allowed tags; other bracketed text is dropped; the screen and phones get none."""
+    answer = spoken("[nervous] I was in the kitchen. [stage left] Ask Rosa. [laughs] Truly!")
+    assert answer == "[nervous] I was in the kitchen. Ask Rosa. [laughs] Truly!"
+    assert shown(answer) == "I was in the kitchen. Ask Rosa. Truly!"
+    assert "[nervous]" in witness_instructions(parse_case(_raw()), parse_case(_raw()).characters[0], [], "en")
+
+
+def test_the_rest_of_an_answer_keeps_the_mood_of_its_first_sentence() -> None:
+    """The first sentence is voiced on its own; the rest starts with its last tag unless it has its own."""
+    assert split_first("[nervous] I was there. Truly, ask Rosa.") == ("[nervous] I was there.", "[nervous] Truly, ask Rosa.")  # fmt: skip
+    assert split_first("[sad] I was there. [laughs] Truly.") == ("[sad] I was there.", "[laughs] Truly.")
+    assert split_first("Just one sentence.") == ("Just one sentence.", "")
+
+
+# Voices ----------------------------------------------------------------------------------------------
+
+
+def test_every_character_but_richie_has_a_designed_voice() -> None:
+    """Suspects and witnesses speak in their own ElevenLabs voice; Richie plays himself in his own."""
+    for case in load_cases():
+        for character in case.characters:
+            if character.id == "richie":
+                assert character.voice is None
+            else:
+                assert character.voice is not None and character.voice.id, (case.id, character.id)
+
+
+@pytest.mark.parametrize(
+    ("voice", "problem"),
+    [({"id": "abc123"}, "description"), ({"description": "A calm man.", "id": "../voices"}, "letters and digits")],
+)
+def test_a_broken_voice_says_what_is_wrong(voice: dict[str, str], problem: str) -> None:
+    """A voice needs a description, and its id is a plain ElevenLabs id."""
+    raw = _raw()
+    raw["characters"][0]["voice"] = voice
+    with pytest.raises(CaseError, match=problem):
+        parse_case(raw)
+
+
+@pytest.mark.asyncio
+async def test_speech_uses_the_voice_it_is_given_and_can_keep_nothing(tmp_path: Path) -> None:
+    """A character's voice id goes in the request; with keep=False no clip is written to disk."""
+    urls: list[str] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, content=b"\x01\x00" * 240)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(reply))
+    speech = Speech(tmp_path, "key", client, voice="Valeria123", keep=False)
+    samples = await speech.say("[annoyed] I was on the terrace.", "en")
+    assert samples is not None and len(samples) == 240
+    assert "/text-to-speech/Valeria123" in urls[0] and not list(tmp_path.iterdir())
+    await client.aclose()
+
+
+class _FakeSpeech:
+    """Stands in for ElevenLabs: one sample per character, or None for text containing ``fail``."""
+
+    made: list[tuple[str, str]] = []
+
+    def __init__(self, folder: Path, api_key: str | None, *, voice: str, keep: bool) -> None:
+        self.voice = voice
+
+    async def say(self, text: str, language: str) -> Any:
+        _FakeSpeech.made.append((self.voice, text))
+        return None if "fail" in text else np.zeros(len(text), dtype=np.int16)
+
+
+def _voiced_game(tmp_path: Path, reachy: FakeReachy, *, key: str | None) -> tuple[Detectives, Any]:
+    game = Detectives(DetectivesSetup(data_dir=tmp_path, port=0, witness=None, elevenlabs_key=key))
+    context = GameContext(info=DETECTIVES, language="en", services=reachy.services)
+    context.running.set()
+    game._context = context
+    return game, parse_case(_raw())
+
+
+@pytest.mark.asyncio
+async def test_a_character_speaks_in_their_voice_first_sentence_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both parts are made in Valeria's voice with their tags; each plays with the tags left out of its text."""
+    monkeypatch.setattr(detectives, "Speech", _FakeSpeech)
+    _FakeSpeech.made = []
+    reachy = FakeReachy(recorded=True)
+    game, case = _voiced_game(tmp_path, reachy, key="key")
+    valeria = case.character("valeria")
+    await game._say_as(valeria, "[annoyed] I was on the terrace. With a friend.")
+    assert valeria.voice is not None
+    assert _FakeSpeech.made == [(valeria.voice.id, "[annoyed] I was on the terrace."), (valeria.voice.id, "[annoyed] With a friend.")]  # fmt: skip
+    assert [text for text, _ in reachy.clips] == ["I was on the terrace.", "With a friend."] and not reachy.said
+
+
+@pytest.mark.asyncio
+async def test_richie_says_the_line_when_there_is_no_voice_or_it_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No key: Richie says it all; a failed second part: the first plays in the voice and Richie says the rest."""
+    monkeypatch.setattr(detectives, "Speech", _FakeSpeech)
+    reachy = FakeReachy(recorded=True)
+    game, case = _voiced_game(tmp_path, reachy, key=None)
+    await game._say_as(case.character("valeria"), "[sad] I loved him. Truly.")
+    assert reachy.said == ["I loved him. Truly."] and not reachy.clips
+
+    reachy = FakeReachy(recorded=True)
+    game, case = _voiced_game(tmp_path, reachy, key="key")
+    await game._say_as(case.character("rosa"), "[sad] I saw it all. Then it failed.")
+    assert [text for text, _ in reachy.clips] == ["I saw it all."] and reachy.said == ["Then it failed."]
 
 
 # Phones and screens ----------------------------------------------------------------------------------

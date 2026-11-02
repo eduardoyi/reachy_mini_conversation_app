@@ -2,7 +2,8 @@
 
 The model sees the public intro, one character's sheet (personality, alibi, what they know, their secret and what
 they lie about), the evidence found so far and who else was there, never the solution or anyone else's secrets,
-so it cannot give the culprit away by accident. Answers are two or three spoken sentences in the game's language.
+so it cannot give the culprit away by accident. Answers are two or three spoken sentences in the game's language,
+with a few ElevenLabs audio tags for the character's own voice; the screen and phones show them without.
 """
 
 import re
@@ -25,6 +26,33 @@ Witness = Callable[[str, str], Awaitable[str]]
 MAX_SENTENCES: Final[int] = 3
 _LANGUAGE_NAMES: Final[dict[str, str]] = {"es": "Venezuelan Spanish", "en": "English"}
 _SENTENCE_END: Final[re.Pattern[str]] = re.compile(r"(?<=[.!?…])\s+")
+# ElevenLabs audio tags a character may use (docs/plans/party-games.md, "Audio tags"); others are dropped, since a
+# tag the voice does not know can be read aloud.
+TAGS: Final[frozenset[str]] = frozenset(
+    {
+        "nervous",
+        "annoyed",
+        "defensive",
+        "proud",
+        "worried",
+        "sad",
+        "excited",
+        "curious",
+        "warmly",
+        "dramatic",
+        "sarcastic",
+        "whispers",
+        "hushed",
+        "pause",
+        "slowly",
+        "laughs",
+        "chuckles",
+        "sighs",
+        "gasps",
+        "clears throat",
+    }
+)
+_TAG: Final[re.Pattern[str]] = re.compile(r"\[([^\]]*)\]\s*")
 
 
 class WitnessError(Exception):
@@ -38,6 +66,9 @@ def witness_instructions(case: Case, character: Character, found: list[Clue], la
         "Richie says your answers aloud to the players, who are the detectives.",
         f"Answer the detective's question in character, in {_LANGUAGE_NAMES[language]}, in two or three short "
         "spoken sentences, first person, plain words: no stage directions, no lists, no emojis, no quotation marks.",
+        "Your voice reads audio tags: put one in square brackets before the words it shapes, and another only "
+        "where your mood changes, at most two in all, chosen from: " + ", ".join(sorted(TAGS)) + ". "
+        "For example: [nervous] I was in the kitchen the whole time. [laughs] Ask anyone!",
         "",
         f"What everyone knows: {case.intro[language]}",
         f"Who you are: {character.about[language]}. Your personality: {character.personality[language]}",
@@ -70,9 +101,33 @@ def witness_instructions(case: Case, character: Character, found: list[Clue], la
 
 
 def spoken(answer: str) -> str:
-    """Return the model's answer as Richie should say it: one paragraph of at most three sentences."""
-    plain = " ".join(answer.replace("*", "").replace('"', "").split())
+    """Return the model's answer as the character's voice says it: one paragraph of at most three sentences.
+
+    Audio tags from ``TAGS`` stay (the voice acts them); any other bracketed text is dropped.
+    """
+    tagged = _TAG.sub(lambda match: match.group(0) if match.group(1).strip().lower() in TAGS else "", answer)
+    plain = " ".join(tagged.replace("*", "").replace('"', "").split())
     return " ".join(_SENTENCE_END.split(plain)[:MAX_SENTENCES])
+
+
+def split_first(answer: str) -> tuple[str, str]:
+    """Split ``answer`` after its first sentence, so its voice can start while the rest is made.
+
+    The rest starts with the last tag of the first sentence when it has none of its own, so the mood carries on.
+    """
+    parts = _SENTENCE_END.split(answer, maxsplit=1)
+    if len(parts) == 1:
+        return answer, ""
+    first, rest = parts
+    tags = _TAG.findall(first)
+    if tags and not rest.startswith("["):
+        rest = f"[{tags[-1]}] {rest}"
+    return first, rest
+
+
+def shown(answer: str) -> str:
+    """Return ``answer`` without its audio tags: for the screen, the phones and Richie's own voice."""
+    return " ".join(_TAG.sub("", answer).split())
 
 
 def gemini_witness(client: genai.Client, model: str) -> Witness:

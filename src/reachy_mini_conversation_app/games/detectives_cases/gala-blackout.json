@@ -11,6 +11,7 @@
     {
       "id": "marco",
       "kind": "suspect",
+      "voice": {"description": "A man in his forties with a Latin American Spanish accent, a stage magician. Theatrical, charming and grand: a rich, showy voice with dramatic pauses.", "id": "hjcB1XpogPinAIk1gMPk"},
       "name": {"en": "Marco Bellini", "es": "Marco Bellini"},
       "about": {"en": "The magician hired to entertain the guests", "es": "El mago contratado para entretener a los invitados"},
       "personality": {
@@ -41,6 +42,7 @@
     {
       "id": "lucia",
       "kind": "suspect",
+      "voice": {"description": "A young woman in her late twenties with a Latin American Spanish accent, an efficient personal assistant. Polite, bright and eager to help: a clear, quick, friendly voice.", "id": "0QLnKAGnepQitThaQFxG"},
       "name": {"en": "Lucía Herrera", "es": "Lucía Herrera"},
       "about": {"en": "Beatriz's assistant, in a black dress and a red scarf", "es": "La asistente de Beatriz, con vestido negro y pañuelo rojo"},
       "personality": {
@@ -73,6 +75,7 @@
     {
       "id": "ricardo",
       "kind": "suspect",
+      "voice": {"description": "A young man in his twenties with a Venezuelan Spanish accent, a spoiled rich heir. Whiny, defensive and dramatic: a slightly nasal, petulant voice.", "id": "dW6rKJ2iTVB1rqMnnpWN"},
       "name": {"en": "Ricardo Lamas", "es": "Ricardo Lamas"},
       "about": {"en": "Beatriz's nephew and heir, always short of money", "es": "El sobrino y heredero de Beatriz, siempre corto de dinero"},
       "personality": {
@@ -103,6 +106,7 @@
     {
       "id": "elena",
       "kind": "suspect",
+      "voice": {"description": "A woman in her fifties with a Latin American Spanish accent, an insurance agent. Precise, dry and worried: a clipped, matter-of-fact voice.", "id": "N5wxdtdu31dAaPAMUXMN"},
       "name": {"en": "Elena Vidal", "es": "Elena Vidal"},
       "about": {"en": "The insurance agent who insured the necklace", "es": "La agente de seguros que aseguró el collar"},
       "personality": {
@@ -133,6 +137,7 @@
     {
       "id": "coronel",
       "kind": "suspect",
+      "voice": {"description": "A man in his seventies with a Spanish accent, a retired army colonel. Stiff, proud and old-fashioned: a deep, gravelly, commanding voice.", "id": "8quNZCiH0PqI57dZgqGY"},
       "name": {"en": "Colonel Ferrán Ortiz", "es": "Coronel Ferrán Ortiz"},
       "about": {"en": "A retired colonel who collects precious stones", "es": "Un coronel retirado que colecciona piedras preciosas"},
       "personality": {
@@ -163,6 +168,7 @@
     {
       "id": "samuel",
       "kind": "witness",
+      "voice": {"description": "A man in his thirties with a Venezuelan Spanish accent, a bartender. Relaxed, observant and funny: an easygoing, smooth, smiling voice.", "id": "ELKUz2Dml0Jmy3lgo9pY"},
       "name": {"en": "Samuel, the bartender", "es": "Samuel, el barman"},
       "about": {"en": "Served drinks all night from the bar, facing the whole room", "es": "Sirvió tragos toda la noche desde la barra, de frente a todo el salón"},
       "personality": {

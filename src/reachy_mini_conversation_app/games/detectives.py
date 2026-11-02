@@ -21,7 +21,7 @@ from dataclasses import field, dataclass
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.games.catalog import DETECTIVES, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
-from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Sounds
+from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Sounds, Speech
 from reachy_mini_conversation_app.games.detectives_case import (
     CASES_DIR,
     Case,
@@ -41,7 +41,9 @@ from reachy_mini_conversation_app.games.detectives_screens import (
 from reachy_mini_conversation_app.games.detectives_witness import (
     Witness,
     WitnessError,
+    shown,
     spoken,
+    split_first,
     witness_instructions,
 )
 
@@ -124,6 +126,8 @@ class DetectivesSetup:
     witness: Witness | None
     public_url: str | None = None
     cases_dir: Path = CASES_DIR
+    # Characters with a designed voice speak in it through ElevenLabs; without a key Richie says their lines.
+    elevenlabs_key: str | None = None
 
     @property
     def history(self) -> Path:
@@ -179,6 +183,7 @@ class Detectives(Game):
         self._setup = setup
         self._rng = rng or random.Random()
         self._sounds = Sounds(setup.data_dir / "big-brain" / "sounds")
+        self._voices: dict[str, Speech] = {}  # by ElevenLabs voice id
         self._context: GameContext | None = None
         self._phones: Phones | None = None
         self._case: Case | None = None
@@ -576,10 +581,42 @@ class Detectives(Game):
         self._show(render_card(character.name[language], f"«{question}»", footer=player.name))
         self._changed()
         answer = await self._witness(character, question)
-        self._notes.append(Testimony(player.name, character, question, answer))
-        self._show(render_card(character.name[language], answer, footer=f"{player.name}: «{question}»"))
+        self._notes.append(Testimony(player.name, character, question, shown(answer)))
+        self._show(render_card(character.name[language], shown(answer), footer=f"{player.name}: «{question}»"))
         self._changed()
-        await self._say(answer)
+        await self._say_as(character, answer)
+
+    async def _say_as(self, character: Character, text: str) -> None:
+        """Say ``text`` in the character's own voice when it has one, else in Richie's (tags dropped).
+
+        The first sentence and the rest are made at once and the first plays as soon as it is ready: a whole
+        answer took 2 to 5 s to make (2026-11-02), its first sentence about a second.
+        """
+        context = self._context
+        assert context is not None
+        say_audio = context.services.say_audio
+        voice = character.voice.id if character.voice is not None else None
+        if not voice or not self._setup.elevenlabs_key or say_audio is None:
+            await self._say(shown(text))
+            return
+        speech = self._voices.get(voice)
+        if speech is None:
+            # Answers are new every time, so nothing is kept on disk.
+            folder = self._setup.data_dir / "detectives" / "speech"
+            speech = self._voices[voice] = Speech(folder, self._setup.elevenlabs_key, voice=voice, keep=False)
+        language = context.language
+        parts = [part for part in split_first(text) if part]
+        made = [asyncio.create_task(speech.say(part, language)) for part in parts]
+        for index, (part, task) in enumerate(zip(parts, made)):
+            samples = await task
+            if samples is None:
+                logger.warning("Detectives: %s's voice failed; Richie says the line", character.id)
+                for later in made[index + 1 :]:
+                    later.cancel()
+                await self._say(shown(" ".join(parts[index:])))
+                return
+            await context.playing()
+            await say_audio(RATE, samples, shown(part), language, None)
 
     async def _witness(self, character: Character, question: str) -> str:
         """Return ``character``'s answer to ``question``: the model's, or their scripted line when it fails."""

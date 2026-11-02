@@ -147,18 +147,28 @@ class Sounds:
 
 
 class Speech:
-    """Live speech in the host voice (Eleven v4 Turbo), kept on disk by text."""
+    """Live speech in one voice (Eleven v4 Turbo, the host's unless told), kept on disk by text unless told not to."""
 
-    def __init__(self, folder: Path, api_key: str | None, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        folder: Path,
+        api_key: str | None,
+        client: httpx.AsyncClient | None = None,
+        *,
+        voice: str = VOICE_ID,
+        keep: bool = True,
+    ) -> None:
         """Speak through ElevenLabs with ``api_key``; without one, nothing is said live."""
         self._folder = folder
         self._api_key = api_key
         self._client = client
+        self._voice = voice
+        self._keep = keep
         self._gate = asyncio.Semaphore(SPEECH_AT_ONCE)
         self._pending: dict[Path, asyncio.Task[Audio | None]] = {}
 
     def _path(self, text: str, language: str) -> Path:
-        digest = hashlib.sha1(f"{VOICE_ID}|{MODEL}|{language}|{text}".encode()).hexdigest()[:20]
+        digest = hashlib.sha1(f"{self._voice}|{MODEL}|{language}|{text}".encode()).hexdigest()[:20]
         return self._folder / f"{digest}.wav"
 
     def ready(self, text: str, language: str) -> bool:
@@ -194,7 +204,7 @@ class Speech:
             async with self._gate:
                 for attempt in range(4):
                     response = await client.post(
-                        f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
+                        f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice}",
                         params={"output_format": f"pcm_{RATE}"},
                         headers={"xi-api-key": str(self._api_key)},
                         json={"text": text, "model_id": MODEL, "language_code": language},
@@ -205,7 +215,8 @@ class Speech:
                     await asyncio.sleep(2 * (attempt + 1))
                 response.raise_for_status()
             samples = np.frombuffer(response.content, dtype=np.int16).copy()
-            write_wav(path, samples)
+            if self._keep:
+                write_wav(path, samples)
             return samples
         except Exception as error:
             logger.warning("Big Brain speech not made: %s", type(error).__name__)

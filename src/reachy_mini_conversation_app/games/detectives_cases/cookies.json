@@ -11,6 +11,7 @@
     {
       "id": "misifu",
       "kind": "suspect",
+      "voice": {"description": "A cartoon cat for a children's game: lazy, proud and sleepy. A drawling, purring, slightly nasal voice that yawns and stretches its words; playful and silly.", "id": "Xg2awBCZFaLbcri3rvNP"},
       "name": {"en": "Misifú the cat", "es": "Misifú, el gato"},
       "about": {"en": "A fluffy, lazy cat who loves milk", "es": "Un gato peludo y flojo al que le encanta la leche"},
       "personality": {
@@ -41,6 +42,7 @@
     {
       "id": "abuela",
       "kind": "suspect",
+      "voice": {"description": "A sweet grandmother in her seventies with a Venezuelan Spanish accent. Warm, funny and a bit cheeky, giggles easily: a soft, affectionate, slightly high voice.", "id": "FTUoMlBeU7pi34pUd8vh"},
       "name": {"en": "Grandma", "es": "La abuela"},
       "about": {"en": "The best baker in the family", "es": "La mejor cocinera de la familia"},
       "personality": {
@@ -101,6 +103,7 @@
     {
       "id": "pancho",
       "kind": "suspect",
+      "voice": {"description": "A big, jolly uncle in his fifties with a Venezuelan Spanish accent. Loud, booming and cheerful, talks too fast when nervous: a deep, hearty voice.", "id": "RmaSlHASRRFcAl1uxzhA"},
       "name": {"en": "Uncle Pancho", "es": "El tío Pancho"},
       "about": {"en": "A big, jolly uncle with a big mustache, on a diet", "es": "Un tío grandote y alegre con un bigotote, que está a dieta"},
       "personality": {
@@ -131,6 +134,7 @@
     {
       "id": "pepe",
       "kind": "witness",
+      "voice": {"description": "A cartoon parrot for a children's game. A high-pitched, squawky, fast and silly voice that repeats words; bright and comic.", "id": "jm73dj1U3A9MZpX2WFpP"},
       "name": {"en": "Pepe the parrot", "es": "El loro Pepe"},
       "about": {"en": "A green parrot who repeats everything he hears", "es": "Un loro verde que repite todo lo que oye"},
       "personality": {

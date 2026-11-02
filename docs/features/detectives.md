@@ -1,7 +1,7 @@
 # Feature: Detectives (mystery party game)
 
 - Status: `in-progress` (first version built and tested on the laptop 2026-11-01; not deployed or played)
-- Last updated: 2026-11-01
+- Last updated: 2026-11-02
 - Plan: [party-games.md](../plans/party-games.md) ("Detectives")
 - Part of: [games.md](games.md) (the shared game host); phones as in [big-brain.md](big-brain.md)
 
@@ -10,7 +10,8 @@
 Detectives is a whodunit for the family or a game night. Richie tells a pre-written case, plays every suspect and
 witness, and reveals the truth at the end; players investigate in turns on their phones. Cases are fixed data
 written in English and Spanish, so the story cannot contradict itself: only the witnesses' answers are made at
-game time, by a text model that sees one character's sheet and nothing else. Adults play a dinner-party case;
+game time, by a text model that sees one character's sheet and nothing else, and each character says them in
+their own ElevenLabs voice. Adults play a dinner-party case;
 kids mode plays "¿Quién se comió las galletas?" (the cat, the grandmother, Uncle Pancho and Richie himself).
 
 Changed from the plan: the plan had a strong model write the case at the start of each game; this version uses
@@ -32,8 +33,9 @@ lights and noir music are not built.
    found, the round and whose turn it is. The player on turn has 60 s and a glowing phone with two choices:
    - **Question someone:** tap a suspect or witness. A question typed in the box is used as it is; with the box
      empty Richie says "Ana, what do you ask Valeria?" and listens to the next thing said (only then, so one voice
-     at a time). The question and the answer appear on the TRMNL and in every phone's notebook, and Richie says the
-     answer (two or three sentences, in character).
+     at a time). The question and the answer appear on the TRMNL and in every phone's notebook, and the character
+     answers in their own voice (two or three sentences, in character, acted with audio tags). Their first
+     sentence starts about 3–4 s after the question; Richie says it instead when their voice cannot be made.
    - **Examine a clue:** tap one of the clues open this round (each clue has the round it opens in). It goes up on
      the TRMNL and every phone, and Richie reads it.
    Doing nothing for 60 s passes the turn.
@@ -71,7 +73,9 @@ that breaks one; `tests/games/test_detectives.py` loads every case file, so a br
       "knows": [{...}, ...],       // facts they share when asked (at least one)
       "secret": {...} | null,      // what they hide; for the culprit, what they did and why
       "lies": {...} | null,        // what they lie about; the culprit never confesses
-      "fallback": {...}            // said when the model fails: an in-character dodge with no new facts
+      "fallback": {...},           // said when the model fails: an in-character dodge with no new facts
+      "voice": {"description": "...", "id": "..."}  // optional: how they sound (English, for ElevenLabs' voice
+                                   // design) and the designed voice's id; no voice: Richie says their lines
     }
   ],
   "culprit": "julian",             // a suspect with a secret and a lie
@@ -104,13 +108,15 @@ parrot). A game picks a case never played in that mode, else the one played long
 |-------|------|--------------|
 | Game | `games/detectives.py` | `Detectives(Game)`: lobby, roles, rounds and turns, the vote, the accusation, the reveal; `snapshot(player)` is each phone's view, `on_message` takes phones' messages; `LINES` holds Richie's fixed lines in both languages |
 | Cases | `games/detectives_case.py`, `games/detectives_cases/*.json` | `parse_case`, `load_cases`, `pick_case`, `CaseError`; the dataclasses `Case`, `Character`, `Clue`, `Motive` |
-| Witnesses | `games/detectives_witness.py` | `witness_instructions(case, character, found, language)`, `spoken()` (at most three sentences, no markdown), `gemini_witness(client, model)` |
+| Witnesses | `games/detectives_witness.py` | `witness_instructions(case, character, found, language)`, `spoken()` (at most three sentences, no markdown, only the audio tags in `TAGS`), `shown()` (no tags, for the screens, phones and Richie's voice), `split_first()`, `gemini_witness(client, model)` |
+| Voices | `games/big_brain_audio.Speech(voice=, keep=False)`, `Detectives._say_as`, `scripts/detectives_voices.py` | each character's answer in their ElevenLabs voice (Eleven v4 Turbo): the first sentence and the rest are made at once and the first plays when ready; the script designs voices for characters with a description and no id |
 | Phones | `games/big_brain_phones.py` (shared, `page=`), `static/detectives/index.html` | the same server and code rules as Big Brain, serving Detectives' page |
 | Screens | `games/detectives_screens.py` | `render_join`, `render_board`, `render_card`, `render_solution` (800×480, four greys): a magnifying glass and crime-scene tape under every header, suspects as silhouettes (witnesses grey and tagged), evidence on numbered markers, players as name chips on the join screen, the culprit beside a mugshot |
 | Sounds | `games/big_brain_audio.Sounds` | Big Brain's `correct`, `drumroll`, `fanfare`, `wrong` from `GAME_DATA_DIR/big-brain/sounds/` when made; skipped otherwise |
 | Wiring | `catalog.py` `DETECTIVES`, `main._build_games`, `config.DETECTIVES_MODEL` | |
 
-Richie speaks in his normal voice (`GameContext.say`); questions are heard through `GameServices.ask`.
+Richie narrates in his normal voice (`GameContext.say`); characters speak through `GameServices.say_audio`;
+questions are heard through `GameServices.ask`.
 
 ## Contracts and configuration
 
@@ -118,6 +124,11 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
   also needs the game host (`HYBRID_RUNTIME_ENABLED`, `QUICK_COMMANDS_ENABLED`, `TYPESAFE_API_KEY`).
 - `DETECTIVES_MODEL` (default `gemini-3.8-flash`): the Gemini text model for witness answers, 15 s at most, else
   the character's `fallback` line.
+- `ELEVENLABS_API_KEY`: the characters' voices. Without it, or for a character with no voice id, Richie says
+  their lines. Voices (2026-11-02): 15 designed with `eleven_ttv_v3` and saved to the account as
+  "Detectives · <case> · <name>" (15 of the Creator plan's 30 voice slots); previews kept on the mini in
+  `game-data/detectives/voice-previews/`. Cost: Eleven v4 Turbo at half a credit a character, about 125
+  credits an answer, so a game of about ten questions uses roughly 1,500 credits.
 - Phones use `BIG_BRAIN_PORT` (7880) and `BIG_BRAIN_PUBLIC_URL`: only one game runs at a time, and the existing
   Tailscale Funnel path reaches whichever page the port serves.
 - Phone protocol (`/ws?code=ABCDEF`, JSON): phones send `join` {name, team: "red"} (the shared server needs a
@@ -130,8 +141,11 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
 
 ## Extension guide
 
-- **A new case:** add a JSON file following the schema above (both languages), run
-  `uv run pytest tests/games/test_detectives.py`, then play it once to hear the witnesses. No code change.
+- **A new case:** add a JSON file following the schema above (both languages) with a `voice` description for
+  each character, run `uv run python scripts/detectives_voices.py --out <folder>` on the mini (it designs the
+  missing voices and writes their ids into the file), run `uv run pytest tests/games/test_detectives.py`,
+  then play it once to hear the witnesses. No code change. To use another take, delete the voice in
+  ElevenLabs, remove its `id` and run the script again.
 - New fixed lines: `LINES` in `games/detectives.py`, both languages.
 - Do not give the model more than the speaking character's sheet: the solution and the other characters' secrets
   stay out of every prompt (a test checks it).
@@ -139,9 +153,15 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
 ## Constraints, privacy, and failure modes
 
 - Questions are heard only right after Richie names the player; typed questions and names stay on the Mac mini
-  for the game. The question text goes to Gemini with the character's sheet; nothing is stored.
+  for the game. The question text goes to Gemini with the character's sheet, and the answer to ElevenLabs to be
+  voiced; nothing is stored.
 - Gemini's cost is not yet in the admin app's usage ledger (a few hundred tokens a question).
 - If the model fails or is slow, the character's scripted `fallback` line is said instead (logged as a warning).
+  In a test on 2026-11-02 one of 30 answers came back empty.
+- If a character's voice fails, Richie says the rest of the answer ("Detectives: <id>'s voice failed").
+- Latency measured 2026-11-02 from the mini (30 answers, all characters, both languages): the answer took
+  1.8–6.7 s to write (usually 2–3 s), and its first sentence started 2.8–7.8 s after the question (usually
+  3–4.5 s); a whole answer voiced at once took 2–5 s more, which is why the first sentence goes ahead.
 - The model can still improvise beyond the sheet; the prompt forbids new facts, but this is not yet checked on a
   real model.
 - The phones' page shares Big Brain's caveats: plain http on the home Wi-Fi unless the Funnel address is set, and
@@ -149,10 +169,14 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
 
 ## Testing
 
-- `uv run pytest tests/games/test_detectives.py` (20): every case file follows the schema in both languages and
+- `uv run pytest tests/games/test_detectives.py` (29): every case file follows the schema in both languages and
   names its culprit in the reveal; two adult cases with 4–5 suspects and the kids' case with its silly suspects;
   broken cases name what is wrong; kids mode and the played history pick the case; a witness prompt holds only
-  its own sheet and the clues found; answers cut to three sentences; the phones get Detectives' page; the screens
+  its own sheet and the clues found; answers cut to three sentences; allowed audio tags kept for the voice and
+  stripped from the screen; the rest of an answer keeps its mood; every character but Richie has a designed
+  voice; broken voices; the speech helper uses the given voice and keeps nothing; a character speaking first
+  sentence first in their voice; Richie stepping in without a key or when a voice fails; the phones get
+  Detectives' page; the screens
   render; the start phrases; and a whole game with three pretend phones and a fake witness model (a typed and a
   spoken question, a model failure answered by the scripted line, a clue, a pass, the vote to accuse in round 2,
   the secret accusation, the step-by-step reveal and who solved it).
@@ -165,5 +189,8 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
 
 ## Changelog
 
+- 2026-11-02: Each character speaks in their own ElevenLabs voice, with audio tags, first sentence first;
+  Richie keeps narrating. Open-source voices were tried first on the mini (Qwen3-TTS, VoxCPM2, Chatterbox,
+  Kokoro): the good ones took 1.5–3.5 times as long as the audio to make, and Kokoro sounded poor.
 - 2026-11-02: Redesigned TRMNL screens in the case-file look described above (see also
   [games.md](games.md#what-the-screens-look-like)).

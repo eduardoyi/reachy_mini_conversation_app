@@ -331,6 +331,7 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             port=config.BIG_BRAIN_PORT,
             witness=gemini_witness(genai.Client(api_key=gemini_key), config.DETECTIVES_MODEL),
             public_url=config.BIG_BRAIN_PUBLIC_URL,
+            elevenlabs_key=config.ELEVENLABS_API_KEY,
         )
         games["detectives"] = lambda: Detectives(detectives)
     host = GameHost(services, games)
