@@ -34,12 +34,15 @@ env_file_value() {
 # Whisper loads if Qwen cannot). Read from .env when not set here.
 LOCAL_STT_ENGINE="${LOCAL_STT_ENGINE:-$(env_file_value LOCAL_STT_ENGINE)}"
 LOCAL_STT_ENGINE="${LOCAL_STT_ENGINE:-whisper}"
-# The camera's factory image is dark (brightness 0) and flat. A small brightness lift plus
-# higher gamma brightens mid-tones without washing out shadows; contrast and sharpness get a
-# nudge. Ranges: brightness -64..64, gamma 80..160, contrast 0..95, sharpness 0..7. Set one
-# empty to leave it alone, or REACHY_CAMERA_TUNING=0 to leave the camera unchanged.
+# The camera's factory image is dark and flat: it keeps 60 fps, so it never exposes longer than
+# 1/60 s, and turns up the gain instead (lamp-lit room 2026-11-02: median 66 of 255). Exposure
+# priority 1 lets it drop frames to expose longer (same room: median 144), so no brightness lift
+# is needed: +12 only greyed the blacks. Higher gamma brightens mid-tones; sharpness gets a nudge.
+# Ranges: exposure priority 0..1, brightness -64..64, gamma 80..160, contrast 0..95, sharpness
+# 0..7. Set one empty to leave it alone, or REACHY_CAMERA_TUNING=0 to leave the camera unchanged.
 REACHY_CAMERA_TUNING="${REACHY_CAMERA_TUNING:-1}"
-REACHY_CAMERA_BRIGHTNESS="${REACHY_CAMERA_BRIGHTNESS-12}"
+REACHY_CAMERA_EXPOSURE_PRIORITY="${REACHY_CAMERA_EXPOSURE_PRIORITY-1}"
+REACHY_CAMERA_BRIGHTNESS="${REACHY_CAMERA_BRIGHTNESS-0}"
 REACHY_CAMERA_GAMMA="${REACHY_CAMERA_GAMMA-130}"
 REACHY_CAMERA_CONTRAST="${REACHY_CAMERA_CONTRAST-1}"
 REACHY_CAMERA_SHARPNESS="${REACHY_CAMERA_SHARPNESS-3}"
@@ -59,19 +62,22 @@ tune_camera() {
       return 0
     fi
   fi
-  # Reachy Mini camera 38fb:1002, processing unit 2; UVC selectors per control.
-  local name selector value applied=()
-  for name in brightness:2 contrast:3 sharpness:8 gamma:9; do
-    selector="${name#*:}"
-    name="${name%%:*}"
+  # Reachy Mini camera 38fb:1002: name:unit:selector[:bytes], camera terminal 1 and processing unit 2.
+  local control name unit selector value applied=()
+  for control in exposure_priority:1:3:1 brightness:2:2 contrast:2:3 sharpness:2:8 gamma:2:9; do
+    name="${control%%:*}"
+    unit="${control#*:}"
+    selector="${unit#*:}"
+    unit="${unit%%:*}"
     case "$name" in
+      exposure_priority) value="$REACHY_CAMERA_EXPOSURE_PRIORITY" ;;
       brightness) value="$REACHY_CAMERA_BRIGHTNESS" ;;
       contrast) value="$REACHY_CAMERA_CONTRAST" ;;
       sharpness) value="$REACHY_CAMERA_SHARPNESS" ;;
       gamma) value="$REACHY_CAMERA_GAMMA" ;;
     esac
     [[ -n "$value" ]] || continue
-    if ! "$bin" 0x38fb 0x1002 2 "$selector" set "$value"; then
+    if ! "$bin" 0x38fb 0x1002 "$unit" "$selector" set "$value"; then
       echo "Could not set camera $name; is the robot connected?" >&2
       return 0
     fi
