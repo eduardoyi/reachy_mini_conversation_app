@@ -3,7 +3,7 @@
 - Status: `in-progress` (host, color hunt, `play_game` and the admin Games panel built and tested 2026-10-31; not deployed; lights flash and writing practice on the host not built)
 - Owner: Eduardo
 - Created: 2026-10-30
-- Last updated: 2026-10-31
+- Last updated: 2026-11-02
 - Feature doc: [Games](../features/games.md)
 
 ## Goal
@@ -58,7 +58,7 @@ color, a tune speeds up for 30 seconds, and the child shows him something of tha
 | Found | The tune stops: "¡Sí! ¡Rojo!", a happy emotion, a star on the screen |
 | Wrong color | "Mmm, eso es azul. ¡Busca algo rojo!" at most once every 5 s, the timer keeps running |
 | Time up | "¡Se acabó el tiempo! Era el rojo." and the next round; nobody loses |
-| Game length | 5 rounds, then "¡Cinco estrellas! ¿Otra vez?"; yes plays 5 more, otherwise the game ends |
+| Game length | 5 rounds, then "¡Cinco estrellas! ¿Otra vez?"; yes plays 5 more, another kids' game named starts it (2026-11-02), otherwise the game ends |
 | Lights | Only the lights named in `GAME_LIGHTS` (e.g. the TV LED strip); without it the game plays without lights. The room lights would tint the camera, hence the restore before looking |
 | Cost | Jev on a changed frame only; a round of 30 s is at most ~40 checks, well under a cent. No image model, no Gemini |
 | Later variants (same engine) | shapes ("algo redondo"), first letter ("algo que empieza con P"), categories ("algo blando"), counts ("tres cosas"), an adult speed round |
@@ -159,3 +159,4 @@ the gate, the spike's recorded frames as a fixture, and a live game on the Mac m
 | 2026-10-31 | Deployed to the Mac mini (`a11c309`): restarted 18:58, "Games enabled: colors, treasure"; the 18 treasure drawings made there (all 18 kept in `game-pictures/`). Not yet played. |
 | 2026-10-31 | Simón dice built with the household's pose list (47 still poses for Jev, no sounds or movement, "da un paso hacia atrás" for whole-body poses, only the bunny from the animals, no "ponte de lado"); built before any camera test, at the household's choice, so its 0.6 threshold is untested. All games' Spanish made Venezuelan (bueno/listo, media, carrito, gorra, creyón, rosado; "ya va" pauses; writing practice: la ve, la doble ve, "Escribiste papá"). Not deployed. |
 | 2026-10-31 | Deployed to the Mac mini (`97a42f0`): restarted 20:34, "Games enabled: colors, treasure, simon", no acoustic wake warning (fixed by the wake-word session). 65 game drawings kept there (18 treasure, the gorra redrawn, 47 poses), all reviewed on a contact sheet. Simón dice not yet played. |
+| 2026-11-02 | After the household played the kids' games: "¿Otra vez?" ended the game even when the children said yes. The answer had to be exactly "sí"; they said a yes and more (one color hunt), and one treasure hunt's answer came back empty from the speech model. Now a yes anywhere plays again, another kids' game named starts it at once ("no, ¡el tesoro!"), "otro juego" asks which, and an unclear answer is asked once more. Not yet played on the robot. |

@@ -11,6 +11,7 @@ from .fakes import FakeReachy, frame
 from reachy_mini_conversation_app.games import hunt, simon_says
 from reachy_mini_conversation_app.games.host import GameHost
 from reachy_mini_conversation_app.games.catalog import parse_game_request
+from reachy_mini_conversation_app.games.color_hunt import ColorHunt
 from reachy_mini_conversation_app.games.simon_says import POSES, SimonSays, pose_drawings, simon_says_phrases
 
 
@@ -59,6 +60,22 @@ async def test_a_pose_done_wins_a_star(game, monkeypatch: pytest.MonkeyPatch) ->
     assert reachy.said[2] in ("¡Muy bien!", "¡Eso!", "¡Chévere!", "¡Perfecto!")
     assert "touching their nose" in reachy.questions[-1]["pose"]["instructions"]
     assert reachy.emotions == ["happy"]
+
+
+@pytest.mark.asyncio
+async def test_simon_says_goes_on_to_the_color_hunt_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answering "¿Otra vez?" with "the color game" starts the color hunt in English, without a goodbye."""
+    monkeypatch.setattr(simon_says, "POSES_PER_GAME", 1)
+    monkeypatch.setattr(SimonSays, "poses", lambda self: ["nose"])
+    reachy = FakeReachy(real_clock=True)
+    reachy.jev_answer = _pose(0.4)
+    host = GameHost(reachy.services, {"simon": SimonSays, "colors": ColorHunt})
+    host.start("simon", "en")
+    await _until(lambda: bool(reachy.asked))
+    await reachy.asked[-1][1]("No, the color game!")
+    await _until(lambda: host.status()["game"] == "colors")
+    assert "Thanks for playing!" not in reachy.said
+    host.end("test over", say=False)
 
 
 @pytest.mark.asyncio

@@ -3,10 +3,13 @@
 import pytest
 
 from reachy_mini_conversation_app.games.catalog import (
+    STOP,
     QUIT_WORDS,
     PAUSE_WORDS,
+    ANOTHER_GAME,
     words,
     find_game,
+    again_answer,
     parse_game_request,
 )
 
@@ -62,6 +65,34 @@ def test_a_bare_stop_is_not_quitting_but_naming_the_game_is() -> None:
     assert words("Para el juego") in PAUSE_WORDS
     assert words("¡Se acabó el juego!") in QUIT_WORDS
     assert words("Stop the game, please") in QUIT_WORDS
+
+
+@pytest.mark.parametrize(
+    ("text", "choice"),
+    [
+        ("¡Sí!", "colors"),
+        ("Sí, otra, otra, ¡el amarillo!", "colors"),  # the yes first, then whatever else they shout
+        ("yes yes yes", "colors"),
+        ("one more time", "colors"),
+        ("¡Otra!", "colors"),
+        ("sí, los colores", "colors"),
+        ("No, ¡el tesoro!", "treasure"),
+        ("no, we want to play treasure hunt", "treasure"),
+        ("¡Simón dice!", "simon"),
+        ("quiero jugar a buscar tesoros", "treasure"),
+        ("otro juego", ANOTHER_GAME),
+        ("something else", ANOTHER_GAME),
+        ("no", STOP),
+        ("No, gracias", STOP),
+        ("ya no, chao", STOP),
+        ("no, otra vez no", STOP),  # the no came first
+        ("mmm", None),
+        ("…", None),
+    ],
+)
+def test_the_answer_to_play_again_is_read_loosely(text: str, choice: str | None) -> None:
+    """A yes anywhere plays again, another kids' game named plays that one, a no stops; else unclear."""
+    assert again_answer(text, "colors") == choice
 
 
 def test_a_close_mishearing_still_finds_the_game() -> None:

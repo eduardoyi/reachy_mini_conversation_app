@@ -5,7 +5,8 @@ camera frame that changed (or one every RECHECK_STILL_S if nothing did) goes to 
 is someone holding an object up to the camera, and is it what was asked for. Two of the last three frames
 finding it win a star; something already in view when the round starts counts only after it has left the view.
 A sure "that is something else" is said at most every WRONG_EVERY_S. Five rounds, nobody loses, then
-"¿Otra vez?". The color hunt and the treasure hunt differ only in what they ask for and how Jev is asked.
+"¿Otra vez?" (``ask_again``, Simón dice's too): a yes plays again and another kids' game named starts it.
+The color hunt and the treasure hunt differ only in what they ask for and how Jev is asked.
 
 With recorded audio (games/kids_audio.py) Richie says varied recorded lines with sounds around them, a jingle
 opens the game, and a quiet music bed replaces the tune: it switches to a faster piece for the last HURRY_S, when
@@ -25,10 +26,10 @@ from PIL import Image, UnidentifiedImageError
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.jev import JevError, sized_jpeg
-from reachy_mini_conversation_app.games.base import Game, GameContext
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.eink_display import render_game_prompt
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE
-from reachy_mini_conversation_app.games.catalog import YES_WORDS, words
+from reachy_mini_conversation_app.games.catalog import STOP, GAMES, KIDS_GAMES, ANOTHER_GAME, again_answer
 from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 
 
@@ -45,7 +46,11 @@ CHANGED_FRAME: Final[float] = 4.0
 MIN_HELD: Final[float] = 0.5
 # "That is something else" is said at most this often.
 WRONG_EVERY_S: Final[float] = 5.0
-OTHER_ROUND_ANSWER_S: Final[float] = 20.0
+# The answer to "¿Otra vez?" may start up to AGAIN_LISTEN_S after it and is waited for OTHER_ROUND_ANSWER_S
+# at most; an answer that says neither yes, no nor a game is asked once more (AGAIN_ASKS in all).
+AGAIN_LISTEN_S: Final[float] = 12.0
+OTHER_ROUND_ANSWER_S: Final[float] = 30.0
+AGAIN_ASKS: Final[int] = 2
 # Held for the picture of what to find before the round starts with the word alone.
 PICTURE_WAIT_S: Final[float] = 3.0
 # With recorded audio: the faster music and "¡Rápido!" for the last HURRY_S of a round of at least HURRY_MIN_S,
@@ -71,6 +76,7 @@ STARS: Final[dict[str, tuple[str, ...]]] = {
 }  # fmt: skip
 _AGAIN: Final[dict[str, str]] = {"es": "¿Otra vez?", "en": "Play again?"}
 THANKS: Final[dict[str, str]] = {"es": "¡Gracias por jugar!", "en": "Thanks for playing!"}
+_WHICH: Final[dict[str, str]] = {"es": "¿A cuál? ¿{titles}?", "en": "Which one? {titles}?"}
 WELL_DONE: Final[dict[str, str]] = {"es": "¡Muy bien!", "en": "Well done!"}
 
 # The tune: a bouncy figure on a C major arpeggio, staccato, sped up from START_BPM to END_BPM over the round.
@@ -83,8 +89,17 @@ _TUNE_LEVEL: Final[float] = 0.18
 def hunt_phrases() -> frozenset[str]:
     """Return the lines every finding game shares, in both languages, for the speech cache."""
     return frozenset(
-        line for language in ("es", "en") for line in (_AGAIN[language], THANKS[language], *STARS[language])
+        line
+        for language in ("es", "en")
+        for line in (_AGAIN[language], THANKS[language], _which(language), *STARS[language])
     )
+
+
+def _which(language: str) -> str:
+    """Return "¿A cuál? ¿A los colores, a buscar tesoros o a Simón dice?"."""
+    titles = [GAMES[key].title[language] for key in KIDS_GAMES]
+    joined = ", ".join(titles[:-1]) + (" o " if language == "es" else " or ") + titles[-1]
+    return _WHICH[language].format(titles=joined[:1].upper() + joined[1:])
 
 
 def beep_note(frequency: float, seconds: float) -> NDArray[np.int16]:
@@ -108,23 +123,50 @@ def thumbnail(jpeg: bytes) -> tuple[Image.Image, NDArray[np.float32]] | None:
     return picture, small
 
 
-async def ask_again(context: GameContext) -> bool:
-    """Ask "¿Otra vez?" and wait for a yes (OTHER_ROUND_ANSWER_S at most)."""
-    answered: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+async def ask_again(context: GameContext, audio: KidsAudio | None) -> str | None:
+    """Ask "¿Otra vez?" (recorded with ``audio``) and return the kids' game to play next, or None to stop.
 
-    async def answer(text: str) -> None:
+    A yes anywhere in the answer ("¡Sí, otra, otra!") plays this game again; another kids' game named ("no, ¡el
+    tesoro!") plays that one; "otro juego" asks which; a no or silence stops. An answer that says none of these
+    (or that the speech model could not read) is asked once more.
+    """
+    playing = context.info.key
+    choice: str | None = None
+    for _ in range(AGAIN_ASKS):
+        if audio is None:
+            text = await _ask(context, _AGAIN[context.language])
+        else:
+            text = await audio.ask(context, "again", OTHER_ROUND_ANSWER_S, listen_s=AGAIN_LISTEN_S)
+        if not text:
+            break  # silence
+        choice = again_answer(text, playing) if text != UNCLEAR_ANSWER else None
+        if choice == ANOTHER_GAME:
+            which = await _ask(context, _which(context.language))
+            choice = again_answer(which, playing) if which else STOP
+            choice = choice if choice in KIDS_GAMES else STOP
+        if choice is not None:
+            break
+    logger.info("%s: play again answer=%s", playing, choice or "none")
+    if choice in KIDS_GAMES:
+        context.played()
+        return choice
+    return None
+
+
+async def _ask(context: GameContext, text: str) -> str | None:
+    """Say ``text`` in Richie's own voice and return the answer (None when none came)."""
+    answered: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+
+    async def answer(said: str) -> None:
         if not answered.done():
-            answered.set_result(words(text) in YES_WORDS)
+            answered.set_result(said)
 
     await context.playing()
-    context.services.ask(_AGAIN[context.language], context.language, answer)
+    context.services.ask(text, context.language, answer)
     try:
-        again = await asyncio.wait_for(answered, OTHER_ROUND_ANSWER_S)
+        return await asyncio.wait_for(answered, OTHER_ROUND_ANSWER_S)
     except asyncio.TimeoutError:
-        return False
-    if again:
-        context.played()
-    return again
+        return None
 
 
 @dataclass(frozen=True)
@@ -209,7 +251,7 @@ class Hunt(Game):
         await self._audio.say(context, *before, *self.moments(kind, target, seen), sounds=sounds, after=after)
 
     async def play(self, context: GameContext) -> None:
-        """Play rounds of five until nobody wants another."""
+        """Play rounds of five until nobody wants another (or another kids' game is asked for)."""
         language = context.language
         audio = self._audio
         self.prepare(context)
@@ -230,18 +272,18 @@ class Hunt(Game):
             context.show(render_game_prompt(WELL_DONE[language], self._stars, ROUNDS))
             if audio is None:
                 await context.say(STARS[language][self._stars])
-                again = await ask_again(context)
             else:
                 await audio.say(context, f"stars_{self._stars}", sounds=("celebrate",) if self._stars else ())
-                again = await audio.ask_yes(context, "again", OTHER_ROUND_ANSWER_S)
-                if again:
-                    context.played()
-            if not again:
+            following = await ask_again(context, audio)
+            if following == self.info.key:
+                continue
+            context.next_game = following
+            if following is None:
                 if audio is None:
                     await context.say(THANKS[language])
                 else:
                     await audio.say(context, "thanks")
-                return
+            return
 
     async def _play_round(self, context: GameContext, target: str) -> bool:
         """One round: name ``target``, play the tune and look until it is found or time is up."""

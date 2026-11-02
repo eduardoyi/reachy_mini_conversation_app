@@ -12,6 +12,7 @@ from .fakes import FakeReachy, seen, frame
 from reachy_mini_conversation_app.games import hunt
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.color_hunt import ColorHunt, color_hunt_phrases
+from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +70,70 @@ async def test_two_frames_of_the_color_find_it_and_win_a_star(game) -> None:
     await reachy.asked[-1][1]("no")
     await _until(lambda: host.state is GameState.IDLE)
     assert reachy.said[-1] == "¡Gracias por jugar!" and reachy.restored == 1
+
+
+@pytest.mark.asyncio
+async def test_a_yes_with_more_words_plays_again(game, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Children say more than "sí" (2026-11-02): a yes anywhere in the answer plays another set of rounds."""
+    monkeypatch.setattr(ColorHunt, "targets", lambda self: ["red", "blue"])
+    reachy, host = game
+    reachy.jev_answer = _answers(seen("none", held=0.05))
+    host.start("colors", "es")
+    await _until(lambda: bool(reachy.asked))
+    await reachy.asked[-1][1]("Sí, otra, otra, ¡el amarillo!")
+    await _until(lambda: len(reachy.asked) == 2, timeout_s=4.0)
+    assert host.state is GameState.PLAYING and sum(line.startswith("¡Busca algo") for line in reachy.said) == 2
+    await reachy.asked[-1][1]("no")
+    await _until(lambda: host.state is GameState.IDLE)
+
+
+@pytest.mark.asyncio
+async def test_naming_another_kids_game_starts_it_right_away(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answering "No, ¡el tesoro!" ends the color hunt without a goodbye and starts the treasure hunt in the same language."""
+    monkeypatch.setattr(TreasureHunt, "targets", lambda self: ["ball"])
+    reachy = FakeReachy(real_clock=True)
+    reachy.jev_answer = _answers(seen("none", held=0.05))
+    host = GameHost(reachy.services, {"colors": ColorHunt, "treasure": TreasureHunt})
+    host.start("colors", "es")
+    await _until(lambda: bool(reachy.asked))
+    await reachy.asked[-1][1]("No, ¡el tesoro!")
+    await _until(lambda: "¡Vamos a buscar tesoros!" in reachy.said)
+    assert host.state is GameState.PLAYING and host.status()["game"] == "treasure"
+    assert "¡Gracias por jugar!" not in reachy.said and reachy.restored == 1
+    host.end("test over", say=False)
+    assert reachy.restored == 2
+
+
+@pytest.mark.asyncio
+async def test_another_game_without_a_name_asks_which(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answering "otro juego" asks which kids' game, and the answer starts it."""
+    monkeypatch.setattr(TreasureHunt, "targets", lambda self: ["ball"])
+    reachy = FakeReachy(real_clock=True)
+    reachy.jev_answer = _answers(seen("none", held=0.05))
+    host = GameHost(reachy.services, {"colors": ColorHunt, "treasure": TreasureHunt})
+    host.start("colors", "es")
+    await _until(lambda: bool(reachy.asked))
+    await reachy.asked[-1][1]("otro juego")
+    await _until(lambda: len(reachy.asked) == 2)
+    assert reachy.asked[-1][0] == "¿A cuál? ¿A los colores, a buscar tesoros o a Simón dice?"
+    await reachy.asked[-1][1]("buscar tesoros")
+    await _until(lambda: host.status()["game"] == "treasure")
+    host.end("test over", say=False)
+
+
+@pytest.mark.asyncio
+async def test_an_unclear_answer_is_asked_once_more(game) -> None:
+    """An answer that says neither yes, no nor a game gets "¿Otra vez?" once more, then the game ends."""
+    reachy, host = game
+    reachy.jev_answer = _answers(seen("none", held=0.05))
+    host.start("colors", "es")
+    await _until(lambda: bool(reachy.asked))
+    await reachy.asked[-1][1]("mmm")
+    await _until(lambda: len(reachy.asked) == 2)
+    assert reachy.asked[-1][0] == "¿Otra vez?"
+    await reachy.asked[-1][1]("mmm")
+    await _until(lambda: host.state is GameState.IDLE)
+    assert reachy.said[-1] == "¡Gracias por jugar!"
 
 
 @pytest.mark.asyncio

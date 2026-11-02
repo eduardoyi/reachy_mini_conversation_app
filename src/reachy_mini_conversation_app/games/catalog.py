@@ -9,6 +9,7 @@ import re
 import difflib
 from typing import Final
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 from reachy_mini_conversation_app.quick_commands import normalize, strip_politeness
 
@@ -511,6 +512,52 @@ QUIT_WORDS: Final[frozenset[str]] = frozenset(
 def words(text: str) -> str:
     """Normalize a transcript for the word sets: lowercase, no accents or punctuation, no "please"."""
     return strip_politeness(normalize(text))
+
+
+# The kids' games: "¿Otra vez?" at the end of one can go on to another by name ("no, ¡el tesoro!").
+KIDS_GAMES: Final[tuple[str, ...]] = ("colors", "treasure", "simon")
+# again_answer's other answers: stop playing, or another game without saying which.
+STOP: Final[str] = "stop"
+ANOTHER_GAME: Final[str] = "another game"
+# The answer to "¿Otra vez?" is read loosely: children say more than "sí" (2026-11-02: a yes, then the color).
+# A cue counts anywhere in the answer, as whole words; when a yes and a no are both there, the first one wins.
+_AGAIN_YES: Final[frozenset[str]] = frozenset(
+    {"si", "sii", "siii", "dale", "vamos", "claro", "vale", "venga", "bueno", "listo", "quiero", "otra", "otro",
+     "yes", "yeah", "yep", "yup", "yay", "sure", "ok", "okay", "again", "more", "another", "lets go"}
+)  # fmt: skip
+_AGAIN_NO: Final[frozenset[str]] = frozenset(
+    {"no", "nope", "nah", "ya no", "basta", "se acabo", "terminamos", "termina", "chao", "adios", "luego",
+     "despues", "otro dia", "stop", "enough", "bye", "later", "were done", "we are done"}
+)  # fmt: skip
+_ANOTHER_GAME: Final[frozenset[str]] = frozenset(
+    {"otro juego", "otra cosa", "algo diferente", "algo distinto", "otro diferente", "otro distinto",
+     "another game", "different game", "something else", "a different one"}
+)  # fmt: skip
+
+
+def _first_at(said: str, phrases: Iterable[str]) -> int | None:
+    """Return where the first of ``phrases`` starts in ``said`` (as whole words), or None."""
+    padded = f" {said} "
+    found = [padded.find(f" {phrase} ") for phrase in phrases]
+    return min((at for at in found if at >= 0), default=None)
+
+
+def again_answer(text: str, playing: str) -> str | None:
+    """Read the answer to "¿Otra vez?" at the end of kids' game ``playing``.
+
+    Return the game to play next (``playing`` again, or another kids' game named anywhere in the answer), STOP,
+    ANOTHER_GAME (another game, not named), or None when the answer says none of these.
+    """
+    said = normalize(text)
+    named = [(at, key) for key in KIDS_GAMES if (at := _first_at(said, GAMES[key].names)) is not None]
+    if named:
+        return min(named)[1]
+    if _first_at(said, _ANOTHER_GAME) is not None:
+        return ANOTHER_GAME
+    yes, no = _first_at(said, _AGAIN_YES), _first_at(said, _AGAIN_NO)
+    if yes is not None and (no is None or yes < no):
+        return playing
+    return STOP if no is not None else None
 
 
 def find_game(name: str) -> GameInfo | None:

@@ -30,7 +30,6 @@ from reachy_mini_conversation_app.games.hunt import (
     CHANGED_FRAME,
     CHECK_EVERY_S,
     RECHECK_STILL_S,
-    OTHER_ROUND_ANSWER_S,
     ask_again,
     thumbnail,
     hunt_phrases,
@@ -180,7 +179,7 @@ class SimonSays(Game):
             await self._audio.say(context, moment, sounds=sounds)
 
     async def play(self, context: GameContext) -> None:
-        """Play sets of eight poses until nobody wants another."""
+        """Play sets of eight poses until nobody wants another (or another kids' game is asked for)."""
         self._draw_missing(context)
         language = context.language
         audio = self._audio
@@ -204,15 +203,13 @@ class SimonSays(Game):
             if back:
                 # Back in close for "¿Otra vez?"
                 await self._say(context, "simon_come_closer", _COME_CLOSER[language])
-            if audio is None:
-                again = await ask_again(context)
-            else:
-                again = await audio.ask_yes(context, "again", OTHER_ROUND_ANSWER_S)
-                if again:
-                    context.played()
-            if not again:
+            following = await ask_again(context, audio)
+            if following == self.info.key:
+                continue
+            context.next_game = following
+            if following is None:
                 await self._say(context, "thanks", THANKS[language])
-                return
+            return
 
     def _draw_missing(self, context: GameContext) -> None:
         """Draw the poses not drawn yet in the background; until then a pose shows its words alone."""

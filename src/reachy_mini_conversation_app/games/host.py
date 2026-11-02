@@ -5,7 +5,8 @@ pat on his head); through Gemini, its own question is the yes. While a game runs
 speaker (music is paused), other announcements wait, and every request to Reachy reaches the host first:
 "pausa" / "seguimos" / "se acabó el juego" heard without the name, his name alone (or an antenna) pauses and
 asks "¿Seguimos o terminamos?", and anything else asks whether to end the game, then does it. The screen
-before the game comes back when it ends.
+before the game comes back when it ends, unless the game named another to play right after (a kids' game's
+"¿Otra vez?" answered "no, ¡el tesoro!"): that one starts at once, in the same language.
 """
 
 import enum
@@ -210,6 +211,10 @@ class GameHost:
         if self._context is context:
             logger.info("Game over: %s", context.info.key)
             self._finish()
+            following = context.next_game
+            if following is not None and following in self._factories:
+                logger.info("Game switched: %s to %s", context.info.key, following)
+                self.start(following, context.language, kids=context.kids)
 
     # While playing -------------------------------------------------------------------------------
 

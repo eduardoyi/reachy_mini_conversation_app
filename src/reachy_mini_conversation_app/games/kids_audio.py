@@ -19,7 +19,6 @@ from collections.abc import Mapping, Callable, Sequence
 import numpy as np
 
 from reachy_mini_conversation_app.games.base import GameContext
-from reachy_mini_conversation_app.games.catalog import YES_WORDS, words
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, join
 from reachy_mini_conversation_app.games.big_brain_lines import shown
 
@@ -122,13 +121,19 @@ class KidsAudio:
         samples, text = joined
         await say_audio(RATE, samples, text, context.language, None)
 
-    async def ask_yes(self, context: GameContext, moment: str, seconds: float) -> bool:
-        """Say ``moment`` and wait up to ``seconds`` for the answer; True for a yes."""
-        answered: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    async def ask(
+        self, context: GameContext, moment: str, seconds: float, *, listen_s: float | None = None
+    ) -> str | None:
+        """Say ``moment`` and return the answer, waited for ``seconds`` at most (None when none came).
+
+        With a recorded take, the answer may start up to ``listen_s`` after it: silence then answers "" and speech
+        the model could not read UNCLEAR_ANSWER.
+        """
+        answered: asyncio.Future[str] = asyncio.get_running_loop().create_future()
 
         async def answer(text: str) -> None:
             if not answered.done():
-                answered.set_result(words(text) in YES_WORDS)
+                answered.set_result(text)
 
         await context.playing()
         say_audio = context.services.say_audio
@@ -136,11 +141,11 @@ class KidsAudio:
         if say_audio is None or joined is None:
             context.services.ask(self.text(moment, context.language), context.language, answer)
         else:
-            await say_audio(RATE, joined[0], joined[1], context.language, answer)
+            await say_audio(RATE, joined[0], joined[1], context.language, answer, listen_s=listen_s)
         try:
             return await asyncio.wait_for(answered, seconds)
         except asyncio.TimeoutError:
-            return False
+            return None
 
     async def play_music(self, context: GameContext, pick: Callable[[float], str], until: Callable[[], bool]) -> None:
         """Play music under the game until ``until()``; ``pick(seconds playing)`` names the piece (it may change).

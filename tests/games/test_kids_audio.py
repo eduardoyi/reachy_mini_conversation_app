@@ -74,17 +74,17 @@ async def test_without_a_clip_richie_says_it_in_his_own_voice(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_play_again_is_recorded_and_a_yes_plays_on(tmp_path: Path) -> None:
-    """Ask "¿Jugamos otra vez?" as a recorded line that listens; "¡sí!" is a yes, silence a no."""
+async def test_play_again_is_recorded_and_listens_for_the_answer(tmp_path: Path) -> None:
+    """Ask "¿Jugamos otra vez?" as a recorded line that listens ``listen_s``; the answer comes back, or None."""
     folder = _recorded(tmp_path, {"again": 1.0}, {})
     reachy = FakeReachy(recorded=True)
     audio = KidsAudio(folder, LINES)
     context = _context(reachy)
-    asking = asyncio.create_task(audio.ask_yes(context, "again", 1.0))
+    asking = asyncio.create_task(audio.ask(context, "again", 1.0, listen_s=12.0))
     await _until(lambda: bool(reachy.clip_answers))
-    await reachy.clip_answers[-1]("¡Sí!")
-    assert await asking is True
-    assert await audio.ask_yes(context, "again", 0.05) is False
+    await reachy.clip_answers[-1]("¡Sí, otra!")
+    assert await asking == "¡Sí, otra!" and reachy.clip_listen == [12.0]
+    assert await audio.ask(context, "again", 0.05) is None
 
 
 def test_sounds_are_levelled_by_loudness_without_clipping() -> None:

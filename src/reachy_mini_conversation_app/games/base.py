@@ -103,6 +103,8 @@ class GameContext:
     kids: bool = False
     # The address phones open to join (the QR code), for the admin app; empty for games without phones.
     join_url: str = ""
+    # The game to start as this one ends ("no, ¡el tesoro!" after "¿Otra vez?"); the game sets it, the host starts it.
+    next_game: str | None = None
 
     async def playing(self) -> None:
         """Return once the game is not paused."""

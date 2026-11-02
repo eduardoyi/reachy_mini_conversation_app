@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-10-31 (treasure hunt, wider colors, Simón dice, Venezuelan Spanish)
+- Last updated: 2026-11-02 ("¿Otra vez?" read loosely; switching between the kids' games)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -72,6 +72,14 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   or 20 s of silence, plays on.
 - **After a game:** the screen shown before comes back, the head moves freely again, Reachy listens as usual.
   A game nobody plays for 5 minutes ends by itself.
+- **"¿Otra vez?" (the three kids' games):** the answer is read loosely, as children answer: a yes anywhere in
+  it ("¡Sí, otra, otra!", "yes yes", "one more time") plays again; another kids' game named anywhere ("no, ¡el
+  tesoro!", "Simón dice", "the color game") ends this one without a goodbye and starts that one at once, in the
+  same language; "otro juego" / "something else" asks "¿A cuál? ¿A los colores, a buscar tesoros o a Simón
+  dice?"; a no ("no", "ya no", "chao") ends with "¡Gracias por jugar!". When a yes and a no are both there, the
+  first one wins. An answer that says none of these, or that the speech model could not read, gets "¿Otra
+  vez?" once more; silence for 12 s ends the game. Only the kids' games switch this way: other games are started
+  by asking Reachy as usual.
 
 ### The color hunt
 
@@ -89,7 +97,8 @@ Detectives, the mystery party game played on phones, also runs on the host and h
 - A sure color outside the group (≥ 0.7) is named at most every 5 s: "Mmm, eso es azul. ¡Busca algo rojo!".
 - A color already in view when the round starts (a bottle on the table) counts only after it has left.
 - Time up: "¡Se acabó el tiempo! Era el rojo." Nobody loses. After five rounds: "¡Tres estrellas!",
-  "¿Otra vez?"; yes plays five more, otherwise "¡Gracias por jugar!" and the game ends.
+  "¿Otra vez?" (see above): yes plays five more, another kids' game starts that one, otherwise "¡Gracias por
+  jugar!" and the game ends.
 
 ### The treasure hunt
 
@@ -200,13 +209,13 @@ flowchart LR
 
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
-| Names and words | `games/catalog.py` | `GAMES`, `parse_game_request(text)`, `find_game`, `words`, the YES / NO / PAUSE / RESUME / QUIT word sets (whole transcripts, normalized) |
+| Names and words | `games/catalog.py` | `GAMES`, `parse_game_request(text)`, `find_game`, `words`, the YES / NO / PAUSE / RESUME / QUIT word sets (whole transcripts, normalized); `KIDS_GAMES`, `again_answer(text, playing)` (a game key, `STOP`, `ANOTHER_GAME` or None; cues anywhere, the first of a yes and a no wins) |
 | Host | `games/host.py` | `GameHost(services, factories)`: `offer`, `start(key, language) -> str | None`, `heard`, `addressed`, `pause`, `resume`, `end`, `holding`, `status`; `host_phrases()` for the speech cache |
-| Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext`, `Game` (`phrases`, `play`, `heard`, `paused`) |
-| Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line, "¿Otra vez?"), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
+| Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext` (`next_game`: set by a game as it ends, the host starts it), `Game` (`phrases`, `play`, `heard`, `paused`) |
+| Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line), `ask_again(context, audio) -> next game or None` (all three kids' games; asked twice at most, `AGAIN_LISTEN_S` 12 s to start answering), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
 | Simón dice | `games/simon_says.py` | `SimonSays`, `POSES` (words, Jev question, drawing, whole body, head gesture), `pose_drawings()`, `simon_says_phrases()` |
-| Kids' audio | `games/kids_audio.py`, `games/kids_lines.py` | `KidsAudio(folder, LINES)`: `say(context, *moments, sounds, after)` (one recorded line with sounds, or Richie's voice), `ask_yes`, `play_music(context, pick, until)`, `leveled`, `loopable`; `LINES[moment][language]` takes with tags, `TAGS`. Data in `game-data/kids/voice/<moment>/<lang>-NN.wav` and `game-data/kids/sounds/` (`chosen.json`). Made by `scripts/big_brain_voice.py --set kids --voice ID` and `scripts/big_brain_sounds.py --set kids` (convert the mp3s with ffmpeg on the laptop: the mini has none) |
+| Kids' audio | `games/kids_audio.py`, `games/kids_lines.py` | `KidsAudio(folder, LINES)`: `say(context, *moments, sounds, after)` (one recorded line with sounds, or Richie's voice), `ask(context, moment, seconds, listen_s=)` (the answer's text), `play_music(context, pick, until)`, `leveled`, `loopable`; `LINES[moment][language]` takes with tags, `TAGS`. Data in `game-data/kids/voice/<moment>/<lang>-NN.wav` and `game-data/kids/sounds/` (`chosen.json`). Made by `scripts/big_brain_voice.py --set kids --voice ID` and `scripts/big_brain_sounds.py --set kids` (convert the mp3s with ffmpeg on the laptop: the mini has none) |
 | Treasure hunt | `games/treasure_hunt.py` | `TreasureHunt`, `TREASURES` (names, what Jev is asked, drawing subject), `treasure_drawings()`, `treasure_hunt_phrases()` |
 | Jev client | `jev.py` | `ask(client, api_key, model, state, questions, images, feature)`, `sized_jpeg`, `JevError` |
 | Tool | `tools/play_game.py` | `play_game(game, action=rules|start, language)`; direct (not a skill); added with `games_configured()` |
@@ -243,7 +252,8 @@ flowchart LR
 ## Testing
 
 `tests/games/` (catalog, host with a waiting game and a fake clock, color and treasure hunts with a fake camera,
-Jev and drawings; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
+Jev and drawings; "¿Otra vez?" read loosely, asked again when unclear, and switching to another kids' game from
+the color hunt and Simón dice; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
 recorded color hunt, and that every moment the games use is written in both languages),
 `tests/tools/test_play_game.py`, the runtime hooks in `tests/test_hybrid_runtime.py`, quick-command routing in
 `tests/test_quick_commands.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
@@ -252,6 +262,9 @@ recorded color hunt, and that every moment the games use is written in both lang
 
 ## Changelog
 
+- 2026-11-02: "¿Otra vez?" in the kids' games reads the answer loosely (before, only a bare "sí" counted: on
+  2026-11-02 a yes followed by more words ended a color hunt, and a reply the speech model could not read ended a
+  treasure hunt), asks once more when it is unclear, and starts another kids' game when one is named.
 - 2026-11-02: Redesigned game screens: a shared header and motif per party game, team shapes, the kids' frame
   and star tray, a new paused screen, and Anton bundled for titles and numbers. Previews checked by eye from the
   2-bit PNGs the TRMNL gets; not yet seen on the device.
