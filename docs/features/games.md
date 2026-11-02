@@ -61,7 +61,7 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   music card waits), other announcements (Maribel's replies) wait until the game is paused or over, and the
   `home_lights` and `spotify_control` tools refuse changes.
 - **Pause:** "pausa", "espera", "para el juego", "pause", "wait" heard without his name; or his name alone, or
-  an antenna bend: "Pausa. ¿Seguimos o terminamos?". The screen shows PAUSA and how to go on; timers stop; the
+  an antenna bend: "Pausa. ¿Seguimos o terminamos?". The screen shows a pause sign, PAUSA, the game's name and how to go on; timers stop; the
   head is held still so a pat resumes. "Seguimos", "continue", "sí" or a pat plays on. 10 minutes paused ends
   the game. An incoming WhatsApp call pauses it.
 - **Quit:** "se acabó el juego", "terminamos", "ya no quiero jugar", "stop the game", "game over" (with or
@@ -75,7 +75,7 @@ Detectives, the mystery party game played on phones, also runs on the host and h
 
 ### The color hunt
 
-- Each round: "¡Busca algo ROJO!", the screen shows ROJO above a row of five stars, and a staccato tune
+- Each round: "¡Busca algo ROJO!", the screen shows ROJO inside the kids' frame, "Busca…" on a tab at the top and a tray of five stars, and a staccato tune
   plays, speeding up from 100 to 180 BPM over 30 seconds of play.
 - About twice a second a camera frame that changed (or one every 1.5 s if nothing did) goes to Jev:
   "is someone holding an object up to the camera?" (a Noul) and "what is its main color?" (a Choice).
@@ -123,6 +123,49 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   bien!", "¡Eso!", "¡Chévere!", "¡Perfecto!"), a happy move, a star. Not done: "¡Así! Mira la pantalla." and on.
   Nobody loses; "¡Ocho estrellas!" and "¿Otra vez?" at the end. No trick rounds (without "Simón dice") yet.
 
+### Recorded voice, sounds and music (the three kids' games)
+
+Built 2026-11-02 so the games stop sounding flat after a few rounds, while staying easy on adults nearby.
+
+- **Richie's lines are recorded** with ElevenLabs in "Richie kids host" (voice `o5eAiNLN0h2ipUCjBmju`, designed
+  2026-11-02 as an upbeat preschool-TV presenter, option C take 1 of three designs Eduardo heard), two or three takes of every
+  moment (`games/kids_lines.py`, 176 moments, 381 takes per language), never the same take twice in a row:
+  an opening per game, round intros ("¡Primera ronda!", "¡Otra!", "¡Última ronda!"), every color, thing and
+  pose said two or three ways, finds, "eso es azul", time up, one nudge halfway through a treasure round
+  ("¿Dónde estará?"), "¡Rápido!" for the last 10 s of a round, stars up to eight, "¿Jugamos otra vez?" and
+  goodbyes. Spanish is Venezuelan and gender-neutral. Lines carry audio tags; nothing shown has them.
+- **Sounds**: a jingle opens each game, a whoosh before each round, a sparkle on a find and a twinkle for the
+  star, a soft boing for a wrong thing, a slide whistle at time up, a shutter for a pose, tiptoes for "un paso
+  atrás", a short celebration before the stars.
+- **Music bed**: quiet searching music during a hunt round that turns faster for the last 10 s, and bouncy
+  "freeze" music while children hold a pose. It replaces the beep tune and stops by itself while Richie
+  speaks or listens.
+- **Levels**: every sound is levelled by loudness (ElevenLabs' takes differ by 15 dB or more): sounds at
+  -24 dB RMS, jingles -22, the music bed -33, against about -20 for the voice.
+- **Without the recordings** (or any one clip), the games say the old lines in Richie's everyday voice and
+  play the beep tune, exactly as before.
+
+### What the screens look like
+
+Every game screen is drawn for the TRMNL's four greys and for reading from across the living room: flat greys or
+bold patterns (no gradients), outlines of 3 px or more, Atkinson Hyperlegible for words and Anton (a condensed
+poster face, OFL) for game names, numbers and big titles.
+
+- **The kids' games** share one frame: a thick rounded border with the caption ("Busca…", "Simón dice…") on a
+  black tab over its top edge, the word as large as it fits (up to three lines, never cut), and the stars on a
+  light-grey tray: won stars solid black, the rest white in a dark-grey outline (two rows when there are eight).
+  With a drawing, the drawing fills the left and the word and stars the right.
+- **Paused** (any game): a black pause disc beside PAUSA, the game's name on a grey pill, how to go on, and
+  striped bands top and bottom.
+- **The party games** (Big Brain, Sheeple, Scribble Rush, Detectives) share a header: a black band with the
+  game's icon and name, a status pill on the right (points, round), and the game's motif under it (marquee bulbs,
+  wool, a checkered flag, crime-scene tape). Join screens keep the QR code exactly as large as before on white,
+  with a black panel beside it: title, "scan to play" pointing at the code, the six-letter code as tiles, and the
+  teams or players. Teams are told apart by shape and fill as well as name: red a black circle, blue a striped
+  square, green a dark-grey triangle, yellow a light-grey diamond. Shared helpers live in `eink_display.py`
+  (`_game_header`, `_badge`, `_pill`, `_pattern`, `_draw_star`, `_star_rows`, `_big_words`) and the team tiles and
+  join screen in `games/big_brain_screens.py`.
+
 ## Current architecture
 
 ```mermaid
@@ -163,6 +206,7 @@ flowchart LR
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line, "¿Otra vez?"), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
 | Simón dice | `games/simon_says.py` | `SimonSays`, `POSES` (words, Jev question, drawing, whole body, head gesture), `pose_drawings()`, `simon_says_phrases()` |
+| Kids' audio | `games/kids_audio.py`, `games/kids_lines.py` | `KidsAudio(folder, LINES)`: `say(context, *moments, sounds, after)` (one recorded line with sounds, or Richie's voice), `ask_yes`, `play_music(context, pick, until)`, `leveled`, `loopable`; `LINES[moment][language]` takes with tags, `TAGS`. Data in `game-data/kids/voice/<moment>/<lang>-NN.wav` and `game-data/kids/sounds/` (`chosen.json`). Made by `scripts/big_brain_voice.py --set kids --voice ID` and `scripts/big_brain_sounds.py --set kids` (convert the mp3s with ffmpeg on the laptop: the mini has none) |
 | Treasure hunt | `games/treasure_hunt.py` | `TreasureHunt`, `TREASURES` (names, what Jev is asked, drawing subject), `treasure_drawings()`, `treasure_hunt_phrases()` |
 | Jev client | `jev.py` | `ask(client, api_key, model, state, questions, images, feature)`, `sized_jpeg`, `JevError` |
 | Tool | `tools/play_game.py` | `play_game(game, action=rules|start, language)`; direct (not a skill); added with `games_configured()` |
@@ -199,8 +243,15 @@ flowchart LR
 ## Testing
 
 `tests/games/` (catalog, host with a waiting game and a fake clock, color and treasure hunts with a fake camera,
-Jev and drawings),
+Jev and drawings; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
+recorded color hunt, and that every moment the games use is written in both languages),
 `tests/tools/test_play_game.py`, the runtime hooks in `tests/test_hybrid_runtime.py`, quick-command routing in
 `tests/test_quick_commands.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
 `tests/admin/test_server.py`. Jev thresholds come from the 2026-10-31 spike on 258 frames from Reachy's camera
 (see the plan).
+
+## Changelog
+
+- 2026-11-02: Redesigned game screens: a shared header and motif per party game, team shapes, the kids' frame
+  and star tray, a new paused screen, and Anton bundled for titles and numbers. Previews checked by eye from the
+  2-bit PNGs the TRMNL gets; not yet seen on the device.

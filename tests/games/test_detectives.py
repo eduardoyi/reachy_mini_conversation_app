@@ -1,5 +1,6 @@
 """Tests for Detectives: the cases and their schema, the witness prompt, the phones' page and a whole game."""
 
+import io
 import json
 import random
 import shutil
@@ -8,10 +9,12 @@ from typing import Any
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from .fakes import FakeReachy
 from reachy_mini_conversation_app.games import detectives
+from reachy_mini_conversation_app.qr_code import qr_matrix
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
 from reachy_mini_conversation_app.games.detectives import PAGE, Detectives, DetectivesSetup, read_played
@@ -133,6 +136,21 @@ def test_the_screens_render() -> None:
         render_card("Rosa", "Don Aurelio tomó la primera copa. " * 6, footer="Ana"),
     ):
         assert png.startswith(b"\x89PNG")
+
+
+def test_the_join_qr_code_keeps_its_size_and_a_white_quiet_zone() -> None:
+    """Phones scan the code across the room: up to 400 px, with two white modules all around it."""
+    url = "https://reachy.tail1234.ts.net/detectives/?c=ABCDEF"
+    screen = Image.open(io.BytesIO(render_join(url, "ABCDEF", ["Ana"] * 12, "es", kids=True))).convert("L")
+    modules = len(qr_matrix(url))
+    scale = min(400 // (modules + 4), 14)
+    size = (modules + 4) * scale
+    left, top = 30, (480 - size) // 2
+    zone = screen.crop((left, top, left + size, top + size))
+    inside = screen.crop((left + 2 * scale, top + 2 * scale, left + size - 2 * scale, top + size - 2 * scale))
+    assert size >= 370
+    assert zone.histogram()[0] == inside.histogram()[0]  # every black pixel is inside the code
+    assert set(zone.get_flattened_data()) == {0, 255}  # crisp: no greys
 
 
 @pytest.mark.parametrize(

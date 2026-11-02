@@ -40,7 +40,9 @@ default, with a kids mode.
   `on_message` (what phones send: `start`, `kids`, `answer`, `speak`, `resume`). It also has `play()` (lobby →
   six boards → ending), `find()` (judging) and `pick_surveys()` (which boards play).
 - `games/sheeple_screens.py`: `render_survey`, the TRMNL board (round, question, a slot per answer in two
-  columns, whose turn it is and the misses, and the scores). Joining and the winner reuse Big Brain's
+  columns, whose turn it is and the misses, and the scores). Hidden answers are dark-grey bars with their number;
+  revealed ones show the answer and its count on a black tab; the team on turn has a black score tile tagged
+  "Turno", and the misses are six boxes crossed out one by one. Joining and the winner reuse Big Brain's
   `render_join` (with `title="SHEEPLE"`) and `render_winner`.
 - `static/sheeple/index.html`: the phones' page (one WebSocket to the game). It shows the join form, the
   lobby, the question with the answer slots, the guess form, the "Responder" button, who is answering, the
@@ -130,3 +132,8 @@ Checked by hand on 2026-11-01: the TRMNL board rendered to a PNG and looked at, 
 
 Not yet checked: a real game on Reachy (speech recognition of spoken guesses, Jev's rulings on real survey
 answers, timing of the reveals, the "Responder" button on real phones), and the real bank.
+
+## Changelog
+
+- 2026-11-02: Redesigned board: the shared game header with a sheep and a wool edge, answer bars, Big Brain's
+  team tiles and a misses box (see [games.md](games.md#what-the-screens-look-like)).

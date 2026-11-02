@@ -1,4 +1,4 @@
-"""Scribble Rush's race track on the TRMNL (800×480, four greys): a lane of squares per team and a marker on each.
+"""Scribble Rush's race track on the TRMNL (800×480, four greys): a lane of squares per team and its token on each.
 
 Joining and the winner reuse Big Brain's screens (games/big_brain_screens.py); what Richie saw is a photo screen.
 """
@@ -6,16 +6,19 @@ Joining and the winner reuse Big Brain's screens (games/big_brain_screens.py); w
 from PIL import Image, ImageDraw
 
 from reachy_mini_conversation_app.eink_display import (
+    _GREY,
     WIDTH,
     HEIGHT,
     _LIGHT_GREY,
-    _font,
+    _paint,
     _fitted,
     _wrapped,
     encode_png,
-    _draw_lines,
+    _game_header,
+    _fitted_display,
     _draw_glyphs_centered,
 )
+from reachy_mini_conversation_app.games.big_brain_screens import _pencil, _team_badge
 
 
 def render_track(
@@ -23,34 +26,46 @@ def render_track(
 ) -> bytes:
     """Render ``title`` and ``caption`` above a lane per team (name, squares so far) of ``goal`` squares.
 
-    The lane of the team named ``turn`` is boxed; the last square of every lane is the finish, drawn in black.
+    Squares already covered are black and the team's token stands on the last of them; the lane of the team named
+    ``turn`` is outlined in black, and the last square of every lane is the checkered finish.
     """
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
     draw = ImageDraw.Draw(canvas)
-    _draw_lines(draw, [title], _fitted(title, WIDTH - 40, 50, 26), left=20, width=WIDTH - 40, top=14, centered=True)
-    font = _fitted(caption, WIDTH - 40, 30, 20, bold=False)
-    _draw_lines(draw, _wrapped(caption, font, WIDTH - 40, 1), font, left=20, width=WIDTH - 40, top=80, centered=True)
-    top, bottom = 140, HEIGHT - 16
-    height = min(100, (bottom - top) // max(1, len(lanes)))
-    name_width = 130
-    square = (WIDTH - 30 - name_width) / goal
+    top = _game_header(canvas, "SCRIBBLE RUSH", _pencil, "checker", height=52) + 6
+    _draw_glyphs_centered(draw, title, _fitted_display(title, WIDTH - 40, 58, 28), WIDTH / 2, top + 36)
+    font = _fitted(caption, WIDTH - 40, 28, 18, bold=False)
+    shown = _wrapped(caption, font, WIDTH - 40, 1)[0]
+    draw.text((WIDTH / 2, top + 88), shown, font=font, fill=0, anchor="ms")
+    lanes_top, bottom = top + 104, HEIGHT - 8
+    height = min(116, (bottom - lanes_top) // max(1, len(lanes)))
+    lanes_top += (bottom - lanes_top - height * len(lanes)) // 2
+    token = min(height - 30, 54)
+    start = 128 + token  # the names, then a start box for tokens still at square 0
+    square = (WIDTH - 30 - start) / goal
+    cell = min(height - 44, 46)
     for index, (name, position) in enumerate(lanes):
-        y = top + index * height
+        y = lanes_top + index * height
         middle = y + height / 2
+        lane = (12, y + 5, WIDTH - 12, y + height - 5)
+        draw.rounded_rectangle(lane, radius=18, fill=_LIGHT_GREY)
         if name == turn:
-            draw.rounded_rectangle((8, y + 4, WIDTH - 8, y + height - 4), radius=10, outline=0, width=3)
-        name_font = _fitted(name.upper(), name_width - 50, 28, 14)
-        draw.text((20, middle), name.upper(), font=name_font, fill=0, anchor="lm")
-        side = min(square - 3, height - 30)
+            draw.rounded_rectangle(lane, radius=18, outline=0, width=6)
+        name_font = _fitted(name.upper(), 100, 28, 14)
+        draw.text((28, middle), name.upper(), font=name_font, fill=0, anchor="lm")
         for step in range(goal):
-            x = 10 + name_width + step * square
-            box = (x, middle - side / 2, x + side, middle + side / 2)
-            last = step == goal - 1
-            filled = 0 if last else _LIGHT_GREY if step < position else 255
-            draw.rectangle(box, fill=filled, outline=0, width=1)
-        radius = side / 2 + 6
-        start = 10 + name_width
-        x = start + (min(position, goal) - 1) * square + side / 2 if position > 0 else start - radius + 4
-        draw.ellipse((x - radius, middle - radius, x + radius, middle + radius), fill=0, outline=255, width=2)
-        _draw_glyphs_centered(draw, name[:1].upper(), _font(int(radius * 1.3), bold=True), x, middle, fill=255)
+            x = start + step * square
+            box = (round(x), round(middle - cell / 2), round(x + square - 4), round(middle + cell / 2))
+            if step == goal - 1:
+                flag = (box[0], box[1] - 8, box[2] + 4, box[3] + 8)
+                _paint(canvas, flag, "checker")
+                draw.rectangle(flag, outline=0, width=3)
+            elif step < position:
+                draw.rectangle(box, fill=0)
+            else:
+                draw.rectangle(box, fill=255, outline=_GREY, width=2)
+        if position > 0:
+            x = min(start + (min(position, goal) - 0.5) * square - 2, WIDTH - 22 - token / 2)
+        else:
+            x = start - token / 2 - 4
+        _team_badge(canvas, name, x, middle, token, halo=5)
     return encode_png(canvas)

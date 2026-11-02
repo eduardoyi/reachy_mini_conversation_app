@@ -454,50 +454,272 @@ def render_writing(letters: list[str], step: int) -> bytes:
     return encode_png(canvas)
 
 
+# Games share one look: a black header band with the game's icon and name in Anton, a strip of the game's motif
+# under it, flat greys or bold patterns (never gradients, which band into four steps) and outlines of 3 px or more.
+# A fill is a grey level or a pattern name from _pattern.
+Fill = int | str
+_MOTIF_HEIGHT = 14
+
+
+@functools.lru_cache(maxsize=32)
+def _display_font(size: int) -> ImageFont.FreeTypeFont:
+    """Return Anton, the condensed poster face for game names, numbers and big titles."""
+    return ImageFont.truetype(str(_ASSETS / "Anton.ttf"), size)
+
+
+def _fitted_display(text: str, width: int, largest: int, smallest: int) -> ImageFont.FreeTypeFont:
+    """Return the largest Anton, down to ``smallest``, that fits ``text`` on one line of ``width``."""
+    for size in range(largest, smallest, -2):
+        if _display_font(size).getlength(text) <= width:
+            return _display_font(size)
+    return _display_font(smallest)
+
+
+def _pattern(kind: str, box: tuple[int, int, int, int]) -> Image.Image:
+    """Return ``box`` (screen coordinates) filled with a pattern that lines up wherever it is drawn."""
+    left, top, right, bottom = box
+    y, x = np.mgrid[top:bottom, left:right]
+    if kind == "stripes":  # bold diagonal stripes, black on white
+        pixels = np.where((x + y) % 16 < 7, 0, 255)
+    elif kind == "tape":  # crime-scene tape: black and light grey bands the other way
+        pixels = np.where((x - y) % 28 < 14, 0, _LIGHT_GREY)
+    elif kind == "checker":
+        pixels = np.where((x // 10 + y // 10) % 2 == 0, 0, 255)
+    elif kind == "dots":  # black dots on light grey
+        pixels = np.where((x % 12 - 6) ** 2 + (y % 12 - 6) ** 2 <= 8, 0, _LIGHT_GREY)
+    elif kind == "hatch":  # faint light-grey diagonals on white, for spent squares
+        pixels = np.where((x + y) % 14 < 4, _LIGHT_GREY, 255)
+    else:
+        raise ValueError(f"unknown pattern {kind}")
+    return Image.fromarray(pixels.astype(np.uint8), "L")
+
+
+def _paint(canvas: Image.Image, box: tuple[int, int, int, int], fill: Fill, mask: Image.Image | None = None) -> None:
+    """Fill ``box`` with a grey or a pattern, only where ``mask`` is set when one is given."""
+    left, top, right, bottom = box
+    if mask is not None and mask.size != (right - left, bottom - top):
+        mask = mask.resize((right - left, bottom - top))
+    if isinstance(fill, int):
+        canvas.paste(fill, box, mask)
+    else:
+        canvas.paste(_pattern(fill, box), box, mask)
+
+
+def _shape_mask(shape: str, size: int) -> Image.Image:
+    """Return a smooth ``size`` square mask of a circle, rounded square, triangle, diamond or star."""
+    scale = 4
+    side = size * scale
+    mask = Image.new("L", (side, side), 0)
+    draw = ImageDraw.Draw(mask)
+    if shape == "circle":
+        draw.ellipse((0, 0, side - 1, side - 1), fill=255)
+    elif shape == "square":
+        inset = side * 0.06
+        draw.rounded_rectangle((inset, inset, side - inset, side - inset), radius=side * 0.16, fill=255)
+    elif shape == "triangle":
+        draw.polygon([(side / 2, 0), (side, side * 0.92), (0, side * 0.92)], fill=255)
+    elif shape == "diamond":
+        draw.polygon([(side / 2, 0), (side, side / 2), (side / 2, side), (0, side / 2)], fill=255)
+    elif shape == "star":
+        draw.polygon(_star_points(side / 2, side / 2 + side * 0.04, side / 2, 0.48), fill=255)
+    else:
+        raise ValueError(f"unknown shape {shape}")
+    return mask.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def _badge(
+    canvas: Image.Image, x: float, y: float, size: int, shape: str, fill: Fill, *, halo: int = 0, border: int = 0
+) -> None:
+    """Draw ``shape`` centered on ``(x, y)``: a black outline around ``fill``, ringed in white by ``halo``."""
+    border = border or max(3, size // 9)
+    for outer, paint in ((size + 2 * halo, 255), (size, 0)) if halo else ((size, 0),):
+        left, top = round(x - outer / 2), round(y - outer / 2)
+        _paint(canvas, (left, top, left + outer, top + outer), paint, _shape_mask(shape, outer))
+    inner = size - 2 * border - (border if shape == "triangle" else 0)
+    shift = border * 0.6 if shape == "triangle" else 0  # a triangle's middle sits low
+    left, top = round(x - inner / 2), round(y + shift - inner / 2)
+    _paint(canvas, (left, top, left + inner, top + inner), fill, _shape_mask(shape, inner))
+
+
+def _pill(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    *,
+    fill: int = 0,
+    text_fill: int = 255,
+    align: str = "center",
+    height: int = 0,
+    outline: int | None = None,
+) -> tuple[float, float, float, float]:
+    """Draw ``text`` in a rounded pill whose middle is at height ``y``; ``x`` is its left, center or right."""
+    height = height or round(font.size * 1.5)
+    width = font.getlength(text) + height * 0.9
+    left = x if align == "left" else x - width if align == "right" else x - width / 2
+    box = (left, y - height / 2, left + width, y + height / 2)
+    draw.rounded_rectangle(box, radius=height / 2, fill=fill, outline=outline, width=3 if outline is not None else 0)
+    draw.text((left + width / 2, _baseline(font, y)), text, font=font, fill=text_fill, anchor="ms")
+    return box
+
+
+def _baseline(font: ImageFont.FreeTypeFont, middle: float) -> float:
+    """Return the baseline that centers capital letters on ``middle`` (descenders hang below, as in print)."""
+    _, top, _, bottom = font.getbbox("H")
+    return middle + (bottom - top) / 2
+
+
+def _spaced(
+    draw: ImageDraw.ImageDraw, x: float, y: float, text: str, font: ImageFont.FreeTypeFont, tracking: float, fill: int
+) -> float:
+    """Draw ``text`` letter-spaced by ``tracking`` with its left at ``x`` and middle at ``y``; return its right."""
+    for letter in text:
+        draw.text((x, _baseline(font, y)), letter, font=font, fill=fill, anchor="ls")
+        x += font.getlength(letter) + tracking
+    return x - tracking
+
+
+def _spaced_width(text: str, font: ImageFont.FreeTypeFont, tracking: float) -> float:
+    return sum(font.getlength(letter) for letter in text) + tracking * (len(text) - 1)
+
+
+def _motif(canvas: Image.Image, top: int, motif: str) -> None:
+    """Draw a game's motif in a strip under its header: marquee bulbs, wool, a checkered flag or crime tape."""
+    draw = ImageDraw.Draw(canvas)
+    bottom = top + _MOTIF_HEIGHT
+    if motif == "marquee":
+        draw.rectangle((0, top, WIDTH, bottom), fill=0)
+        for index, x in enumerate(range(10, WIDTH, 22)):
+            draw.ellipse((x - 5, top + 2, x + 5, top + 12), fill=255 if index % 2 == 0 else _LIGHT_GREY)
+    elif motif == "wool":
+        for x in range(-6, WIDTH + 30, 28):
+            draw.chord((x, top - 12, x + 28, top + 12), 0, 180, fill=0)
+    elif motif == "checker":
+        _paint(canvas, (0, top, WIDTH, bottom + 6), "checker")
+    elif motif == "tape":
+        _paint(canvas, (0, top, WIDTH, bottom), "tape")
+        draw.line((0, bottom, WIDTH, bottom), fill=0, width=3)
+    else:
+        raise ValueError(f"unknown motif {motif}")
+
+
+Icon = Callable[[ImageDraw.ImageDraw, float, float, float, int], None]
+
+
+def _game_header(
+    canvas: Image.Image, title: str, icon: Icon, motif: str, *, status: str = "", height: int = 60
+) -> int:
+    """Draw a game's header (black band, icon, name, an optional status pill, its motif); return the y below."""
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 0, WIDTH, height), fill=0)
+    icon(draw, 14 + (height - 16) / 2, height / 2, height - 16, 255)
+    status = status.upper()
+    status_font = _display_font(round(height * 0.5))
+    status_width = status_font.getlength(status) + height * 0.9 if status else 0
+    left = height + 6
+    room = WIDTH - left - 16 - status_width - (16 if status else 0)
+    tracking = height * 0.05
+    font = _display_font(round(height * 0.66))
+    while _spaced_width(title, font, tracking) > room and font.size > 20:
+        font = _display_font(font.size - 2)
+    _spaced(draw, left, height / 2, title, font, tracking, 255)
+    if status:
+        _pill(draw, WIDTH - 14, height / 2, status, status_font, fill=255, text_fill=0, align="right", height=height - 16)  # fmt: skip
+    _motif(canvas, height, motif)
+    return height + _MOTIF_HEIGHT
+
+
+def _star_points(x: float, y: float, radius: float, inner: float) -> list[tuple[float, float]]:
+    points = []
+    for index in range(10):
+        angle = math.pi / 2 + index * math.pi / 5
+        reach = radius if index % 2 == 0 else radius * inner
+        points.append((x + reach * math.cos(angle), y - reach * math.sin(angle)))
+    return points
+
+
+def _draw_star(draw: ImageDraw.ImageDraw, x: float, y: float, radius: float, *, filled: bool) -> None:
+    """Draw a five-pointed star centered on ``(x, y)``: solid black when won, else white in a dark grey outline."""
+    points = _star_points(x, y + radius * 0.06, radius, 0.5)
+    if filled:
+        draw.polygon(points, fill=0)
+    else:
+        draw.polygon(points, fill=255, outline=_GREY, width=max(3, round(radius / 8)))
+
+
+def _star_rows(draw: ImageDraw.ImageDraw, stars: int, total: int, box: tuple[int, int, int, int]) -> None:
+    """Lay ``total`` stars (the first ``stars`` won) on a light-grey tray filling ``box``, in one or two rows."""
+    left, top, right, bottom = box
+    draw.rounded_rectangle(box, radius=min(28, (bottom - top) // 2), fill=_LIGHT_GREY)
+    width, height = right - left - 24, bottom - top - 16
+    rows = 1 if total <= 5 or width / total >= height * 0.85 else 2
+    per_row = math.ceil(total / rows)
+    size = min(height / rows, width / per_row) * 0.92
+    for index in range(total):
+        row, column = divmod(index, per_row)
+        in_row = min(per_row, total - row * per_row)
+        x = left + (right - left) / 2 + (column - (in_row - 1) / 2) * (width / per_row)
+        y = top + 8 + height / rows * (row + 0.5)
+        _draw_star(draw, x, y, size / 2, filled=index < stars)
+
+
+def _kids_frame(draw: ImageDraw.ImageDraw, caption: str, middle: float) -> None:
+    """Draw the kids' games frame: a thick rounded border with ``caption`` on a black tab over its top edge."""
+    draw.rounded_rectangle((8, 34, WIDTH - 8, HEIGHT - 8), radius=34, outline=0, width=8)
+    if caption:
+        _pill(draw, middle, 36, caption, _font(34, bold=True), height=60)
+
+
+def _big_words(
+    draw: ImageDraw.ImageDraw, word: str, x: float, width: int, middle: float, height: float, *, largest: int = 190
+) -> None:
+    """Draw ``word`` centered on ``(x, middle)`` as large as it fits in ``width`` by ``height``, on up to 3 lines."""
+    for size in range(largest, 26, -4):
+        font = _font(size, bold=True)
+        lines = _wrapped(word, font, width, 3)
+        fits = all(font.getlength(line) <= width for line in lines) and not lines[-1].endswith("…")
+        if fits and len(lines) * size * 1.1 <= height:
+            break
+    line_height = font.size * 1.1
+    for index, line in enumerate(lines):
+        _draw_glyphs_centered(draw, line, font, x, middle + (index - (len(lines) - 1) / 2) * line_height)
+
+
 def render_game_prompt(word: str, stars: int, total: int, caption: str = "") -> bytes:
-    """Render a game's prompt: ``word`` very large, ``caption`` small above it, and a row of stars.
+    """Render a game's prompt: ``word`` very large, ``caption`` on a tab above it, and a tray of stars.
 
     ``total`` stars, the first ``stars`` filled: the color hunt's "ROJO" and the finds so far.
     """
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
     draw = ImageDraw.Draw(canvas)
-    if caption:
-        _draw_lines(draw, [caption], _font(36, bold=True), left=20, width=WIDTH - 40, top=28, centered=True)
-    _draw_glyphs_centered(draw, word, _fitted(word, WIDTH - 60, 200, 48), WIDTH / 2, 230)
-    size, gap = 52, 18
-    left = (WIDTH - total * size - (total - 1) * gap) / 2
-    for index in range(total):
-        _draw_star(draw, left + index * (size + gap) + size / 2, HEIGHT - 70, size / 2, filled=index < stars)
+    _kids_frame(draw, caption, WIDTH / 2)
+    _big_words(draw, word, WIDTH / 2, WIDTH - 90, 206, 250)
+    tray = min(WIDTH - 120, total * 96 + 40)
+    _star_rows(draw, stars, total, (round((WIDTH - tray) / 2), HEIGHT - 124, round((WIDTH + tray) / 2), HEIGHT - 30))
     return encode_png(canvas)
 
 
 def render_game_picture(picture: Image.Image, word: str, stars: int, total: int, caption: str = "") -> bytes:
     """Render a game's prompt with a drawing, for children who cannot read yet.
 
-    The picture is on the left; ``caption``, ``word`` and a row of ``total`` stars (the first ``stars`` filled)
+    The picture is on the left; ``caption``, ``word`` and a tray of ``total`` stars (the first ``stars`` filled)
     are on the right.
     """
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
-    fitted = ImageOps.contain(picture.convert("L"), (420, HEIGHT - 40))
-    canvas.paste(fitted, (20 + (420 - fitted.width) // 2, (HEIGHT - fitted.height) // 2))
+    fitted = ImageOps.contain(picture.convert("L"), (420, HEIGHT - 80))
+    canvas.paste(fitted, (26 + (420 - fitted.width) // 2, 56 + (HEIGHT - 80 - fitted.height) // 2))
     draw = ImageDraw.Draw(canvas)
-    left, width = 460, WIDTH - 480
-    if caption:
-        _draw_lines(draw, [caption], _font(32, bold=True), left=left, width=width, top=70, centered=True)
-    font = _fitted(max(word.split(), key=len), width, 84, 40)
-    lines = _wrapped(word, font, width, 3)
-    middle = 230 - len(lines) * int(font.size * 1.2) / 2
-    _draw_lines(draw, lines, font, left=left, width=width, top=int(middle), centered=True)
-    gap = 12
-    size = min(40, (width - (total - 1) * gap) // max(total, 1))  # eight or ten stars still fit the column
-    first = left + (width - total * size - (total - 1) * gap) / 2
-    for index in range(total):
-        _draw_star(draw, first + index * (size + gap) + size / 2, HEIGHT - 70, size / 2, filled=index < stars)
+    left, width = 476, WIDTH - 504
+    draw.line((left - 16, 80, left - 16, HEIGHT - 50), fill=_LIGHT_GREY, width=4)
+    _kids_frame(draw, caption, left + width / 2)
+    _big_words(draw, word, left + width / 2, width, 190, 230)
+    _star_rows(draw, stars, total, (left - 4, HEIGHT - 150, left + width + 4, HEIGHT - 30))
     return encode_png(canvas)
 
 
 def render_game_paused(title: str, language: str) -> bytes:
-    """Render a paused game: PAUSA in large letters, the game's name and how to go on."""
+    """Render a paused game: a pause sign, PAUSA in large letters, the game's name and how to go on."""
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)
     draw = ImageDraw.Draw(canvas)
     big, hint = (
@@ -505,24 +727,23 @@ def render_game_paused(title: str, language: str) -> bytes:
         if language == "es"
         else ("PAUSED", "Say “keep playing” or pat my head")
     )
-    _draw_glyphs_centered(draw, big, _font(150, bold=True), WIDTH / 2, 200)
+    _paint(canvas, (0, 0, WIDTH, 22), "stripes")
+    _paint(canvas, (0, HEIGHT - 22, WIDTH, HEIGHT), "stripes")
+    font = _display_font(150)
+    word_width = font.getlength(big)
+    disc = 170
+    left = (WIDTH - disc - 40 - word_width) / 2
+    draw.ellipse((left, 190 - disc / 2, left + disc, 190 + disc / 2), fill=0)
+    bar_width, bar_height = disc * 0.16, disc * 0.48
+    for offset in (-0.14, 0.14):
+        x = left + disc / 2 + offset * disc
+        draw.rounded_rectangle((x - bar_width / 2, 190 - bar_height / 2, x + bar_width / 2, 190 + bar_height / 2), radius=6, fill=255)  # fmt: skip
+    _draw_glyphs_centered(draw, big, font, left + disc + 40 + word_width / 2, 190)
     playing = f"Jugando {title}" if language == "es" else f"Playing {title}"
-    _draw_lines(draw, [playing], _font(36), left=20, width=WIDTH - 40, top=320, centered=True)
-    _draw_lines(draw, [hint], _font(28), left=20, width=WIDTH - 40, top=390, centered=True)
+    playing_font = _fitted(playing, WIDTH - 120, 36, 24)
+    _pill(draw, WIDTH / 2, 340, playing, playing_font, fill=_LIGHT_GREY, text_fill=0, height=60)
+    _draw_lines(draw, [hint], _font(30), left=20, width=WIDTH - 40, top=392, centered=True)
     return encode_png(canvas)
-
-
-def _draw_star(draw: ImageDraw.ImageDraw, x: float, y: float, radius: float, *, filled: bool) -> None:
-    """Draw a five-pointed star centered on ``(x, y)``: solid black, or a grey outline still to win."""
-    points = []
-    for index in range(10):
-        angle = math.pi / 2 + index * math.pi / 5
-        reach = radius if index % 2 == 0 else radius * 0.45
-        points.append((x + reach * math.cos(angle), y - reach * math.sin(angle)))
-    if filled:
-        draw.polygon(points, fill=0)
-    else:
-        draw.polygon(points, outline=_GREY, width=4)
 
 
 def _draw_glyphs_centered(

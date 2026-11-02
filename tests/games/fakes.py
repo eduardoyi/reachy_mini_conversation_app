@@ -19,8 +19,8 @@ Answer = Callable[[str], Awaitable[object]]
 class FakeReachy:
     """Game services that record everything; ``now`` is the clock unless ``real_clock``."""
 
-    def __init__(self, *, real_clock: bool = False) -> None:
-        """Start with nothing said or shown, at a fixed time unless ``real_clock``."""
+    def __init__(self, *, real_clock: bool = False, recorded: bool = False) -> None:
+        """Start with nothing said or shown, at a fixed time unless ``real_clock``; ``recorded`` plays clips."""
         self.now = 1000.0
         self.said: list[str] = []
         self.asked: list[tuple[str, Answer]] = []
@@ -42,6 +42,9 @@ class FakeReachy:
         self.drawn: list[list[str]] = []
         self.gestures: list[str] = []
         self.jev_answer: Callable[[], dict[str, dict[str, Any]]] | None = None
+        # Recorded lines played (their text and length in samples), and the answer each one waited for.
+        self.clips: list[tuple[str, int]] = []
+        self.clip_answers: list[Answer] = []
         self.services = GameServices(
             speak=self._speak,
             ask=lambda text, language, answer: (self.said.append(text), self.asked.append((text, answer))),
@@ -61,10 +64,25 @@ class FakeReachy:
             draw_pictures=self._draw_pictures,
             gesture=self._gesture,
             clock=time.monotonic if real_clock else (lambda: self.now),
+            say_audio=self._say_audio if recorded else None,
         )
 
     async def _speak(self, text: str, language: str) -> None:
         self.said.append(text)
+
+    async def _say_audio(
+        self,
+        rate: int,
+        samples: NDArray[np.int16],
+        text: str,
+        language: str,
+        answer: Answer | None,
+        *,
+        listen_s: float | None = None,
+    ) -> None:
+        self.clips.append((text, len(samples)))
+        if answer is not None:
+            self.clip_answers.append(answer)
 
     def _save_screen(self) -> Callable[[], None]:
         def restore() -> None:

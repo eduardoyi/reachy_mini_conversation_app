@@ -15,6 +15,7 @@ import hashlib
 import logging
 from typing import Final
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 import httpx
 import numpy as np
@@ -85,9 +86,12 @@ def louder(samples: Audio, gain: float) -> Audio:
 class Clips:
     """The host's recorded lines by moment and language."""
 
-    def __init__(self, folder: Path, rng: random.Random | None = None) -> None:
-        """Remember where the clips are; each is read when first played."""
+    def __init__(
+        self, folder: Path, rng: random.Random | None = None, lines: Mapping[str, Mapping[str, Sequence[str]]] = LINES
+    ) -> None:
+        """Remember where the clips of ``lines`` (Big Brain's unless given) are; each is read when first played."""
         self._folder = folder
+        self._lines = lines
         self._rng = rng or random.Random()
         self._cache: dict[Path, Audio] = {}
         self._last: dict[tuple[str, str], int] = {}
@@ -97,7 +101,7 @@ class Clips:
         return bool(self._takes(moment, language))
 
     def _takes(self, moment: str, language: str) -> list[int]:
-        count = len(LINES.get(moment, {}).get(language, ()))
+        count = len(self._lines.get(moment, {}).get(language, ()))
         return [take for take in range(1, count + 1) if self._path(moment, language, take).exists()]
 
     def _path(self, moment: str, language: str, take: int) -> Path:
@@ -116,7 +120,7 @@ class Clips:
         path = self._path(moment, language, take)
         if path not in self._cache:
             self._cache[path] = read_wav(path)
-        return shown(LINES[moment][language][take - 1]), self._cache[path]
+        return shown(self._lines[moment][language][take - 1]), self._cache[path]
 
 
 class Sounds:

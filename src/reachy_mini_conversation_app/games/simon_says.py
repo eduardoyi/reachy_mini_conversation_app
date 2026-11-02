@@ -6,7 +6,8 @@ doing it (for the 2-year-old) beside the words. For POSE_S of play, camera frame
 person in `frame` touching their nose?"); two sure frames out of the last three count, with a star and a cheer.
 Nobody loses: when no one does it, Reachy says "¡Así!" and goes on. Poses that need the whole body come after
 "¡Da un paso hacia atrás!", and "¡Ahora acércate!" brings them back. No trick rounds (without "Simón dice") yet.
-Spanish is Venezuelan.
+Spanish is Venezuelan. With recorded audio (games/kids_audio.py) the lines are recorded takes with sounds, a
+jingle opens the game and bouncy music plays quietly while the children hold a pose.
 """
 
 import random
@@ -29,12 +30,14 @@ from reachy_mini_conversation_app.games.hunt import (
     CHANGED_FRAME,
     CHECK_EVERY_S,
     RECHECK_STILL_S,
+    OTHER_ROUND_ANSWER_S,
     ask_again,
     thumbnail,
     hunt_phrases,
 )
 from reachy_mini_conversation_app.eink_display import render_game_prompt, render_game_picture
 from reachy_mini_conversation_app.games.catalog import SIMON_SAYS
+from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 
 
 logger = logging.getLogger(__name__)
@@ -154,9 +157,10 @@ class SimonSays(Game):
 
     info = SIMON_SAYS
 
-    def __init__(self, rng: random.Random | None = None) -> None:
-        """Pick poses with ``rng`` (seeded in tests)."""
+    def __init__(self, rng: random.Random | None = None, audio: KidsAudio | None = None) -> None:
+        """Pick poses with ``rng`` (seeded in tests); speak with ``audio`` when it is given."""
         self._rng = rng or random.Random()
+        self._audio = audio
         self._stars = 0
 
     @classmethod
@@ -168,11 +172,19 @@ class SimonSays(Game):
         """Every pose key (tests narrow it)."""
         return list(POSES)
 
+    async def _say(self, context: GameContext, moment: str, text: str, *, sounds: tuple[str, ...] = ()) -> None:
+        """Say a recorded take of ``moment`` with ``sounds``; ``text`` in Richie's own voice without audio."""
+        if self._audio is None:
+            await context.say(text)
+        else:
+            await self._audio.say(context, moment, sounds=sounds)
+
     async def play(self, context: GameContext) -> None:
         """Play sets of eight poses until nobody wants another."""
         self._draw_missing(context)
         language = context.language
-        await context.say(_START[language])
+        audio = self._audio
+        await self._say(context, "simon_start", _START[language], sounds=("intro_simon",))
         while True:
             self._stars = 0
             chosen = self._rng.sample(self.poses(), min(POSES_PER_GAME, len(self.poses())))
@@ -182,16 +194,24 @@ class SimonSays(Game):
             for number, key in enumerate(chosen, start=1):
                 pose = POSES[key]
                 if pose.body and not back:
-                    await context.say(_STEP_BACK[language])
+                    await self._say(context, "simon_step_back", _STEP_BACK[language], sounds=("tiptoe",))
                     back = True
                 if await self._pose(context, key, number, len(chosen)):
                     self._stars += 1
             context.show(render_game_prompt(WELL_DONE[language], self._stars, len(chosen)))
-            await context.say(STARS[language][self._stars])
+            celebrate = ("celebrate",) if self._stars else ()
+            await self._say(context, f"stars_{self._stars}", STARS[language][self._stars], sounds=celebrate)
             if back:
-                await context.say(_COME_CLOSER[language])  # back in close for "¿Otra vez?"
-            if not await ask_again(context):
-                await context.say(THANKS[language])
+                # Back in close for "¿Otra vez?"
+                await self._say(context, "simon_come_closer", _COME_CLOSER[language])
+            if audio is None:
+                again = await ask_again(context)
+            else:
+                again = await audio.ask_yes(context, "again", OTHER_ROUND_ANSWER_S)
+                if again:
+                    context.played()
+            if not again:
+                await self._say(context, "thanks", THANKS[language])
                 return
 
     def _draw_missing(self, context: GameContext) -> None:
@@ -218,22 +238,36 @@ class SimonSays(Game):
         pose = POSES[key]
         context.progress = f"Pose {number} of {total}: {pose.english}"
         context.show(self._screen(context, key, self._stars, total))
-        await context.say(_SAYS[language].format(pose=pose.spanish if language == "es" else pose.english))
+        says = _SAYS[language].format(pose=pose.spanish if language == "es" else pose.english)
+        await self._say(context, f"simon_{key}", says, sounds=("round",))
         if pose.gesture is not None and context.services.gesture is not None:
             await context.services.gesture(pose.gesture)
+        started = context.played_s
+        music = None
+        if self._audio is not None:
+            music = asyncio.get_running_loop().create_task(
+                self._audio.play_music(context, lambda _: "pose", lambda: context.played_s - started >= POSE_S),
+                name="simon-music",
+            )
         try:
             done = await self._look(context, key)
         finally:
+            if music is not None:
+                music.cancel()
             if pose.gesture is not None and context.services.gesture is not None:
                 await context.services.gesture("front")
         if done:
             context.played()
             context.services.emotion("happy")
-            await context.say(self._rng.choice(_PRAISE[language]))
+            praise = self._rng.choice(_PRAISE[language])
+            if self._audio is None:
+                await context.say(praise)
+            else:
+                await self._audio.say(context, "simon_praise", sounds=("snap",), after=("star",))
             context.show(self._screen(context, key, self._stars + 1, total))
             await context.sleep(1.0)
             return True
-        await context.say(_LIKE_THIS[language])
+        await self._say(context, "simon_like_this", _LIKE_THIS[language], sounds=("boing",))
         await context.sleep(1.5)
         return False
 

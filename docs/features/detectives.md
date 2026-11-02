@@ -106,7 +106,7 @@ parrot). A game picks a case never played in that mode, else the one played long
 | Cases | `games/detectives_case.py`, `games/detectives_cases/*.json` | `parse_case`, `load_cases`, `pick_case`, `CaseError`; the dataclasses `Case`, `Character`, `Clue`, `Motive` |
 | Witnesses | `games/detectives_witness.py` | `witness_instructions(case, character, found, language)`, `spoken()` (at most three sentences, no markdown), `gemini_witness(client, model)` |
 | Phones | `games/big_brain_phones.py` (shared, `page=`), `static/detectives/index.html` | the same server and code rules as Big Brain, serving Detectives' page |
-| Screens | `games/detectives_screens.py` | `render_join`, `render_board`, `render_card`, `render_solution` (800×480, four greys) |
+| Screens | `games/detectives_screens.py` | `render_join`, `render_board`, `render_card`, `render_solution` (800×480, four greys): a magnifying glass and crime-scene tape under every header, suspects as silhouettes (witnesses grey and tagged), evidence on numbered markers, players as name chips on the join screen, the culprit beside a mugshot |
 | Sounds | `games/big_brain_audio.Sounds` | Big Brain's `correct`, `drumroll`, `fanfare`, `wrong` from `GAME_DATA_DIR/big-brain/sounds/` when made; skipped otherwise |
 | Wiring | `catalog.py` `DETECTIVES`, `main._build_games`, `config.DETECTIVES_MODEL` | |
 
@@ -162,3 +162,8 @@ Richie speaks in his normal voice (`GameContext.say`); questions are heard throu
   worktree the PNGs are LFS pointer files and 98 display tests fail).
 - Not tested: a real Gemini model's witness answers, the phone page in a real browser or on Android, the TRMNL
   screens on the device, Richie's listening for questions on the robot, a real game night.
+
+## Changelog
+
+- 2026-11-02: Redesigned TRMNL screens in the case-file look described above (see also
+  [games.md](games.md#what-the-screens-look-like)).

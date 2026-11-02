@@ -1,13 +1,16 @@
-"""Make Big Brain's fixed host clips with ElevenLabs (docs/plans/party-games.md, "Host, sounds and music").
+"""Make the games' fixed host clips with ElevenLabs (docs/plans/party-games.md, "Host, sounds and music").
 
 Every take in ``games/big_brain_lines.py`` becomes ``<out>/<moment>/<language>-<take>.wav`` (24 kHz mono, what
 the game plays) in the chosen host
 voice on Eleven v4 Turbo, audio tags included. ``manifest.json`` records each clip's text, so a rerun makes only
 the clips whose text is new or changed. With ``--check``, Whisper transcribes every clip and flags any that
 read a tag aloud or say something other than the line; flagged clips are listed in ``check.json`` and can be
-remade by deleting them and running again.
+remade by deleting them and running again. ``--set kids`` makes the kids' games' lines (games/kids_lines.py)
+instead, in the voice given with ``--voice``.
 
 Usage: uv run python scripts/big_brain_voice.py --out ~/.local/share/reachy/game-data/big-brain/voice --check
+       uv run python scripts/big_brain_voice.py --set kids --voice VOICE_ID \
+           --out ~/.local/share/reachy/game-data/kids/voice --check
 """
 
 import os
@@ -24,6 +27,8 @@ import httpx
 from dotenv import find_dotenv, load_dotenv
 from openai import AsyncOpenAI
 
+from reachy_mini_conversation_app.games.kids_lines import TAGS as KIDS_TAGS
+from reachy_mini_conversation_app.games.kids_lines import LINES as KIDS_LINES
 from reachy_mini_conversation_app.games.big_brain_lines import TAGS, LINES, shown
 
 
@@ -39,12 +44,14 @@ def _words(text: str) -> list[str]:
     return re.sub(r"[^\w\s]", " ", text.lower()).split()
 
 
-async def make(client: httpx.AsyncClient, gate: asyncio.Semaphore, text: str, language: str, path: Path) -> None:
-    """Say ``text`` in the host voice and write it to ``path``, retrying while ElevenLabs is busy."""
+async def make(
+    client: httpx.AsyncClient, gate: asyncio.Semaphore, text: str, language: str, path: Path, voice: str = VOICE_ID
+) -> None:
+    """Say ``text`` in ``voice`` and write it to ``path``, retrying while ElevenLabs is busy."""
     async with gate:
         for attempt in range(8):
             response = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
                 params={"output_format": "pcm_24000"},
                 json={"text": text, "model_id": MODEL, "language_code": language},
             )
@@ -60,14 +67,16 @@ async def make(client: httpx.AsyncClient, gate: asyncio.Semaphore, text: str, la
             audio.writeframes(response.content)
 
 
-async def check(openai: AsyncOpenAI, gate: asyncio.Semaphore, text: str, language: str, path: Path) -> dict[str, Any]:
+async def check(
+    openai: AsyncOpenAI, gate: asyncio.Semaphore, text: str, language: str, path: Path, tags: frozenset[str] = TAGS
+) -> dict[str, Any]:
     """Transcribe a clip and compare it with its line."""
     async with gate:
         with path.open("rb") as audio:
             heard = (await openai.audio.transcriptions.create(model="whisper-1", file=audio, language=language)).text
     # A tag counts as read aloud only when its word is not part of the line itself ("We'll pause here").
     said_tags = [
-        tag for tag in TAGS if re.search(rf"\b{re.escape(tag)}\b", heard.lower()) and tag not in shown(text).lower()
+        tag for tag in tags if re.search(rf"\b{re.escape(tag)}\b", heard.lower()) and tag not in shown(text).lower()
     ]
     similarity = difflib.SequenceMatcher(None, _words(shown(text)), _words(heard)).ratio()
     return {"heard": heard, "tags_read_aloud": said_tags, "similarity": round(similarity, 2)}
@@ -78,7 +87,10 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="transcribe every clip and flag bad ones")
+    parser.add_argument("--set", default="big-brain", choices=("big-brain", "kids"), help="which game's lines")
+    parser.add_argument("--voice", default=VOICE_ID, help="the ElevenLabs voice id (Big Brain's host by default)")
     args = parser.parse_args()
+    lines, tags = (KIDS_LINES, KIDS_TAGS) if args.set == "kids" else (LINES, TAGS)
     load_dotenv(find_dotenv(usecwd=True))
     out: Path = args.out.expanduser()
     out.mkdir(parents=True, exist_ok=True)
@@ -89,7 +101,7 @@ async def main() -> None:
 
     wanted: dict[str, dict[str, list[dict[str, str]]]] = {}
     todo: list[tuple[str, str, Path]] = []
-    for moment, takes in LINES.items():
+    for moment, takes in lines.items():
         for language, lines in takes.items():
             entries = []
             for take, text in enumerate(lines, start=1):
@@ -105,7 +117,8 @@ async def main() -> None:
     gate = asyncio.Semaphore(CONCURRENCY)
     async with httpx.AsyncClient(headers=headers, timeout=120) as client:
         results = await asyncio.gather(
-            *(make(client, gate, text, language, path) for text, language, path in todo), return_exceptions=True
+            *(make(client, gate, text, language, path, args.voice) for text, language, path in todo),
+            return_exceptions=True,
         )
     failed = [(path, error) for (_, _, path), error in zip(todo, results) if isinstance(error, BaseException)]
     for path, error in failed:
@@ -125,7 +138,7 @@ async def main() -> None:
         ]
         check_gate = asyncio.Semaphore(8)
         checks = await asyncio.gather(
-            *(check(openai, check_gate, e["text"], lang, out / e["file"]) for _, lang, e in clips)
+            *(check(openai, check_gate, e["text"], lang, out / e["file"], tags) for _, lang, e in clips)
         )
         flagged = [
             {"file": entry["file"], "text": entry["text"], **result}

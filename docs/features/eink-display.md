@@ -264,7 +264,7 @@ flowchart LR
 | Gate | `tools/core_tools.py` `DISPLAY_TOOLS` | Present only with `TRMNL_ENABLED`; added automatically unless the profile's tools were customized |
 | Dependency | `ToolDependencies.display` | Built by `main._build_display()` |
 | Config | `config.py` | `TRMNL_ENABLED` (0), `TRMNL_PORT` (8090, 1024–65535), `TRMNL_REFRESH_SECONDS` (1, 1–3600), `DISPLAY_IMAGE_MODEL` (`gpt-image-2.5-flare`), `BRAVE_API_KEY`, `TYPESAFE_API_KEY`, `DISPLAY_CHECK_MODEL` (`jev-latest`) |
-| Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt` |
+| Assets | `static/eink/` | `reachy.png` (resting-card art, generated from photos of the robot), Atkinson Hyperlegible Regular/Bold (`Atkinson-*.ttf`, short names for the Windows wheel path budget) and its `OFL.txt`; Anton (`Anton.ttf`, cut to Latin-1 and common punctuation, 18 KB) for the game screens' titles and numbers, with `OFL-Anton.txt` |
 | Guidance | `profiles/household_companion/profile.md` | When to use the screen (explanations for how and why questions); Spanish-style pronunciation and Spanish meanings for Italian words |
 
 TRMNL device API, as served (firmware 1.8.17 checked):
@@ -330,6 +330,7 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 - Pillow (added for this feature): image decoding, scaling, text. HPND license, no network access.
 - `openai` (existing) for drawings and edits with `gpt-image-*` models; `google-genai` (existing) for Gemini image models and lesson captions.
 - Atkinson Hyperlegible, SIL Open Font License 1.1 (bundled with its license).
+- Anton, SIL Open Font License 1.1 (bundled with its license, no reserved font name, subset with fontTools).
 
 ## Testing
 
@@ -360,6 +361,9 @@ reusing the cached drawing and a list; the device fetched each at its next check
 through a spoken conversation.
 
 ## Changelog
+
+- 2026-11-02: Game screens redesigned (see [games.md](games.md#what-the-screens-look-like)); Anton bundled for their
+  titles and numbers.
 
 - 2026-10-30: Writing practice (`kind=writing`, quick command "enséñame a escribir X"): one capital at a time,
   stepped by pats or "¡ya!" without the name, the letter's name and sound spoken from cached lines; no cloud

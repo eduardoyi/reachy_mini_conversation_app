@@ -44,6 +44,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_game_paused,
     render_game_prompt,
     render_now_playing,
+    render_game_picture,
 )
 from reachy_mini_conversation_app.web_pictures import WebPicture, PictureError
 
@@ -170,6 +171,14 @@ def test_light_grey_fills_become_one_even_grey() -> None:
         ),
         pytest.param(lambda: render_game_prompt("ROJO", 2, 5, "Busca algo…"), id="game-prompt"),
         pytest.param(lambda: render_game_prompt("AMARILLO", 5, 5), id="game-prompt-all-stars"),
+        pytest.param(
+            lambda: render_game_prompt("Pon las manos detrás de la cabeza", 3, 8, "Simón dice…"),
+            id="game-prompt-phrase",
+        ),  # fmt: skip
+        pytest.param(
+            lambda: render_game_picture(Image.new("L", (300, 400), 170), "Manos en los cachetes", 5, 8, "Simón dice…"),
+            id="game-picture-eight-stars",
+        ),
         pytest.param(lambda: render_game_paused("a los colores", "es"), id="game-paused"),
         pytest.param(lambda: render_game_paused("color hunt", "en"), id="game-paused-english"),
         pytest.param(

@@ -84,6 +84,7 @@ class ColorHunt(Hunt):
 
     info = COLOR_HUNT
     round_s = ROUND_S
+    prefix = "colors"
 
     @classmethod
     def phrases(cls) -> frozenset[str]:
@@ -120,3 +121,9 @@ class ColorHunt(Hunt):
     def name(self, target: str, language: str) -> str:
         """Return the color's name."""
         return _name(target, language)
+
+    def moments(self, kind: str, target: str, seen: str = "") -> tuple[str, ...]:
+        """Return the recorded moments; "wrong" says which color it is ("Eso es azul") and the target again."""
+        if kind == "wrong" and seen in TARGETS:
+            return (f"colors_seen_{seen}", f"colors_again_{target}")
+        return super().moments(kind, target, seen)

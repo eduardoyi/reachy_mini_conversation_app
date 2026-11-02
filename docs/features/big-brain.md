@@ -19,7 +19,8 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
 1. **Start:** "Richie, juguemos Big Brain" (or "trivia", "el concurso", "let's play Big Brain"), then "sí". Gemini
    can also start it with `play_game` (`bigbrain`).
 2. **Join:** the TRMNL shows a QR code, a six-letter code and the four teams (red, blue, green, yellow) with
-   their players. Each phone scans it, types a name, picks a team. Intro music, then the welcome and how to join.
+   their players. On the grey screen each team is also a shape: red a black circle, blue a striped square, green a
+   dark-grey triangle, yellow a light-grey diamond. Each phone scans it, types a name, picks a team. Intro music, then the welcome and how to join.
    Any player taps "¡Empezar!" (or the room says "¡empezamos!"); a "Modo niños" switch sits next to it.
 3. **Board (20 squares):** five columns (themed topics such as "Mitología griega", one broad category), four rows
    of 200/400/600/800 points from the easiest to the hardest quarter of the bank. Richie names the team in
@@ -172,3 +173,11 @@ big-brain/rulings.json          Jev's and the room's rulings
 - QR codes decoded by macOS Core Image for 2, 33, 72 and 100-byte texts (versions 1, 3, 4, 5).
 - The phone page was tested by its author against a stand-in server in the browser at 360 px; not yet against
   the real server or an Android phone. Not yet played on the robot.
+
+## Changelog
+
+- 2026-11-02: Redesigned TRMNL screens (see [games.md](games.md#what-the-screens-look-like)): a black header
+  with the bulb and marquee bulbs; the board's values as black tiles that turn hatched once played, the category
+  on a grey band over each clue, hidden squares on a notched ribbon, the answer in a framed card, a tick or cross
+  with the points in the reveal, a sunburst and trophy for the winner, and a tile per team (shape, name, points)
+  with the team in control in black.

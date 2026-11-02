@@ -52,7 +52,8 @@ guesses. Richie says them aloud one by one; the earlier he gets it, the more squ
 
 The phone server is Big Brain's (`Phones`, with `page=` for this game's own page) on the same port and public
 address; only one game runs at a time. The join and winner screens are Big Brain's (`render_join` takes a
-`title`, default "BIG BRAIN"); the track is `scribble_screens.render_track`; the drawing is shown with
+`title`, default "BIG BRAIN"); the track is `scribble_screens.render_track` (a grey lane per team, covered squares in black, the team's shape as its
+token, a checkered finish, the lane on turn outlined); the drawing is shown with
 `eink_display.render_photo`.
 
 ## Canonical files and contracts
@@ -123,3 +124,8 @@ address; only one game runs at a time. The join and winner screens are Big Brain
   in the worktree; as bare pointers they fail the display tests).
 - Not yet done: the phone page in a real browser or on a phone, the real Gemini model on real drawings (hit
   rate and latency), the tick-tock and timings in a real room, and the TRMNL screens on the device.
+
+## Changelog
+
+- 2026-11-02: Redesigned track: the shared game header with a pencil and a checkered edge, team-shaped tokens and
+  black progress (see [games.md](games.md#what-the-screens-look-like)).

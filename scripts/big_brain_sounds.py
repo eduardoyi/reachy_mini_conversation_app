@@ -1,12 +1,14 @@
-"""Make Big Brain's sounds and music with ElevenLabs (docs/plans/party-games.md, "Big Brain build").
+"""Make the games' sounds and music with ElevenLabs (docs/plans/party-games.md, "Big Brain build").
 
 Each sound is several takes of an ElevenLabs sound effect (200 credits each) and each piece of music several
 takes of Eleven Music (900 credits a minute), all our own: the prompts ask for original quiz-show moments and
 never for a show's theme. Every take is kept as ``<out>/<name>/take-N.mp3`` and as the 24 kHz mono WAV the
 game plays (converted with ffmpeg); ``chosen.json`` names the take the game uses, the first until Eduardo picks
-another. A rerun makes only missing takes.
+another. A rerun makes only missing takes. ``--set kids`` makes the kids' games' set instead (the color hunt,
+the treasure hunt and Simón dice: games/kids_audio.py), two takes each.
 
 Usage: uv run python scripts/big_brain_sounds.py --out ~/.local/share/reachy/game-data/big-brain/sounds
+       uv run python scripts/big_brain_sounds.py --set kids --out ~/.local/share/reachy/game-data/kids/sounds
 """
 
 import os
@@ -22,7 +24,7 @@ from dotenv import find_dotenv, load_dotenv
 
 TAKES = 3
 CONCURRENCY = 4  # the Creator plan allows five requests at once
-NOT_A_COPY = "Original, not imitating any TV show or existing theme."
+NOT_A_COPY = "Original, not imitating any TV show, song or existing theme."
 
 # Name: (seconds, prompt).
 SOUNDS: dict[str, tuple[float, str]] = {
@@ -86,6 +88,45 @@ MUSIC: dict[str, tuple[float, str]] = {
     ),
 }
 
+# The kids' games: short, soft and bright, for children of 2 to 6 with adults in the room. Music is a quiet bed.
+KIDS_SOUNDS: dict[str, tuple[float, str]] = {
+    "found": (1.8, "Magical sparkly chime cascade ending in a happy little xylophone ta-da, a small child found the "
+              "right thing in a toddler game. Soft and bright, not loud."),
+    "star": (1.0, "Single bright twinkling star ding with a gentle shimmer, earning a star in a children's game."),
+    "boing": (0.8, "Soft comic cartoon boing with a tiny wobble, a gentle not-quite sound in a toddler game, "
+              "friendly, never harsh."),
+    "time_up": (1.5, "Gentle descending slide whistle into a soft marimba plonk, time is up in a toddler game, cute "
+                "not sad."),
+    "round": (1.0, "Quick playful whoosh with a bubbly pop and a tiny bell, a new round starts in a children's game."),
+    "cheer": (2.0, "A small group of happy young children cheering yay and clapping, short and joyful, not "
+              "screaming."),
+    "snap": (0.9, "Playful camera shutter click with a sparkly twinkle, a photo of a child's funny pose."),
+    "tiptoe": (1.2, "Three soft cartoon tiptoe boops stepping backwards, playful."),
+}  # fmt: skip
+KIDS_MUSIC: dict[str, tuple[float, str]] = {
+    "intro_colors": (10.0, "Short bright playful jingle for a toddler color game: ukulele, glockenspiel and "
+                     "handclaps, a happy rainbow feeling, ends with a cute final note. Instrumental."),
+    "intro_treasure": (10.0, "Short adventurous playful jingle for little kids hunting treasure around the house: "
+                       "pizzicato strings, marimba and a tiny swashbuckling flourish, ends with a cute final note. "
+                       "Instrumental."),
+    "intro_simon": (10.0, "Short bouncy funky jingle for a kids' copy-the-pose game: bass, claps and a silly "
+                    "kazoo-like synth, ends with a cute final note. Instrumental."),
+    "hunt": (30.0, "Light playful searching music for a toddler hunt game, about 110 bpm: pizzicato strings, "
+             "marimba, soft glockenspiel and brushed percussion, curious and a little sneaky, steady, no big "
+             "changes, loops smoothly, background level. Instrumental."),
+    "hunt_hurry": (20.0, "Faster, more exciting playful searching music for young kids, about 150 bpm: ticking "
+                   "woodblock, pizzicato and marimba, a hurry-up feeling that is fun, not stressful, steady, loops "
+                   "smoothly, background level. Instrumental."),
+    "pose": (20.0, "Bouncy freeze-dance music for young kids holding a pose, about 120 bpm: ukulele, claps and a "
+             "light synth bass, cheerful and silly, steady, loops smoothly, background level. Instrumental."),
+    "celebrate": (10.0, "Short joyful celebration for young kids finishing a game: glockenspiel and ukulele "
+                  "fanfare with handclaps and a little ta-da ending. Instrumental."),
+}  # fmt: skip
+SETS: dict[str, tuple[dict[str, tuple[float, str]], dict[str, tuple[float, str]], int]] = {
+    "big-brain": (SOUNDS, MUSIC, TAKES),
+    "kids": (KIDS_SOUNDS, KIDS_MUSIC, 2),
+}
+
 
 async def sound(client: httpx.AsyncClient, seconds: float, prompt: str) -> bytes:
     """Return one sound effect take as mp3."""
@@ -122,12 +163,14 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--only", default="", help="only these sounds, comma-separated (e.g. intro_hp)")
+    parser.add_argument("--set", default="big-brain", choices=SETS, help="which game's sounds")
     args = parser.parse_args()
     load_dotenv(find_dotenv(usecwd=True))
     out: Path = args.out.expanduser()
     gate = asyncio.Semaphore(CONCURRENCY)
-    jobs = [(name, "sound", seconds, prompt) for name, (seconds, prompt) in SOUNDS.items()]
-    jobs += [(name, "music", seconds, prompt) for name, (seconds, prompt) in MUSIC.items()]
+    sounds, musics, takes = SETS[args.set]
+    jobs = [(name, "sound", seconds, prompt) for name, (seconds, prompt) in sounds.items()]
+    jobs += [(name, "music", seconds, prompt) for name, (seconds, prompt) in musics.items()]
     if args.only:
         jobs = [job for job in jobs if job[0] in args.only.split(",")]
 
@@ -152,7 +195,7 @@ async def main() -> None:
             return None
 
         errors = await asyncio.gather(
-            *(take(*job, number) for job in jobs for number in range(1, TAKES + 1)), return_exceptions=True
+            *(take(*job, number) for job in jobs for number in range(1, takes + 1)), return_exceptions=True
         )
     for error in errors:
         if error:

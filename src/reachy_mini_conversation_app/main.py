@@ -156,6 +156,8 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.games.detectives import Detectives, DetectivesSetup
+    from reachy_mini_conversation_app.games.kids_audio import KidsAudio
+    from reachy_mini_conversation_app.games.kids_lines import LINES as KIDS_LINES
     from reachy_mini_conversation_app.games.simon_says import SimonSays
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
     from reachy_mini_conversation_app.games.scribble_rush import ScribbleRush, GeminiGuesser, ScribbleSetup
@@ -281,8 +283,17 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         gesture=gesture,
         say_audio=say_audio,
     )
+    game_data = Path(config.GAME_DATA_DIR)
+    # The kids' games' recorded lines, sounds and music (games/kids_audio.py); without them, Richie's own voice.
+    kids_audio = KidsAudio(game_data / "kids", KIDS_LINES)
     games: dict[str, Callable[[], Game]] = (
-        {"colors": ColorHunt, "treasure": TreasureHunt, "simon": SimonSays} if deps.camera_enabled else {}
+        {
+            "colors": lambda: ColorHunt(audio=kids_audio),
+            "treasure": lambda: TreasureHunt(audio=kids_audio),
+            "simon": lambda: SimonSays(audio=kids_audio),
+        }
+        if deps.camera_enabled
+        else {}
     )
     gemini_key = (config.GEMINI_API_KEY or "").strip()
     if deps.camera_enabled and gemini_key:
@@ -292,7 +303,6 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             public_url=config.BIG_BRAIN_PUBLIC_URL,
         )
         games["scribble"] = lambda: ScribbleRush(scribble)
-    game_data = Path(config.GAME_DATA_DIR)
     if (game_data / "trivia-bank" / "bank.jsonl").is_file():
         setup = BigBrainSetup(
             data_dir=game_data,

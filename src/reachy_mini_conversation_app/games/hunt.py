@@ -6,6 +6,10 @@ is someone holding an object up to the camera, and is it what was asked for. Two
 finding it win a star; something already in view when the round starts counts only after it has left the view.
 A sure "that is something else" is said at most every WRONG_EVERY_S. Five rounds, nobody loses, then
 "¿Otra vez?". The color hunt and the treasure hunt differ only in what they ask for and how Jev is asked.
+
+With recorded audio (games/kids_audio.py) Richie says varied recorded lines with sounds around them, a jingle
+opens the game, and a quiet music bed replaces the tune: it switches to a faster piece for the last HURRY_S, when
+he also says to hurry, and in long rounds he nudges once halfway if nothing was found yet.
 """
 
 import io
@@ -25,6 +29,7 @@ from reachy_mini_conversation_app.games.base import Game, GameContext
 from reachy_mini_conversation_app.eink_display import render_game_prompt
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE
 from reachy_mini_conversation_app.games.catalog import YES_WORDS, words
+from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +48,12 @@ WRONG_EVERY_S: Final[float] = 5.0
 OTHER_ROUND_ANSWER_S: Final[float] = 20.0
 # Held for the picture of what to find before the round starts with the word alone.
 PICTURE_WAIT_S: Final[float] = 3.0
+# With recorded audio: the faster music and "¡Rápido!" for the last HURRY_S of a round of at least HURRY_MIN_S,
+# and one nudge at NUDGE_AT of a round of at least NUDGE_MIN_S.
+HURRY_S: Final[float] = 10.0
+HURRY_MIN_S: Final[float] = 25.0
+NUDGE_AT: Final[float] = 0.45
+NUDGE_MIN_S: Final[float] = 45.0
 
 HELD_QUESTION: Final[dict[str, Any]] = {
     "type": "noul",
@@ -131,10 +142,13 @@ class Hunt(Game):
     """A finding game: subclasses say what to find, how Jev is asked, and what Reachy says."""
 
     round_s: float = 30.0
+    # The game's recorded moments start with this ("colors_find_red"); see games/kids_lines.py.
+    prefix: str = ""
 
-    def __init__(self, rng: random.Random | None = None) -> None:
-        """Pick what to find with ``rng`` (seeded in tests)."""
+    def __init__(self, rng: random.Random | None = None, audio: KidsAudio | None = None) -> None:
+        """Pick what to find with ``rng`` (seeded in tests); speak with ``audio`` when it is given."""
         self._rng = rng or random.Random()
+        self._audio = audio
         self._stars = 0
         self._round = 0
 
@@ -160,6 +174,17 @@ class Hunt(Game):
         """Return the target's name as the screen shows it."""
         raise NotImplementedError
 
+    def moments(self, kind: str, target: str, seen: str = "") -> tuple[str, ...]:
+        """Return the recorded moments for ``kind`` (as ``line``); "wrong" names the target again."""
+        prefix = self.prefix
+        return {
+            "start": (f"{prefix}_start",),
+            "find": (f"{prefix}_find_{target}",),
+            "found": (f"{prefix}_found_{target}",),
+            "wrong": ("wrong", f"{prefix}_again_{target}"),
+            "time_up": ("time_up",),
+        }[kind]
+
     def prepare(self, context: GameContext) -> None:
         """Get ready as the game starts (the treasure hunt draws its missing pictures)."""
 
@@ -173,11 +198,22 @@ class Hunt(Game):
     def paused(self, context: GameContext) -> None:
         """Nothing to stop: the tune waits for play to resume, and a wake already cut what was queued."""
 
+    async def _say(
+        self, context: GameContext, kind: str, target: str = "", seen: str = "", *, sounds: tuple[str, ...] = (),
+        before: tuple[str, ...] = (), after: tuple[str, ...] = (),
+    ) -> None:  # fmt: skip
+        """Say the line for ``kind``: recorded (with ``before`` moments and the sounds) when there is audio."""
+        if self._audio is None:
+            await context.say(self.line(kind, target, context.language, seen))
+            return
+        await self._audio.say(context, *before, *self.moments(kind, target, seen), sounds=sounds, after=after)
+
     async def play(self, context: GameContext) -> None:
         """Play rounds of five until nobody wants another."""
         language = context.language
+        audio = self._audio
         self.prepare(context)
-        await context.say(self.line("start", "", language))
+        await self._say(context, "start", sounds=(f"intro_{self.prefix}",))
         previous = ""
         while True:
             self._stars = 0
@@ -192,35 +228,72 @@ class Hunt(Game):
                     self._stars += 1
                 context.progress = f"Round {self._round} of {ROUNDS}, {self._stars} star{'s' * (self._stars != 1)}"
             context.show(render_game_prompt(WELL_DONE[language], self._stars, ROUNDS))
-            await context.say(STARS[language][self._stars])
-            if not await ask_again(context):
-                await context.say(THANKS[language])
+            if audio is None:
+                await context.say(STARS[language][self._stars])
+                again = await ask_again(context)
+            else:
+                await audio.say(context, f"stars_{self._stars}", sounds=("celebrate",) if self._stars else ())
+                again = await audio.ask_yes(context, "again", OTHER_ROUND_ANSWER_S)
+                if again:
+                    context.played()
+            if not again:
+                if audio is None:
+                    await context.say(THANKS[language])
+                else:
+                    await audio.say(context, "thanks")
                 return
 
     async def _play_round(self, context: GameContext, target: str) -> bool:
         """One round: name ``target``, play the tune and look until it is found or time is up."""
-        language = context.language
         context.progress = f"Round {self._round} of {ROUNDS}: {self.name(target, 'en')}"
         context.show(await self.screen(context, target, self._stars))
-        await context.say(self.line("find", target, language))
+        opening = "round_first" if self._round == 1 else "round_last" if self._round == ROUNDS else "round_next"
+        await self._say(context, "find", target, sounds=("round",), before=(opening,))
         started = context.played_s
-        tune = asyncio.get_running_loop().create_task(self._play_tune(context, started), name="hunt-tune")
+        loop = asyncio.get_running_loop()
+        tunes = [loop.create_task(self._play_tune(context, started), name="hunt-tune")]
+        if self._audio is not None:
+            tunes.append(loop.create_task(self._coach(context, started), name="hunt-coach"))
         try:
             found = await self._look(context, target, started)
         finally:
-            tune.cancel()
+            for task in tunes:
+                task.cancel()
         if found:
             context.played()
             context.services.emotion("happy")
-            await context.say(self.line("found", target, language))
+            await self._say(context, "found", target, sounds=("found",), after=("star",))
             context.show(await self.screen(context, target, self._stars + 1))
             await context.sleep(1.0)
             return True
-        await context.say(self.line("time_up", target, language))
+        await self._say(context, "time_up", target, sounds=("time_up",))
         return False
 
+    async def _coach(self, context: GameContext, started: float) -> None:
+        """With recorded audio: one nudge halfway through a long round, and "¡Rápido!" near the end."""
+        assert self._audio is not None
+        cues = []
+        if self.round_s >= NUDGE_MIN_S:
+            cues.append((self.round_s * NUDGE_AT, "nudge"))
+        if self.round_s >= HURRY_MIN_S:
+            cues.append((self.round_s - HURRY_S, "hurry"))
+        for at, moment in cues:
+            await context.sleep(max(0.0, at - (context.played_s - started)))
+            await self._audio.say(context, moment)
+
     async def _play_tune(self, context: GameContext, started: float) -> None:
-        """Play the tune, faster as the round goes on, while the game is not paused and Reachy is free."""
+        """Play the tune, faster as the round goes on, while the game is not paused and Reachy is free.
+
+        With recorded music, the music bed instead: the faster piece for the last HURRY_S.
+        """
+        if self._audio is not None and self._audio.music("hunt") is not None:
+            hurry_from = self.round_s - HURRY_S if self.round_s >= HURRY_MIN_S else self.round_s
+            await self._audio.play_music(
+                context,
+                lambda elapsed: "hunt_hurry" if elapsed >= hurry_from else "hunt",
+                lambda: context.played_s - started >= self.round_s,
+            )
+            return
         beat = 0
         while context.played_s - started < self.round_s:
             await context.playing()
@@ -268,7 +341,7 @@ class Hunt(Game):
                 context.played()
                 if check.wrong and not check.match and context.played_s - wrong_said_at >= WRONG_EVERY_S:
                     wrong_said_at = context.played_s
-                    await context.say(self.line("wrong", target, context.language, check.seen))
+                    await self._say(context, "wrong", target, check.seen, sounds=("boing",))
                     recent.clear()
         return False
 

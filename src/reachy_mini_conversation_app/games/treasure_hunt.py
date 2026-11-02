@@ -120,6 +120,7 @@ class TreasureHunt(Hunt):
 
     info = TREASURE_HUNT
     round_s = ROUND_S
+    prefix = "treasure"
 
     @classmethod
     def phrases(cls) -> frozenset[str]:
