@@ -369,10 +369,11 @@ On macOS the launcher also tunes the camera, whose factory image is dark and fla
 for Gemini, the face tracker and photos. It builds `scripts/uvc-ctl.c` once with the Xcode
 Command Line Tools and sets `REACHY_CAMERA_EXPOSURE_PRIORITY` (default `1`: in dim light the
 camera drops frames to expose longer than 1/60 s, about twice as bright in a lamp-lit room;
-`0` keeps 60 fps), `REACHY_CAMERA_BRIGHTNESS` (`0`, range -64 to 64), `REACHY_CAMERA_GAMMA` (`130`, 80 to 160), `REACHY_CAMERA_CONTRAST` (`1`, 0 to
+`0` keeps 60 fps), `REACHY_CAMERA_FOCUS` (`860`, range 0 to 1023, higher is nearer; the camera's
+autofocus settles too far and leaves the room soft; `auto` turns it back on), `REACHY_CAMERA_BRIGHTNESS` (`0`, range -64 to 64), `REACHY_CAMERA_GAMMA` (`130`, 80 to 160), `REACHY_CAMERA_CONTRAST` (`1`, 0 to
 95), and `REACHY_CAMERA_SHARPNESS` (`3`, 0 to 7). Set one empty to leave it alone,
-or `REACHY_CAMERA_TUNING=0` to leave the camera unchanged. If the image stays soft,
-see Pollen's troubleshooting entry "The camera can't focus".
+or `REACHY_CAMERA_TUNING=0` to leave the camera unchanged. If the image is still soft, check
+the lens for smudges and dust, or move `REACHY_CAMERA_FOCUS` toward where people usually stand.
 
 Then add this to the ignored `.env`:
 

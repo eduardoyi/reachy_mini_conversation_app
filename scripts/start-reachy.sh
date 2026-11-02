@@ -38,10 +38,15 @@ LOCAL_STT_ENGINE="${LOCAL_STT_ENGINE:-whisper}"
 # 1/60 s, and turns up the gain instead (lamp-lit room 2026-11-02: median 66 of 255). Exposure
 # priority 1 lets it drop frames to expose longer (same room: median 144), so no brightness lift
 # is needed: +12 only greyed the blacks. Higher gamma brightens mid-tones; sharpness gets a nudge.
-# Ranges: exposure priority 0..1, brightness -64..64, gamma 80..160, contrast 0..95, sharpness
-# 0..7. Set one empty to leave it alone, or REACHY_CAMERA_TUNING=0 to leave the camera unchanged.
+# Autofocus parks the lens at 590-650, too far for anything in the room; fixed at 860 (higher is
+# nearer) the toy shelf at ~3 m was 3x sharper, the far wall 1.5x and an armchair at ~1 m 1.7x
+# (2026-11-02 sweep). REACHY_CAMERA_FOCUS=auto turns autofocus back on.
+# Ranges: exposure priority 0..1, focus 0..1023 or auto, brightness -64..64, gamma 80..160,
+# contrast 0..95, sharpness 0..7. Set one empty to leave it alone, or REACHY_CAMERA_TUNING=0 to
+# leave the camera unchanged.
 REACHY_CAMERA_TUNING="${REACHY_CAMERA_TUNING:-1}"
 REACHY_CAMERA_EXPOSURE_PRIORITY="${REACHY_CAMERA_EXPOSURE_PRIORITY-1}"
+REACHY_CAMERA_FOCUS="${REACHY_CAMERA_FOCUS-860}"
 REACHY_CAMERA_BRIGHTNESS="${REACHY_CAMERA_BRIGHTNESS-0}"
 REACHY_CAMERA_GAMMA="${REACHY_CAMERA_GAMMA-130}"
 REACHY_CAMERA_CONTRAST="${REACHY_CAMERA_CONTRAST-1}"
@@ -64,13 +69,16 @@ tune_camera() {
   fi
   # Reachy Mini camera 38fb:1002: name:unit:selector[:bytes], camera terminal 1 and processing unit 2.
   local control name unit selector value applied=()
-  for control in exposure_priority:1:3:1 brightness:2:2 contrast:2:3 sharpness:2:8 gamma:2:9; do
+  # Autofocus goes off before the lens is placed.
+  for control in exposure_priority:1:3:1 autofocus:1:8:1 focus:1:6 brightness:2:2 contrast:2:3 sharpness:2:8 gamma:2:9; do
     name="${control%%:*}"
     unit="${control#*:}"
     selector="${unit#*:}"
     unit="${unit%%:*}"
     case "$name" in
       exposure_priority) value="$REACHY_CAMERA_EXPOSURE_PRIORITY" ;;
+      autofocus) [[ "$REACHY_CAMERA_FOCUS" == auto ]] && value=1 || value="${REACHY_CAMERA_FOCUS:+0}" ;;
+      focus) [[ "$REACHY_CAMERA_FOCUS" == auto ]] && value="" || value="$REACHY_CAMERA_FOCUS" ;;
       brightness) value="$REACHY_CAMERA_BRIGHTNESS" ;;
       contrast) value="$REACHY_CAMERA_CONTRAST" ;;
       sharpness) value="$REACHY_CAMERA_SHARPNESS" ;;
