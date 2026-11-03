@@ -160,6 +160,13 @@ Architecture overview: [`README.md`](README.md#architecture).
 
 - **Adding a tool:** subclass `Tool` from `tools/core_tools.py` in its own file under `tools/`. Define `name`, `description`, `parameters_schema`, and an async `__call__(self, deps: ToolDependencies, **kwargs)` returning a `dict`. Return `{"error": ...}` on failure instead of raising into the loop. Copy an existing tool such as `tools/move_head.py`.
 - **Adding a personality:** add a directory under `profiles/`, following an existing one (e.g. `profiles/default/`).
+- **Adding a game:** a new game ships with all of its assets, made and put in the right place in the same change, never left for later:
+  - its catalog entry (`games/catalog.py`, plus `KIDS_GAMES` for a kids' game) and its registration in `main._build_games`;
+  - its Games-tab card: an entry in `GAME_CARDS` in `static/admin/admin.js` on the right shelf (`party`, `editions` or `little`), and its card art at `static/admin/games/<key>.webp`. The art is 768×512 WebP in Git LFS, made with the image connector using the existing cards as style references. A game without an entry falls onto the party shelf with a blank picture. `tests/admin/test_game_cards.py` checks every game has both;
+  - its recorded lines (with ElevenLabs audio tags), recorded with `scripts/big_brain_voice.py` into `game-data/` on the Mac mini, and its sounds and music, made with `scripts/big_brain_sounds.py` on the laptop (the mini has no ffmpeg) and copied to the mini's `game-data/`;
+  - any screen drawings it needs, passed to `draw_pictures` so they are made in the background on first play.
+
+  Say what the recording and generation will cost (ElevenLabs characters and credits, image calls) when asking to deploy.
 
 ## Commands
 

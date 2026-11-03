@@ -156,6 +156,8 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   like a chicken) with its drawing. A pat or "¡listo!" (or 15 s), a cheer, then "¿Otra vez?", which keeps the
   names. Nobody loses.
 - The head is held still the whole game (`Game.holds_head`), so pats count while playing.
+- In the admin app it is "Crazy Hen" on the "For little ones" shelf, with its own card art
+  (`static/admin/games/gallina.webp`).
 
 ### Recorded voice, sounds and music (the three kids' games)
 

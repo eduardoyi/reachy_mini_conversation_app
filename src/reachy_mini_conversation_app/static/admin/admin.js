@@ -381,11 +381,12 @@ const GAME_CARDS = {
   colors: { name: "Color Hunt", shelf: "little", facts: ["Camera"] },
   treasure: { name: "Treasure Hunt", shelf: "little", facts: ["Camera"] },
   simon: { name: "Simon Says", shelf: "little", facts: ["Camera"] },
+  gallina: { name: "Crazy Hen", shelf: "little", facts: ["Any number of kids", "No camera"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
   ["editions", "Big Brain editions", "The same show with a whole board about one world."],
-  ["little", "For little ones", "No phones: kids show Reachy things and he watches."],
+  ["little", "For little ones", "No phones: kids play with Reachy out loud, and he watches or listens."],
 ];
 const SAY = { es: (title) => `Juguemos ${title}`, en: (title) => `Let's play ${title}` };
 

@@ -73,3 +73,6 @@ forfeit. Nobody loses. Then "¿Otra vez?", like the other kids' games.
   moments in `kids_lines.py`, sounds and music prompts, the catalog entry, `Game.holds_head` (pats only
   registered while the head is held, which the host did only while asking or paused). 20 tests. Lines, sounds and
   drawings not made yet; not played yet.
+- 2026-11-03: Deployed; 362 lines recorded, sounds and music made and copied to the mini. Its Games-tab card
+  added after Eduardo saw it on the party shelf with no picture: "Crazy Hen" on the kids' shelf with its art.
+  AGENTS.md now says a new game ships with all its assets, and a test checks every game has a card and art.
