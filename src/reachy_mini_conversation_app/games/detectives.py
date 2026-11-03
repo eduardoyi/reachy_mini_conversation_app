@@ -500,6 +500,9 @@ class Detectives(Game):
                 await self._say(self._line("no_cases"))
                 return
             self._case = case
+            # Spoken questions name the characters and the evidence: the speech model leans toward them.
+            names = [c.name[lang] for c in case.characters for lang in ("es", "en")]
+            context.services.hint_answers(names + [clue.title[lang] for clue in case.clues for lang in ("es", "en")])
             await asyncio.to_thread(remember_played, self._setup.history, case.id)
             logger.info("Detectives: case %s, %d players", case.id, len(self._order))
             await self._introduce()

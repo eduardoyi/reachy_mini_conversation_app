@@ -316,6 +316,7 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
     assert _said(said, "team_top") >= 1 and _said(said, "cleared") == 3
     assert _said(said, "winner") == _said(said, "winner_red") == 1 and _said(said, "top_sheep") == 1
     assert "¡Ana!" in said
+    assert any("Nevera" in words and "refrigerator" in words for words in reachy.hints)  # each board's answers
     assert len(read_history(tmp_path / "sheeple" / "history.json")) == sheeple.ROUNDS
     assert game.snapshot(room.red)["sheep"][0]["name"] == "Ana"
 

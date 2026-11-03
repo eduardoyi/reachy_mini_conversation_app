@@ -876,6 +876,8 @@ class Config:
     TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
     # Big Brain (games/big_brain.py): the host voice, and its clue bank, clips and sounds.
     ELEVENLABS_API_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip() or None
+    # Game answers (the words after a game's beep) are heard by ElevenLabs Scribe v2 when the key is set.
+    GAME_ANSWERS_SCRIBE = _env_flag("GAME_ANSWERS_SCRIBE", default=True)
     GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
     # The phones join Big Brain on this port of the home Wi-Fi, only while a game runs.
     BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
@@ -1120,6 +1122,7 @@ def refresh_runtime_config_from_env() -> None:
     config.BRAVE_API_KEY = (os.getenv("BRAVE_API_KEY") or "").strip() or None
     config.TYPESAFE_API_KEY = (os.getenv("TYPESAFE_API_KEY") or "").strip() or None
     config.ELEVENLABS_API_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip() or None
+    config.GAME_ANSWERS_SCRIBE = _env_flag("GAME_ANSWERS_SCRIBE", default=True)
     config.GAME_DATA_DIR = os.path.expanduser(os.getenv("GAME_DATA_DIR") or "~/.local/share/reachy/game-data")
     config.BIG_BRAIN_PORT = int(os.getenv("BIG_BRAIN_PORT") or 7880)
     config.BIG_BRAIN_PUBLIC_URL = (os.getenv("BIG_BRAIN_PUBLIC_URL") or "").strip() or None

@@ -286,6 +286,7 @@ def _build_games(
         draw_pictures=display.draw_game_pictures if display is not None else None,
         gesture=gesture,
         say_audio=say_audio,
+        hint_answers=runtime.set_answer_hints,
     )
     game_data = Path(config.GAME_DATA_DIR)
     # The kids' games' recorded lines, sounds and music (games/kids_audio.py); without them, Richie's own voice.
@@ -845,6 +846,7 @@ def run(
     if config.HYBRID_RUNTIME_ENABLED:
         from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
         from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector, transcript_aliases
+        from reachy_mini_conversation_app.scribe_stt import ScribeTranscriber
         from reachy_mini_conversation_app.local_actions import LocalActionExecutor
         from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
         from reachy_mini_conversation_app.ambient_context import (
@@ -1014,6 +1016,12 @@ def run(
             speaking_callback=getattr(movement_manager, "set_speaking", None),
             request_transcriber=request_transcriber,
             name_check_transcriber=name_check_transcriber,
+            # Game answers only (Eduardo agreed 2026-11-03): Scribe v2 in the cloud, the local model when it fails.
+            game_transcriber=(
+                ScribeTranscriber(config.ELEVENLABS_API_KEY)
+                if config.ELEVENLABS_API_KEY and config.GAME_ANSWERS_SCRIBE
+                else None
+            ),
             listening_observer=on_listening,
             wake_followup_timeout_s=config.LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         )

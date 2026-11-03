@@ -150,9 +150,10 @@ big-brain/rulings.json          Jev's and the room's rulings
 - Android blocks Chrome from home-network addresses until Chrome has the **Nearby devices** permission (Settings →
   Apps → Chrome → Permissions); without it the join link fails with `ERR_TOO_MANY_RETRIES`. Found on a Pixel 9a
   on 2026-11-01; every Android guest needs it once.
-- Only the buzzing player is listened to, and only right after the buzz; nothing is recorded or kept beyond the
-  usual local transcript. Typed answers and names stay on the Mac mini for the game (rulings keep the answer
-  text, without names).
+- Only the buzzing player is listened to, and only right after the buzz. That answer's few seconds of audio go
+  to ElevenLabs Scribe v2 to be transcribed, biased toward the board's answers (see
+  [games.md](games.md#hearing-game-answers)); nothing is kept. Typed answers and names stay on the Mac mini for
+  the game (rulings keep the answer text, without names).
 - ElevenLabs allows five requests at a time on the Creator plan; the board's clues are prepared while players
   join. Its cost is not yet in the admin app's usage ledger (Jev's judging is, under "Games").
 - A clip the speech model cannot read (2026-11-01: "Pacific", 1.6 s of audio, no text) reaches the game as

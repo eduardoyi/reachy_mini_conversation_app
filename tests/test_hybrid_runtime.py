@@ -5618,3 +5618,77 @@ async def test_a_recording_of_the_name_holds_wakes_and_returns_the_voice(tmp_pat
         assert await runtime.record_name(wait_s=0.0) is not None  # held wakes are released afterwards
     finally:
         await runtime.close()
+
+
+async def _answer_a_question(game: bool, cloud: Any, hints: list[str]) -> tuple[list[str], list[str]]:
+    """Ask a question whose answer is awaited (a game's when ``game``) and say "Pluto"; return answers and local calls."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+    local: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply("¡Correcto!")
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer, "es", game=game)
+        return _QuickReply("¿Qué planeta?")
+
+    async def accurate(_audio: AudioFrame, *, language: str = "") -> str:
+        local.append(language)
+        return "Pluton"
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    runtime._request_transcriber = accurate
+    runtime._game_transcriber = cloud
+    runtime.set_answer_hints(hints)
+    try:
+        assert await runtime.activate("keyboard", addressed_text="juguemos")
+        await _eventually(lambda: runtime._request_clip is not None)
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        await _eventually(lambda: spoken == ["¿Qué planeta?", "¡Correcto!"])
+    finally:
+        await runtime.close()
+    return answers, local
+
+
+@pytest.mark.asyncio
+async def test_a_game_answer_is_heard_by_the_cloud_game_model_with_the_game_words() -> None:
+    """A game's awaited answer goes to the cloud game model with its hints; the local model is not asked."""
+    seen: list[tuple[int, list[str]]] = []
+
+    async def cloud(audio: AudioFrame, hints: Any) -> str:
+        seen.append((audio[1].size, list(hints)))
+        return "Pluto"
+
+    answers, local = await _answer_a_question(True, cloud, ["Pluto", "Plutón"])
+    assert answers == ["Pluto"] and local == []
+    assert seen and seen[0][0] > 0 and seen[0][1] == ["Pluto", "Plutón"]
+
+
+@pytest.mark.asyncio
+async def test_a_game_answer_falls_back_to_the_local_model_when_the_cloud_fails() -> None:
+    """An error (or a slow reply) from the cloud game model leaves the answer to the local model."""
+
+    async def cloud(audio: AudioFrame, hints: Any) -> str:
+        raise httpx.ConnectError("no network")
+
+    answers, local = await _answer_a_question(True, cloud, [])
+    assert answers == ["Pluton"] and local == [""]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_outside_a_game_never_goes_to_the_cloud_game_model() -> None:
+    """Everyday answers (a dinner booking, who to send a photo to) stay on the local model."""
+    called: list[str] = []
+
+    async def cloud(audio: AudioFrame, hints: Any) -> str:
+        called.append("cloud")
+        return "Pluto"
+
+    answers, local = await _answer_a_question(False, cloud, ["Pluto"])
+    assert answers == ["Pluton"] and local == [""] and called == []

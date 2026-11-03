@@ -47,6 +47,8 @@ class FakeReachy:
         self.clip_answers: list[Answer] = []
         # How long each recorded question let its answer take to start.
         self.clip_listen: list[float | None] = []
+        # The words each game told the speech model to expect, in order ([] when cleared).
+        self.hints: list[list[str]] = []
         self.services = GameServices(
             speak=self._speak,
             ask=lambda text, language, answer: (self.said.append(text), self.asked.append((text, answer))),
@@ -67,6 +69,7 @@ class FakeReachy:
             gesture=self._gesture,
             clock=time.monotonic if real_clock else (lambda: self.now),
             say_audio=self._say_audio if recorded else None,
+            hint_answers=self.hints.append,
         )
 
     async def _speak(self, text: str, language: str) -> None:

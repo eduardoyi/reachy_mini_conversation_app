@@ -473,6 +473,7 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     assert [entry["team"] for entry in game._reveal] == ["blue", "red"]
     assert len(read_history(tmp_path / "big-brain" / "history.json")) == 21
     assert any(listening for _, listening in played)
+    assert any(len(words) >= 20 for words in reachy.hints)  # the board's answers, for the speech model
     assert parse_game_request("juguemos big brain") is not None
 
 

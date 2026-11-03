@@ -75,6 +75,9 @@ class GameServices:
     # Play recorded speech (sample rate, samples, its text for the transcript, language) as Reachy's line once he
     # is free, and return once it has been heard; with an answer handler, listen for the next thing said.
     say_audio: Optional[SayAudio] = None
+    # The words the game's spoken answers are likely to be (its board's answers, its names), so the speech model
+    # leans toward them; the host clears them when the game ends.
+    hint_answers: Callable[[list[str]], None] = lambda words: None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
     clock: Callable[[], float] = time.monotonic

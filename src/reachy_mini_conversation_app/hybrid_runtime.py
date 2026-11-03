@@ -13,7 +13,7 @@ from typing import Protocol, TypeAlias
 from contextlib import aclosing
 from collections import deque
 from dataclasses import replace, dataclass
-from collections.abc import Callable, Awaitable, AsyncIterator
+from collections.abc import Callable, Sequence, Awaitable, AsyncIterator
 
 import numpy as np
 from numpy.typing import NDArray
@@ -74,6 +74,10 @@ class RequestTranscriber(Protocol):
     def __call__(self, audio: AudioFrame, *, language: str = "") -> Awaitable[str]:
         """Return the text said in ``audio``."""
         ...
+
+
+# A cloud model for game answers (scribe_stt.ScribeTranscriber): the clip and the words the game expects.
+GameTranscriber = Callable[[AudioFrame, Sequence[str]], Awaitable[str]]
 
 
 class RuntimeMode(str, Enum):
@@ -447,6 +451,8 @@ class HybridRuntime:
     _REQUEST_CLIP_SILENCE_S = 0.8
     _REQUEST_CLIP_MAX_S = 8.0
     _REQUEST_CLIP_STT_TIMEOUT_S = 6.0
+    # A game answer the cloud model has not heard in this long is heard by the local model instead.
+    _GAME_STT_TIMEOUT_S = 3.5
     # A voice message (record_message): wait this long for speech after the beep, end it after this much
     # silence (children pause mid-thought), never let it run longer than the cap; keep this much silence.
     # A touch on his head ends it sooner, so the silence can be long enough for a child's pause.
@@ -570,6 +576,7 @@ class HybridRuntime:
         speaking_callback: Callable[[bool], None] | None = None,
         request_transcriber: RequestTranscriber | None = None,
         name_check_transcriber: Callable[[AudioFrame], Awaitable[str]] | None = None,
+        game_transcriber: GameTranscriber | None = None,
         listening_observer: Callable[[bool], Awaitable[None]] | None = None,
         wake_followup_timeout_s: float = DEFAULT_LOCAL_WAKE_FOLLOWUP_TIMEOUT_SECONDS,
         start_asleep: bool = False,
@@ -629,6 +636,10 @@ class HybridRuntime:
         self._request_transcriber = request_transcriber
         # Checks the name in the wake audio first (the fast ambient model); the request model is the second try.
         self._name_check_transcriber = name_check_transcriber
+        # Hears a game's awaited answers (Scribe v2, in the cloud), biased toward the words the game expects;
+        # the request model hears them when it fails. Nothing else goes to it.
+        self._game_transcriber = game_transcriber
+        self._answer_hints: tuple[str, ...] = ()
         self._request_clip: list[AudioFrame] | None = None
         # Audio after the wake that was still waiting for local processing when the clip began: on a busy Mac
         # the wake is detected late, so the start of the request ("Prende" in "prende la luz") is already
@@ -1453,6 +1464,7 @@ class HybridRuntime:
                             else self._REQUEST_CLIP_START_S
                         ),
                         language=turn.language if reason == "awaited_answer" and turn is not None else "",
+                        game=reason == "awaited_answer" and turn is not None and turn.game,
                     ),
                     name=f"hybrid-request-clip-{generation}",
                 )
@@ -1483,7 +1495,7 @@ class HybridRuntime:
                 if turn is not None:
                     await self._speak_locally(turn.text, turn.language, generation, audio=turn.audio)
                     if turn.answer is not None:
-                        self.expect_answer(turn.answer, turn.language, listen_s=turn.listen_s)
+                        self.expect_answer(turn.answer, turn.language, listen_s=turn.listen_s, game=turn.game)
                     if turn.on_spoken is not None:
                         turn.on_spoken()
                 await self._return_to_ambient(generation, "announcement_spoken")
@@ -1816,6 +1828,7 @@ class HybridRuntime:
         start_s: float = _REQUEST_CLIP_START_S,
         wake_event: str | None = None,
         language: str = "",
+        game: bool = False,
     ) -> str:
         """Record what is said after an acoustic wake until the speaker stops, and transcribe it as one clip.
 
@@ -1826,6 +1839,8 @@ class HybridRuntime:
 
         ``language`` is what an awaited answer is expected in: a short answer the speech model put in another
         script ("Familia Yi" as "फैमिलिया जी" on 2026-10-31) is transcribed again in that language.
+
+        A ``game``'s answer is heard by the cloud game model first, when there is one (scribe_stt.py).
         """
         transcriber = self._request_transcriber
         self._request_clip_cut_off = False
@@ -1876,6 +1891,12 @@ class HybridRuntime:
         if lead_in is not None and lead_in[0] == sample_rate and lead_in[1].size:
             parts.insert(0, lead_in[1])
         audio = np.concatenate(parts)
+        heard = await self._hear_game_answer((sample_rate, audio)) if game else None
+        if heard is not None:
+            self._note_wake(wake_event, request_chars=len(heard), cut_off=self._request_clip_cut_off)
+            if config.QUICK_COMMANDS_LOG_TEXT:
+                logger.info("Request clip text: %r", heard)
+            return heard
         text = await asyncio.wait_for(transcriber((sample_rate, audio)), self._REQUEST_CLIP_STT_TIMEOUT_S)
         if language and isinstance(text, str) and not is_mostly_latin(text):
             logger.info("Request clip not in Latin script; transcribing again in %s", language)
@@ -1892,6 +1913,23 @@ class HybridRuntime:
             logger.info("Request clip text: %r", text)
         self._note_wake(wake_event, request_chars=len(text.strip()), cut_off=self._request_clip_cut_off)
         return text if isinstance(text, str) else ""
+
+    def set_answer_hints(self, words: Sequence[str]) -> None:
+        """Set the words a game's answers are likely to be (its board, its names); empty when no game runs."""
+        self._answer_hints = tuple(words)
+
+    async def _hear_game_answer(self, audio: AudioFrame) -> str | None:
+        """Return a game answer as the cloud game model heard it, or None to hear it locally (no model, or it failed)."""
+        if self._game_transcriber is None:
+            return None
+        try:
+            text = await asyncio.wait_for(self._game_transcriber(audio, self._answer_hints), self._GAME_STT_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Game answer not heard by the cloud model (%s); hearing it locally", type(error).__name__)
+            return None
+        return text if isinstance(text, str) else None
 
     async def _transcribe_segment_accurately(self, sequence: int) -> str:
         """Transcribe one local segment's audio again with the request model ("" when unavailable)."""
@@ -2370,11 +2408,14 @@ class HybridRuntime:
             logger.debug("Head touches unavailable: %s", type(error).__name__)
             return 0
 
-    def expect_answer(self, answer: QuickCommandHandler, language: str = "", *, listen_s: float | None = None) -> None:
+    def expect_answer(
+        self, answer: QuickCommandHandler, language: str = "", *, listen_s: float | None = None, game: bool = False
+    ) -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
 
         ``language`` is the one the question was asked in, when known. Thread-safe. Silence for ``listen_s``
-        (default ``_ANSWER_START_S``) ends it without opening the conversation.
+        (default ``_ANSWER_START_S``) ends it without opening the conversation. A ``game``'s answer is heard by
+        the cloud game model when there is one.
         """
         self._queue_turn(
             _PendingTurn(
@@ -2382,6 +2423,7 @@ class HybridRuntime:
                 self._clock() + self._ANSWER_PENDING_S,
                 language=language,
                 answer=answer,
+                game=game,
                 listen_s=listen_s,
             )
         )

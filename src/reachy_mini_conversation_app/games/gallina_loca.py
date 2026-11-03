@@ -291,6 +291,7 @@ class GallinaLoca(Game):
             logger.warning("La gallina loca: known names unavailable: %s", type(error).__name__)
             known = []
         language = context.language
+        context.services.hint_answers([name.split()[0] for name in known if name.split()])  # the family's names
         moment = "gallina_who"
         for _ in range(MAX_PLAYERS + 2):
             said = await self._ask(context, moment)

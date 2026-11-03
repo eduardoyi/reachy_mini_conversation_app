@@ -191,6 +191,7 @@ class GameHost:
         game = factory()
         services = self._services
         context = GameContext(info=game.info, language=language, services=services, kids=kids)
+        services.hint_answers([])  # the last game's words are not this one's
         context.resume = lambda: self.resume(say=True)
         context.active_at = services.clock()
         self._game, self._context, self._language = game, context, language
@@ -361,6 +362,8 @@ class GameHost:
 
     def _set_state(self, state: GameState) -> None:
         self._state = state
+        if state is GameState.IDLE:
+            self._services.hint_answers([])
         context = self._context
         if context is not None:
             if state is GameState.PLAYING:

@@ -1,7 +1,7 @@
 # Feature: hybrid ambient runtime
 
 - Status: `in-progress`
-- Last updated: 2026-11-02
+- Last updated: 2026-11-03 (game answers through Scribe v2)
 - Plan: [Reachy hybrid household companion](../plans/reachy-hybrid-household-companion.md)
 
 ## Overview
@@ -254,6 +254,11 @@ can later be replaced by an acoustic detector without changing the runtime.
 LLM routing into this boundary.
 
 ## Constraints and failure modes
+
+- A game's awaited answer (`expect_answer(..., game=True)`, set by a game's announcement) is the one clip that
+  may leave the Mac mini: `game_transcriber` (Scribe v2, `scribe_stt.py`) hears it with the words set by
+  `set_answer_hints`, and the request model hears it when that fails or takes more than `_GAME_STT_TIMEOUT_S`
+  (3.5 s). Every other request and answer is transcribed locally (2026-11-03, agreed by Eduardo).
 
 - Ambient mode must work with no cloud credentials and with the provider factory
   never called.

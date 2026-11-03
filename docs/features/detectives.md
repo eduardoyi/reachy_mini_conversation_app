@@ -153,8 +153,9 @@ questions are heard through `GameServices.ask`.
 
 ## Constraints, privacy, and failure modes
 
-- Questions are heard only right after Richie names the player; typed questions and names stay on the Mac mini
-  for the game. The question text goes to Gemini with the character's sheet, and the answer to ElevenLabs to be
+- Questions are heard only right after Richie names the player; the spoken question's audio goes to ElevenLabs
+  Scribe v2, biased toward the characters' names and the evidence (see [games.md](games.md#hearing-game-answers)).
+  Typed questions and names stay on the Mac mini for the game. The question text goes to Gemini with the character's sheet, and the answer to ElevenLabs to be
   voiced; nothing is stored.
 - Gemini's cost is not yet in the admin app's usage ledger (a few hundred tokens a question).
 - If the model fails or is slow, the character's scripted `fallback` line is said instead (logged as a warning).

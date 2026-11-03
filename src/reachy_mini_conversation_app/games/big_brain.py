@@ -533,6 +533,7 @@ class BigBrain(Game):
                 logger.warning("Big Brain: no board: %s", error)
                 return
             self._prepare_speech()
+            context.services.hint_answers(self._hints())
             await self._rounds()
             await self._final()
             await self._ending()
@@ -565,6 +566,16 @@ class BigBrain(Game):
             for clue in column:
                 self._speech.prepare(clue.text, language)
         self._speech.prepare(board.final.text, language)
+
+    def _hints(self) -> list[str]:
+        """Return the board's answers (each clue's own first, then the other forms it accepts) for the speech model.
+
+        The whole board, never one clue's answer alone, so a wrong answer is not pulled toward the right one.
+        """
+        board = self._board
+        assert board is not None
+        clues = [clue for column in board.clues for clue in column]
+        return [clue.answer for clue in clues] + [form for clue in clues for form in clue.accept]
 
     def _show(self, png: bytes) -> None:
         if self._context is not None:

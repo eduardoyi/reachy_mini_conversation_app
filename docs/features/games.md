@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-03 (la gallina loca, a hot-potato kids' game)
+- Last updated: 2026-11-03 (la gallina loca; game answers heard by Scribe v2)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -179,6 +179,25 @@ Built 2026-11-02 so the games stop sounding flat after a few rounds, while stayi
 - **Without the recordings** (or any one clip), the games say the old lines in Richie's everyday voice and
   play the beep tune, exactly as before.
 
+### Hearing game answers
+
+- What is said right after a game's question (a buzzed answer, a Sheeple guess, a Detectives question, a
+  child's name, "¿Otra vez?") is transcribed by **ElevenLabs Scribe v2** (`scribe_stt.py`), sent as raw 16 kHz
+  PCM. If Scribe fails or takes more than 3.5 s, the local request model (Qwen3-ASR 1.7B) hears it instead.
+  Before, Qwen heard every answer, and the room overruled it a few times a game (9 times in 8 Big Brain games
+  on 2026-11-01).
+- Each game tells the speech model which words to expect (`GameServices.hint_answers`), sent as Scribe
+  keyterms: Big Brain the whole board's answers (each clue's answer, then the forms it accepts; never one clue
+  alone, so a wrong answer is not pulled toward the right one), Sheeple each board's answers in both languages,
+  Detectives the characters' names and the evidence, la gallina loca the family's names. At most 100 are sent:
+  more would bill each answer as at least 20 s. The host clears them when a game starts and ends.
+- Only game answers go to the cloud (Eduardo agreed on 2026-11-03: they are game words, not conversation).
+  Everything else Reachy hears stays on the Mac mini. `GAME_ANSWERS_SCRIBE=false` turns it off; without
+  `ELEVENLABS_API_KEY` the local model hears everything.
+- Cost: about $0.004–0.006 a minute plus 20% for keyterms, so 1–2 cents for a game's 2–3 minutes of answers.
+  It draws on the same ElevenLabs credits as the host voices. The log keeps counts only (seconds, characters,
+  hints, milliseconds), never words.
+
 ### What the screens look like
 
 Every game screen is drawn for the TRMNL's four greys and for reading from across the living room: flat greys or
@@ -290,6 +309,9 @@ recorded color hunt, and that every moment the games use is written in both lang
 (see the plan).
 
 ## Changelog
+
+- 2026-11-03: Game answers are heard by ElevenLabs Scribe v2, biased toward the words each game expects, with the
+  local model as the fallback (the room kept overruling Qwen on short answers).
 
 - 2026-11-03: La gallina loca, a hot-potato kids' game without the camera (names said at the start, turns passed
   by a pat or "¡listo!", a secret timer, a silly forfeit). A game can hold the head still while it plays, so pats

@@ -588,6 +588,10 @@ class Sheeple(Game):
             self._turn = teams[self._first_turn % len(teams)]
             self._first_turn += 1
         self._prepare(*(self._reveal(rank, answer) for rank, answer in enumerate(board.answers)))
+        if self._context is not None:  # the speech model leans toward this board's answers, in both languages
+            self._context.services.hint_answers(
+                [a.text for a in board.answers] + [f for a in board.answers for f in a.accept]
+            )
         self._show_board()
         self._changed()
         intro = [f"{self._kind}_round", *(["double"] if double else []), "asked"]

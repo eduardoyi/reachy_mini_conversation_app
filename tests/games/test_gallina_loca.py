@@ -126,6 +126,8 @@ async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
     await _until(lambda: _count(reachy.said, "thanks") == 1)
     assert reachy.emotions == ["excited", "excited"] and reachy.screens
     assert reachy.quiet[0] is True  # the head is held still from the start, so pats count while playing
+    assert ["Enzo", "Sofía"] in reachy.hints  # the speech model leans toward the family's names
+    await _until(lambda: reachy.hints[-1] == [])  # cleared once the game is over
 
 
 @pytest.mark.asyncio
