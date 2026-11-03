@@ -148,6 +148,48 @@ SIMON_SAYS: Final[GameInfo] = GameInfo(
     ),
 )
 
+GALLINA_LOCA: Final[GameInfo] = GameInfo(
+    key="gallina",
+    names=frozenset(
+        {
+            "la gallina loca",
+            "gallina loca",
+            "la gallina",
+            "gallina",
+            "la gallinita loca",
+            "gallinita loca",
+            "la gallinita",
+            "gallinita",
+            "el juego de la gallina",
+            "el juego de la gallina loca",
+            "la gaina loca",
+            "gaina loca",
+            "la gallina local",
+            "papa caliente",
+            "la papa caliente",
+            "crazy hen",
+            "the crazy hen",
+            "crazy chicken",
+            "the crazy chicken",
+            "the chicken game",
+            "chicken game",
+            "hot potato",
+        }
+    ),  # fmt: skip
+    title={"es": "a la gallina loca", "en": "crazy hen"},
+    pitch={
+        "es": "La gallina dice tu nombre y algo loco que hacer, y cuando cacarea... ¡penitencia!",
+        "en": "The hen calls your name and something silly to do, and when she squawks... a forfeit!",
+    },
+    rules=(
+        "A hot-potato game for small children with no camera: each child says their name at the start, then "
+        "Reachy, a crazy hen with a secret timer, calls one by name with something silly to do (walk like a duck, "
+        "touch your nose, roar like a lion) and a drawing of it; a pat on his head or '¡listo!' passes the turn. "
+        "The music speeds up, and when the hen squawks '¡COCOROCÓ!' whoever's turn it is does a silly forfeit. "
+        "Nobody loses. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
 BIG_BRAIN: Final[GameInfo] = GameInfo(
     key="bigbrain",
     names=frozenset(
@@ -441,6 +483,7 @@ GAMES: Final[dict[str, GameInfo]] = {
         COLOR_HUNT,
         TREASURE_HUNT,
         SIMON_SAYS,
+        GALLINA_LOCA,
         BIG_BRAIN,
         BIG_BRAIN_HP,
         BIG_BRAIN_LOTR,
@@ -515,7 +558,7 @@ def words(text: str) -> str:
 
 
 # The kids' games: "¿Otra vez?" at the end of one can go on to another by name ("no, ¡el tesoro!").
-KIDS_GAMES: Final[tuple[str, ...]] = ("colors", "treasure", "simon")
+KIDS_GAMES: Final[tuple[str, ...]] = ("colors", "treasure", "simon", "gallina")
 # again_answer's other answers: stop playing, or another game without saying which.
 STOP: Final[str] = "stop"
 ANOTHER_GAME: Final[str] = "another game"

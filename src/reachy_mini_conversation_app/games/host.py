@@ -368,7 +368,8 @@ class GameHost:
             else:
                 context.running.clear()
         # The head is held still (no breathing, no speech wobble) only while a pat means something.
-        self._hold_head(state in (GameState.ASKING, GameState.PAUSED))
+        patting = state is GameState.PLAYING and self._game is not None and self._game.holds_head
+        self._hold_head(patting or state in (GameState.ASKING, GameState.PAUSED))
         if state is not GameState.IDLE and (self._watch is None or self._watch.done()):
             self._watch = asyncio.get_running_loop().create_task(self._watch_loop(), name="game-watch")
 

@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-02 ("¿Otra vez?" read loosely; switching between the kids' games)
+- Last updated: 2026-11-03 (la gallina loca, a hot-potato kids' game)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -24,6 +24,11 @@ Two finding games on one engine (`games/hunt.py`):
 
 And **Simón dice** ("juguemos a Simón dice", "let's play Simon says"): Reachy names a still pose ("Simón dice:
 ¡tócate la nariz!"), the screen shows a child doing it, and the camera checks they do it and hold still.
+
+And **la gallina loca** ("juguemos a la gallina loca", "let's play crazy hen"; plan:
+[la-gallina-loca.md](../plans/la-gallina-loca.md)): a hot-potato game with no camera. Richie, a crazy hen with a
+secret timer, calls each child by name with something silly to do; a pat or "¡listo!" passes the turn, and when
+the hen squawks, whoever's turn it is does a silly forfeit.
 
 Out of scope for now: flashing the room lights in the game's color (the light systems do not report a lamp's
 current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
@@ -132,6 +137,26 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   bien!", "¡Eso!", "¡Chévere!", "¡Perfecto!"), a happy move, a star. Not done: "¡Así! Mira la pantalla." and on.
   Nobody loses; "¡Ocho estrellas!" and "¿Otra vez?" at the end. No trick rounds (without "Simón dice") yet.
 
+### La gallina loca
+
+- **Names first:** "¿Quién juega? ¡Díganme sus nombres!" Each answer may hold one or several names ("Enzo y
+  Sofía"); they are matched against the family's names from face recognition (the enrolled list read as words;
+  the camera is not used), first names only, close slips included ("Endzo" is Enzo), and any other name is taken
+  as heard ("me llamo Valentina"). Richie greets each one live ("¡Hola, Enzo!") and asks "¿Quién más?" until "ya",
+  "nadie más", silence or six names. With no names he calls "¡Siguiente!" instead.
+- **A round:** a secret 45–90 s of playing time and a bouncy hen tune that switches to a faster one between 55%
+  and 75% of it ("¡La gallina se está poniendo loca!"). Each turn: a cluck, a name (never the same child twice
+  running; now and then "¡Otra vez tú!") and a challenge, about 40% one of Simón dice's 47 poses, the rest one of
+  22 active ones (walk like a duck, flap like a hen, run and touch the wall...), with its drawing, words and the
+  child's name on the screen. A pat on his head or "¡listo!" / "¡ya!" (heard without his name, not in the turn's
+  first 1.5 s) passes the turn with a quick "¡Bien!"; after 20 s, "¡La gallina sigue!". Nothing is checked:
+  children are trusted.
+- **The end:** when the timer runs out, even mid-turn: a squawk, "¡COCOROCÓ!", the child's name, "¡Te tocó la
+  penitencia!" and one of five forfeits (the hen dance, cluck three times, lay an egg, crow like a rooster, walk
+  like a chicken) with its drawing. A pat or "¡listo!" (or 15 s), a cheer, then "¿Otra vez?", which keeps the
+  names. Nobody loses.
+- The head is held still the whole game (`Game.holds_head`), so pats count while playing.
+
 ### Recorded voice, sounds and music (the three kids' games)
 
 Built 2026-11-02 so the games stop sounding flat after a few rounds, while staying easy on adults nearby.
@@ -214,6 +239,7 @@ flowchart LR
 | Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext` (`next_game`: set by a game as it ends, the host starts it), `Game` (`phrases`, `play`, `heard`, `paused`) |
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line), `ask_again(context, audio) -> next game or None` (all three kids' games; asked twice at most, `AGAIN_LISTEN_S` 12 s to start answering), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
+| La gallina loca | `games/gallina_loca.py` | `GallinaLoca(audio, speech=, known_names=)`, `CHALLENGES`, `FORFEITS`, `heard_names(text, known) -> (names, done)`; names said live in the kids' voice (`Speech`, `game-data/kids/speech`); registered without the camera |
 | Simón dice | `games/simon_says.py` | `SimonSays`, `POSES` (words, Jev question, drawing, whole body, head gesture), `pose_drawings()`, `simon_says_phrases()` |
 | Kids' audio | `games/kids_audio.py`, `games/kids_lines.py` | `KidsAudio(folder, LINES)`: `say(context, *moments, sounds, after)` (one recorded line with sounds, or Richie's voice), `ask(context, moment, seconds, listen_s=)` (the answer's text), `play_music(context, pick, until)`, `leveled`, `loopable`; `LINES[moment][language]` takes with tags, `TAGS`. Data in `game-data/kids/voice/<moment>/<lang>-NN.wav` and `game-data/kids/sounds/` (`chosen.json`). Made by `scripts/big_brain_voice.py --set kids --voice ID` and `scripts/big_brain_sounds.py --set kids` (convert the mp3s with ffmpeg on the laptop: the mini has none) |
 | Treasure hunt | `games/treasure_hunt.py` | `TreasureHunt`, `TREASURES` (names, what Jev is asked, drawing subject), `treasure_drawings()`, `treasure_hunt_phrases()` |
@@ -245,15 +271,18 @@ flowchart LR
 - Camera frames go to TypeSafe (Jev) during the color hunt only, one at a time, never stored; with privacy on
   the camera returns nothing, so nothing is found. Starting a game from the phone is refused while privacy is on.
 - A Jev failure skips that frame. A game line not heard within 20 s (Reachy busy) is skipped.
-- Head pats only register while the head is held still: while asking and while paused. While playing, voice
-  and the antennas are the controls.
+- Head pats only register while the head is held still: while asking and while paused, and while playing a
+  game with `holds_head` (la gallina loca). Otherwise, while playing, voice and the antennas are the controls.
+- La gallina loca sends the children's names to ElevenLabs to say them in the kids' voice (kept by text, so
+  each name once); without a key Richie's everyday voice says them.
 - Reachy's own tune reaches the room transcription; game words must be heard over it (to check live).
 
 ## Testing
 
 `tests/games/` (catalog, host with a waiting game and a fake clock, color and treasure hunts with a fake camera,
 Jev and drawings; "¿Otra vez?" read loosely, asked again when unclear, and switching to another kids' game from
-the color hunt and Simón dice; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
+the color hunt and Simón dice; `test_gallina_loca.py` for names heard, a whole game with pats and "¡listo!",
+no names, the head held still, and switching to and from it; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
 recorded color hunt, and that every moment the games use is written in both languages),
 `tests/tools/test_play_game.py`, the runtime hooks in `tests/test_hybrid_runtime.py`, quick-command routing in
 `tests/test_quick_commands.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
@@ -261,6 +290,10 @@ recorded color hunt, and that every moment the games use is written in both lang
 (see the plan).
 
 ## Changelog
+
+- 2026-11-03: La gallina loca, a hot-potato kids' game without the camera (names said at the start, turns passed
+  by a pat or "¡listo!", a secret timer, a silly forfeit). A game can hold the head still while it plays, so pats
+  count (`Game.holds_head`). The kids' screens draw no star tray when there are no stars.
 
 - 2026-11-02: "¿Otra vez?" in the kids' games reads the answer loosely (before, only a bare "sí" counted: on
   2026-11-02 a yes followed by more words ended a color hunt, and a reply the speech model could not read ended a

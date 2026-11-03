@@ -136,6 +136,8 @@ class Game:
     """One game: its info, its fixed lines (cached by the reply voice), and how it plays."""
 
     info: GameInfo
+    # The head is held still while playing too, so a pat on it counts (la gallina loca passes turns by pats).
+    holds_head: bool = False
 
     @classmethod
     def phrases(cls) -> frozenset[str]:

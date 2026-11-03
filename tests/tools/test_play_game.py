@@ -61,6 +61,7 @@ async def test_unknown_games_and_no_host() -> None:
         "colors",
         "treasure",
         "simon",
+        "gallina",
         "bigbrain",
         "bigbrain_hp",
         "bigbrain_lotr",

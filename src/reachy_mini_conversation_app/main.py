@@ -136,7 +136,9 @@ def _prepare_photos(link: Any, faces: Any, speech: Any) -> None:
         logger.info("WhatsApp server ready for photos")
 
 
-def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any) -> Any:
+def _build_games(
+    deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any, known_names: Callable[[], list[str]] = list
+) -> Any:
     """Build the game host (games/host.py) over the hybrid runtime, or None when games are not set up."""
     from reachy_mini_conversation_app.tools.core_tools import games_configured
 
@@ -156,12 +158,14 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
     from reachy_mini_conversation_app.tools.move_head import MoveHead
     from reachy_mini_conversation_app.games.color_hunt import ColorHunt
     from reachy_mini_conversation_app.games.detectives import Detectives, DetectivesSetup
-    from reachy_mini_conversation_app.games.kids_audio import KidsAudio
+    from reachy_mini_conversation_app.games.kids_audio import KIDS_VOICE_ID, KidsAudio
     from reachy_mini_conversation_app.games.kids_lines import LINES as KIDS_LINES
     from reachy_mini_conversation_app.games.simon_says import SimonSays
+    from reachy_mini_conversation_app.games.gallina_loca import GallinaLoca
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
     from reachy_mini_conversation_app.games.scribble_rush import ScribbleRush, GeminiGuesser, ScribbleSetup
     from reachy_mini_conversation_app.games.treasure_hunt import TreasureHunt
+    from reachy_mini_conversation_app.games.big_brain_audio import Speech
     from reachy_mini_conversation_app.tools.spotify_control import SpotifyControl
     from reachy_mini_conversation_app.games.detectives_witness import gemini_witness
 
@@ -303,6 +307,9 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
             public_url=config.BIG_BRAIN_PUBLIC_URL,
         )
         games["scribble"] = lambda: ScribbleRush(scribble)
+    # No camera: the children say their names (matched to the family's) and pat his head or say "¡listo!".
+    kids_speech = Speech(game_data / "kids" / "speech", config.ELEVENLABS_API_KEY, voice=KIDS_VOICE_ID)
+    games["gallina"] = lambda: GallinaLoca(kids_audio, speech=kids_speech, known_names=known_names)
     if (game_data / "trivia-bank" / "bank.jsonl").is_file():
         setup = BigBrainSetup(
             data_dir=game_data,
@@ -1054,7 +1061,10 @@ def run(
                 quiet_head=quiet_head,
                 touches=movement_manager.head_touches,
             )
-        deps.games = _build_games(deps, hybrid_runtime, movement_manager, robot, calls)
+        known_names = (
+            (lambda: [person.name for person in face_service.registry.people()]) if face_service is not None else list
+        )
+        deps.games = _build_games(deps, hybrid_runtime, movement_manager, robot, calls, known_names)
         if deps.games is not None or deps.writing is not None:
             games, writing = deps.games, deps.writing
 

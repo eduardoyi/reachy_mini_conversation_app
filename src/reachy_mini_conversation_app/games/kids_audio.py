@@ -23,11 +23,15 @@ from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clip
 from reachy_mini_conversation_app.games.big_brain_lines import shown
 
 
+# "Richie kids host" (ElevenLabs), the kids' games' recorded voice; names are said live in it too.
+KIDS_VOICE_ID: Final[str] = "o5eAiNLN0h2ipUCjBmju"
 # Loudness (RMS, dB below full scale) of sounds, of the jingles that open and end a game, and of the music bed.
 SOUND_DB: Final[float] = -24.0
 JINGLE_DB: Final[float] = -22.0
 MUSIC_DB: Final[float] = -33.0
-JINGLES: Final[frozenset[str]] = frozenset({"intro_colors", "intro_treasure", "intro_simon", "celebrate"})
+JINGLES: Final[frozenset[str]] = frozenset(
+    {"intro_colors", "intro_treasure", "intro_simon", "intro_gallina", "celebrate"}
+)
 # No sample louder than this (dB below full scale) after levelling.
 PEAK_DB: Final[float] = -1.0
 # Music goes out in pieces of CHUNK_S, at most AHEAD_S ahead of what is playing, so it stops soon after a find.
@@ -76,6 +80,10 @@ class KidsAudio:
         """Return what ``moment`` says, without tags (its first take)."""
         takes = self._lines.get(moment, {}).get(language, ())
         return shown(takes[0]) if takes else ""
+
+    def take(self, moment: str, language: str) -> tuple[str, Audio] | None:
+        """Return a recorded take of ``moment`` (its words without tags, and its samples), or None."""
+        return self._clips.line(moment, language)
 
     def sound(self, name: str) -> Audio | None:
         """Return sound (or jingle) ``name`` at its level, or None when it was not made."""

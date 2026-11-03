@@ -5,7 +5,7 @@ takes of Eleven Music (900 credits a minute), all our own: the prompts ask for o
 never for a show's theme. Every take is kept as ``<out>/<name>/take-N.mp3`` and as the 24 kHz mono WAV the
 game plays (converted with ffmpeg); ``chosen.json`` names the take the game uses, the first until Eduardo picks
 another. A rerun makes only missing takes. ``--set kids`` makes the kids' games' set instead (the color hunt,
-the treasure hunt and Simón dice: games/kids_audio.py), two takes each.
+the treasure hunt, Simón dice and la gallina loca: games/kids_audio.py), two takes each.
 
 Usage: uv run python scripts/big_brain_sounds.py --out ~/.local/share/reachy/game-data/big-brain/sounds
        uv run python scripts/big_brain_sounds.py --set kids --out ~/.local/share/reachy/game-data/kids/sounds
@@ -102,6 +102,11 @@ KIDS_SOUNDS: dict[str, tuple[float, str]] = {
               "screaming."),
     "snap": (0.9, "Playful camera shutter click with a sparkly twinkle, a photo of a child's funny pose."),
     "tiptoe": (1.2, "Three soft cartoon tiptoe boops stepping backwards, playful."),
+    # La gallina loca
+    "cluck": (1.2, "A funny cartoon hen clucking three quick times, bok bok bok, playful, for a toddler game."),
+    "squawk": (2.5, "A silly cartoon hen squawking in a frantic flappy panic with a rooster crow at the end, funny "
+               "not scary, for a toddler game."),
+    "egg_pop": (1.0, "A cute cartoon pop of a hen laying an egg, a soft plop and a tiny sparkle, for a toddler game."),
 }  # fmt: skip
 KIDS_MUSIC: dict[str, tuple[float, str]] = {
     "intro_colors": (10.0, "Short bright playful jingle for a toddler color game: ukulele, glockenspiel and "
@@ -119,6 +124,15 @@ KIDS_MUSIC: dict[str, tuple[float, str]] = {
                    "smoothly, background level. Instrumental."),
     "pose": (20.0, "Bouncy freeze-dance music for young kids holding a pose, about 120 bpm: ukulele, claps and a "
              "light synth bass, cheerful and silly, steady, loops smoothly, background level. Instrumental."),
+    "intro_gallina": (10.0, "Short silly barnyard jingle for a kids' hot-potato game with a crazy hen: bouncy "
+                      "banjo, clucking woodblocks and a cartoon slide whistle, ends with a cute final note. "
+                      "Instrumental."),
+    "gallina": (30.0, "Bouncy silly barnyard music for a kids' hot-potato game, about 120 bpm: banjo, pizzicato, "
+                "clucking woodblocks and claps, playful and a little sneaky, steady, loops smoothly, background "
+                "level. Original, not the chicken dance. Instrumental."),
+    "gallina_hurry": (20.0, "Faster, more frantic silly barnyard music for a kids' hot-potato game, about 160 bpm: "
+                      "banjo, fast woodblocks and a ticking clock, a fun hurry-up feeling, not stressful, steady, "
+                      "loops smoothly, background level. Instrumental."),
     "celebrate": (10.0, "Short joyful celebration for young kids finishing a game: glockenspiel and ukulele "
                   "fanfare with handclaps and a little ta-da ending. Instrumental."),
 }  # fmt: skip

@@ -649,7 +649,12 @@ def _draw_star(draw: ImageDraw.ImageDraw, x: float, y: float, radius: float, *, 
 
 
 def _star_rows(draw: ImageDraw.ImageDraw, stars: int, total: int, box: tuple[int, int, int, int]) -> None:
-    """Lay ``total`` stars (the first ``stars`` won) on a light-grey tray filling ``box``, in one or two rows."""
+    """Lay ``total`` stars (the first ``stars`` won) on a light-grey tray filling ``box``, in one or two rows.
+
+    With no stars to give (la gallina loca), there is no tray.
+    """
+    if total <= 0:
+        return
     left, top, right, bottom = box
     draw.rounded_rectangle(box, radius=min(28, (bottom - top) // 2), fill=_LIGHT_GREY)
     width, height = right - left - 24, bottom - top - 16

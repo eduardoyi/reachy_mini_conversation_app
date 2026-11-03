@@ -1,4 +1,4 @@
-"""What Richie says in the kids' games (the color hunt, the treasure hunt and Simón dice), recorded once.
+"""What Richie says in the kids' games (the color hunt, the treasure hunt, Simón dice and la gallina loca), recorded once.
 
 Each moment has two or more takes so the games don't sound the same every round, written for children of 2 to
 6 with adults in the room: warm and playful, short, never shouting. Lines carry ElevenLabs audio tags in square
@@ -13,6 +13,7 @@ from typing import Final
 
 from reachy_mini_conversation_app.games.color_hunt import TARGETS
 from reachy_mini_conversation_app.games.simon_says import POSES
+from reachy_mini_conversation_app.games.gallina_loca import FORFEITS, CHALLENGES
 from reachy_mini_conversation_app.games.treasure_hunt import TREASURES
 
 
@@ -250,4 +251,87 @@ for _key, _pose in POSES.items():
         "en": (f"[playful] Simon says... [excited] {_pose.english}!", f"[whispers] Ready... [cheerful] Simon says: {_pose.english}!"),
     }  # fmt: skip
 
-LINES: Final[dict[str, Takes]] = {**_SHARED, **_COLORS, **_TREASURE, **_SIMON}
+_GALLINA: Final[dict[str, Takes]] = {
+    "gallina_start": {
+        "es": (
+            "[excited] ¡Soy la gallina loca! [playful] Cuando diga tu nombre, haces lo que te pida... y me tocas la cabeza o dices ¡listo! [whispers] Pero cuidado... [giggles] ¡cuando la gallina cacarea, hay penitencia!",
+            "[giggles] ¡Coc, coc! ¡Llegó la gallina loca! [playful] Yo digo un nombre y algo loco que hacer. Lo haces, me tocas la cabeza o dices ¡listo!... [whispers] y cuando la gallina se vuelva loca... [excited] ¡penitencia!",
+        ),
+        "en": (
+            "[excited] I'm the crazy hen! [playful] When I say your name, do what I ask... then pat my head or shout ready! [whispers] But careful... [giggles] when the hen squawks, there's a forfeit!",
+            "[giggles] Cluck, cluck! The crazy hen is here! [playful] I call a name and something silly to do. Do it, then pat my head or say ready!... [whispers] and when the hen goes crazy... [excited] forfeit!",
+        ),
+    },
+    "gallina_who": {
+        "es": ("[cheerful] ¿Quién juega? [playful] ¡Díganme sus nombres, uno por uno!", "[curious] A ver... ¿cómo se llaman los que van a jugar?"),
+        "en": ("[cheerful] Who's playing? [playful] Tell me your names, one at a time!", "[curious] Let's see... what are the players' names?"),
+    },
+    "gallina_more": {
+        "es": ("[curious] ¿Quién más?", "[playful] ¿Alguien más juega?", "[cheerful] ¿Y quién más?"),
+        "en": ("[curious] Who else?", "[playful] Anyone else playing?", "[cheerful] And who else?"),
+    },
+    "gallina_no_names": {
+        "es": ("[playful] ¡No escuché nombres! [cheerful] Igual jugamos: cuando diga ¡siguiente!, le toca al que sigue en la rueda.", "[giggles] Bueno, ¡sin nombres! [playful] Cuando diga ¡siguiente!, le toca al de al lado."),
+        "en": ("[playful] I didn't hear any names! [cheerful] We'll play anyway: when I say next, it's the next one in the circle.", "[giggles] Okay, no names! [playful] When I say next, it's the turn of the one beside you."),
+    },
+    "gallina_ready": {
+        "es": ("[excited] ¡Listo! [playful] ¡Que empiece la gallina loca!", "[giggles] ¡Coc, coc, coc! [excited] ¡A jugar!"),
+        "en": ("[excited] All set! [playful] Let the crazy hen begin!", "[giggles] Cluck, cluck, cluck! [excited] Let's play!"),
+    },
+    "gallina_next": {
+        "es": ("[excited] ¡Siguiente!", "[playful] ¡Le toca al siguiente!", "[giggles] ¡Al que sigue!"),
+        "en": ("[excited] Next!", "[playful] Next one's turn!", "[giggles] Next in line!"),
+    },
+    "gallina_again_you": {
+        "es": ("[giggles] ¡La gallina dice... otra vez tú!", "[playful] ¡Uy! [excited] ¡Otra vez tú!"),
+        "en": ("[giggles] The hen says... you again!", "[playful] Ooh! [excited] You again!"),
+    },
+    "gallina_good": {
+        "es": ("[excited] ¡Bien!", "[cheerful] ¡Eso!", "[giggles] ¡Qué gallina tan rápida!", "[proud] ¡Muy bien!", "[playful] ¡Chévere!", "[excited] ¡Así se hace!"),
+        "en": ("[excited] Good!", "[cheerful] Yes!", "[giggles] What a speedy chicken!", "[proud] Well done!", "[playful] Nice!", "[excited] That's how you do it!"),
+    },
+    "gallina_slow": {
+        "es": ("[playful] ¡Uy, la gallina no espera! [excited] ¡Sigue!", "[giggles] ¡Muy lento! ¡La gallina sigue!"),
+        "en": ("[playful] Oops, the hen doesn't wait! [excited] Moving on!", "[giggles] Too slow! The hen moves on!"),
+    },
+    "gallina_hurry": {
+        "es": ("[gasps] ¡La gallina se está poniendo loca!", "[whispers] Oigan... [excited] ¡la gallina está cacareando más rápido!", "[giggles] ¡Coc, coc, coc! ¡Rápido, rápido!"),
+        "en": ("[gasps] The hen is getting crazy!", "[whispers] Listen... [excited] the hen is clucking faster!", "[giggles] Cluck, cluck, cluck! Quick, quick!"),
+    },
+    "gallina_boom": {
+        "es": ("[excited] ¡COCOROCÓ! [giggles] ¡La gallina se volvió loca!", "[gasps] ¡COCOROCÓ! [excited] ¡Se acabó el tiempo!", "[excited] ¡COCOROCÓ, COCOROCÓ!"),
+        "en": ("[excited] BAWK BAWK! [giggles] The hen went crazy!", "[gasps] BAWK! [excited] Time's up!", "[excited] BAWK, BAWK, BAWK!"),
+    },
+    "gallina_caught": {
+        "es": ("[giggles] ¡Te tocó la penitencia!", "[playful] ¡La gallina te agarró! [giggles] Penitencia...", "[excited] ¡Penitencia para ti!"),
+        "en": ("[giggles] You get the forfeit!", "[playful] The hen got you! [giggles] Forfeit...", "[excited] A forfeit for you!"),
+    },
+    "gallina_caught_anyone": {
+        "es": ("[giggles] ¡Al que le tocaba... le toca la penitencia!", "[playful] ¿A quién le tocaba? [giggles] ¡Penitencia!"),
+        "en": ("[giggles] Whoever's turn it was... gets the forfeit!", "[playful] Whose turn was it? [giggles] Forfeit!"),
+    },
+    "gallina_forfeit_done": {
+        "es": ("[giggles] ¡Jajaja! [excited] ¡Qué gallina tan buena!", "[cheerful] ¡Eso! [giggles] ¡Hasta yo me reí!", "[proud] ¡Perfecto! [playful] Eres una gallina de verdad."),
+        "en": ("[giggles] Ha ha ha! [excited] What a great chicken!", "[cheerful] Yes! [giggles] Even I laughed!", "[proud] Perfect! [playful] You're a real chicken."),
+    },
+}  # fmt: skip
+for _key, _challenge in CHALLENGES.items():
+    _es, _en = _challenge.spanish, _challenge.english
+    _GALLINA[f"gallina_do_{_key}"] = {
+        "es": (f"[excited] ¡{_es[:1].upper() + _es[1:]}!", f"[playful] A ver... [excited] ¡{_es}!"),
+        "en": (f"[excited] {_en[:1].upper() + _en[1:]}!", f"[playful] Let's see... [excited] {_en}!"),
+    }
+for _key, _pose in POSES.items():
+    _es, _en = _pose.spanish, _pose.english
+    _GALLINA[f"gallina_pose_{_key}"] = {
+        "es": (f"[excited] ¡{_es[:1].upper() + _es[1:]}!", f"[playful] A ver... [excited] ¡{_es}!"),
+        "en": (f"[excited] {_en[:1].upper() + _en[1:]}!", f"[playful] Let's see... [excited] {_en}!"),
+    }
+for _key, _forfeit in FORFEITS.items():
+    _es, _en = _forfeit.spanish, _forfeit.english
+    _GALLINA[f"gallina_forfeit_{_key}"] = {
+        "es": (f"[playful] ¡{_es[:1].upper() + _es[1:]}!",),
+        "en": (f"[playful] {_en[:1].upper() + _en[1:]}!",),
+    }
+
+LINES: Final[dict[str, Takes]] = {**_SHARED, **_COLORS, **_TREASURE, **_SIMON, **_GALLINA}
