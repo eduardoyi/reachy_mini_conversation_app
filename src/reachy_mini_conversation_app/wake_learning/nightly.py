@@ -247,6 +247,14 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
             found.extend(located)
             if not located and not _near(at, said_call, CALL_GAP_S * 3):
                 moments.unsure.append((clip_start(event), at))
+        elif _woke(event) and kind == "name_heard":
+            # A transcript wake is logged when its sentence ends, often seconds after the name: only a name the
+            # night located gives a time. Without one, the whole sentence is unknown rather than a guessed call.
+            target = about if _not_called(event) else found
+            if not _near(at, said_call + said_about + said_not, 1.5):
+                target.extend(located)
+                if not located:
+                    moments.unsure.append(_sentence_span(event))
         elif _woke(event):
             target = about if _not_called(event) else found  # told "not to you" over his name: said about him
             if _near(at, said_call + said_about + said_not, 1.5):
@@ -265,6 +273,12 @@ def day_moments(events: list[dict[str, Any]], names: dict[str, list[float]], ans
     # A name heard close by outweighs an automatic "no name" (a repeat the check missed); never a person's answer.
     moments.not_calls = sorted([time for time in quiet if not _near(time, moments.named, 3.0)] + said_not)
     return moments
+
+
+def _sentence_span(event: dict[str, Any]) -> tuple[float, float]:
+    """Return when a transcript wake's sentence was said: its speech, from a second before, to just after it was logged."""
+    at = float(event["t"])
+    return at - float(event.get("speech_seconds") or 0.0) - 1.0, at + 0.5
 
 
 def _near(at: float, times: Iterable[float], within: float) -> bool:
@@ -565,7 +579,9 @@ def day_score(events: list[dict[str, Any]], names: dict[str, list[float]], answe
                 false_wakes += 1
                 continue
             seeds.append((at, "woke", tv))
-            seeds.extend((time, "failed", tv) for time in located if time < at - EARLIER_CALL_S)
+            # A transcript wake's own name sits anywhere in its sentence; only one before the sentence was missed.
+            before = _sentence_span(event)[0] if event["kind"] == "name_heard" else at - EARLIER_CALL_S
+            seeds.extend((time, "failed", tv) for time in located if time < before)
         elif event["kind"] == "missed":
             seeds.append((at, "missed", tv))
             seeds.extend((time, "failed", tv) for time in located)
