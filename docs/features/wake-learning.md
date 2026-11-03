@@ -1,7 +1,7 @@
 # Feature: Wake learning
 
 - Status: `in-progress` (live on the Mac mini since 2026-10-31; first nights pending)
-- Last updated: 2026-10-31
+- Last updated: 2026-11-03
 - Plan: [wake-word-scoreboard.md](../plans/wake-word-scoreboard.md)
 - Related: [Wake word](wake-word.md), [Wake clip capture](wake-clip-capture.md), [Phone admin app](phone-admin-app.md)
 
@@ -92,8 +92,12 @@ flowchart LR
 ### What counts as what (`nightly.day_moments`)
 
 - **Call** (his name, to him):
-  - a fire whose name check passed (or a trusted fire that went on to wake him), or a transcript wake, unless one
-    of the rules below applies;
+  - a fire whose name check passed (or a trusted fire that went on to wake him), unless one of the rules below
+    applies;
+  - for a transcript wake, only the name the night located in its clip: the wake is logged when the sentence
+    ends, often seconds after the name. With no name located, the sentence (its speech, from a second
+    before) is unknown. On the scoreboard a name inside that sentence is the call itself, not an earlier
+    one he missed (2026-11-03: about half the names training used were these sentence ends);
   - a name the speech server located in any kept clip (including one found in a fire's 10 s pre-roll more than
     2.5 s before the fire, which is an earlier call he missed);
   - a household "To him" (or a yes to "Is this the call he missed?").
@@ -220,7 +224,7 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 | `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused, a clip asked again); clip cut and confinement; switch, undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
 | `tests/wake_learning/test_feature_log.py` | Runs split by gaps, start times, windows and `window_at`; pruning |
 | `tests/wake_learning/test_takes.py` | When a take ends; voice span with margins; a far quiet call; level in dB |
-| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; mentions ("not for me" over his name, "About him") as his name but no call and no false wake, and unknowns asked about; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
+| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; mentions ("not for me" over his name, "About him") as his name but no call and no false wake, and unknowns asked about; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped); the scoreboard's episodes; a transcript wake's name only where located, and not a missed call inside its own sentence; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
 | `tests/test_acoustic_wake_word.py` | Shadow fires reported, never waking; the model's float32 scores written to the records; feature frames; re-arming inside the cooldown; loading a shadow head |
 | `tests/test_hybrid_runtime.py` | A rejected wake keeps the stream (no reset) and hears a repeated call, and can't be marked false; fire records; missed marks; a false-wake mark closes its conversation and a sleep soon after is noted; recording a name holds wakes |
 | `tests/test_control_api.py` | `/wake/missed` (privacy refuses); `/wake/false`; `/wake/take` keeps only the voice, refuses quiet or long takes and when he can't record |

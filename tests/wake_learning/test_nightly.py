@@ -175,6 +175,25 @@ def test_his_name_said_about_him_is_his_name_but_no_call_and_no_false_wake() -> 
     assert all(item.follow_up and item.question == "Did someone say his name?" for item in items)
 
 
+def test_a_transcript_wake_gives_his_name_only_where_the_night_found_it() -> None:
+    """A transcript wake is logged when its sentence ends, seconds after the name: its time is never his name.
+
+    With the name located in its clip, that time is the call; without, the whole sentence is unknown, so it is
+    neither trained on as his name nor sampled as quiet.
+    """
+    located = _event("name_heard", DAY + 100, outcome="woke", speech_seconds=6.0)  # clip starts at DAY + 90
+    unlocated = _event("name_heard", DAY + 300, outcome="woke", speech_seconds=4.0)
+    events = [located, unlocated]
+
+    moments = day_moments(events, {located["id"]: [3.5]}, {})
+
+    assert moments.calls == [DAY + 93.5]
+    assert moments.unsure == [(DAY + 295.0, DAY + 300.5)]
+    score = day_score(events, {located["id"]: [3.5]}, {})
+    assert (score["calls"], score["first_time"]) == (2, 2)  # the name in its own sentence is not a missed call
+    assert day_score(events, {located["id"]: [0.5]}, {})["first_time"] == 1  # one before the sentence is
+
+
 class FakeHead:
     """A head whose score is one feature of the window's last frame."""
 
