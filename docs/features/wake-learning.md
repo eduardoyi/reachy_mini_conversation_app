@@ -163,7 +163,7 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
 | `WAKE_LEARNING_ENABLED` | `0` | Needs `WAKE_CLIPS_ENABLED=1`. The app logs features and runs the registry's live and shadow heads (the live one replaces `LOCAL_ACOUSTIC_WAKE_EXTRA_HEAD`; a missing file is skipped, never fatal); the nightly job runs. |
 | `WAKE_FEATURES_KEEP_DAYS` | `30` | Days of feature log kept (about 9 MB per hour of listening). |
 | `WAKE_TRAINER_PYTHON` | (none) | A Python with `torch`, `onnx` and `numpy` for `scripts/wake_train.py`; without it the night labels, scores and offers switches but trains nothing. |
-| `WAKE_BASE_SET` | (none) | A saved training set (`.npz` with `X` 16x96 windows and `Y` 1, 0 or -1 for uncertain) mixed into every night's training. On the mini: the "Richie" head's set, `~/wake-retrain/features.npz` (synthetic calls and sound-alikes in macOS voices, plus 2026-10-27 to 10-29 room clips). Missing or malformed, the night trains without it. |
+| `WAKE_BASE_SET` | (none) | A saved training set (`.npz` with `X` 16x96 windows and `Y` 1, 0 or -1 for uncertain) mixed into every night's training. On the mini: `~/wake-retrain/base-richi-acav50k.npz`, the "Richie" head's set (synthetic calls and sound-alikes in macOS voices, plus 2026-10-27 to 10-29 room clips) and 50,000 random windows of openWakeWord's ACAV100M negative features (`davidscripka/openwakeword_features`, CC BY-NC-SA, in `~/wake-retrain/oww`). Missing or malformed, the night trains without it. |
 | `ADMIN_APP_SERVICE` | (none) | The app's LaunchAgent label; the night restarts the app after choosing a new shadow head. |
 
 Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_app/`, owner-only):
