@@ -194,6 +194,20 @@ def test_a_transcript_wake_gives_his_name_only_where_the_night_found_it() -> Non
     assert day_score(events, {located["id"]: [0.5]}, {})["first_time"] == 1  # one before the sentence is
 
 
+def test_a_saved_training_set_joins_the_night_without_its_uncertain_windows(tmp_path: Path) -> None:
+    """The base set's calls and non-calls are used; uncertain windows (-1), a missing file or a bad one are not."""
+    path = tmp_path / "features.npz"
+    np.savez(path, X=np.ones((3, 16, 96), np.float16), Y=np.array([1.0, 0.0, -1.0], np.float32))
+
+    windows, labels = nightly.base_examples(path)
+
+    assert windows.shape == (2, 16, 96) and labels.tolist() == [1.0, 0.0]
+    assert nightly.base_examples(None)[0].shape == (0, 16, 96)
+    assert nightly.base_examples(tmp_path / "missing.npz")[0].shape == (0, 16, 96)
+    np.savez(path, X=np.ones((2, 8, 96), np.float16), Y=np.ones(2, np.float32))
+    assert nightly.base_examples(path)[0].shape == (0, 16, 96)
+
+
 class FakeHead:
     """A head whose score is one feature of the window's last frame."""
 

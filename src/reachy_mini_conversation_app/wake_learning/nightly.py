@@ -492,6 +492,28 @@ def recording_examples(store: WakeLearningStore, model_dir: Path, noise: list[ND
     return np.concatenate(windows), np.concatenate(labels)
 
 
+def base_examples(path: Path | None) -> tuple[NDArray[np.float16], NDArray[np.float32]]:
+    """Return a saved training set's windows (``X``, 16x96) labelled 1 or 0 (``Y``; -1, uncertain, is left out).
+
+    The set the "Richie" head was trained on holds synthetic calls in several voices and sound-alikes like
+    "Ricky" that three days of the house cannot teach; a challenger without them lost to that head.
+    """
+    empty = np.zeros((0, 16, 96), np.float16), np.zeros(0, np.float32)
+    if path is None:
+        return empty
+    try:
+        with np.load(path, allow_pickle=False) as saved:
+            windows, labels = saved["X"], saved["Y"].astype(np.float32)
+    except (OSError, KeyError, ValueError) as error:
+        logger.warning("Base training set unreadable (%s); training without it", type(error).__name__)
+        return empty
+    if windows.ndim != 3 or windows.shape[1:] != (16, 96) or len(windows) != len(labels):
+        logger.warning("Base training set has the wrong shape; training without it")
+        return empty
+    keep = (labels == 0) | (labels == 1)
+    return windows[keep].astype(np.float16), labels[keep]
+
+
 def _stream_windows(
     features: Any, audio: NDArray[np.int16], rate: int
 ) -> tuple[NDArray[np.float16], NDArray[np.float64]]:
@@ -622,6 +644,7 @@ class NightSettings:
     seed_head: Path | None = None
     seed_threshold: float = 0.8
     restart: Callable[[], Awaitable[None]] | None = None
+    base_set: Path | None = None  # a saved training set mixed into every night's (WAKE_BASE_SET)
     today: date = field(default_factory=date.today)
 
 
@@ -716,6 +739,7 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
         noise = [_read_wav(store.clips / event["clip"])[1] for day in days for event in labelled[day][0]
                  if event["kind"] == "background" and event.get("clip")][:200]  # fmt: skip
         examples.append(recording_examples(store, settings.model_dir, noise, rng))
+        examples.append(base_examples(settings.base_set))
         windows = np.concatenate([pair[0] for pair in examples])
         labels = np.concatenate([pair[1] for pair in examples])
         negatives = np.flatnonzero(labels == 0)
@@ -832,6 +856,7 @@ def main() -> None:
         else None,
         seed_threshold=config.LOCAL_ACOUSTIC_WAKE_EXTRA_THRESHOLD,
         restart=restart if service else None,
+        base_set=Path(base).expanduser() if (base := os.getenv("WAKE_BASE_SET", "").strip()) else None,
     )
     if behind_privacy_prompt(settings.model_dir):
         logger.error("Wake models are in %s, where macOS would hold the night on a privacy prompt; move them out",
