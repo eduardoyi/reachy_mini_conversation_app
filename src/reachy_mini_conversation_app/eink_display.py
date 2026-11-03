@@ -723,6 +723,45 @@ def render_game_picture(picture: Image.Image, word: str, stars: int, total: int,
     return encode_png(canvas)
 
 
+def _draw_egg(draw: ImageDraw.ImageDraw, x: float, y: float, width: float, height: float) -> None:
+    """Draw a grey egg centered on ``(x, y)``, narrower at the top, with a white shine."""
+    points = []
+    for step in range(48):
+        angle = 2 * math.pi * step / 48
+        up = math.sin(angle)  # 1 at the top
+        points.append((x + width / 2 * math.cos(angle) * (1 - 0.16 * up), y - height / 2 * up))
+    draw.polygon(points, fill=_LIGHT_GREY, outline=0, width=4)
+    draw.ellipse((x - width * 0.24, y - height * 0.3, x - width * 0.06, y - height * 0.08), fill=255)
+
+
+def render_egg_count(rows: list[tuple[str, int]], caption: str = "") -> bytes:
+    """Render la gallina loca's players in turn order, each name with the eggs they have laid (up to 6 rows).
+
+    With no eggs yet, it is the order the turns go in.
+    """
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    _kids_frame(draw, caption, WIDTH / 2)
+    rows = rows[:6]
+    top, bottom = 90, HEIGHT - 34
+    step = (bottom - top) / max(len(rows), 1)
+    size = min(64, int(step * 0.8))
+    font = _font(size, bold=True)
+    for index, (name, eggs) in enumerate(rows):
+        middle = top + step * (index + 0.5)
+        name_font = _fitted(name, 300, size, 26)
+        left, ink_top, _, ink_bottom = draw.textbbox((0, 0), name, font=name_font)
+        draw.text((60 - left, middle - (ink_top + ink_bottom) / 2), name, font=name_font, fill=0)
+        height = size * 0.95
+        width = height * 0.76
+        shown = min(eggs, 8)
+        for egg in range(shown):
+            _draw_egg(draw, 400 + egg * (width + 10) + width / 2, middle, width, height)
+        if eggs > shown:
+            _draw_glyphs_centered(draw, f"+{eggs - shown}", font, 400 + shown * (width + 10) + 40, middle)
+    return encode_png(canvas)
+
+
 def render_game_paused(title: str, language: str) -> bytes:
     """Render a paused game: a pause sign, PAUSA in large letters, the game's name and how to go on."""
     canvas = Image.new("L", (WIDTH, HEIGHT), 255)

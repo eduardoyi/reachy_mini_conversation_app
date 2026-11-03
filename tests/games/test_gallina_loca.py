@@ -1,4 +1,4 @@
-"""Tests for la gallina loca: names heard at the start, turns passed by a pat or "¡listo!", the hen going off."""
+"""Tests for la gallina loca: names heard at the start, turns in order passed by a pat or "¡listo!", eggs."""
 
 import asyncio
 from pathlib import Path
@@ -12,7 +12,6 @@ from reachy_mini_conversation_app.games.host import GameHost
 from reachy_mini_conversation_app.games.catalog import again_answer, parse_game_request
 from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 from reachy_mini_conversation_app.games.kids_lines import LINES
-from reachy_mini_conversation_app.games.simon_says import POSES
 from reachy_mini_conversation_app.games.gallina_loca import FORFEITS, CHALLENGES, GallinaLoca, heard_names
 from reachy_mini_conversation_app.games.big_brain_audio import silence, write_wav
 from reachy_mini_conversation_app.games.big_brain_lines import shown
@@ -20,7 +19,7 @@ from reachy_mini_conversation_app.games.big_brain_lines import shown
 
 @pytest.fixture(autouse=True)
 def fast_hen(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the round 1.2 s, the turns short, the answers quick, and never "¡Otra vez tú!"."""
+    """Make the round 1.2 s, the turns short, the answers quick, and a "¡Bien!" after every turn before the hurry."""
     for name, value in {
         "ROUND_S": (1.2, 1.2),
         "HURRY_AT": (0.5, 0.5),
@@ -28,7 +27,8 @@ def fast_hen(monkeypatch: pytest.MonkeyPatch) -> None:
         "MIN_TURN_S": 0.05,
         "FORFEIT_S": 0.2,
         "NAME_ANSWER_S": 0.5,
-        "AGAIN_YOU": 0.0,
+        "COPY_SETTLE_S": 0.05,
+        "GOOD_SHARE": 1.0,
     }.items():
         monkeypatch.setattr(gallina_loca, name, value)
     monkeypatch.setattr(hunt, "OTHER_ROUND_ANSWER_S", 0.5)
@@ -83,7 +83,7 @@ def test_names_are_heard_against_the_family_and_as_said(said: str, names: list[s
 
 @pytest.mark.asyncio
 async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
-    """Two names, turns passed by pats and "¡listo!", the hen goes off with a forfeit, again with the same names."""
+    """Two names in order, turns passed by pats and "¡listo!", an egg when the hen goes off, the golden hen."""
     reachy = FakeReachy(real_clock=True)
     host = _host(tmp_path, reachy, ["Enzo Yi", "Sofía"])
     host.start("gallina", "es")
@@ -95,6 +95,7 @@ async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
     await reachy.asked[1][1]("Sofía y ya")
     await _until(lambda: _count(reachy.said, "gallina_ready") == 1)
     assert "¡Hola, Sofía!" in reachy.said
+    assert _count(reachy.said, "gallina_order") == 1 and "Enzo y Sofía." in reachy.said  # the order the turns go in
 
     async def play() -> None:  # a pat or a "¡listo!" in each turn, in turn
         while True:
@@ -111,20 +112,26 @@ async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
     said = reachy.said
     boom = next(index for index, line in enumerate(said) if line in _takes("gallina_boom"))
     calls = [line for line in said[:boom] if line in ("¡Enzo!", "¡Sofía!")]
-    assert said[boom + 1] == calls[-1]  # the forfeit goes to whoever's turn it was
-    assert len(calls) >= 2 and all(a != b for a, b in zip(calls, calls[1:]))  # never the same child twice running
+    assert len(calls) >= 2 and calls == [("¡Enzo!", "¡Sofía!")[i % 2] for i in range(len(calls))]  # in order
+    caught = said[boom + 1]
+    assert caught in ("¡Enzo!", "¡Sofía!") and said[boom + 2] in _takes("gallina_caught")
     assert _count(said, "gallina_good") >= 1
-    assert _count(said, "gallina_boom") == 1 and _count(said, "gallina_caught") == 1
+    assert _count(said, "gallina_boom") == 1
     assert any(line in _takes(f"gallina_forfeit_{key}") for key in FORFEITS for line in said)
-    assert _count(said, "gallina_forfeit_done") == 1 and _count(said, "gallina_hurry") <= 1
+    assert _count(said, "gallina_laid") == 1 and _count(said, "gallina_hurry") <= 1
     assert reachy.asked[2][0] in _takes("again")
     await reachy.asked[2][1]("¡sí, otra vez!")
     await _until(lambda: len(reachy.asked) == 4)
     assert sum(text in _takes("gallina_who") or text in _takes("gallina_more") for text, _ in reachy.asked) == 2
     assert _count(reachy.said, "gallina_boom") == 2  # a second round, with the same names
+    laid = next(index for index, line in enumerate(reachy.said) if line in _takes("gallina_laid"))
+    first_call = next(line for line in reachy.said[laid:] if line in ("¡Enzo!", "¡Sofía!"))
+    assert first_call != caught  # the next round starts with the child after the one who laid the egg
     await reachy.asked[3][1]("no")
     await _until(lambda: _count(reachy.said, "thanks") == 1)
-    assert reachy.emotions == ["excited", "excited"] and reachy.screens
+    golden = _count(reachy.said, "gallina_golden") + _count(reachy.said, "gallina_golden_tie")
+    assert golden == 1 and _count(reachy.said, "gallina_golden_after") == 1  # the most eggs, or a tie
+    assert reachy.emotions.count("excited") == 2 and reachy.screens
     assert reachy.quiet[0] is True  # the head is held still from the start, so pats count while playing
     assert ["Enzo", "Sofía"] in reachy.hints  # the speech model leans toward the family's names
     await _until(lambda: reachy.hints[-1] == [])  # cleared once the game is over
@@ -132,7 +139,7 @@ async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_without_names_the_hen_says_next_and_turns_time_out(tmp_path: Path) -> None:
-    """Nobody says a name: "¡Siguiente!" calls each turn, an undone turn moves on, and anyone gets the forfeit."""
+    """Nobody says a name: "¡Siguiente!" calls each turn, an undone turn moves on, and whoever has the hen lays."""
     reachy = FakeReachy(real_clock=True)
     host = _host(tmp_path, reachy, [])
     host.start("gallina", "es")
@@ -140,7 +147,7 @@ async def test_without_names_the_hen_says_next_and_turns_time_out(tmp_path: Path
     said = reachy.said
     assert _count(said, "gallina_no_names") == 1
     assert _count(said, "gallina_next") >= 2 and _count(said, "gallina_slow") >= 1
-    assert _count(said, "gallina_caught_anyone") == 1
+    assert _count(said, "gallina_caught_anyone") == 1 and _count(said, "gallina_order") == 0
     host.end("test over", say=False)
 
 
@@ -189,11 +196,18 @@ def test_another_kids_game_can_switch_to_and_from_the_hen() -> None:
     assert again_answer("¡Simón dice!", "gallina") == "simon"
 
 
-def test_every_challenge_and_forfeit_has_a_line_and_a_drawing() -> None:
-    """Each challenge, pose and forfeit is recorded in both languages and has something to draw."""
-    keys = [f"gallina_do_{k}" for k in CHALLENGES] + [f"gallina_pose_{k}" for k in POSES]
-    keys += [f"gallina_forfeit_{k}" for k in FORFEITS]
+def test_every_challenge_and_way_to_lay_has_a_line_and_a_drawing() -> None:
+    """Each challenge and way to lay an egg is recorded in both languages and has something to draw."""
+    keys = [f"gallina_do_{k}" for k in CHALLENGES] + [f"gallina_forfeit_{k}" for k in FORFEITS]
     for key in keys:
         assert LINES[key]["es"] and LINES[key]["en"], key
     assert all(c.drawing for c in (*CHALLENGES.values(), *FORFEITS.values()))
-    assert len(CHALLENGES) >= 20 and len(FORFEITS) >= 5
+    assert len(CHALLENGES) >= 25 and len(FORFEITS) >= 5
+
+
+def test_his_moves_to_copy_are_ones_he_can_play() -> None:
+    """Each "¡Copia a Richie!" plays one of his recorded moves: an emotion intent he knows."""
+    from reachy_mini_conversation_app.tools.play_emotion import _INTENT_TO_MOVES
+
+    moves = [c.move for c in CHALLENGES.values() if c.move]
+    assert moves and all(move in _INTENT_TO_MOVES for move in moves)

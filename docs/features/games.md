@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-03 (la gallina loca; game answers heard by Scribe v2)
+- Last updated: 2026-11-03 (la gallina loca redone: turns in order, eggs, sillier challenges)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -27,8 +27,8 @@ And **Simón dice** ("juguemos a Simón dice", "let's play Simon says"): Reachy 
 
 And **la gallina loca** ("juguemos a la gallina loca", "let's play crazy hen"; plan:
 [la-gallina-loca.md](../plans/la-gallina-loca.md)): a hot-potato game with no camera. Richie, a crazy hen with a
-secret timer, calls each child by name with something silly to do; a pat or "¡listo!" passes the turn, and when
-the hen squawks, whoever's turn it is does a silly forfeit.
+secret timer, calls each child in turn with something silly to do; a pat or "¡listo!" passes the hen to the
+next child, and when he crows "¡COCOROCÓ!", whoever has it lays an egg.
 
 Out of scope for now: flashing the room lights in the game's color (the light systems do not report a lamp's
 current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
@@ -143,18 +143,37 @@ Detectives, the mystery party game played on phones, also runs on the host and h
   Sofía"); they are matched against the family's names from face recognition (the enrolled list read as words;
   the camera is not used), first names only, close slips included ("Endzo" is Enzo), and any other name is taken
   as heard ("me llamo Valentina"). Richie greets each one live ("¡Hola, Enzo!") and asks "¿Quién más?" until "ya",
-  "nadie más", silence or six names. With no names he calls "¡Siguiente!" instead.
+  "nadie más", silence or six names. Then he says the order ("Vamos en este orden: Enzo, Sofía y Papá."), shown
+  on the screen too. With no names he calls "¡Siguiente!" instead, and the children go round the circle.
+- **The rules, said once in kid words:** do the silly thing, pat his head or shout "¡listo!", and it is the next
+  one's turn; when he crows "¡COCOROCÓ!", whoever has the hen lays an egg. (Before 2026-11-03 it said "when the
+  hen clucks, penitencia", which meant nothing: he clucks every turn, and "penitencia" is a grown-up word.)
 - **A round:** a secret 45–90 s of playing time and a bouncy hen tune that switches to a faster one between 55%
-  and 75% of it ("¡La gallina se está poniendo loca!"). Each turn: a cluck, a name (never the same child twice
-  running; now and then "¡Otra vez tú!") and a challenge, about 40% one of Simón dice's 47 poses, the rest one of
-  22 active ones (walk like a duck, flap like a hen, run and touch the wall...), with its drawing, words and the
-  child's name on the screen. A pat on his head or "¡listo!" / "¡ya!" (heard without his name, not in the turn's
-  first 1.5 s) passes the turn with a quick "¡Bien!"; after 20 s, "¡La gallina sigue!". Nothing is checked:
-  children are trusted.
-- **The end:** when the timer runs out, even mid-turn: a squawk, "¡COCOROCÓ!", the child's name, "¡Te tocó la
-  penitencia!" and one of five forfeits (the hen dance, cluck three times, lay an egg, crow like a rooster, walk
-  like a chicken) with its drawing. A pat or "¡listo!" (or 15 s), a cheer, then "¿Otra vez?", which keeps the
-  names. Nobody loses.
+  and 75% of it ("¡La gallina se está poniendo loca!"). Turns go strictly in the order the names were said, so
+  everyone plays (before, a random child was picked each turn and some never played). Each turn: a cluck, the
+  name and one of 30 quick challenges, none repeated until all have been played, with its drawing and short
+  words on the screen:
+  - silly moves: shake your chicken butt, write your name with your butt, an armpit toot, wobble like jelly,
+    noodle dance, penguin, zombie, frog ("¡croac!"), hop on one foot ("¡pío, pío!"), monkey, a statue that
+    can't laugh;
+  - silly voices: "pollito" in a monster voice, a witch's laugh, cry like a baby, sing your name like opera,
+    hello like a robot, a giant sneeze, a pretend burp, your favorite food with your tongue out;
+  - quick thinking: three yellow things, an animal that flies, count down from five and blast off;
+  - runs: touch something red, something soft, and come back;
+  - Richie: "¡Copia a Richie!" (he plays one of his recorded moves: a dance, an electric shake, scared,
+    surprised; pats are ignored for its first 4 s so his own move is not taken for one), tickle Richie;
+  - "¡Inventa algo loco!".
+  Mild butt and fart jokes are on purpose (Eduardo, 2026-11-03: the original's spirit, and what 4–8 year olds
+  laugh at most). A pat on his head or "¡listo!" / "¡ya!" (heard without his name, not in the turn's first
+  1.5 s) passes the hen on; about a third of the turns before the faster tune get a quick "¡Bien!", none after,
+  so the pace picks up. After 20 s, "¡La gallina sigue!". Nothing is checked: children are trusted.
+- **The egg:** when the timer runs out, even mid-turn: a squawk, "¡COCOROCÓ!", the name of whoever has the hen
+  (if the turn was just done, the next child: the hen was already passed), "¡Te toca poner un huevo!" and one of
+  six ways to lay it (squat and wiggle, "¡plop!"; push out a giant egg; flap and cluck; spin; crow like a
+  rooster; peck around), with its drawing. A pat or "¡listo!" (or 15 s), a pop and a cheer, and the screen shows
+  everyone's eggs. Then "¿Otra vez?", which keeps the names and starts with the child after the one who laid.
+- **The golden hen:** when nobody wants another round, whoever laid the most eggs is "la gallina de oro" (all of
+  them on a tie), with the eggs on the screen. Eduardo chose eggs over "becomes the hen" or a plain forfeit.
 - The head is held still the whole game (`Game.holds_head`), so pats count while playing.
 - In the admin app it is "Crazy Hen" on the "For little ones" shelf, with its own card art
   (`static/admin/games/gallina.webp`).

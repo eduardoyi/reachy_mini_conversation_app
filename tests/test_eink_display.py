@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.eink_display import (
     render_lesson,
     render_drawing,
     render_writing,
+    render_egg_count,
     render_game_paused,
     render_game_prompt,
     render_now_playing,
@@ -179,6 +180,14 @@ def test_light_grey_fills_become_one_even_grey() -> None:
             lambda: render_game_picture(Image.new("L", (300, 400), 170), "Manos en los cachetes", 5, 8, "Simón dice…"),
             id="game-picture-eight-stars",
         ),
+        pytest.param(lambda: render_egg_count([("Enzo", 0), ("Sofía", 0)], "En este orden"), id="egg-order"),
+        pytest.param(
+            lambda: render_egg_count(
+                [("Enzo", 2), ("Sofía", 11), ("Maximiliano Alejandro", 0), ("Mamá", 1), ("Papá", 3), ("Abuela", 0)],
+                "Huevos",
+            ),
+            id="egg-count-six-players",
+        ),  # fmt: skip
         pytest.param(lambda: render_game_paused("a los colores", "es"), id="game-paused"),
         pytest.param(lambda: render_game_paused("color hunt", "en"), id="game-paused-english"),
         pytest.param(

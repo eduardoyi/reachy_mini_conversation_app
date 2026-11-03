@@ -3,7 +3,7 @@
 - Status: `in-progress` (designed 2026-11-03 with Eduardo; being built)
 - Owner: Eduardo
 - Created: 2026-11-03
-- Last updated: 2026-11-03
+- Last updated: 2026-11-03 (redone after the first game with the kids)
 - Builds on: [Games on Reachy](games.md) (the game host, the kids' recorded voice, sounds and music, "¿Otra vez?")
 
 ## Goal
@@ -26,6 +26,23 @@ forfeit. Nobody loses. Then "¿Otra vez?", like the other kids' games.
   trusted to do the challenge; nothing is checked with the camera.
 - **The ending:** a silly forfeit for whoever's turn it is when time runs out. Nobody loses.
 
+## Decisions after the first game (Eduardo, 2026-11-03)
+
+Eduardo found it "kinda lame": random turns left some children out, nobody knew what "penitencia" meant, and the
+challenges were not cool or funny enough. Hurry Up Chicken Butt's rules (a shaken chicken picks one of three
+practised activities, the chicken goes to the player on the left, a run to touch the Chicken Butt and back, and
+whoever holds it when it yells loses) showed what was missing: everyone in turn, quick repeatable silliness, and
+a clear ending.
+
+- **Turns in order:** the order the names were said, announced at the start; the next round starts with the
+  child after the one caught.
+- **Eggs:** whoever has the hen when it goes off lays an egg (a silly hen move) and gets an egg by their name on
+  the screen; at the end, the most eggs is "la gallina de oro". Chosen over "becomes the hen" and a clearer
+  forfeit.
+- **Mild butt and fart jokes are fine** (shake your chicken butt, an armpit toot, a pretend burp).
+- **New challenges:** short and silly (moves, voices, quick thinking, runs, copying Richie's own moves); Simón
+  dice's still poses are gone.
+
 ## How a game goes
 
 1. "Juguemos a la gallina loca" (or "la gallina", "crazy hen"; "papa caliente" and "hot potato" too), then the
@@ -35,16 +52,14 @@ forfeit. Nobody loses. Then "¿Otra vez?", like the other kids' games.
    six names. An adult can say the names for a two-year-old. "¿Otra vez?" keeps the same names.
 3. **The round:** a secret timer of 45 to 90 s of playing time, and a bouncy hen tune that switches to a faster
    one somewhere between 55% and 75% of it (when Richie also says the hen is getting crazy).
-4. **A turn:** a cluck, the child's name and a challenge: about 40% a Simón dice pose (already drawn and
-   voiced), the rest something active (walk like a duck, flap your wings and cluck, hop like a bunny three
-   times, run and touch the wall and come back...). The screen shows the drawing, the words and the child's
-   name. Sometimes the hen says "¡Otra vez tú!" and the same child gets another one. The turn ends on a pat or
-   "¡listo!" (not in its first 1.5 s, so the last child's pat doesn't count), with a quick "¡Bien!", or after
-   20 s with "¡La gallina sigue!". A challenge doesn't repeat within a round, and the same child is never called
-   twice in a row (except "¡Otra vez tú!").
-5. **The end:** the timer runs out even mid-turn: a squawk, "¡COCOROCÓ!", "¡La gallina te tocó a ti, Enzo!"
-   and a forfeit (do the hen dance, cluck three times, lay an egg: crouch down and say "¡pop!"...), with its
-   drawing. A pat or "¡listo!" (or 15 s), a cheer, then "¿Otra vez?".
+4. **A turn** (as redone after the first game): in the order the names were said, a cluck, the child's name and
+   one of 30 quick, silly challenges (games/gallina_loca.py `CHALLENGES`), none repeated until all have been
+   played, with its drawing, short words and the child's name on the screen. The turn ends on a pat or
+   "¡listo!" (not in its first 1.5 s, or 4 s after one of Richie's moves to copy), sometimes with a quick
+   "¡Bien!" before the faster tune, or after 20 s with "¡La gallina sigue!".
+5. **The egg:** the timer runs out even mid-turn: a squawk, "¡COCOROCÓ!", the name of whoever has the hen, "¡Te
+   toca poner un huevo!" and a way to lay it, with its drawing. A pat or "¡listo!" (or 15 s), a pop and a
+   cheer, and everyone's eggs on the screen; then "¿Otra vez?". At the end, the golden hen.
 
 ## Build
 
@@ -66,6 +81,8 @@ forfeit. Nobody loses. Then "¿Otra vez?", like the other kids' games.
       "¿Otra vez?" keeping the names), no names ("¡Siguiente!"), and "¿Otra vez?" switching to and from it.
 - [ ] Lines, sounds and music recorded on the mini; drawings made.
 - [ ] Played with the kids: pats and "¡listo!" heard over the music, names heard right, the length feels right.
+- [ ] Played again after the redo: everyone gets turns, the egg is understood, the challenges get laughs, a
+      "¡Copia a Richie!" move is not taken for a pat.
 
 ## Progress
 
@@ -76,3 +93,7 @@ forfeit. Nobody loses. Then "¿Otra vez?", like the other kids' games.
 - 2026-11-03: Deployed; 362 lines recorded, sounds and music made and copied to the mini. Its Games-tab card
   added after Eduardo saw it on the party shelf with no picture: "Crazy Hen" on the kids' shelf with its art.
   AGENTS.md now says a new game ships with all its assets, and a test checks every game has a card and art.
+- 2026-11-03: Redone after the first game (decisions above): turns in order with the order said and shown, 30
+  new challenges (Simón dice's poses dropped), six ways to lay an egg, an egg count screen
+  (`render_egg_count`), the golden hen, the rules said in kid words, fewer "¡Bien!"s. Lines, sounds and drawings
+  for the new challenges not made yet; not played yet.

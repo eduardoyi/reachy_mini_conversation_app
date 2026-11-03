@@ -254,12 +254,12 @@ for _key, _pose in POSES.items():
 _GALLINA: Final[dict[str, Takes]] = {
     "gallina_start": {
         "es": (
-            "[excited] ¡Soy la gallina loca! [playful] Cuando diga tu nombre, haces lo que te pida... y me tocas la cabeza o dices ¡listo! [whispers] Pero cuidado... [giggles] ¡cuando la gallina cacarea, hay penitencia!",
-            "[giggles] ¡Coc, coc! ¡Llegó la gallina loca! [playful] Yo digo un nombre y algo loco que hacer. Lo haces, me tocas la cabeza o dices ¡listo!... [whispers] y cuando la gallina se vuelva loca... [excited] ¡penitencia!",
+            "[excited] ¡Soy la gallina loca! [playful] Yo digo tu nombre y algo loco que hacer. Lo haces rapidito... ¡y me tocas la cabeza o gritas listo! [whispers] Pero ojo... [excited] cuando yo grite ¡COCOROCÓ!, [giggles] ¡al que le toque, pone un huevo!",
+            "[giggles] ¡Coc, coc! ¡Llegó la gallina loca! [playful] Les toca uno por uno: hacen la locura que les diga, me tocan la cabeza o dicen ¡listo!, y le toca al siguiente. [whispers] Y cuando grite ¡COCOROCÓ!... [giggles] ¡el que tenga la gallina pone un huevo!",
         ),
         "en": (
-            "[excited] I'm the crazy hen! [playful] When I say your name, do what I ask... then pat my head or shout ready! [whispers] But careful... [giggles] when the hen squawks, there's a forfeit!",
-            "[giggles] Cluck, cluck! The crazy hen is here! [playful] I call a name and something silly to do. Do it, then pat my head or say ready!... [whispers] and when the hen goes crazy... [excited] forfeit!",
+            "[excited] I'm the crazy hen! [playful] I say your name and something silly to do. Do it fast... then pat my head or shout ready! [whispers] But watch out... [excited] when I crow BAWK BAWK, [giggles] whoever's turn it is lays an egg!",
+            "[giggles] Cluck, cluck! The crazy hen is here! [playful] One at a time: do the silly thing I say, pat my head or say ready, and it's the next one's turn. [whispers] And when I crow BAWK BAWK... [giggles] whoever has the hen lays an egg!",
         ),
     },
     "gallina_who": {
@@ -274,6 +274,10 @@ _GALLINA: Final[dict[str, Takes]] = {
         "es": ("[playful] ¡No escuché nombres! [cheerful] Igual jugamos: cuando diga ¡siguiente!, le toca al que sigue en la rueda.", "[giggles] Bueno, ¡sin nombres! [playful] Cuando diga ¡siguiente!, le toca al de al lado."),
         "en": ("[playful] I didn't hear any names! [cheerful] We'll play anyway: when I say next, it's the next one in the circle.", "[giggles] Okay, no names! [playful] When I say next, it's the turn of the one beside you."),
     },
+    "gallina_order": {
+        "es": ("[cheerful] Vamos en este orden:", "[playful] Les toca así:"),
+        "en": ("[cheerful] Here's the order:", "[playful] We go like this:"),
+    },
     "gallina_ready": {
         "es": ("[excited] ¡Listo! [playful] ¡Que empiece la gallina loca!", "[giggles] ¡Coc, coc, coc! [excited] ¡A jugar!"),
         "en": ("[excited] All set! [playful] Let the crazy hen begin!", "[giggles] Cluck, cluck, cluck! [excited] Let's play!"),
@@ -281,10 +285,6 @@ _GALLINA: Final[dict[str, Takes]] = {
     "gallina_next": {
         "es": ("[excited] ¡Siguiente!", "[playful] ¡Le toca al siguiente!", "[giggles] ¡Al que sigue!"),
         "en": ("[excited] Next!", "[playful] Next one's turn!", "[giggles] Next in line!"),
-    },
-    "gallina_again_you": {
-        "es": ("[giggles] ¡La gallina dice... otra vez tú!", "[playful] ¡Uy! [excited] ¡Otra vez tú!"),
-        "en": ("[giggles] The hen says... you again!", "[playful] Ooh! [excited] You again!"),
     },
     "gallina_good": {
         "es": ("[excited] ¡Bien!", "[cheerful] ¡Eso!", "[giggles] ¡Qué gallina tan rápida!", "[proud] ¡Muy bien!", "[playful] ¡Chévere!", "[excited] ¡Así se hace!"),
@@ -303,29 +303,49 @@ _GALLINA: Final[dict[str, Takes]] = {
         "en": ("[excited] BAWK BAWK! [giggles] The hen went crazy!", "[gasps] BAWK! [excited] Time's up!", "[excited] BAWK, BAWK, BAWK!"),
     },
     "gallina_caught": {
-        "es": ("[giggles] ¡Te tocó la penitencia!", "[playful] ¡La gallina te agarró! [giggles] Penitencia...", "[excited] ¡Penitencia para ti!"),
-        "en": ("[giggles] You get the forfeit!", "[playful] The hen got you! [giggles] Forfeit...", "[excited] A forfeit for you!"),
+        "es": ("[giggles] ¡Te toca poner un huevo!", "[playful] ¡La gallina te agarró! [giggles] A poner un huevo...", "[excited] ¡Tú pones el huevo!"),
+        "en": ("[giggles] You have to lay an egg!", "[playful] The hen got you! [giggles] Time to lay an egg...", "[excited] You lay the egg!"),
     },
     "gallina_caught_anyone": {
-        "es": ("[giggles] ¡Al que le tocaba... le toca la penitencia!", "[playful] ¿A quién le tocaba? [giggles] ¡Penitencia!"),
-        "en": ("[giggles] Whoever's turn it was... gets the forfeit!", "[playful] Whose turn was it? [giggles] Forfeit!"),
+        "es": ("[giggles] ¡El que tenía la gallina... pone un huevo!", "[playful] ¿A quién le tocaba? [giggles] ¡Pone un huevo!"),
+        "en": ("[giggles] Whoever had the hen... lays an egg!", "[playful] Whose turn was it? [giggles] Lay an egg!"),
     },
-    "gallina_forfeit_done": {
-        "es": ("[giggles] ¡Jajaja! [excited] ¡Qué gallina tan buena!", "[cheerful] ¡Eso! [giggles] ¡Hasta yo me reí!", "[proud] ¡Perfecto! [playful] Eres una gallina de verdad."),
-        "en": ("[giggles] Ha ha ha! [excited] What a great chicken!", "[cheerful] Yes! [giggles] Even I laughed!", "[proud] Perfect! [playful] You're a real chicken."),
+    "gallina_laid": {
+        "es": ("[excited] ¡Puso un huevo! [giggles] ¡Qué gallina tan ponedora!", "[giggles] ¡Jajaja! [excited] ¡Un huevo más!", "[cheerful] ¡Plop! [giggles] ¡Hasta yo me reí!"),
+        "en": ("[excited] An egg! [giggles] What a great egg-layer!", "[giggles] Ha ha ha! [excited] One more egg!", "[cheerful] Plop! [giggles] Even I laughed!"),
+    },
+    "gallina_golden": {
+        "es": ("[whispers] Y la gallina de oro... la que puso más huevos... [excited] es...", "[playful] ¿Quién puso más huevos? [excited] La gallina de oro es..."),
+        "en": ("[whispers] And the golden hen... who laid the most eggs... [excited] is...", "[playful] Who laid the most eggs? [excited] The golden hen is..."),
+    },
+    "gallina_golden_tie": {
+        "es": ("[gasps] ¡Empate de huevos! [excited] Las gallinas de oro son...", "[giggles] ¡Pusieron los mismos huevos! [excited] Gallinas de oro..."),
+        "en": ("[gasps] It's an egg tie! [excited] The golden hens are...", "[giggles] Same number of eggs! [excited] Golden hens..."),
+    },
+    "gallina_golden_after": {
+        "es": ("[giggles] ¡Cocorocó! [cheerful] ¡Qué ponedores!", "[excited] ¡Un aplauso para los huevos! [giggles] ¡Coc, coc!"),
+        "en": ("[giggles] Bawk bawk! [cheerful] Champion egg-layers!", "[excited] A round of applause for the eggs! [giggles] Cluck, cluck!"),
     },
 }  # fmt: skip
+
+
+def _cried(words: str, language: str) -> str:
+    """Return "¡Salta como rana y di ¡croac!" from "salta como rana y di ¡croac!" (one "!" at the end)."""
+    capital = words[:1].upper() + words[1:]
+    return ("¡" if language == "es" else "") + capital + ("" if capital.endswith("!") else "!")
+
+
 for _key, _challenge in CHALLENGES.items():
     _es, _en = _challenge.spanish, _challenge.english
+    if _challenge.move:  # he does the move right after
+        _GALLINA[f"gallina_do_{_key}"] = {
+            "es": ("[excited] ¡Copia a Richie! [playful] ¡Mira!", "[giggles] ¡Copia a Richie! ¡Así!"),
+            "en": ("[excited] Copy Richie! [playful] Watch!", "[giggles] Copy Richie! Like this!"),
+        }
+        continue
     _GALLINA[f"gallina_do_{_key}"] = {
-        "es": (f"[excited] ¡{_es[:1].upper() + _es[1:]}!", f"[playful] A ver... [excited] ¡{_es}!"),
-        "en": (f"[excited] {_en[:1].upper() + _en[1:]}!", f"[playful] Let's see... [excited] {_en}!"),
-    }
-for _key, _pose in POSES.items():
-    _es, _en = _pose.spanish, _pose.english
-    _GALLINA[f"gallina_pose_{_key}"] = {
-        "es": (f"[excited] ¡{_es[:1].upper() + _es[1:]}!", f"[playful] A ver... [excited] ¡{_es}!"),
-        "en": (f"[excited] {_en[:1].upper() + _en[1:]}!", f"[playful] Let's see... [excited] {_en}!"),
+        "es": (f"[excited] {_cried(_es, 'es')}", f"[giggles] {_cried(_es, 'es')}"),
+        "en": (f"[excited] {_cried(_en, 'en')}", f"[giggles] {_cried(_en, 'en')}"),
     }
 for _key, _forfeit in FORFEITS.items():
     _es, _en = _forfeit.spanish, _forfeit.english
