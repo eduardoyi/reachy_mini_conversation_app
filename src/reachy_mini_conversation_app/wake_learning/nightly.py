@@ -67,7 +67,9 @@ SWITCH_MARGIN_CALLS: Final[int] = 2
 QUEUE_SIZE: Final[int] = 10
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
-MAX_NEGATIVES: Final[int] = 300_000
+# Room for a week of the house next to a base set (the Richie head's set and 250,000 ACAV100M windows): about
+# 1.8 GB of float16 windows, which the trainer turns into float32 a batch at a time.
+MAX_NEGATIVES: Final[int] = 600_000
 RECORDING_COPIES: Final[int] = 3
 # Name checks: the whole clip in pieces of at most this, then 1.5 s windows every 0.25 s to find where it is.
 CHECK_PIECE_S: Final[float] = 10.0
