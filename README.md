@@ -162,6 +162,7 @@ values. This keeps one-off commands such as
 | `WAKE_FEATURES_KEEP_DAYS` | `30`. Days of the wake feature log kept (about 9 MB per hour of listening). |
 | `WAKE_REMINDER_TIME` | `19:30`. When the admin app sends the daily wake-word reminder (clips to check, a new model to approve, a voice refresh), never in quiet hours; `off` stops it. |
 | `WAKE_TRAINER_PYTHON` | Unset. A Python with PyTorch and onnx that runs `scripts/wake_train.py` for the nightly job; without it the night labels and scores but trains nothing. |
+| `WAKE_BASE_SET` | Unset. A saved `.npz` training set (`X`, `Y`) the nightly job mixes into every night's training, such as the "Richie" head's. See [docs/features/wake-learning.md](docs/features/wake-learning.md). |
 | `LOCAL_ACOUSTIC_WAKE_THRESHOLD` | Acoustic wake score threshold in (0, 1]; defaults to the frozen `0.5`. Each wake logs its score and each sub-threshold score event logs its peak ("near miss", numbers only) for calibrating a new microphone; `1` effectively disables waking while still logging scores. With `LOCAL_STT_REQUEST_MODEL` set, Whisper checks the name in the 2.5 s the wake model fired on before Reachy reacts, so a low threshold (0.3 on the Mac mini) catches far calls without false wakes. | Calibrate it with the guided `reachy-wake-calibrate --media-backend local --model-dir <bundle>` (app stopped).
 | `LOCAL_WAKE_WORD` | Local transcript wake phrase. Defaults to `Reachy`; matching remains exact and caller-configured. |
 | `LOCAL_WAKE_COOLDOWN_SECONDS` | Duplicate wake suppression window. Defaults to `2`. |
