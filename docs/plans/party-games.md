@@ -506,3 +506,6 @@ game, a living-room escape room, map conquest and a co-op island adventure.
   Detectives' phone said "Richie is listening" while he was still asking). Big Brain's "¡Correcto!" card clears at
   the next pick and before the final, and an empty board no longer asks for a pick. Scribble Rush shows the
   category as a big label on the TRMNL and the phones. Not yet played again.
+- 2026-11-03: Sheeple moves to Big Brain's host voice with a survey host's banter (sheeple_lines.py, 392 takes;
+  names, answers and questions live in the same voice), and Big Brain gets 196 more takes and lines for misses
+  in a row, below zero, comebacks and runaways. Clips not yet recorded; not yet played.

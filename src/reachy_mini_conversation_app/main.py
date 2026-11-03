@@ -321,7 +321,12 @@ def _build_games(deps: Any, runtime: Any, movement: Any, robot: Any, calls: Any)
         )
         if themed.bank.is_file():
             games[key] = lambda themed=themed: BigBrain(themed)  # type: ignore[misc]
-    sheeple = SheepleSetup(data_dir=game_data, port=config.BIG_BRAIN_PORT, public_url=config.BIG_BRAIN_PUBLIC_URL)
+    sheeple = SheepleSetup(
+        data_dir=game_data,
+        port=config.BIG_BRAIN_PORT,
+        public_url=config.BIG_BRAIN_PUBLIC_URL,
+        elevenlabs_key=config.ELEVENLABS_API_KEY,
+    )
     if sheeple.bank.is_file():  # one phone game at a time, so it shares Big Brain's port and public address
         games["sheeple"] = lambda: Sheeple(sheeple)
     gemini_key = (config.GEMINI_API_KEY or "").strip()

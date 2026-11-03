@@ -2,7 +2,7 @@
 
 - Status: `in-progress` (built and tested 2026-11-01; deployed to the Mac mini 2026-11-01 13:45; first played
   2026-11-01 15:01, two teams; fixes from that game below)
-- Last updated: 2026-11-02 (a beep before each spoken answer; the result card clears)
+- Last updated: 2026-11-03 (more takes; lines for misses in a row, below zero, comebacks and runaways)
 - Plan: [party-games.md](../plans/party-games.md) ("Big Brain build")
 - Part of: [games.md](games.md) (the shared game host)
 
@@ -31,7 +31,10 @@ bets), bilingual (Spanish or English, answers count in either), adults by defaul
    line a short beep plays and only then does he listen, for up to 6 s for the answer to start; that player's
    phone says "Espera el bip… y responde" until the beep and "¡Responde en voz alta!" (with a buzz) from it (silence is a miss at once; speech he could not make out gets one
    "say that again?"). Right: the points, the next pick, a cheer (a streak and the 800 row get their own lines). Wrong: the
-   points are lost (not in kids mode, nor on a double), that team is locked out and the others get 6 s more.
+   points are lost (not in kids mode, nor on a double), that team is locked out and the others get 6 s more. A
+   team's third wrong answer in a row and a wrong answer that drops it below zero get their own lines. After a
+   square Richie calls a new leader (a comeback when it had trailed by 1,500 or more) or a runaway (3,000 ahead,
+   once per leader).
    Nobody: "time's up", and the answer on the TRMNL and in his voice.
 5. **Hidden squares** (never in the 200 row, in different columns): double or nothing (twice the points; a miss
    costs nothing), steal (a right answer also takes the square's points from the leading other team), everyone
@@ -99,7 +102,7 @@ borrows the nearest clue from the next row. The script's Gemini and OpenAI paths
 | Board | `games/big_brain_board.py` | `build_board(bank, language, kids, recent)`: rows by hardness quarter, themed columns (one per broad category) plus a broad one, three hidden squares, a final from the hardest quarter with appeal ≥ 2.3; no two clues sharing an accepted answer; `imperial()` leaves out clues measured in miles, feet or Fahrenheit; `remember`/`read_history` keep clues out for 30 days |
 | Judge | `games/big_brain_judge.py` | `matches()` by code (case, accents, articles, lead-ins, slips ≥ 0.84 similar, a surname, a name without its generic word such as "Pacific" for "Pacific Ocean", the answer with a few words around it; a filler such as "um" is wrong), then Jev (`right`, `too_broad`, and for spoken answers `sounds_like`: speech recognition's spelling of an accepted answer, "Téphanis" for "Tiffany's") → `Ruling.RIGHT/WRONG/SPECIFIC`; rulings kept in `rulings.json` |
 | Audio | `games/big_brain_audio.py` | `Clips` (host lines by moment, never the same take twice running), `Sounds` (as `chosen.json` picks), `Speech` (Eleven v4 Turbo, raw 24 kHz PCM, kept by text) |
-| Lines | `games/big_brain_lines.py` | 41 moments, 334 takes in English and Venezuelan Spanish with ElevenLabs audio tags |
+| Lines | `games/big_brain_lines.py` | 57 moments (with the teams' own), 616 takes in English and Venezuelan Spanish with ElevenLabs audio tags |
 | Phones | `games/big_brain_phones.py`, `static/big_brain/index.html` | FastAPI on `0.0.0.0:BIG_BRAIN_PORT` inside Reachy's loop (no signal capture), only during a game; the code in every request; joins kept here |
 | Screens | `games/big_brain_screens.py` | `render_join`, `render_board`, `render_clue`, `render_answer`, `render_final`, `render_reveal`, `render_winner` |
 | QR | `qr_code.py` | Byte mode, level L, versions 1–5; checked against macOS's own reader (all sizes decoded) |
@@ -134,7 +137,8 @@ big-brain/rulings.json          Jev's and the room's rulings
 
 ## Extension guide
 
-- New host lines: add takes to `big_brain_lines.py` (known tags only; the tests check), then
+- New host lines: add takes at the end of a moment in `big_brain_lines.py` (clips are named by take number, so
+  never edit or reorder one; known tags only, the tests check), then
   `uv run python scripts/big_brain_voice.py --out <game-data>/big-brain/voice --check` makes only the new ones.
 - New sounds: add a prompt to `scripts/big_brain_sounds.py`; pick a take by editing `sounds/chosen.json`.
 - More clues: `scripts/trivia_bank.py --pick hard|appeal --rewrite-top N`, then `scripts/trivia_topics.py`.
@@ -163,10 +167,11 @@ big-brain/rulings.json          Jev's and the room's rulings
 
 ## Testing
 
-- `uv run pytest tests/games/test_big_brain.py` (16): board shape and order, kids mode, the 30-day memory, the
+- `uv run pytest tests/games/test_big_brain.py` (17): board shape and order, kids mode, the 30-day memory, the
   judge by code in both languages, Jev's kept rulings and the room's overrule, the QR code's structure, the
   phones' code and joining (FastAPI test client), and a whole show with two pretend phones from joining to the
-  winner (red always right wins; the reveal goes from the lowest score; 21 clues remembered).
+  winner (red always right wins; the reveal goes from the lowest score; 21 clues remembered); misses in a row,
+  below zero, a comeback, a runaway and the fallback to the older line until a new moment is recorded.
 - `tests/test_hybrid_runtime.py::test_a_game_announcement_can_play_recorded_speech_instead_of_saying_its_text`.
 - `tests/games/test_big_brain_lines.py` (4): both languages, known tags only, tags stripped for screens.
 - Full gate on 2026-11-01: `ruff check . --fix && ruff format . && mypy --pretty --show-error-codes && pytest
@@ -177,6 +182,10 @@ big-brain/rulings.json          Jev's and the room's rulings
 
 ## Changelog
 
+- 2026-11-03: More banter: 196 more takes (correct and wrong 20 each, lead changes 10, streaks and hard ones 12,
+  …), and new moments for a third wrong answer in a row, a drop below zero and a runaway leader; the unused
+  "comeback" now plays when the new leader had trailed by 1,500. A new moment falls back to the older one until its
+  clips are made.
 - 2026-11-02: After the household played the Disney edition: a beep after Richie's "¿Sí?" opens the listening,
   and the phone says "answer now" only from then (players answered over his line); the "¡Correcto!" card goes
   when the next pick starts and before the final (it stayed on); nobody is asked to pick once the board is empty

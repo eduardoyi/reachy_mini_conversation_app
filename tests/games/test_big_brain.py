@@ -21,6 +21,7 @@ from reachy_mini_conversation_app.games.catalog import parse_game_request
 from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
 from reachy_mini_conversation_app.games.big_brain_board import (
     POINTS,
+    Clue,
     BoardError,
     imperial,
     remember,
@@ -473,3 +474,40 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     assert len(read_history(tmp_path / "big-brain" / "history.json")) == 21
     assert any(listening for _, listening in played)
     assert parse_game_request("juguemos big brain") is not None
+
+
+@pytest.mark.asyncio
+async def test_misses_in_a_row_a_drop_below_zero_a_comeback_and_a_runaway_get_their_own_lines(tmp_path: Path) -> None:
+    """More of the host's banter (2026-11-03): each new moment plays once recorded, the old one until then."""
+    game = BigBrain(BigBrainSetup(data_dir=tmp_path, elevenlabs_key=None, port=0))
+    said: list[tuple[str, ...]] = []
+
+    async def say(*moments: str, sounds: tuple[str, ...] = (), after: Any = None) -> None:
+        said.append(moments)
+
+    game._say = say  # type: ignore[method-assign]
+    game._teams_playing = lambda: ["red", "blue"]  # type: ignore[method-assign]
+    recorded = {"wrong_streak", "comeback", "below_zero", "runaway"}
+    game._clips.has = lambda moment, language: moment in recorded  # type: ignore[method-assign]
+    red = Player("p1", "Ana", "red", 0.0)
+    clue = Clue("c1", "Cosas", 400, "¿Qué?", "Esto", ["esto"], 0.5)
+    game._scores = {"red": 600, "blue": 0}
+    for _ in range(3):
+        await game._wrong(red, clue, "otra cosa")
+    assert said == [("wrong",), ("wrong", "below_zero"), ("wrong_streak",)]
+    recorded.discard("wrong_streak")
+    for _ in range(3):
+        await game._wrong(red, clue, "otra cosa")
+    assert said[-1] == ("wrong",)
+
+    said.clear()
+    game._scores = {"red": 3000, "blue": 0}
+    await game._standings("red", "red")
+    assert said == [("runaway",)]
+    await game._standings("red", "red")  # said once per leader
+    game._scores = {"red": 3000, "blue": 3200}
+    await game._standings("red", "blue")
+    assert said == [("runaway",), ("comeback",)]
+    game._scores = {"red": 3400, "blue": 3200}
+    await game._standings("blue", "red")
+    assert said[-1] == ("lead_change",)

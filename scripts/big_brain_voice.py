@@ -6,11 +6,13 @@ voice on Eleven v4 Turbo, audio tags included. ``manifest.json`` records each cl
 the clips whose text is new or changed. With ``--check``, Whisper transcribes every clip and flags any that
 read a tag aloud or say something other than the line; flagged clips are listed in ``check.json`` and can be
 remade by deleting them and running again. ``--set kids`` makes the kids' games' lines (games/kids_lines.py)
-instead, in the voice given with ``--voice``.
+instead, in the voice given with ``--voice``; ``--set sheeple`` makes Sheeple's (games/sheeple_lines.py) in the
+host voice.
 
 Usage: uv run python scripts/big_brain_voice.py --out ~/.local/share/reachy/game-data/big-brain/voice --check
        uv run python scripts/big_brain_voice.py --set kids --voice VOICE_ID \
            --out ~/.local/share/reachy/game-data/kids/voice --check
+       uv run python scripts/big_brain_voice.py --set sheeple --out ~/.local/share/reachy/game-data/sheeple/voice --check
 """
 
 import os
@@ -29,6 +31,7 @@ from openai import AsyncOpenAI
 
 from reachy_mini_conversation_app.games.kids_lines import TAGS as KIDS_TAGS
 from reachy_mini_conversation_app.games.kids_lines import LINES as KIDS_LINES
+from reachy_mini_conversation_app.games.sheeple_lines import LINES as SHEEPLE_LINES
 from reachy_mini_conversation_app.games.big_brain_lines import TAGS, LINES, shown
 
 
@@ -87,10 +90,12 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="transcribe every clip and flag bad ones")
-    parser.add_argument("--set", default="big-brain", choices=("big-brain", "kids"), help="which game's lines")
+    parser.add_argument(
+        "--set", default="big-brain", choices=("big-brain", "kids", "sheeple"), help="which game's lines"
+    )
     parser.add_argument("--voice", default=VOICE_ID, help="the ElevenLabs voice id (Big Brain's host by default)")
     args = parser.parse_args()
-    lines, tags = (KIDS_LINES, KIDS_TAGS) if args.set == "kids" else (LINES, TAGS)
+    lines, tags = {"kids": (KIDS_LINES, KIDS_TAGS), "sheeple": (SHEEPLE_LINES, TAGS)}.get(args.set, (LINES, TAGS))
     load_dotenv(find_dotenv(usecwd=True))
     out: Path = args.out.expanduser()
     out.mkdir(parents=True, exist_ok=True)

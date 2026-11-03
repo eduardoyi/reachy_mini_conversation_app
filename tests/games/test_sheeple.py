@@ -16,8 +16,11 @@ from reachy_mini_conversation_app.games import sheeple
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
 from reachy_mini_conversation_app.games.sheeple import Survey, Sheeple, SheepleSetup, survey, pick_surveys
+from reachy_mini_conversation_app.games.sheeple_lines import LINES
+from reachy_mini_conversation_app.games.big_brain_audio import silence, write_wav
 from reachy_mini_conversation_app.games.big_brain_board import read_history
 from reachy_mini_conversation_app.games.big_brain_judge import Judge
+from reachy_mini_conversation_app.games.big_brain_lines import shown
 from reachy_mini_conversation_app.games.sheeple_screens import render_survey
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 
@@ -209,10 +212,25 @@ class _Played:
         self.listened: list[str] = []
         self.loudest: list[int] = []  # the loudest sample of what played before each answer
         self.told_to_talk: list[bool] = []  # the speaker's phone said "talk now" while Reachy listened
+        self.clips: list[str] = []  # the text of everything played as audio rather than said
 
 
-async def _play_a_whole_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, red_hits: bool = True) -> _Played:
-    """Play six boards on the real host with two phones; red names hidden answers aloud when ``red_hits``."""
+def _said(lines: list[str], moment: str) -> int:
+    """Count the lines that are a take of ``moment`` (in Spanish, without tags)."""
+    takes = {shown(take) for take in LINES[moment]["es"]}
+    return sum(line in takes for line in lines)
+
+
+async def _play_a_whole_game(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, red_hits: bool = True, recorded: tuple[str, ...] = ()
+) -> _Played:
+    """Play six boards on the real host with two phones; red names hidden answers aloud when ``red_hits``.
+
+    The ``recorded`` moments have clips (a moment of silence each); everything else is said in the everyday voice.
+    """
+    for moment in recorded:
+        for take in range(len(LINES[moment]["es"])):
+            write_wav(tmp_path / "sheeple" / "voice" / moment / f"es-{take + 1:02d}.wav", silence(0.1))
     for name, value in {"FLOCK_S": 1.0, "TURN_S": 1.0, "ANSWER_S": 1.0, "AFTER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
         monkeypatch.setattr(sheeple, name, value)
 
@@ -221,7 +239,7 @@ async def _play_a_whole_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
 
     monkeypatch.setattr(Phones, "start", nothing)
     monkeypatch.setattr(Phones, "stop", nothing)
-    (tmp_path / "sheeple").mkdir()
+    (tmp_path / "sheeple").mkdir(exist_ok=True)
     (tmp_path / "sheeple" / "bank.jsonl").write_text("\n".join(json.dumps(entry) for entry in _bank()))
     reachy = FakeReachy(real_clock=True)
 
@@ -231,11 +249,14 @@ async def _play_a_whole_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     reachy.services.jev = jev
     games: list[Sheeple] = []
     played: list[_Played] = []
+    clips: list[str] = []
 
     async def say_audio(
         rate: int, samples: np.ndarray, text: str, language: str, answer: Any, *, listen_s: float | None = None
     ) -> None:
         game = games[0]
+        if answer is None:
+            clips.append(text)
         if answer is None or game._speaker is None or game._survey is None:
             return
         played[0].listened.append(game._speaker.name)
@@ -256,6 +277,7 @@ async def _play_a_whole_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     await asyncio.sleep(0.1)
     room = _Room(games[0])
     played.append(_Played(games[0], reachy, room))
+    played[0].clips = clips
     room.join()
     playing = asyncio.get_running_loop().create_task(room.play())
     try:
@@ -274,18 +296,26 @@ async def test_a_whole_game_from_joining_to_the_winner(tmp_path: Path, monkeypat
     """Six boards, flock and team in turn, the last double; red hits every time and wins; boards are kept.
 
     Flock rounds score each typed guess (the English "the fridge" in a Spanish game); in team rounds blue's
-    miss passes the turn and red clears the board aloud, one listener at a time.
+    miss passes the turn and red clears the board aloud, one listener at a time. Richie riffs on the answers
+    (2026-11-03): a whisper before number one, Ana alone on it, Luis's stray guess read out, blue's miss said back.
     """
     played = await _play_a_whole_game(tmp_path, monkeypatch)
     game, reachy, room, listened = played.game, played.reachy, played.room, played.listened
     assert len(game._surveys) == sheeple.ROUNDS
     # Flock rounds 1, 3 and 5: Ana's "the fridge" scores 41 each; red clears the three team boards, the last doubled.
+
     assert game._points == {"p1": 41 * 3}
     assert game._scores["red"] == 41 * 3 + 80 * 2 + 80 * 2
     assert game._scores["red"] > game._scores.get("blue", 0) == 0
     assert "Luis" in listened and "Ana" in listened
-    assert any("gringos" in line for line in reachy.said)
-    assert any(line.startswith("¡Gana el equipo Rojo") for line in reachy.said)
+    said = reachy.said
+    assert _said(said, "asked") == sheeple.ROUNDS and any("Algo que hay en una cocina" in line for line in said)
+    assert _said(said, "top_suspense") == _said(said, "lone_top") == _said(said, "black_sheep") == 3
+    assert said.count("Luis puso: un pingüino.") == 3
+    assert "¿un dinosaurio?" in said and _said(said, "not_there") >= 1
+    assert _said(said, "team_top") >= 1 and _said(said, "cleared") == 3
+    assert _said(said, "winner") == _said(said, "winner_red") == 1 and _said(said, "top_sheep") == 1
+    assert "¡Ana!" in said
     assert len(read_history(tmp_path / "sheeple" / "history.json")) == sheeple.ROUNDS
     assert game.snapshot(room.red)["sheep"][0]["name"] == "Ana"
 
@@ -296,8 +326,8 @@ async def test_a_team_board_ends_after_three_misses(tmp_path: Path, monkeypatch:
     played = await _play_a_whole_game(tmp_path, monkeypatch, red_hits=False)
     said = played.reachy.said
     assert sheeple.MISSES == 3
-    assert sum("Van 3 de tres fallos." in line for line in said) == 3
-    assert not any("Van 4 de" in line for line in said)
+    assert _said(said, "miss_3") == _said(said, "miss_2") == _said(said, "miss_1") == 3
+    assert _said(said, "left") == 3 and _said(said, "cleared") == 0
     assert len(played.listened) == 3 * 3
 
 
@@ -312,11 +342,28 @@ async def test_a_beep_opens_each_spoken_answer_and_the_phone_says_talk_then(
     assert played.game.snapshot(played.room.red)["listening"] is False
 
 
-def test_every_fixed_line_is_offered_to_the_speech_cache() -> None:
-    """The fixed lines (no names or numbers in them) are cached in both languages."""
-    phrases = Sheeple.phrases()
-    assert "¡Tablero limpio!" in phrases and "Board cleared!" in phrases
-    assert all("{" not in phrase for phrase in phrases)
+@pytest.mark.asyncio
+async def test_a_recorded_moment_plays_its_clip_and_the_rest_is_said(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the third miss recorded, its clip plays as audio and is never said in the everyday voice."""
+    played = await _play_a_whole_game(tmp_path, monkeypatch, red_hits=False, recorded=("miss_3",))
+    assert _said(played.reachy.said, "miss_3") == 0
+    assert _said(played.clips, "miss_3") == 3
+    assert _said(played.reachy.said, "not_there") == 9
+
+
+def test_every_moment_sheeple_plays_has_takes_in_both_languages() -> None:
+    """Each moment the game names (and each team's turn and win) has two or more takes, tagged, in es and en."""
+    source = Path(sheeple.__file__).read_text(encoding="utf-8")
+    named = {moment for moment in LINES if f'"{moment}"' in source}
+    named |= {f"{kind}_round" for kind in ("flock", "team")} | {f"miss_{n}" for n in range(1, sheeple.MISSES + 1)}
+    named |= {f"{kind}_{team}" for kind in ("turn", "winner") for team in ("red", "blue", "green", "yellow")}
+    assert len(named) > 35
+    for moment in named:
+        for language in ("es", "en"):
+            takes = LINES[moment][language]
+            assert len(takes) >= 2 and all(take.startswith("[") and shown(take) for take in takes), moment
 
 
 def test_a_survey_needs_its_question_in_the_language() -> None:

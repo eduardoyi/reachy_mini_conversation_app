@@ -5,7 +5,12 @@ in the US, its answers hidden and ranked by how many said them. Flock rounds: ev
 Richie reveals the answers from the least to the most popular, and each guess scores the people who gave its
 answer (for the player's team). Team rounds: the team whose turn it is taps "answer" on a phone and that player
 alone says a guess aloud; a hit scores and keeps the turn, a miss passes it, and three misses end the board. Six
-boards, flock and team in turn, the last one double, then the winning team. Richie speaks in his own voice.
+boards, flock and team in turn, the last one double, then the winning team.
+
+Richie hosts in Big Brain's host voice: fixed moments are the recorded clips of ``sheeple_lines.py`` (a moment
+not recorded yet is said live from one of its takes), and questions, answers and names are said live in the same
+voice and kept by text. Without an ElevenLabs key, his everyday voice says it all. He riffs on the answers the
+way a survey-show host does (2026-11-03: the household found the game flat next to Big Brain's banter).
 """
 
 import time
@@ -20,10 +25,11 @@ from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameCo
 from reachy_mini_conversation_app.games.catalog import SHEEPLE, words
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain import START_WORDS, team_name
-from reachy_mini_conversation_app.games.big_brain_audio import RATE, Sounds, beep, join, silence
+from reachy_mini_conversation_app.games.sheeple_lines import LINES as HOST_LINES
+from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, beep, join, silence
 from reachy_mini_conversation_app.games.big_brain_board import remember, load_bank, read_history
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling, plain, matches
-from reachy_mini_conversation_app.games.big_brain_lines import TEAMS
+from reachy_mini_conversation_app.games.big_brain_lines import TEAMS, shown
 from reachy_mini_conversation_app.games.sheeple_screens import Slot, render_survey
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 from reachy_mini_conversation_app.games.big_brain_screens import render_join, render_winner
@@ -43,65 +49,35 @@ ANSWER_S: Final[float] = 20.0  # at most, from the prompt to the answer's text
 LOBBY_REMINDER_S: Final[float] = 75.0
 AFTER_S: Final[float] = 30.0  # the page stays up this long after the game, for the final scores
 JEV_AT_ONCE: Final[int] = 6
+LOW_COUNT: Final[int] = 5  # an answer this few people gave "barely counts"
+ECHO_CHARS: Final[int] = 40  # a missed spoken guess this short is said back ("¿Un dinosaurio?")
+# After a board: a new leader that was this far behind is a comeback; a lead this big is a runaway; a gap this
+# small between the top two is a close game.
+COMEBACK_POINTS: Final[int] = 60
+RUNAWAY_POINTS: Final[int] = 150
+CLOSE_POINTS: Final[int] = 10
 
+# What Richie says live (names, answers, counts), and what the screens and phones show.
 _LINES: Final[dict[str, dict[str, str]]] = {
-    "welcome": {
-        "es": "¡Bienvenidos a Sheeple! Aquí no gana el más listo: gana el que piensa como el rebaño. Escaneen el código de la pantalla para jugar.",  # fmt: skip
-        "en": "Welcome to Sheeple! The smartest player doesn't win here: whoever thinks like the flock does. Scan the code on the screen to join.",  # fmt: skip
-    },
-    "waiting": {
-        "es": "Cuando estén todos, toquen Empezar en el teléfono.",
-        "en": "When everyone's in, tap Start on your phone.",
-    },
-    "begin": {
-        "es": "¡Empezamos! Les preguntamos cosas a cien gringos, y ustedes adivinan qué contestaron. Unas rondas las juegan todos a la vez en el teléfono, y otras por equipos, en voz alta.",  # fmt: skip
-        "en": "Let's go! We asked a hundred people some questions, and you guess what they said. Some rounds everyone plays at once on the phone, others go team by team, out loud.",  # fmt: skip
-    },
     "no_bank": {"es": "No encuentro las encuestas.", "en": "I can't find the surveys."},
     "flock": {"es": "Ronda {number}: ¡todos responden!", "en": "Round {number}: everybody answers!"},
     "team": {"es": "Ronda {number}: por equipos.", "en": "Round {number}: team by team."},
-    "double": {"es": "¡Última ronda, y vale doble!", "en": "Last round, and it counts double!"},
-    "type_it": {
-        "es": "Escriban en el teléfono lo que creen que dijo la mayoría.",
-        "en": "Type on your phone what you think most people said.",
-    },
-    "time_up": {"es": "¡Tiempo! A ver qué dijo el rebaño.", "en": "Time! Let's see what the flock said."},
     "reveal": {"es": "Número {rank}: {answer}, con {count}.", "en": "Number {rank}: {answer}, with {count}."},
     "said_by": {"es": "¡Lo dijo {names}!", "en": "{names} said it!"},
-    "nobody_hit": {"es": "Nadie pensó como el rebaño esta vez.", "en": "Nobody thought like the flock this time."},
-    "your_turn": {
-        "es": "Equipo {team}, les toca. Toquen Responder en el teléfono y díganmelo.",
-        "en": "{team} team, your turn. Tap Answer on your phone and tell me.",
-    },
+    "typed": {"es": "{name} puso: {guess}.", "en": "{name} typed: {guess}."},
     "listen": {"es": "¿{name}?", "en": "{name}?"},
-    "hit": {"es": "¡Está! {answer}, con {count}.", "en": "It's there! {answer}, with {count}."},
-    "already": {"es": "Esa ya está en el tablero.", "en": "That one is already on the board."},
-    "not_there": {"es": "¡No está!", "en": "Not there!"},
-    "miss": {"es": "Van {misses} de tres fallos.", "en": "That's {misses} of three misses."},
-    "no_answer": {"es": "No te oí. Cuenta como fallo.", "en": "I didn't hear you. That's a miss."},
+    "echo": {"es": "[disbelief] ¿{said}?", "en": "[disbelief] {said}?"},
     "too_slow": {"es": "Se acabó el tiempo del equipo.", "en": "The team ran out of time."},
-    "cleared": {"es": "¡Tablero limpio!", "en": "Board cleared!"},
-    "left": {"es": "Faltaban: {answers}.", "en": "Still hidden: {answers}."},
-    "winner": {
-        "es": "¡Gana el equipo {team}, con {points} puntos!",
-        "en": "The {team} team wins, with {points} points!",
-    },  # fmt: skip
-    "tie": {"es": "¡Empate! Ganan {teams}.", "en": "It's a tie! {teams} win."},
-    "sheep": {
-        "es": "Y la oveja mayor, la que más pensó como el rebaño: ¡{name}!",
-        "en": "And the top sheep, who thought most like the flock: {name}!",
-    },
-    "goodbye": {"es": "¡Gracias por jugar Sheeple! Bee.", "en": "Thanks for playing Sheeple! Baa."},
+    "list": {"es": "{answers}.", "en": "{answers}."},
+    "name": {"es": "¡{name}!", "en": "{name}!"},
 }
-# Before each question; in Spanish, with some cheek about where the surveys come from.
-_ASKED: Final[dict[str, tuple[str, ...]]] = {
-    "es": ("Le preguntamos a cien gringos:", "Cien gringos respondieron esto:", "Encuesta a cien gringos:"),
-    "en": ("We asked a hundred people:", "A hundred people answered this:", "Survey says, a hundred people:"),
-}
-_FIXED: Final[tuple[str, ...]] = (
-    "welcome", "waiting", "begin", "no_bank", "double", "type_it", "time_up", "nobody_hit", "not_there", "already",
-    "no_answer", "too_slow", "cleared", "goodbye",
-)  # fmt: skip
+
+
+@dataclass(frozen=True)
+class Live:
+    """Words Richie says live in the host voice: a question, an answer, a name. Tags shape them, unshown."""
+
+    text: str
 
 
 @dataclass
@@ -111,6 +87,7 @@ class SheepleSetup:
     data_dir: Path
     port: int
     public_url: str | None = None  # the phones' https address, as for Big Brain (the same port)
+    elevenlabs_key: str | None = None  # the host voice; without it Richie's everyday voice hosts
 
     @property
     def folder(self) -> Path:
@@ -200,6 +177,8 @@ class Sheeple(Game):
         self._setup = setup
         self._rng = rng or random.Random()
         self._sounds = Sounds(setup.data_dir / "big-brain" / "sounds")
+        self._clips = Clips(setup.folder / "voice", self._rng, lines=HOST_LINES)
+        self._speech = Speech(setup.folder / "speech", setup.elevenlabs_key)
         self._context: GameContext | None = None
         self._judge: Judge | None = None
         self._jev_gate = asyncio.Semaphore(JEV_AT_ONCE)
@@ -223,11 +202,10 @@ class Sheeple(Game):
         self._message: str | None = None
         self._deadline: float | None = None  # in playing seconds
         self._event = asyncio.Event()
-
-    @classmethod
-    def phrases(cls) -> frozenset[str]:
-        """Every fixed line, in both languages, for the speech cache."""
-        return frozenset(_LINES[key][language] for key in _FIXED for language in ("es", "en"))
+        self._led: str | None = None  # the team that led after the last board
+        self._behind: dict[str, int] = {}  # team -> the most it trailed the leader by since the lead last changed
+        self._ran: str | None = None  # the team Richie last called a runaway
+        self._close_said = False  # "close game" was said after the last board
 
     # What phones see ------------------------------------------------------------------------------
 
@@ -357,14 +335,54 @@ class Sheeple(Game):
         if self._context is not None:
             await self._context.say(text)
 
-    async def _sound(self, name: str) -> None:
-        """Play one of Big Brain's sounds when it was made (and recorded audio can play)."""
+    def _live(self, key: str, **values: object) -> Live:
+        return Live(self._line(key, **values))
+
+    def _prepare(self, *texts: str) -> None:
+        """Start making live lines now, so they are ready when Richie says them."""
+        for text in texts:
+            self._speech.prepare(text, self._language)
+
+    async def _piece(self, part: str | Live) -> tuple[str, Audio | None]:
+        """Return a part's shown text and its host-voice audio (None: say the text in the everyday voice)."""
+        language = self._language
+        if isinstance(part, Live):
+            return shown(part.text), await self._speech.say(part.text, language)
+        line = self._clips.line(part, language)
+        if line is not None:
+            return line
+        takes = HOST_LINES.get(part, {}).get(language, ())
+        if not takes:
+            return "", None
+        take = self._rng.choice(takes)  # not recorded yet: the take is said live, its tags and all
+        return shown(take), await self._speech.say(take, language)
+
+    async def _host(self, *parts: str | Live, sounds: tuple[str, ...] = ()) -> None:
+        """Say ``parts`` (moments of sheeple_lines, or live words) after ``sounds``, in order, as few pieces as can be."""
         context = self._context
-        samples = self._sounds.get(name)
-        if context is None or samples is None or context.services.say_audio is None:
+        if context is None:
             return
-        await context.playing()
-        await context.services.say_audio(RATE, samples, "", context.language, None)
+        pieces: list[tuple[str, Audio | None]] = [
+            ("", s) for name in sounds if (s := self._sounds.get(name)) is not None
+        ]
+        pieces += await asyncio.gather(*(self._piece(part) for part in parts))
+        say_audio = context.services.say_audio
+        run: list[tuple[str, Audio]] = []
+
+        async def flush() -> None:
+            if run and say_audio is not None:
+                texts = [text for text, _ in run if text]
+                await context.playing()
+                await say_audio(RATE, join(*(samples for _, samples in run)), " ".join(texts), context.language, None)
+            run.clear()
+
+        for text, samples in pieces:
+            if samples is not None and say_audio is not None:
+                run.append((text, samples))
+            elif text:
+                await flush()
+                await context.say(text)
+        await flush()
 
     async def _listen(self, prompt: str) -> str:
         """Say ``prompt`` and return what the named player then says ("" for nothing)."""
@@ -381,7 +399,7 @@ class Sheeple(Game):
         say_audio = context.services.say_audio
         if say_audio is not None:
             # A beep opens the listening with its own short wait: players spoke over the name before (2026-11-02).
-            await context.say(prompt)
+            await self._host(Live(prompt))
             self._listening = True
             self._changed()
             await say_audio(
@@ -486,8 +504,12 @@ class Sheeple(Game):
                 logger.warning("Sheeple: no board fits (%s, kids=%s)", context.language, self._kids)
                 await self._say(self._line("no_bank"))
                 return
+            self._prepare(*(board.question for board in self._surveys))
+            self._prepare(*(self._line("listen", name=player.name) for player in self._phones.players.values()))
             for index, board in enumerate(self._surveys):
                 await self._play_board(index, board)
+                if index + 1 < len(self._surveys):
+                    await self._standings()
             await self._ending()
             await asyncio.sleep(AFTER_S)
         finally:
@@ -533,7 +555,7 @@ class Sheeple(Game):
         self._phase = "lobby"
         self._show_join()
         self._changed()
-        await self._say(self._line("welcome"))
+        await self._host("welcome", sounds=("intro",))
         shown_players = -1
         while not (self._started and self._phones.players):
             self._started = False
@@ -542,15 +564,18 @@ class Sheeple(Game):
                 shown_players = len(self._phones.players)
                 self._show_join()
             if not came and not self._started:
-                await self._say(self._line("waiting"))
+                await self._host("waiting")
         for team in self._teams_playing():
             self._scores.setdefault(team, 0)
         self._first_turn = self._rng.randrange(len(self._teams_playing()))
         logger.info("Sheeple started: %d players, %d teams", len(self._phones.players), len(self._teams_playing()))
         self._phase = "intro"
         self._changed()
-        await self._say(self._line("begin"))
+        await self._host("begin")
         return True
+
+    def _reveal(self, rank: int, answer: Answer) -> str:
+        return self._line("reveal", rank=rank + 1, answer=answer.text, count=answer.count)
 
     async def _play_board(self, index: int, board: Survey) -> None:
         self._survey, self._round = board, index + 1
@@ -562,23 +587,22 @@ class Sheeple(Game):
             teams = self._teams_playing()
             self._turn = teams[self._first_turn % len(teams)]
             self._first_turn += 1
+        self._prepare(*(self._reveal(rank, answer) for rank, answer in enumerate(board.answers)))
         self._show_board()
         self._changed()
-        await self._sound("board")
-        intro = self._line(self._kind, number=self._round) + (" " + self._line("double") if double else "")
-        asked = self._rng.choice(_ASKED[self._language])
-        await self._say(f"{intro} {asked} {board.question}")
+        intro = [f"{self._kind}_round", *(["double"] if double else []), "asked"]
+        await self._host(*intro, Live(board.question), sounds=("board",))
         if self._kind == "flock":
             await self._flock(board, 2 if double else 1)
         else:
             await self._team(board, 2 if double else 1)
 
     async def _flock(self, board: Survey, times: int) -> None:
-        """Everybody types a guess; the answers are revealed from the least popular up."""
+        """Everybody types a guess; the answers are revealed from the least popular up, with Richie's comments."""
         assert self._phones is not None
         self._phase = "flock"
         self._changed()
-        await self._say(self._line("type_it"))
+        await self._host("type_it")
         context = self._context
         assert context is not None
         self._deadline = context.played_s + FLOCK_S
@@ -590,35 +614,70 @@ class Sheeple(Game):
         self._deadline = None
         self._phase = "reveal"
         self._changed()
-        await self._say(self._line("time_up"))
         guesses = {plain(text): text for text in self._typed.values() if plain(text)}
-        found = await asyncio.gather(*(self.find(board, text, spoken=False) for text in guesses.values()))
+        found, _ = await asyncio.gather(
+            asyncio.gather(*(self.find(board, text, spoken=False) for text in guesses.values())),
+            self._host("time_up"),
+        )
         hit_by_guess = dict(zip(guesses, found))
-        self._hits = {player_id: hit_by_guess.get(plain(text)) for player_id, text in self._typed.items()}
+        self._hits = {
+            player_id: hit_by_guess.get(plain(text)) for player_id, text in self._typed.items() if player_id in players
+        }
+        typers = [pid for pid, text in self._typed.items() if plain(text) and pid in players]
+        winners_at = {
+            rank: [players[pid] for pid, hit in self._hits.items() if hit == rank]
+            for rank in range(len(board.answers))
+        }
+        language = self._language
+        # The survey host's favourite moment, after the reveals: a guess not one of the hundred gave, read out.
+        strays = [pid for pid in typers if self._hits.get(pid) is None]
+        stray = players[self._rng.choice(strays)] if strays else None
+        typed = self._live("typed", name=stray.name, guess=self._typed[stray.id]) if stray else None
+        self._prepare(
+            *(
+                self._line("said_by", names=_joined([p.name for p in winners], language))
+                for winners in winners_at.values()
+                if winners
+            ),
+            *([typed.text] if typed else []),
+        )
         anybody = False
         for rank in reversed(range(len(board.answers))):
             answer = board.answers[rank]
+            winners = winners_at[rank]
+            if rank == 0:
+                await self._host("top_suspense")
             answer.shown = True
-            winners = [players[pid] for pid, hit in self._hits.items() if hit == rank and pid in players]
             for player in winners:
                 self._points[player.id] = self._points.get(player.id, 0) + answer.count * times
                 self._scores[player.team] = self._scores.get(player.team, 0) + answer.count * times
-            names = _joined([player.name for player in winners], self._language)
+            names = _joined([player.name for player in winners], language)
             self._message = f"{answer.text}: {names} +{answer.count * times}" if winners else None
             self._show_board()
             self._changed()
-            if rank == 0:
-                await self._sound("drumroll")
-            line = self._line("reveal", rank=rank + 1, answer=answer.text, count=answer.count)
-            if winners:
-                anybody = True
-                await self._sound("correct")
-                line += " " + self._line("said_by", names=names)
-            await self._say(line)
+            sounds = ("drumroll",) if rank == 0 else ()
+            if not winners:
+                missed_top = rank == 0 and bool(typers)
+                await self._host(Live(self._reveal(rank, answer)), *(["top_missed"] if missed_top else []), sounds=sounds)  # fmt: skip
+                continue
+            anybody = True
+            if len(typers) > 1 and len(winners) == len(typers):
+                comment = "whole_flock"
+            elif rank == 0 and len(winners) == 1 and len(typers) > 1:
+                comment = "lone_top"
+            elif answer.count <= LOW_COUNT:
+                comment = "low_hit"
+            else:
+                comment = "flock_hit"
+            said_by = self._live("said_by", names=names)
+            await self._host(Live(self._reveal(rank, answer)), said_by, comment, sounds=(*sounds, "correct"))
         self._phase = "revealed"
         self._changed()
         if not anybody:
-            await self._say(self._line("nobody_hit"))
+            await self._host("nobody_hit")
+            return
+        if typed is not None:
+            await self._host(typed, "black_sheep")
 
     async def _team(self, board: Survey, times: int) -> None:
         """Teams take turns saying a guess aloud until the board is clear or three misses."""
@@ -632,12 +691,13 @@ class Sheeple(Game):
             self._show_board()
             if team != announced:
                 announced = team
-                await self._say(self._line("your_turn", team=team_name(team, self._language)))
-            came = await self._wait(TURN_S)
+                await self._host(f"turn_{team}")
+            # A tap during the turn's line already counts (it was taken for "too slow" before, 2026-11-03).
+            came = self._speaker is not None or await self._wait(TURN_S)
             speaker = self._speaker
             if not came or speaker is None:
                 self._message = self._line("too_slow")
-                await self._miss(self._line("too_slow"))
+                await self._miss("too_slow")
                 continue
             self._phase = "answering"
             self._changed()
@@ -653,18 +713,26 @@ class Sheeple(Game):
                 self._show_board()
                 self._changed()
                 context.services.emotion("happy")
-                await self._sound("correct")
-                await self._say(self._line("hit", answer=answer.text, count=answer.count))
+                reveal = Live(self._reveal(index, answer))
+                if index == 0:
+                    parts: tuple[str | Live, ...] = ("team_top", reveal)
+                elif answer.count <= LOW_COUNT:
+                    parts = ("team_hit", reveal, "team_low")
+                else:
+                    parts = ("team_hit", reveal)
+                await self._host(*parts, sounds=("correct",))
                 continue
             if not said:
                 self._message = None
-                await self._miss(self._line("no_answer"))
+                await self._miss("no_answer")
             elif index is not None:
                 self._message = f"{speaker.name}: «{said}»"
-                await self._miss(self._line("already"))
+                await self._miss("already")
             else:
                 self._message = f"{speaker.name}: «{said}» ✗"
-                await self._miss(self._line("not_there"))
+                # Said back first, as a survey host would ("¿Un dinosaurio?"), when it is short enough.
+                echo = [self._live("echo", said=said.strip(" .!?¿¡"))] if len(said) <= ECHO_CHARS else []
+                await self._miss(*echo, "not_there")
         self._phase, self._speaker = "reveal", None
         hidden = [answer for answer in board.answers if not answer.shown]
         for answer in hidden:
@@ -672,12 +740,12 @@ class Sheeple(Game):
         self._show_board()
         self._changed()
         if hidden:
-            await self._say(self._line("left", answers=_joined([a.text for a in hidden], self._language)))
+            await self._host("left", self._live("list", answers=_joined([a.text for a in hidden], self._language)))
         else:
-            await self._say(self._line("cleared"))
+            await self._host("cleared")
 
-    async def _miss(self, why: str) -> None:
-        """Count a miss, say so, and pass the turn to the next team."""
+    async def _miss(self, *why: str | Live) -> None:
+        """Count a miss, say why and how many, and pass the turn to the next team."""
         self._misses += 1
         self._phase = "miss"
         teams = self._teams_playing()
@@ -685,8 +753,37 @@ class Sheeple(Game):
             self._turn = teams[(teams.index(self._turn) + 1) % len(teams)]
         self._show_board()
         self._changed()
-        await self._sound("wrong")
-        await self._say(f"{why} {self._line('miss', misses=self._misses)}".strip())
+        await self._host(*why, f"miss_{min(self._misses, MISSES)}", sounds=("wrong",))
+
+    def _leader(self) -> tuple[str | None, int]:
+        """Return the team alone in first place (None for a tie) and its lead over the next team."""
+        ranked = sorted((self._scores.get(team, 0) for team in self._teams_playing()), reverse=True)
+        if len(ranked) < 2 or ranked[0] == ranked[1]:
+            return None, 0
+        best = ranked[0]
+        return next(team for team in self._teams_playing() if self._scores.get(team, 0) == best), best - ranked[1]
+
+    async def _standings(self) -> None:
+        """Between boards, Richie remarks on the race: a new leader, a comeback, a runaway, a close game."""
+        leader, lead = self._leader()
+        moment: str | None = None
+        if leader is not None and self._led is not None and leader != self._led:
+            moment = "comeback" if self._behind.get(leader, 0) >= COMEBACK_POINTS else "lead_change"
+            self._behind, self._ran = {}, None
+        elif leader is not None and lead >= RUNAWAY_POINTS and self._ran != leader:
+            moment, self._ran = "runaway", leader
+        elif (
+            self._round > 1 and lead <= CLOSE_POINTS and not self._close_said and max(self._scores.values(), default=0)
+        ):
+            moment = "close_game"
+        self._close_said = moment == "close_game"
+        if leader is not None:
+            self._led = leader
+        top = max((self._scores.get(team, 0) for team in self._teams_playing()), default=0)
+        for team in self._teams_playing():
+            self._behind[team] = max(self._behind.get(team, 0), top - self._scores.get(team, 0))
+        if moment is not None:
+            await self._host(moment)
 
     async def _ending(self) -> None:
         language = self._language
@@ -695,22 +792,19 @@ class Sheeple(Game):
         self._changed()
         scores = {team: self._scores.get(team, 0) for team in self._teams_playing()}
         best = max(scores.values(), default=0)
-        winners = [team_name(team, language) for team, points in scores.items() if points == best]
+        winners = [team for team, points in scores.items() if points == best]
         if self._context is not None:
             self._context.services.emotion("excited")
-        await self._sound("drumroll")
         if len(winners) == 1:
-            await self._say(self._line("winner", team=winners[0], points=best))
+            await self._host("winner", f"winner_{winners[0]}", sounds=("drumroll",))
         else:
-            await self._say(self._line("tie", teams=_joined(winners, language)))
+            await self._host("tie", sounds=("drumroll",))
         phones = self._phones
         if phones is not None and len(phones.players) > 1 and self._points:
             top = max(phones.players.values(), key=lambda p: self._points.get(p.id, 0))
             if self._points.get(top.id, 0) > 0:
-                await self._say(self._line("sheep", name=top.name))
-        await self._sound("fanfare")
-        await self._sound("applause")
-        await self._say(self._line("goodbye"))
+                await self._host("top_sheep", self._live("name", name=top.name))
+        await self._host("goodbye", sounds=("fanfare", "applause"))
         logger.info("Sheeple over: %s", ", ".join(f"{team} {points}" for team, points in scores.items()))
 
 

@@ -78,6 +78,11 @@ FINAL_ANSWER_S: Final[float] = 8.0  # the final's answer on the TRMNL before the
 # The page and its link stay up this long after the game, for the final scores.
 AFTER_S: Final[float] = 30.0
 STREAK: Final[int] = 3
+# Three wrong answers in a row get their own line; a new leader that trailed by COMEBACK_POINTS is a comeback,
+# and a lead of RUNAWAY_POINTS over the next team a runaway (2026-11-03: more of the host's banter).
+MISS_STREAK: Final[int] = 3
+COMEBACK_POINTS: Final[int] = 1500
+RUNAWAY_POINTS: Final[int] = 3000
 START_WORDS: Final[frozenset[str]] = frozenset(
     {"empezamos", "empecemos", "empieza", "arranca", "arrancamos", "listo", "listos", "ya estamos", "a jugar",
      "start", "lets start", "start the game", "were ready", "ready", "go"}
@@ -164,6 +169,9 @@ class BigBrain(Game):
         self._kids = False
         self._scores: dict[str, int] = {}
         self._streak: dict[str, int] = {}
+        self._wrong_row: dict[str, int] = {}  # team -> wrong answers in a row
+        self._behind: dict[str, int] = {}  # team -> the most it trailed the leader by since the lead last changed
+        self._ran: str | None = None  # the team Richie last called a runaway
         self._control: str | None = None
         self._clue: Clue | None = None
         self._clue_shown = False
@@ -645,13 +653,34 @@ class BigBrain(Game):
             clue = board.clues[column][row]
             await self._square(clue)
             new_leader = self._leader()
-            if leader is not None and new_leader is not None and new_leader != leader and board.left:
-                await self._say("lead_change")
+            if board.left:
+                await self._standings(leader, new_leader)
             leader = new_leader or leader
         self._phase, self._message = "board", None
         self._show_board()
         self._changed()
         await self._say("board_done")
+
+    def _either(self, moment: str, fallback: str) -> str:
+        """Return ``moment`` when it was recorded, else ``fallback`` (new moments play once their clips are made)."""
+        return moment if self._clips.has(moment, self._language) else fallback
+
+    async def _standings(self, leader: str | None, new_leader: str | None) -> None:
+        """After a square, remark on the race: a new leader (a comeback when it trailed far), or a runaway."""
+        scores = sorted((self._scores.get(team, 0) for team in self._teams_playing()), reverse=True)
+        lead = scores[0] - scores[1] if len(scores) > 1 else 0
+        moment: str | None = None
+        if leader is not None and new_leader is not None and new_leader != leader:
+            far = self._behind.get(new_leader, 0) >= COMEBACK_POINTS
+            moment = self._either("comeback", "lead_change") if far else "lead_change"
+            self._behind, self._ran = {}, None
+        elif new_leader is not None and lead >= RUNAWAY_POINTS and self._ran != new_leader:
+            moment, self._ran = "runaway", new_leader
+        top = scores[0] if scores else 0
+        for team in self._teams_playing():
+            self._behind[team] = max(self._behind.get(team, 0), top - self._scores.get(team, 0))
+        if moment is not None:
+            await self._say(moment)
 
     def _leader(self) -> str | None:
         scores = {team: self._scores.get(team, 0) for team in self._teams_playing()}
@@ -762,6 +791,7 @@ class BigBrain(Game):
                 self._scores[robbed] -= taken
                 self._scores[team] += taken
         self._streak = {team: self._streak.get(team, 0) + 1}
+        self._wrong_row[team] = 0
         self._control = team
         self._message = (f"¡Correcto, {player.name}! +{points}" if language == "es" else f"Correct, {player.name}! +{points}")  # fmt: skip
         self._phase, self._answer_shown = "reading", True
@@ -774,8 +804,10 @@ class BigBrain(Game):
     async def _wrong(self, player: Player, clue: Clue, said: str) -> None:
         team, language = player.team, self._language
         lost = 0 if self._kids or clue.hidden == "double" else clue.points
-        self._scores[team] = self._scores.get(team, 0) - lost
+        before = self._scores.get(team, 0)
+        self._scores[team] = before - lost
         self._streak[team] = 0
+        self._wrong_row[team] = self._wrong_row.get(team, 0) + 1
         self._locked.add(team)
         self._buzz = None
         if said:
@@ -783,7 +815,13 @@ class BigBrain(Game):
         self._message = (f"{player.name}: «{said}» — no" if language == "es" else f"{player.name}: “{said}” — no") if said else None  # fmt: skip
         self._phase = "reading"
         self._changed()
-        await self._say("wrong", sounds=("wrong",))
+        if self._wrong_row[team] >= MISS_STREAK:
+            self._wrong_row[team] = 0
+            await self._say(self._either("wrong_streak", "wrong"), sounds=("wrong",))
+        elif before >= 0 > self._scores[team]:
+            await self._say("wrong", "below_zero", sounds=("wrong",))
+        else:
+            await self._say("wrong", sounds=("wrong",))
 
     async def _everyone(self, clue: Clue) -> None:
         """Everybody types an answer; every right one scores for its team."""
