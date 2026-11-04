@@ -53,7 +53,8 @@ the second as "spoke when you were talking about him". The deciding layer is not
 - **Clips to check**: up to 10 a day, where the automatic signals are least sure. "Did someone say his name?"
   Yes asks "To him or about him?"; No and Not sure end it there. "Is this the call he missed?" is just yes or
   no. Each answer overrules the speech model and the logs. Writing an answered clip into a new list asks it
-  again; the old answer counts until the new one.
+  again; the old answer counts until the new one. Taking an answer back (Back on the phone) writes an
+  `"undone"` line to `answers.jsonl` that forgets every earlier answer to that clip, so it waits again.
 - **Switching**:
   - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, one
     push offers it with the numbers;

@@ -100,6 +100,25 @@ class WakeWord:
             for item in self.store.queue()
         ]
 
+    def checked(self) -> list[dict[str, Any]]:
+        """Return the clips already answered from this list, oldest answer first, so a phone can go back to them."""
+        return [
+            {
+                "id": item.id,
+                "question": item.question,
+                "follow_up": item.follow_up,
+                "seconds": round(item.end - item.start, 1),
+                "answer": answer,
+            }
+            for item, answer in self.store.checked()
+        ]
+
+    def take_back(self, item_id: str, who: str) -> None:
+        """Forget the answer to a clip checked from this list, so it is asked again; LookupError when there is none."""
+        if all(item.id != item_id for item, _ in self.store.checked()):
+            raise LookupError(item_id)
+        self.store.take_back(item_id, who)
+
     def clip(self, item_id: str) -> bytes:
         """Return a waiting clip as WAV; raises LookupError when it is not waiting or cannot be read."""
         item = next((item for item in self.store.queue() if item.id == item_id), None)

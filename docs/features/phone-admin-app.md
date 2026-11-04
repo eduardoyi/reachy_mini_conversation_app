@@ -41,7 +41,9 @@ incoming calls are declined. The camera stays available to the admin app.
 - **The sheet** (tap the card, or `/#wake`), with what to do first:
   - **Check clips:** a card stack. Each clip plays by itself: "Did someone say his name?" Yes (swipe right) then
     asks "To him or about him?"; No (swipe left) and Not sure (swipe down) answer at once. "Is this the call
-    he missed?" is just Yes or No. At most 10 a day.
+    he missed?" is just Yes or No. At most 10 a day. Back (under the card) takes the last answer back and
+    plays that clip again with what was said ("You said: No. Answer again."); it reaches every clip answered
+    from the current list, even after closing and reopening the sheet.
   - **New model:** the proposal's before → after numbers, with Switch / Keep current. Undo is shown for 7 days.
   - **Teach Reachy your voice:** pick a person, then about 20 short prompts ("by the sofa", "from the kitchen",
     "louder", "quietly", "in a sentence", "from the hallway", "with the TV on", "as if he didn't hear"). Reachy
@@ -116,7 +118,7 @@ flowchart LR
 | `admin/notifier.py` | `Notifier` (subscriptions in `push.json`, VAPID key `vapid.pem`), `Watch` (checks every minute). |
 | `admin/web_push.py` | RFC 8291 aes128gcm encryption and RFC 8292 VAPID with `cryptography`; checked against the RFC 8291 example. |
 | `static/admin/` | `index.html` (icons as an inline SVG sprite, Reachy as inline SVG whose pose follows `data-state`), `admin.js`, `admin.css` (light and dark tokens; Unbounded and Figtree from Google Fonts), `manifest.webmanifest`, `sw.js`, icons. Plain JS, no build step. |
-| `admin/wake.py` | `WakeWord` (summary, clips to check and their audio, answers, keep, switch and undo with a restart once he is idle) and `WakeReminder` (the daily push) over `wake_learning.store.WakeLearningStore`. Routes in `server.py`: `GET /api/wake`, `GET /api/wake/queue`, `GET /api/wake/clip?item=`, `POST /api/wake/answer`, `/missed`, `/take`, `/switch`, `/keep`, `/undo`; audited as `wake clip checked`, `wake miss marked`, `wake call recorded`, `wake model switched`, `wake model kept`, `wake model switch undone` (never what was said). |
+| `admin/wake.py` | `WakeWord` (summary, clips to check and their audio, answers, keep, switch and undo with a restart once he is idle) and `WakeReminder` (the daily push) over `wake_learning.store.WakeLearningStore`. Routes in `server.py`: `GET /api/wake`, `GET /api/wake/queue` (clips waiting, and those already answered from this list), `GET /api/wake/clip?item=`, `POST /api/wake/answer`, `/take-back`, `/missed`, `/take`, `/switch`, `/keep`, `/undo`; audited as `wake clip checked`, `wake clip answer taken back`, `wake miss marked`, `wake call recorded`, `wake model switched`, `wake model kept`, `wake model switch undone` (never what was said). |
 | `admin/gallery.py` | `Gallery.items/path/thumbnail/delete` over `PHOTO_ARCHIVE_DIR` and the display cache (`drawings-v3`, older `drawings-v2`/`drawings`, `lessons`, `pictures`; never album art); ids are `<folder>/<file>` and nothing else opens. Routes `GET /api/gallery`, `GET /api/gallery/file?id=&thumb=1`, `POST /api/gallery/delete` (audited). |
 | `memory_routes.py` | `register_memory_routes`: `GET /memory`, `POST /memory/update`, `POST /memory/forget` on the control API (the app owns the memory file and writes it constantly, so changes go through its process). The admin app relays them as `/api/memory...` and audits who changed whose memory, never the text. |
 | `admin/costs.py` | `breakdown(entries, now, days)` over the usage ledger; route `GET /api/costs?days=1\|7\|30`. |

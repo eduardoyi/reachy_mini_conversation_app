@@ -305,6 +305,42 @@ def test_a_clip_already_checked_on_the_other_phone_is_refused(wake: Wake) -> Non
     assert wake.store.answers() == {"c0": "call"}
 
 
+def test_a_mistapped_answer_is_taken_back_and_the_clip_asked_again(wake: Wake) -> None:
+    """Back takes the latest answer back: the clip waits again, and the list says what was answered before."""
+    _queue(wake.store, 3)
+    with wake.client(headers={"Tailscale-User-Login": "adriana@example.com"}) as client:
+        client.post("/api/wake/answer", headers=SAME_ORIGIN, json={"item": "c1", "answer": "mention"})
+        client.post("/api/wake/answer", headers=SAME_ORIGIN, json={"item": "c0", "answer": "call"})
+        before = client.get("/api/wake/queue").json()
+        taken = client.post("/api/wake/take-back", headers=SAME_ORIGIN, json={"item": "c0"})
+        after = client.get("/api/wake/queue").json()
+        clip = client.get("/api/wake/clip", params={"item": "c0"})
+        again = client.post("/api/wake/answer", headers=SAME_ORIGIN, json={"item": "c0", "answer": "not_call"})
+    assert [(item["id"], item["answer"]) for item in before["checked"]] == [("c1", "mention"), ("c0", "call")]
+    assert [item["id"] for item in before["items"]] == ["c2"]
+    assert taken.json() == {"taken_back": True}
+    assert [item["id"] for item in after["checked"]] == ["c1"]
+    assert [item["id"] for item in after["items"]] == ["c0", "c2"]
+    assert clip.status_code == 200 and again.status_code == 200
+    assert wake.store.answers() == {"c1": "mention", "c0": "not_call"}
+    actions = [entry["action"] for entry in wake.audit()]  # newest first
+    assert actions == ["wake clip checked", "wake clip answer taken back", "wake clip checked", "wake clip checked"]
+
+
+def test_only_an_answer_from_the_current_list_can_be_taken_back(wake: Wake) -> None:
+    """A clip never answered, or answered before tonight's list was made, has nothing to take back."""
+    _queue(wake.store)
+    wake.store.answer("c1", "call", "adriana@example.com")
+    with wake.client() as client:
+        unanswered = client.post("/api/wake/take-back", headers=SAME_ORIGIN, json={"item": "c0"})
+        unknown = client.post("/api/wake/take-back", headers=SAME_ORIGIN, json={"item": "nope"})
+        time.sleep(1.1)  # answers and lists are stamped to the second
+        _queue(wake.store)
+        older = client.post("/api/wake/take-back", headers=SAME_ORIGIN, json={"item": "c1"})
+    assert unanswered.status_code == unknown.status_code == older.status_code == 404
+    assert wake.store.answers() == {"c1": "call"} and wake.audit() == []
+
+
 def test_wake_routes_need_a_household_login_and_the_apps_own_origin(wake: Wake) -> None:
     """The same guard as every other route: no login, no clip; no origin, no change."""
     _queue(wake.store)
