@@ -4,9 +4,10 @@
    never words). The household's answers on the phone overrule it.
 2. Score: the live and shadow heads, next to the main model, over every hour of the feature log: how many calls
    each pair would have caught and how often it would have fired on everything else.
-3. Offer a switch when the shadow pair caught more calls and fired no more, over a full day it ran live.
+3. Offer a switch when the shadow pair caught clearly more calls and fired no more, or as many calls on a fifth
+   fewer fires, over a full day it ran beside the live pair.
 4. Train a challenger on all labelled days but the newest; it becomes the next shadow head if it beats the
-   current one on that day.
+   current one on that day: more calls without more fires, or as many calls on clearly fewer fires.
 5. Pick tomorrow's clips to check, and write the scoreboard.
 
 Everything stays on this computer; training runs in a separate Python with PyTorch (``WAKE_TRAINER_PYTHON``).
@@ -62,9 +63,13 @@ COOLDOWN_S: Final[float] = 3.0
 # Main-head threshold at which the extra head's scaled score would count as a "trusted" wake (hybrid_runtime);
 # the extra head's own threshold stays above main/0.8 so it never can.
 TRUSTED_SCORE: Final[float] = 0.8
-EXTRA_THRESHOLDS: Final[tuple[float, ...]] = (0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
-# A switch is offered only for a clear gain: this many more calls caught (and at least 5% of them).
+EXTRA_THRESHOLDS: Final[tuple[float, ...]] = (0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.96, 0.97, 0.98, 0.985, 0.99)
+# A switch is offered only for a clear gain: this many more calls caught (and at least 5% of them) without
+# firing more, or as many calls caught with at most this share of the fires.
 SWITCH_MARGIN_CALLS: Final[int] = 2
+SWITCH_FIRES_SHARE: Final[float] = 0.8
+# A challenger becomes the shadow head when it catches more without firing more, or as many with this share.
+SHADOW_FIRES_SHARE: Final[float] = 0.9
 QUEUE_SIZE: Final[int] = 10
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
@@ -72,6 +77,9 @@ NEGATIVES_PER_DAY: Final[int] = 60_000
 # 1.8 GB of float16 windows, which the trainer turns into float32 a batch at a time.
 MAX_NEGATIVES: Final[int] = 600_000
 RECORDING_COPIES: Final[int] = 3
+# The name check finds where the name ends to within a quarter second; the main head reacts about 0.4 s
+# after that (checked on 140 recordings of the name). Calls are labelled where the head can tell, not before.
+NAME_LABEL_SHIFT_S: Final[float] = 0.4
 # Name checks: the whole clip in pieces of at most this, then 1.5 s windows every 0.25 s to find where it is.
 CHECK_PIECE_S: Final[float] = 10.0
 LOCATE_WINDOW_S: Final[float] = 1.5
@@ -414,15 +422,25 @@ def choose_threshold(days: list[tuple[DayScores, DayMoments]], main: str, main_t
         if main_threshold / threshold >= TRUSTED_SCORE:
             continue
         result = evaluate(days, main, main_threshold, extra, threshold)
-        if result.fires_per_day <= fire_budget and (best is None or result.caught > best[1].caught):
+        if result.fires_per_day <= fire_budget and (
+            best is None
+            or result.caught > best[1].caught
+            or (result.caught == best[1].caught and result.fires_per_day < best[1].fires_per_day)
+        ):
             best = (threshold, result)
     return best
 
 
+def better(candidate: PairResult, current: PairResult, margin: int, fires_share: float) -> bool:
+    """Whether ``candidate`` catches ``margin`` more calls without firing more, or as many on a share of the fires."""
+    more = candidate.caught >= current.caught + margin and candidate.fires_per_day <= current.fires_per_day + 0.5
+    quieter = candidate.caught >= current.caught and candidate.fires_per_day <= fires_share * current.fires_per_day
+    return more or quieter
+
+
 def clearly_better(candidate: PairResult, current: PairResult) -> bool:
-    """Whether ``candidate`` catches clearly more calls without firing more."""
-    margin = max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999))
-    return candidate.caught >= current.caught + margin and candidate.fires_per_day <= current.fires_per_day + 0.5
+    """Whether ``candidate`` is better by enough to offer a switch."""
+    return better(candidate, current, max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999)), SWITCH_FIRES_SHARE)
 
 
 # ---- training data -------------------------------------------------------------------------------------------
@@ -432,7 +450,7 @@ def day_examples(day: DayScores, runs: list[FeatureRun], moments: DayMoments, rn
     ends = day.ends
     labels = np.full(len(ends), -1.0, dtype=np.float32)
     for at in moments.named:
-        first, last = np.searchsorted(ends, [at - 0.4, at + 0.25])
+        first, last = np.searchsorted(ends, [at - 0.4 + NAME_LABEL_SHIFT_S, at + 0.25 + NAME_LABEL_SHIFT_S])
         labels[first:last] = 1.0
     for at in moments.not_calls:
         first, last = np.searchsorted(ends, [at - 1.5, at + 0.5])
@@ -487,7 +505,9 @@ def recording_examples(store: WakeLearningStore, model_dir: Path, noise: list[ND
             clip = np.clip(clip, -32768, 32767).astype(np.int16)
             voice_end = (lead.size + voice.size) / rate - 0.25  # the recording keeps 0.25 s after the voice
             clip_windows, clip_ends = _stream_windows(features, clip, rate)
-            near = (clip_ends >= voice_end - 0.3) & (clip_ends <= voice_end + 0.3)
+            near = (clip_ends >= voice_end - 0.3 + NAME_LABEL_SHIFT_S) & (
+                clip_ends <= voice_end + 0.3 + NAME_LABEL_SHIFT_S
+            )
             windows.append(clip_windows[near])
             labels.append(np.ones(int(near.sum()), np.float32))
     if not windows:
@@ -771,11 +791,7 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             )
             summary["challenger"] = {"name": name, "threshold": choice[0] if choice else None,
                                      **(choice[1].as_json() if choice else {})}  # fmt: skip
-            if (
-                choice is not None
-                and choice[1].caught > current.caught
-                and (choice[1].fires_per_day <= current.fires_per_day + 0.5)
-            ):
+            if choice is not None and better(choice[1], current, 1, SHADOW_FIRES_SHARE):
                 record = HeadRecord(name, choice[0], hashlib.sha256(path.read_bytes()).hexdigest(),
                                     datetime.now().isoformat(timespec="seconds"), choice[1].as_json())  # fmt: skip
                 store.set_shadow(record)

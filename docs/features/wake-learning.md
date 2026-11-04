@@ -56,8 +56,8 @@ the second as "spoke when you were talking about him". The deciding layer is not
   again; the old answer counts until the new one. Taking an answer back (Back on the phone) writes an
   `"undone"` line to `answers.jsonl` that forgets every earlier answer to that clip, so it waits again.
 - **Switching**:
-  - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, one
-    push offers it with the numbers;
+  - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, or as
+    many calls on a fifth fewer fires, one push offers it with the numbers;
   - "Switch" makes it live the next time Reachy is idle, and Undo stays for 7 days.
 - **Scoreboard**: this week's calls answered the first time, false wakes a day, by TV on or off, how often he
   spoke up when you were talking about him, and how many times the live and shadow heads heard his name.
@@ -137,10 +137,19 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
 - **Fires per day.** Fires (one per 3 s) more than 20 s from his name or an unknown stretch, per 16 hours of
   listening.
 - **Switch offer.** The shadow pair must catch at least 2 more calls (and 5% more) than the live pair over the days
-  since the shadow started, with fires no higher than the live pair's plus 0.5 a day.
-- **Challenger.** It trains on every day but the newest. Its threshold is the one that catches the most calls on
-  the newest day without firing more than the live pair. It becomes the shadow if it beats the current shadow
-  there.
+  since the shadow started, with fires no higher than the live pair's plus 0.5 a day; or catch as many calls on at
+  most 80% of the live pair's fires (`SWITCH_FIRES_SHARE`).
+- **Challenger.** It trains on every day but the newest. Its threshold (0.4 to 0.99) is the one that catches the
+  most calls on the newest day without firing more than the live pair, the quieter one on a tie. It becomes the
+  shadow if it beats the current shadow there: more calls without more fires, or as many on at most 90% of the
+  fires (`SHADOW_FIRES_SHARE`).
+- **Call labels.** Training labels a call's windows from the located name end to 0.65 s after it
+  (`NAME_LABEL_SHIFT_S`, 0.4 s later than the name check's end): the main head reacts about 0.4 s after the end
+  the name check finds, on 140 Mac recordings. Labelled where the check put it, challengers learned to fire on
+  the start of the name and fired more on sound-alikes.
+- **Household recordings.** Besides the phone takes, `recordings.jsonl` holds 150 of Eduardo's and Adriana's
+  September Mac-microphone calls (prompt `Mac microphone, September`), cut 0.25 s after the name the name check
+  found and dated when they were made.
 - **Thresholds.** An extra head's threshold stays at 0.4 or more, so its scaled score never reaches the trusted
   shortcut's 0.8.
 

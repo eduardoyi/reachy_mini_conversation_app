@@ -296,6 +296,27 @@ def test_a_clear_gain_needs_more_than_noise() -> None:
     assert not nightly.clearly_better(nightly.PairResult(35, 41, 14.0), current)
 
 
+def test_as_many_calls_on_clearly_fewer_fires_also_counts() -> None:
+    """A switch takes a fifth fewer fires for the same calls; a shadow, a tenth. Fewer calls never do."""
+    current = nightly.PairResult(caught=22, calls=39, fires_per_day=416.0)
+    assert nightly.clearly_better(nightly.PairResult(22, 39, 332.0), current)
+    assert not nightly.clearly_better(nightly.PairResult(22, 39, 360.0), current)
+    assert nightly.better(nightly.PairResult(22, 39, 360.0), current, 1, nightly.SHADOW_FIRES_SHARE)
+    assert not nightly.better(nightly.PairResult(21, 39, 100.0), current, 1, nightly.SHADOW_FIRES_SHARE)
+
+
+def test_a_tie_on_calls_takes_the_threshold_that_fires_less() -> None:
+    """Two thresholds that catch the same call: the stricter, quieter one is chosen."""
+    ends = np.arange(0, 600, FRAME_S)
+    extra = np.zeros(len(ends), np.float32)
+    extra[(ends > 100) & (ends < 101)] = 0.97  # a false fire only the looser thresholds pass
+    extra[(ends > 300) & (ends < 300.5)] = 0.99  # the call
+    scores = {"m": np.zeros(len(ends), np.float32), "x": extra}
+    day = (DayScores(ends, 16.0, scores), DayMoments(calls=[300.0]))
+    choice = nightly.choose_threshold([day], "m", 0.3, "x", fire_budget=100.0)
+    assert choice is not None and choice[0] == 0.98 and choice[1].caught == 1
+
+
 def test_a_head_threshold_keeps_it_out_of_the_trusted_shortcut() -> None:
     """With the main threshold at 0.3, an extra head below 0.375 could reach a 'sure' 0.8: never chosen."""
     ends = np.arange(0, 60, FRAME_S)
