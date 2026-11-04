@@ -1,6 +1,7 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
 from __future__ import annotations
+import os
 import sys
 import time
 import asyncio
@@ -20,6 +21,7 @@ from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     log_connection_troubleshooting,
+    settings_behind_privacy_prompt,
 )
 from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now, listening_allowed
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder, wake_clips_directory
@@ -660,6 +662,13 @@ def run(
             startup_settings = load_startup_settings_into_runtime(instance_path)
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
+
+    for name in settings_behind_privacy_prompt(os.environ):
+        logger.warning(
+            "%s points into Desktop, Documents or Downloads, where macOS can hold a read on a privacy prompt and "
+            "freeze Reachy until someone answers it; move it, for example under ~/.local/share",
+            name,
+        )
 
     acoustic_wake_detector: OpenWakeWordDetector | None = None
     wake_clips: WakeClipRecorder | None = None

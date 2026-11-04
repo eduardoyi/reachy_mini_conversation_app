@@ -36,13 +36,30 @@ MUSIC_STARTED_IN_CONVERSATION = (
 
 
 _CREDENTIALS_LOCK = asyncio.Lock()
+# The credentials file is read and written off the event loop, and given up on after this long: a read
+# stuck on a macOS privacy prompt (a file in ~/Documents) once froze the loop and wake word with it all night.
+CREDENTIALS_FILE_TIMEOUT_S = 5.0
+
+
+def _read_credentials(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_credentials(path: Path, credentials: dict[str, object]) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(credentials, output)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 async def spotify_access_token(client: httpx.AsyncClient, credentials_path: str) -> str:
     """Return a valid access token, refreshing and privately persisting it when it is about to expire."""
     async with _CREDENTIALS_LOCK:
         path = Path(credentials_path).expanduser()
-        credentials: object = json.loads(path.read_text(encoding="utf-8"))
+        credentials = await asyncio.wait_for(asyncio.to_thread(_read_credentials, path), CREDENTIALS_FILE_TIMEOUT_S)
         if not isinstance(credentials, dict):
             raise ValueError("Invalid credentials")
         access = credentials.get("access_token")
@@ -84,13 +101,7 @@ async def spotify_access_token(client: httpx.AsyncClient, credentials_path: str)
         ):
             raise ValueError("Invalid token response")
         credentials.update(access_token=access, refresh_token=refresh, expires_at=time.time() + lifetime)
-        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                json.dump(credentials, output)
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        await asyncio.wait_for(asyncio.to_thread(_write_credentials, path, credentials), CREDENTIALS_FILE_TIMEOUT_S)
         return access
 
 

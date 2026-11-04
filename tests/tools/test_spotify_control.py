@@ -2,6 +2,7 @@ import json
 import time
 import asyncio
 import logging
+import threading
 from unittest.mock import Mock
 
 import httpx
@@ -122,6 +123,36 @@ async def test_refresh_saved_privately_before_playback(configured, monkeypatch):
     assert saved["access_token"] == "renewed"
     assert saved["refresh_token"] == "secret-refresh"
     assert configured.stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_credentials_read_gives_up_without_freezing_the_loop(configured, monkeypatch):
+    """A read held up by the OS (a macOS privacy prompt) times out while the loop keeps running."""
+    released = threading.Event()
+
+    def stuck(path):
+        released.wait(5)
+        return {}
+
+    monkeypatch.setattr(spotify_control, "_read_credentials", stuck)
+    monkeypatch.setattr(spotify_control, "CREDENTIALS_FILE_TIMEOUT_S", 0.05)
+    ticks = 0
+
+    async def tick():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    ticker = asyncio.create_task(tick())
+    try:
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(TimeoutError):
+                await spotify_control.spotify_access_token(client, str(configured))
+    finally:
+        released.set()
+        ticker.cancel()
+    assert ticks >= 3
 
 
 @pytest.mark.asyncio

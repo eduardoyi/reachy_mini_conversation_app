@@ -26,9 +26,15 @@ outside a conversation, so they must enforce their own authorization boundary.
 This Mac completed a one-time Authorization Code with PKCE flow using the
 registered `http://127.0.0.1:8765/callback` and scopes
 `user-read-playback-state user-modify-playback-state`. The setup helper and tokens
-live in `~/Documents/Reachy/private-spotify/`, not the repository. Credentials
+live in `~/.local/share/reachy_mini_conversation_app/spotify/`, not the repository. Credentials
 were saved with owner-only permissions. The private `connect.py` helper is a
 local setup artifact, not a shipped cross-platform authentication UI.
+
+Keep them out of `~/Documents`, `~/Desktop` and `~/Downloads`: macOS can hold a read there on a
+privacy prompt. On 2026-11-03 that froze Reachy's event loop, and his wake word with it, all night.
+The credentials file is now read and written off the event loop and given up on after 5 s
+(`CREDENTIALS_FILE_TIMEOUT_S`), and at startup Reachy logs a warning for any `*_FILE`, `*_DIR`,
+`*_PATH`, `*_HEAD` or `*_SET` setting that points into one of those folders.
 
 Expired access tokens refresh before requests. Refreshed credentials replace the
 old file atomically using a private temporary file. Refresh-token expiry/revocation

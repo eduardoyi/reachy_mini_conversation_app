@@ -33,6 +33,7 @@ import numpy as np
 import onnxruntime as ort
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.utils import behind_privacy_prompt
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector, transcript_aliases
 from reachy_mini_conversation_app.wake_clips import make_private_dir
@@ -823,16 +824,6 @@ def _prune(folder: Path, today: date, *, keep_days: int) -> None:
                 path.rmdir()
             else:
                 path.unlink(missing_ok=True)
-
-
-# macOS asks before a program reads these; run by launchd, the night would wait on that prompt until morning.
-_PROMPTED_FOLDERS: Final[tuple[str, ...]] = ("Desktop", "Documents", "Downloads")
-
-
-def behind_privacy_prompt(path: Path, home: Path | None = None) -> bool:
-    """Return whether reading ``path`` from a LaunchAgent would stop on a macOS privacy prompt."""
-    home = home or Path.home()
-    return any(path.expanduser().is_relative_to(home / folder) for folder in _PROMPTED_FOLDERS)
 
 
 def main() -> None:
