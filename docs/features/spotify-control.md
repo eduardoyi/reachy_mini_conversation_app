@@ -33,7 +33,8 @@ local setup artifact, not a shipped cross-platform authentication UI.
 Keep them out of `~/Documents`, `~/Desktop` and `~/Downloads`: macOS can hold a read there on a
 privacy prompt. On 2026-11-03 that froze Reachy's event loop, and his wake word with it, all night.
 The credentials file is now read and written off the event loop and given up on after 5 s
-(`CREDENTIALS_FILE_TIMEOUT_S`), and at startup Reachy logs a warning for any `*_FILE`, `*_DIR`,
+(`CREDENTIALS_FILE_TIMEOUT_S`). While a read is still stuck, later looks fail at once instead of starting
+another thread, so stuck reads never fill the thread pool the rest of the app shares. At startup Reachy logs a warning for any `*_FILE`, `*_DIR`,
 `*_PATH`, `*_HEAD` or `*_SET` setting that points into one of those folders.
 
 Expired access tokens refresh before requests. Refreshed credentials replace the

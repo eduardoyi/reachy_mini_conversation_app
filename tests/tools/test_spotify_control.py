@@ -127,12 +127,19 @@ async def test_refresh_saved_privately_before_playback(configured, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_stuck_credentials_read_gives_up_without_freezing_the_loop(configured, monkeypatch):
-    """A read held up by the OS (a macOS privacy prompt) times out while the loop keeps running."""
+    """A read held up by the OS (a macOS privacy prompt) times out while the loop keeps running.
+
+    Later looks fail at once rather than stacking more stuck threads, and work again once the read returns.
+    """
     released = threading.Event()
+    real_read = spotify_control._read_credentials
+    stuck_reads = 0
 
     def stuck(path):
+        nonlocal stuck_reads
+        stuck_reads += 1
         released.wait(5)
-        return {}
+        return real_read(path)
 
     monkeypatch.setattr(spotify_control, "_read_credentials", stuck)
     monkeypatch.setattr(spotify_control, "CREDENTIALS_FILE_TIMEOUT_S", 0.05)
@@ -149,10 +156,19 @@ async def test_a_stuck_credentials_read_gives_up_without_freezing_the_loop(confi
         async with httpx.AsyncClient() as client:
             with pytest.raises(TimeoutError):
                 await spotify_control.spotify_access_token(client, str(configured))
+            assert ticks >= 3
+            with pytest.raises(TimeoutError, match="still stuck"):
+                await spotify_control.spotify_access_token(client, str(configured))
+            assert stuck_reads == 1
+            released.set()
+            for _ in range(100):
+                if not spotify_control._FILE_IN_USE.locked():
+                    break
+                await asyncio.sleep(0.01)
+            assert await spotify_control.spotify_access_token(client, str(configured)) == "secret-access"
     finally:
         released.set()
         ticker.cancel()
-    assert ticks >= 3
 
 
 @pytest.mark.asyncio
