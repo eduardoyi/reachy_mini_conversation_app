@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-03 (la gallina loca redone: turns in order, eggs, sillier challenges)
+- Last updated: 2026-11-03 (six treasures and ten Simón dice poses the kids asked for; the book's drawing)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -108,13 +108,21 @@ Detectives, the mystery party game played on phones, also runs on the host and h
 ### The treasure hunt
 
 - Things at home: una pelota, un zapato, una media, un libro, un peluche, un carrito, una cuchara, un vaso,
-  una gorra, una muñeca, un Lego, un creyón o un lápiz. Groups: un animal, una fruta, algo con
+  una gorra, una muñeca, un Lego, un creyón o un lápiz, and the kids' favorites (asked for 2026-11-03): un
+  autobús, un avión, una olla o un sartén (real or toy), un libro de Buscando a Wally (its cover, or a page
+  crowded with tiny people), un Bluey and un Spider-Man (a toy, a book, a picture or clothes with them on it). They
+  come up as often as the rest. Groups: un animal, una fruta, algo con
   ruedas, algo redondo, algo cuadrado, algo blando, algo con letras, algo más pequeño que tu mano. No letters
   ("algo que empieza con P") and no combinations ("algo verde y redondo") yet. No repeats within five rounds.
 - The screen shows a drawing of the thing on the left (for the 2-year-old) and its name on the right. The
-  drawings are made once by the image model (about $0.03 each, 18 of them; the last two groups have none)
+  drawings are made once by the image model (about $0.03 each, 24 of them; the last two groups have none;
+  Bluey and the Wally book are drawn as themselves, three good drawings out of three tries; Spider-Man is
+  refused by gpt-image and Gemini's image model alike, however he is described, so his is a spider web with a
+  friendly spider. The Spider-Man hands pose draws fine, as it shows only a child)
   and kept in `game-pictures/` beside the display cache, apart from the gallery's drawings. The first game
-  draws the missing ones in the background; until a drawing exists its rounds show the name alone.
+  draws the missing ones in the background; until a drawing exists its rounds show the name alone. A drawing
+  is kept by its subject, so changing the subject draws it again: "a children's picture book" came out as an
+  elephant (an illustration from one), so the book is now "a closed hardcover book, seen at an angle".
 - Jev is asked "is the object held up {a ball of any kind}?": ≥ 0.6 counts (two of the last three frames). Held
   up surely (≥ 0.7) and surely not it (≤ 0.15): "Mmm, eso no. ¡Busca una pelota!", at most every 5 s. These two
   thresholds were not tested on real frames.
@@ -122,17 +130,20 @@ Detectives, the mystery party game played on phones, also runs on the host and h
 
 ### Simón dice
 
-- 47 still poses Jev judges from one frame (no sounds or movement, chosen 2026-10-31): face and head (tócate
-  la nariz, tápate los ojos, pon cara de bravo, saca la lengua, mira hacia arriba…), arms (levanta los brazos,
-  haz el avión, saca músculos, brazos de zombi…), hands and fingers (pulgar arriba, un corazón con las manos,
-  cachos de toro, enséñame dos dedos, orejas de conejo…) and the whole body (agáchate, siéntate en el piso,
-  párate en un pie, voltéate de espaldas, haz una estrella…). `games/simon_says.py` `POSES` has each one's words,
+- 57 still poses Jev judges from one frame (no sounds or movement, chosen 2026-10-31): face and head (tócate
+  la nariz, tápate los ojos, pon cara de bravo, saca la lengua, mira hacia arriba, cara de pez, cachetes de pez
+  globo, hazte el dormido…), arms (levanta los brazos, haz el avión, saca músculos, brazos de zombi, T-rex,
+  trompa de elefante, vuela como superhéroe…), hands and fingers (pulgar arriba, un corazón con las manos,
+  cachos de toro, enséñame dos dedos, orejas de conejo, manos de Spider-Man, bigotes de gato…) and the whole body
+  (agáchate, siéntate en el piso, párate en un pie, voltéate de espaldas, haz una estrella, pose de superhéroe,
+  flamenco…). The ten newest were added 2026-11-03: Spider-Man hands, which the kids asked for, and superheroes,
+  animals and silly faces Eduardo picked; still no trick rounds (he chose to keep it simple). `games/simon_says.py` `POSES` has each one's words,
   what Jev is asked ("Is a person in `frame` touching their nose with a finger?") and its drawing.
 - Eight poses a game, random, close-up ones first; before the first whole-body pose "¡Da un paso hacia
   atrás!", after the last "¡Ahora acércate!". For "mira hacia arriba" and "mira hacia un lado" Reachy turns his
   head too, and back after.
 - Each pose: "Simón dice: ¡tócate la nariz!", the screen shows a drawing of a child doing it (for the
-  2-year-old; the 47 drawings are made once like the treasure ones) beside short words, then 8 s of play for
+  2-year-old; the 57 drawings are made once like the treasure ones) beside short words, then 8 s of play for
   two of the last three checked frames to show it (≥ 0.6, untested on real frames). Done: a cheer ("¡Muy
   bien!", "¡Eso!", "¡Chévere!", "¡Perfecto!"), a happy move, a star. Not done: "¡Así! Mira la pantalla." and on.
   Nobody loses; "¡Ocho estrellas!" and "¿Otra vez?" at the end. No trick rounds (without "Simón dice") yet.

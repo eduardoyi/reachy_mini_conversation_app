@@ -40,7 +40,8 @@ TREASURES: Final[dict[str, Treasure]] = {
     "ball": Treasure("una pelota", "a ball", "a ball of any kind", "a ball"),
     "shoe": Treasure("un zapato", "a shoe", "a shoe, slipper, sandal or boot", "a shoe"),
     "sock": Treasure("una media", "a sock", "a sock", "a sock"),
-    "book": Treasure("un libro", "a book", "a book, of any size", "a children's picture book"),
+    # "a children's picture book" was drawn as an elephant (an illustration from one), 2026-11-03.
+    "book": Treasure("un libro", "a book", "a book, of any size", "a closed hardcover book, seen at an angle"),
     "plush": Treasure("un peluche", "a stuffed toy", "a stuffed toy or plush animal", "a teddy bear"),
     "toy_car": Treasure("un carrito", "a toy car", "a toy car, truck or other toy vehicle", "a toy car"),
     "spoon": Treasure("una cuchara", "a spoon", "a spoon", "a spoon"),
@@ -69,6 +70,34 @@ TREASURES: Final[dict[str, Treasure]] = {
         "something soft",
         "something soft, like a cushion, a blanket or a stuffed toy",
         "a fluffy cushion",
+    ),  # fmt: skip
+    # The kids' favorites (asked for 2026-11-03): toys, pictures and clothes count; real kitchen pots too.
+    "bus": Treasure("un autobús", "a bus", "a bus: a toy bus, or a picture of one", "a bus"),
+    "airplane": Treasure("un avión", "an airplane", "an airplane: a toy plane, or a picture of one", "an airplane"),
+    "pot": Treasure(
+        "una olla o un sartén",
+        "a pot or a pan",
+        "a cooking pot or a frying pan, real or toy",
+        "a cooking pot and a frying pan",
+    ),  # fmt: skip
+    "wally": Treasure(
+        "un libro de Buscando a Wally",
+        "a Where's Wally book",
+        "a Where's Wally? (Where's Waldo?) book, closed or open: its cover, or a page crowded with tiny people",
+        "a Where's Wally? book, with Wally in his red-and-white striped shirt, bobble hat and round glasses on the cover",
+    ),  # fmt: skip
+    "bluey": Treasure(
+        "un Bluey",
+        "a Bluey",
+        "Bluey, the blue heeler puppy from the cartoon Bluey: a toy, a plush, a book, a picture or clothes with her on it",
+        "Bluey, the blue heeler puppy from the children's cartoon Bluey",
+    ),  # fmt: skip
+    "spiderman": Treasure(
+        "un Spider-Man",
+        "a Spider-Man",
+        "Spider-Man: a toy, a costume or mask, a book, a picture or clothes with him on it",
+        # Both image models refuse anything like Spider-Man (tried 2026-11-04); Bluey and Wally draw fine.
+        "a round spider web with a friendly little spider in the middle",
     ),  # fmt: skip
     "letters": Treasure("algo con letras", "something with letters", "something with letters or writing on it", None),
     "small": Treasure(

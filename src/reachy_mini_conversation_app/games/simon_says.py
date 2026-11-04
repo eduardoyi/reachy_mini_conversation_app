@@ -85,6 +85,9 @@ POSES: Final[dict[str, Pose]] = {
     "tilt": Pose("inclina la cabeza", "tilt your head", "tilting their head to one side", _child("tilting their head to one side")),
     "look_up": Pose("mira hacia arriba", "look up", "looking up at the ceiling", _child("looking straight up"), gesture="up"),
     "look_side": Pose("mira hacia un lado", "look to the side", "looking to one side, head turned", _child("with their head turned to look to the side"), gesture="left"),
+    "fish_face": Pose("pon cara de pez", "make a fish face", "making a fish face: cheeks sucked in, lips pushed out", _child("making a fish face, cheeks sucked in and lips pushed out")),
+    "pufferfish": Pose("infla los cachetes como un pez globo", "puff up your cheeks like a pufferfish", "with their cheeks puffed full of air", _child("with cheeks puffed up full of air like a pufferfish"), label_es="cachetes de pez globo", label_en="pufferfish cheeks"),
+    "sleep": Pose("hazte el dormido", "pretend to sleep", "pretending to sleep: eyes closed, head resting on their hands by one cheek", _child("pretending to sleep, eyes closed, head resting on both hands by one cheek")),
     # Arms
     "arms_up": Pose("levanta los brazos", "put both arms up", "with both arms raised above their head", _child("with both arms raised high")),
     "one_arm": Pose("levanta un brazo", "put one arm up", "with exactly one arm raised above their head", _child("with one arm raised high")),
@@ -96,6 +99,9 @@ POSES: Final[dict[str, Pose]] = {
     "hug": Pose("abrázate", "hug yourself", "hugging themselves with both arms", _child("hugging themselves")),
     "hands_together": Pose("junta las manos", "put your hands together", "with their palms pressed together in front of them", _child("with palms pressed together in front of the chest")),
     "zombie": Pose("pon los brazos hacia adelante, como un zombi", "arms forward like a zombie", "with both arms stretched straight forward like a sleepwalker", _child("with both arms stretched straight forward like a friendly zombie"), label_es="brazos de zombi", label_en="zombie arms"),
+    "trex": Pose("haz de dinosaurio T-rex", "be a T-rex", "pretending to be a T-rex: elbows tucked in, short arms with claw hands in front, mouth open in a roar", _child("pretending to be a T-rex, elbows tucked in, little claw hands in front, roaring"), label_es="T-rex", label_en="T-rex"),
+    "trunk": Pose("haz una trompa de elefante con el brazo", "make an elephant trunk with your arm", "with one arm hanging down from their nose like an elephant's trunk", _child("with one arm hanging down from the nose like an elephant's trunk"), label_es="trompa de elefante", label_en="elephant trunk"),
+    "fly": Pose("vuela como superhéroe", "fly like a superhero", "with one fist stretched straight up high like a flying superhero", _child("with one fist stretched straight up high like a flying superhero")),
     # Hands and fingers
     "thumbs_up": Pose("pon el pulgar arriba", "thumbs up", "giving a thumbs up", _child("giving a thumbs up"), label_es="pulgar arriba"),
     "show_hands": Pose("enséñame las manos", "show me your hands", "showing both open hands, palms to the camera", _child("showing both open hands, palms forward")),
@@ -108,6 +114,8 @@ POSES: Final[dict[str, Pose]] = {
     "three_fingers": Pose("enséñame tres dedos", "show me three fingers", "holding up exactly three fingers", _child("holding up exactly three fingers")),
     "peace": Pose("haz el signo de la paz", "make a peace sign", "making a peace sign (a V) with their fingers", _child("making a peace sign with two fingers")),
     "bunny": Pose("haz como un conejo, con las manos en la cabeza como orejas", "be a bunny, with your hands on your head as ears", "holding their hands up on their head like bunny ears", _child("holding both hands on top of the head like bunny ears"), label_es="orejas de conejo", label_en="bunny ears"),
+    "spider": Pose("haz con las manos como Spider-Man", "make Spider-Man hands", "making Spider-Man's web-shooting hand: palm out, middle and ring fingers folded down, the other fingers straight", _child("holding out one hand like Spider-Man shooting a web, middle and ring fingers folded down"), label_es="manos de Spider-Man", label_en="Spider-Man hands"),
+    "whiskers": Pose("hazte bigotes de gato con los dedos", "make cat whiskers with your fingers", "with spread fingers across their cheeks like cat whiskers", _child("with spread fingers across both cheeks like cat whiskers"), label_es="bigotes de gato", label_en="cat whiskers"),
     # Body: a step back first
     "crouch": Pose("agáchate", "crouch down", "crouching down low", _child("crouching down low"), body=True),
     "sit": Pose("siéntate en el piso", "sit on the floor", "sitting on the floor", _child("sitting cross-legged on the floor"), body=True),
@@ -118,6 +126,8 @@ POSES: Final[dict[str, Pose]] = {
     "back": Pose("voltéate de espaldas", "turn your back to me", "standing with their back to the camera", "a young child standing with their back to us", body=True),
     "star": Pose("haz una estrella", "be a star", "standing with arms and legs spread wide like a star", _child("standing with arms and legs spread wide like a star"), body=True),
     "statue": Pose("quédate como una estatua", "freeze like a statue", "standing frozen in a pose like a statue", _child("frozen like a statue in a funny pose"), body=True),
+    "superhero": Pose("haz la pose de superhéroe", "do a superhero pose", "standing in a superhero pose: fists on hips, chest out", _child("standing proudly in a superhero pose, fists on hips, chest out"), body=True, label_es="pose de superhéroe", label_en="superhero pose"),
+    "flamingo": Pose("haz de flamenco: en un pie, con los brazos abiertos", "be a flamingo: on one foot, arms out", "standing on one foot with both arms stretched out to the sides like a flamingo", _child("standing on one foot with both arms out like a flamingo"), body=True, label_es="flamenco", label_en="flamingo"),
 }  # fmt: skip
 
 _START: Final[dict[str, str]] = {"es": "¡Vamos a jugar a Simón dice!", "en": "Let's play Simon says!"}

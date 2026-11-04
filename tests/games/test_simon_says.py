@@ -143,7 +143,7 @@ def test_lines_are_cached_and_venezuelan() -> None:
         "¡Ocho estrellas!",
     ):
         assert line in phrases
-    assert "ponte de lado" not in " ".join(phrases) and len(POSES) == 47
+    assert "ponte de lado" not in " ".join(phrases) and len(POSES) == 57
 
 
 @pytest.mark.parametrize("text", ["juguemos a Simón dice", "vamos a jugar Simón dice", "let's play Simon says"])
