@@ -324,3 +324,11 @@ def test_a_head_threshold_keeps_it_out_of_the_trusted_shortcut() -> None:
     day = (DayScores(ends, 16.0, scores), DayMoments(calls=[30.0]))
     choice = nightly.choose_threshold([day], "m", 0.3, "x", fire_budget=100.0)
     assert choice is None or choice[0] >= 0.4
+
+
+def test_a_challenger_is_tuned_on_the_newest_two_days_and_trained_on_the_rest() -> None:
+    """One day chose a threshold that did not hold the next (2026-11-04); two days, and one is always left to train."""
+    week = ["2026-11-03", "2026-10-31", "2026-11-04", "2026-11-01"]
+    assert nightly.dev_days(week) == ["2026-11-03", "2026-11-04"]
+    assert nightly.dev_days(["2026-11-01", "2026-11-02"]) == ["2026-11-02"]
+    assert nightly.dev_days(["2026-11-01"]) == []

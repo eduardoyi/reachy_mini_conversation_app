@@ -6,8 +6,9 @@
    each pair would have caught and how often it would have fired on everything else.
 3. Offer a switch when the shadow pair caught clearly more calls and fired no more, or as many calls on a fifth
    fewer fires, over a full day it ran beside the live pair.
-4. Train a challenger on all labelled days but the newest; it becomes the next shadow head if it beats the
-   current one on that day: more calls without more fires, or as many calls on clearly fewer fires.
+4. Train a challenger on all labelled days but the newest two; its threshold is chosen on those two, and it
+   becomes the next shadow head if it beats the current one there: more calls without more fires, or as many
+   calls on clearly fewer fires.
 5. Pick tomorrow's clips to check, and write the scoreboard.
 
 Everything stays on this computer; training runs in a separate Python with PyTorch (``WAKE_TRAINER_PYTHON``).
@@ -80,6 +81,9 @@ RECORDING_COPIES: Final[int] = 3
 # The name check finds where the name ends to within a quarter second; the main head reacts about 0.4 s
 # after that (checked on 140 recordings of the name). Calls are labelled where the head can tell, not before.
 NAME_LABEL_SHIFT_S: Final[float] = 0.4
+# A threshold chosen on one day did not hold: house-20261104 matched the live pair's 22 calls on 2026-11-03,
+# where it was chosen, and caught 15 to the live pair's 24 on 2026-11-04. Challengers are tuned on this many.
+DEV_DAYS: Final[int] = 2
 # Name checks: the whole clip in pieces of at most this, then 1.5 s windows every 0.25 s to find where it is.
 CHECK_PIECE_S: Final[float] = 10.0
 LOCATE_WINDOW_S: Final[float] = 1.5
@@ -431,6 +435,12 @@ def choose_threshold(days: list[tuple[DayScores, DayMoments]], main: str, main_t
     return best
 
 
+def dev_days(days: Iterable[str]) -> list[str]:
+    """Return the newest ``DEV_DAYS`` days a challenger is tuned on, always leaving one to train on."""
+    ordered = sorted(days)
+    return ordered[-min(DEV_DAYS, len(ordered) - 1) :] if len(ordered) > 1 else []
+
+
 def better(candidate: PairResult, current: PairResult, margin: int, fires_share: float) -> bool:
     """Whether ``candidate`` catches ``margin`` more calls without firing more, or as many on a share of the fires."""
     more = candidate.caught >= current.caught + margin and candidate.fires_per_day <= current.fires_per_day + 0.5
@@ -756,8 +766,8 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             store.withdraw_proposal()
 
     if len(evaluated) >= 2:
-        newest = max(scored)
-        train_days = [day for day in scored if day != newest]
+        tuning = dev_days(scored)
+        train_days = [day for day in scored if day not in tuning]
         examples = [day_examples(scored[day], runs_by_day[day], labelled[day][2], rng) for day in train_days]
         noise = [_read_wav(store.clips / event["clip"])[1] for day in days for event in labelled[day][0]
                  if event["kind"] == "background" and event.get("clip")][:200]  # fmt: skip
@@ -778,8 +788,8 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             path = store.heads / f"{name}.onnx"
             write_private(path, challenger_file.read_bytes())
             challenger_file.unlink()
-            dev_scores = score_day(runs_by_day[newest], [*heads, Head(path)], store.root / "scores" / newest)
-            dev = [(dev_scores, labelled[newest][2])]
+            dev = [(score_day(runs_by_day[day], [*heads, Head(path)], store.root / "scores" / day), labelled[day][2])
+                   for day in tuning]  # fmt: skip
             live_dev = evaluate(dev, main, settings.main_threshold, live.name if live else None,
                                 live.threshold if live else 1.0)  # fmt: skip
             choice = choose_threshold(dev, main, settings.main_threshold, name, max(live_dev.fires_per_day, 1.0))
