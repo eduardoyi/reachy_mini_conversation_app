@@ -48,3 +48,4 @@ never quoted.
 | Date | Step | Result |
 |------|------|--------|
 | 2026-11-05 | 1 | Log analysis above; record built and deployed (see the feature document). |
+| 2026-11-05 | 3 | Language rule added to the household profile at Eduardo's request: answer in the language just spoken, Spanish when unsure, another language only when asked. The record will show whether switches stop. |
