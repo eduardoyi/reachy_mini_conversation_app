@@ -4,7 +4,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Literal, ClassVar, TypeAlias
+from typing import TYPE_CHECKING, Literal, ClassVar, TypeAlias
 from collections.abc import Callable
 
 import numpy as np
@@ -15,6 +15,9 @@ from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_tools
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
+
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.conversation_record import ConversationRecord
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     _traffic_observer: TrafficObserver | None = None
     _connection_observer: ConnectionObserver | None = None
     _interaction_busy_observer: InteractionBusyObserver | None = None
+    _conversation_record: ConversationRecord | None = None
     _startup_greeting_enabled: bool = True
     _initial_context: str = ""
     _identity_hint_provider: Callable[[], str | None] | None = None
@@ -77,6 +81,10 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_interaction_busy_observer(self, observer: InteractionBusyObserver | None) -> None:
         """Attach/detach an observer for authoritative provider busy state."""
         self._interaction_busy_observer = observer
+
+    def set_conversation_record(self, record: ConversationRecord | None) -> None:
+        """Attach/detach the local record of this conversation (providers that transcribe add their turns)."""
+        self._conversation_record = record
 
     @property
     def interaction_busy(self) -> bool:

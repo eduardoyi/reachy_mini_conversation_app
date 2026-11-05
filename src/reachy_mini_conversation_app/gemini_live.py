@@ -1650,6 +1650,8 @@ class GeminiLiveHandler(ConversationHandler):
                 self._clear_first_audio_markers(reason="interrupted")
                 self._cancel_thinking_cue()
                 self._spoken_turns.interrupted()
+                if self._conversation_record is not None:
+                    self._conversation_record.cut_off()
                 self._mark_activity("server_interrupted")
                 if self._extended_thinking and not await self._cancel_pending_tools(generation):
                     await self._fence_session(session, generation, "interruption_uncontained")
@@ -1659,12 +1661,19 @@ class GeminiLiveHandler(ConversationHandler):
             self._handle_transcription(server_content.input_transcription, role="user", interim=False)
             self._handle_transcription(server_content.output_transcription, role="assistant", interim=False)
             # Raw pieces (with their spacing) for memory capture; interim text stays UI-only.
+            record = self._conversation_record
             if server_content.input_transcription is not None:
                 self._spoken_turns.user_piece(server_content.input_transcription.text)
+                if record is not None:
+                    record.heard(server_content.input_transcription.text or "")
             if server_content.output_transcription is not None:
                 self._spoken_turns.assistant_piece(server_content.output_transcription.text)
+                if record is not None:
+                    record.said(server_content.output_transcription.text or "")
             if server_content.turn_complete:
                 self._spoken_turns.turn_complete()
+                if record is not None:
+                    record.turn_complete()
 
             if server_content.model_turn is not None and server_content.model_turn.parts:
                 for part in server_content.model_turn.parts:
@@ -1820,6 +1829,8 @@ class GeminiLiveHandler(ConversationHandler):
             tool_name = function_call.name
             if isinstance(tool_name, str) and tool_name:
                 self._turn_tool_names.append(tool_name)
+                if self._conversation_record is not None:
+                    self._conversation_record.tool(tool_name)
             if not isinstance(call_id, str) or not call_id:
                 logger.error("Ignoring Gemini tool call without a valid call id")
                 continue

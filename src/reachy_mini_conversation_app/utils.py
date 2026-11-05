@@ -2,7 +2,9 @@ from __future__ import annotations
 import logging
 import argparse
 import warnings
-from typing import Optional
+from typing import Final, Optional
+from pathlib import Path
+from collections.abc import Mapping
 
 
 def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
@@ -94,3 +96,23 @@ def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[
     logger.error("  3. For wireless: check network connectivity")
     logger.error("  4. Review daemon logs")
     logger.error("  5. Restart the daemon")
+
+
+# macOS asks before a program reads these; a read there waits on that prompt, and whatever made it with it.
+_PROMPTED_FOLDERS: Final[tuple[str, ...]] = ("Desktop", "Documents", "Downloads")
+_PATH_SETTING_ENDINGS: Final[tuple[str, ...]] = ("_FILE", "_DIR", "_PATH", "_HEAD", "_SET")
+
+
+def behind_privacy_prompt(path: Path, home: Path | None = None) -> bool:
+    """Return whether reading ``path`` from Reachy or a LaunchAgent could stop on a macOS privacy prompt."""
+    home = home or Path.home()
+    return any(path.expanduser().is_relative_to(home / folder) for folder in _PROMPTED_FOLDERS)
+
+
+def settings_behind_privacy_prompt(env: Mapping[str, str], home: Path | None = None) -> list[str]:
+    """Return the names of path settings (``*_FILE``, ``*_DIR``, ...) that point behind a macOS privacy prompt."""
+    return sorted(
+        name
+        for name, value in env.items()
+        if name.endswith(_PATH_SETTING_ENDINGS) and value.strip() and behind_privacy_prompt(Path(value.strip()), home)
+    )

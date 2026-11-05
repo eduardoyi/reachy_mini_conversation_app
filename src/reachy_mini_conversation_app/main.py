@@ -1,6 +1,7 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
 from __future__ import annotations
+import os
 import sys
 import time
 import asyncio
@@ -20,12 +21,14 @@ from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     log_connection_troubleshooting,
+    settings_behind_privacy_prompt,
 )
 from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now, listening_allowed
 from reachy_mini_conversation_app.wake_clips import WakeClipRecorder, wake_clips_directory
 from reachy_mini_conversation_app.control_api import ControlApi, load_or_create_token, start_control_server
 from reachy_mini_conversation_app.eink_display import render_text
 from reachy_mini_conversation_app.acoustic_wake_word import OpenWakeWordDetector
+from reachy_mini_conversation_app.conversation_record import ConversationRecorder, conversation_record_directory
 from reachy_mini_conversation_app.wake_learning.store import (
     WakeLearningStore,
     wake_features_directory,
@@ -669,6 +672,13 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
+    for name in settings_behind_privacy_prompt(os.environ):
+        logger.warning(
+            "%s points into Desktop, Documents or Downloads, where macOS can hold a read on a privacy prompt and "
+            "freeze Reachy until someone answers it; move it, for example under ~/.local/share",
+            name,
+        )
+
     acoustic_wake_detector: OpenWakeWordDetector | None = None
     wake_clips: WakeClipRecorder | None = None
     wake_store: WakeLearningStore | None = None
@@ -723,6 +733,18 @@ def run(
         )
     elif config.WAKE_CLIPS_ENABLED:
         logger.warning("WAKE_CLIPS_ENABLED needs LOCAL_ACOUSTIC_WAKE_ENABLED=1; no wake clips are saved")
+
+    conversation_recorder: ConversationRecorder | None = None
+    if config.CONVERSATION_RECORD_ENABLED:
+        if config.HYBRID_RUNTIME_ENABLED:
+            conversation_recorder = ConversationRecorder(
+                conversation_record_directory(), keep_days=config.CONVERSATION_RECORD_KEEP_DAYS
+            )
+            logger.info(
+                "Conversation record enabled: saving locally for %d days", config.CONVERSATION_RECORD_KEEP_DAYS
+            )
+        else:
+            logger.warning("CONVERSATION_RECORD_ENABLED needs HYBRID_RUNTIME_ENABLED=1; no conversations are recorded")
 
     realtime_provider = get_realtime_provider()
     if realtime_provider == REALTIME_PROVIDER_GEMINI:
@@ -1010,6 +1032,7 @@ def run(
             wake_detector=wake_detector,
             acoustic_wake_detector=acoustic_wake_detector,
             wake_clips=wake_clips,
+            conversation_recorder=conversation_recorder,
             intent_router=intent_router,
             action_executor=action_executor,
             local_processing_close_callback=context_processor.close if context_processor is not None else None,

@@ -166,25 +166,38 @@ class WakeLearningStore:
 
     def queue(self) -> list[ReviewItem]:
         """Return the clips still to check, in order; a clip answered before this list was made is asked again."""
-        document = _read_json(self.root / "queue.json") or {}
-        made = str(document.get("made", ""))
+        made, items = self._queued()
         answered = self._latest_answers()
+        return [item for item in items if item.id not in answered or str(answered[item.id].get("at", "")) < made]
+
+    def checked(self) -> list[tuple[ReviewItem, str]]:
+        """Return this list's clips answered since it was made, with their answers, in the order they were given."""
+        made, items = self._queued()
+        by_id = {item.id: item for item in items}
+        return [
+            (by_id[item_id], str(entry["answer"]))
+            for item_id, entry in self._latest_answers().items()
+            if item_id in by_id and str(entry.get("at", "")) >= made
+        ]
+
+    def _queued(self) -> tuple[str, list[ReviewItem]]:
+        document = _read_json(self.root / "queue.json") or {}
         items = []
         for entry in document.get("items") or []:
             try:
-                item = ReviewItem(
-                    id=str(entry["id"]),
-                    clip=str(entry["clip"]),
-                    start=float(entry["start"]),
-                    end=float(entry["end"]),
-                    question=str(entry["question"]),
-                    follow_up=entry.get("follow_up") is True,
+                items.append(
+                    ReviewItem(
+                        id=str(entry["id"]),
+                        clip=str(entry["clip"]),
+                        start=float(entry["start"]),
+                        end=float(entry["end"]),
+                        question=str(entry["question"]),
+                        follow_up=entry.get("follow_up") is True,
+                    )
                 )
             except (KeyError, TypeError, ValueError):
                 continue
-            if item.id not in answered or str(answered[item.id].get("at", "")) < made:
-                items.append(item)
-        return items
+        return str(document.get("made", "")), items
 
     def answer(self, item_id: str, answer: str, who: str) -> None:
         """Keep an answer to a clip (one of ``ANSWERS``); a later answer to the same clip wins."""
@@ -193,16 +206,26 @@ class WakeLearningStore:
         with self._lock:
             append_line(self.root / "answers.jsonl", {"item": item_id, "answer": answer, "who": who, "at": _now()})
 
+    def take_back(self, item_id: str, who: str) -> None:
+        """Forget every answer to a clip so far (a mistap); the clip waits to be checked again."""
+        with self._lock:
+            append_line(self.root / "answers.jsonl", {"item": item_id, "undone": True, "who": who, "at": _now()})
+
     def answers(self) -> dict[str, str]:
         """Return the latest answer per clip id."""
         return {item: str(entry["answer"]) for item, entry in self._latest_answers().items()}
 
     def _latest_answers(self) -> dict[str, dict[str, Any]]:
-        return {
-            str(entry["item"]): entry
-            for entry in read_lines(self.root / "answers.jsonl")
-            if entry.get("answer") in ANSWERS and "item" in entry
-        }
+        latest: dict[str, dict[str, Any]] = {}
+        for entry in read_lines(self.root / "answers.jsonl"):
+            if "item" not in entry:
+                continue
+            if entry.get("undone") is True:
+                latest.pop(str(entry["item"]), None)
+            elif entry.get("answer") in ANSWERS:
+                latest.pop(str(entry["item"]), None)  # kept in the order the answers were given
+                latest[str(entry["item"])] = entry
+        return latest
 
     def clip_audio(self, item: ReviewItem) -> bytes:
         """Return the item's seconds of its clip as a WAV file."""

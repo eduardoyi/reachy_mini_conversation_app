@@ -53,10 +53,11 @@ the second as "spoke when you were talking about him". The deciding layer is not
 - **Clips to check**: up to 10 a day, where the automatic signals are least sure. "Did someone say his name?"
   Yes asks "To him or about him?"; No and Not sure end it there. "Is this the call he missed?" is just yes or
   no. Each answer overrules the speech model and the logs. Writing an answered clip into a new list asks it
-  again; the old answer counts until the new one.
+  again; the old answer counts until the new one. Taking an answer back (Back on the phone) writes an
+  `"undone"` line to `answers.jsonl` that forgets every earlier answer to that clip, so it waits again.
 - **Switching**:
-  - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, one
-    push offers it with the numbers;
+  - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, or as
+    many calls on a fifth fewer fires, one push offers it with the numbers;
   - "Switch" makes it live the next time Reachy is idle, and Undo stays for 7 days.
 - **Scoreboard**: this week's calls answered the first time, false wakes a day, by TV on or off, how often he
   spoke up when you were talking about him, and how many times the live and shadow heads heard his name.
@@ -136,10 +137,25 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
 - **Fires per day.** Fires (one per 3 s) more than 20 s from his name or an unknown stretch, per 16 hours of
   listening.
 - **Switch offer.** The shadow pair must catch at least 2 more calls (and 5% more) than the live pair over the days
-  since the shadow started, with fires no higher than the live pair's plus 0.5 a day.
-- **Challenger.** It trains on every day but the newest. Its threshold is the one that catches the most calls on
-  the newest day without firing more than the live pair. It becomes the shadow if it beats the current shadow
-  there.
+  since the shadow started, with fires no higher than the live pair's plus 0.5 a day; or catch as many calls on at
+  most 80% of the live pair's fires (`SWITCH_FIRES_SHARE`).
+- **Challenger.** It starts from the live head's weights (`scripts/wake_train.py` loads either head's shape) and
+  trains on every day but the newest two (`DEV_DAYS`; with only two days, the newest one). Its
+  threshold (0.4 to 0.99) is the one that catches the most calls on those two days without firing more than the
+  live pair, the quieter one on a tie. It becomes the shadow if it beats the current shadow there: more calls
+  without more fires, or as many on at most 90% of the fires (`SHADOW_FIRES_SHARE`). Until 2026-11-05 it was
+  tuned on the newest day alone: house-20261104 matched the live pair's 22 calls on the day it was tuned on and
+  caught 15 to the live pair's 24 the next day. A challenger also replaces a shadow that catches fewer calls
+  than the live pair when it catches more than that shadow, within the live pair's fires (`closer_to_live`).
+  On 2026-11-03/04 (76 calls), one started from the live head caught 44 at about 307 fires a day, one started
+  from the main head 35 at about 216; the live pair caught 46 at about 352, the shadow 37 at about 231.
+- **Call labels.** Training labels a call's windows from the located name end to 0.65 s after it
+  (`NAME_LABEL_SHIFT_S`, 0.4 s later than the name check's end): the main head reacts about 0.4 s after the end
+  the name check finds, on 140 Mac recordings. Labelled where the check put it, challengers learned to fire on
+  the start of the name and fired more on sound-alikes.
+- **Household recordings.** Besides the phone takes, `recordings.jsonl` holds 150 of Eduardo's and Adriana's
+  September Mac-microphone calls (prompt `Mac microphone, September`), cut 0.25 s after the name the name check
+  found and dated when they were made.
 - **Thresholds.** An extra head's threshold stays at 0.4 or more, so its scaled score never reaches the trusted
   shortcut's 0.8.
 

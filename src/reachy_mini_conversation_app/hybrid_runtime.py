@@ -42,6 +42,7 @@ from reachy_mini_conversation_app.local_processing import (
     LocalProcessingBackend,
     NullLocalProcessingBackend,
 )
+from reachy_mini_conversation_app.conversation_record import ConversationRecord, ConversationRecorder
 from reachy_mini_conversation_app.local_intent_router import LocalIntent, LocalIntentRouter, IntentDecisionReason
 from reachy_mini_conversation_app.wake_learning.takes import take_finished
 from reachy_mini_conversation_app.conversation_handler import (
@@ -478,6 +479,10 @@ class HybridRuntime:
     # before Reachy reacts. On 2026-10-28, 59 of 86 wakes had no name (breakfast clinks) and real calls
     # scored 0.3-0.93; checking the name let a 0.3 threshold wake 34 of 38 named calls with no false wake.
     _WAKE_NAME_WINDOW_S = 2.5
+    # The wake model can fire mid-name: on 2026-11-05 "Richi, lights" took 0.9 s, the model fired 0.6 s in and
+    # the check heard half a word. A miss with a voice still going is checked again with this much more audio
+    # (replaying 490 rejected wakes, 0.3 s more found the name in 2 more calls).
+    _WAKE_NAME_REST_S = 0.4
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
     # Whisper can mishear a real call ("Reggie.", "Preciso.", "What did she do?" for three "Richie, lights
@@ -561,6 +566,7 @@ class HybridRuntime:
         wake_detector: TranscriptWakeWordDetector | None = None,
         acoustic_wake_detector: AcousticWakeWordDetector | None = None,
         wake_clips: WakeClipRecorder | None = None,
+        conversation_recorder: ConversationRecorder | None = None,
         intent_router: LocalIntentRouter | None = None,
         action_executor: LocalActionExecutor | None = None,
         local_processing_close_callback: LocalProcessingCloseCallback | None = None,
@@ -610,6 +616,10 @@ class HybridRuntime:
         self._acoustic_wake_detector = acoustic_wake_detector
         # Fed only the audio the wake model hears while listening locally; saves clips to retrain it.
         self._wake_clips = wake_clips
+        # Keeps each cloud conversation's turns and audio on this computer (docs/features/conversation-record.md).
+        self._conversation_recorder = conversation_recorder
+        self._conversation_record: ConversationRecord | None = None
+        self._request_clip_audio_s: float | None = None
         self._acoustic_epoch = 0
         self._acoustic_stream_epoch: int | None = None
         self._wake_window = bytearray()
@@ -1157,6 +1167,32 @@ class HybridRuntime:
                 self._connection_ready,
             )
 
+    def _start_conversation_record(self, handler: ConversationHandler, **details: object) -> None:
+        """Open the local record of the conversation this handler is starting, when records are kept."""
+        self._request_clip_audio_s = None  # the next activation's clip, if any, sets it again
+        recorder = self._conversation_recorder
+        if recorder is None:
+            return
+        attach = getattr(handler, "set_conversation_record", None)
+        record = recorder.start(**details)
+        self._conversation_record = record
+        if callable(attach):
+            attach(record)
+
+    def _record_sent_audio(self, frame: AudioFrame) -> None:
+        """Add audio the provider accepted to the conversation's record."""
+        record = self._conversation_record
+        if record is not None:
+            record.audio(frame[0], audio_to_mono_int16(frame[1]))
+
+    def _close_conversation_record(self, handler: ConversationHandler | None, reason: str) -> None:
+        record, self._conversation_record = self._conversation_record, None
+        detach = getattr(handler, "set_conversation_record", None)
+        if callable(detach):
+            detach(None)
+        if record is not None:
+            record.close(reason)
+
     def _transition(self, new_mode: RuntimeMode, reason: str) -> None:
         with self._lifecycle_lock:
             old_mode = self._mode
@@ -1476,6 +1512,10 @@ class HybridRuntime:
             trusted_unnamed = False
             if wake_audio is not None:
                 heard = await self._name_in_wake_audio(wake_audio, asleep=asleep)
+                if not heard:
+                    longer = self._wake_audio_with_rest_of_name(wake_audio)
+                    if longer is not None:
+                        heard = await self._name_in_wake_audio(longer, asleep=asleep)
                 trusted_unnamed = not heard and self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep)
                 self._note_wake(wake_event, heard=heard, trusted=trusted_unnamed)
                 if not heard and not trusted_unnamed:
@@ -1704,6 +1744,16 @@ class HybridRuntime:
                         raise asyncio.CancelledError
                 self._configure_handler(handler, generation)
                 handler.set_initial_context(initial_context)
+                self._start_conversation_record(
+                    handler,
+                    wake=reason,
+                    trusted_without_name=trusted_unnamed,
+                    request_heard_locally=addressed_text,
+                    request_sent_as="audio" if request_in_audio else ("text" if addressed_text else "none"),
+                    request_clip_s=self._request_clip_audio_s,
+                    request_clip_cut_off=self._request_clip_cut_off if self._request_clip_audio_s else None,
+                    room_context=initial_context,
+                )
                 with self._metrics_lock:
                     self._session_audio_bytes_start = self._cloud_audio_bytes_sent
                     self._session_video_frames_start = self._cloud_video_frames_sent
@@ -1844,6 +1894,7 @@ class HybridRuntime:
         """
         transcriber = self._request_transcriber
         self._request_clip_cut_off = False
+        self._request_clip_audio_s = None
         self._request_clip_spoke = False  # someone spoke in the last clip (even if no text came of it)
         if transcriber is None:
             return ""
@@ -1891,6 +1942,7 @@ class HybridRuntime:
         if lead_in is not None and lead_in[0] == sample_rate and lead_in[1].size:
             parts.insert(0, lead_in[1])
         audio = np.concatenate(parts)
+        self._request_clip_audio_s = round(audio.size / sample_rate, 1)
         heard = await self._hear_game_answer((sample_rate, audio)) if game else None
         if heard is not None:
             self._note_wake(wake_event, request_chars=len(heard), cut_off=self._request_clip_cut_off)
@@ -2021,6 +2073,25 @@ class HybridRuntime:
             return not asleep
         logger.info("Wake name check heard=False")
         return False
+
+    def _wake_audio_with_rest_of_name(
+        self, wake_audio: tuple[int, NDArray[np.int16]]
+    ) -> tuple[int, NDArray[np.int16]] | None:
+        """Return the wake audio and the request clip's first moments, or None when nobody was still speaking.
+
+        The request clip records from the fire, so it holds the rest of a name the wake model fired in the middle
+        of; the first check (0.4 s and more) has given it time to.
+        """
+        rate = wake_audio[0]
+        frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
+        rest = np.concatenate(frames)[: int(rate * self._WAKE_NAME_REST_S)] if frames else None
+        try:
+            still_speaking = rest is not None and self._request_clip_vad.is_speech((rate, rest))
+        except (TypeError, ValueError):
+            still_speaking = False
+        if rest is None or not still_speaking:
+            return None
+        return rate, np.concatenate([wake_audio[1], rest])
 
     def _trusted_voice_wake(self, audio: tuple[int, NDArray[np.int16]], score: float | None, *, asleep: bool) -> bool:
         """Whether a sure wake model and a voice in the window outweigh Whisper missing the name (awake only)."""
@@ -2939,6 +3010,7 @@ class HybridRuntime:
                 self._postactivation_seconds -= self._frame_duration(queued_frame)
             try:
                 await handler.receive(queued_frame)
+                self._record_sent_audio(queued_frame)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -3150,6 +3222,7 @@ class HybridRuntime:
                 copied_frame = (copied_frame[0], np.zeros_like(copied_frame[1]))
             try:
                 await handler.receive(copied_frame)
+                self._record_sent_audio(copied_frame)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -3767,6 +3840,7 @@ class HybridRuntime:
                 elif mode is RuntimeMode.CLOUD_CONVERSATION:
                     handler = active_handler
                     self._log_cloud_session_summary(reason)
+                    self._close_conversation_record(handler, reason)
                     tasks_to_cancel = (
                         self._activation_task,
                         self._provider_task,

@@ -4519,6 +4519,43 @@ async def test_no_cue_until_the_name_check_passes() -> None:
         await runtime.close()
 
 
+@pytest.mark.parametrize(("after_fire", "wakes"), [(3_000, True), (20, False)])
+@pytest.mark.asyncio
+async def test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed(after_fire: int, wakes: bool) -> None:
+    """The wake model can fire mid-name ("Richi, lights" on 2026-11-05).
+
+    With a voice still going, the name check hears the next moments too; with quiet after the fire, the miss stands.
+    """
+    runtime, handler, acknowledged, _listening, _asked = _runtime_with_wake_audio("", "")
+    wake_audio = runtime._wake_name_audio
+    assert wake_audio is not None
+    checked: list[int] = []
+
+    async def fast(audio: AudioFrame) -> str:
+        checked.append(audio[1].size)
+        return "Richi, lights." if audio[1].size > wake_audio[1].size else "ри"
+
+    runtime._name_check_transcriber = fast
+    runtime._request_clip_queued = [(16000, np.full(8000, after_fire, dtype=np.int16))]
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        if wakes:
+            for _ in range(300):
+                if acknowledged:
+                    break
+                await asyncio.sleep(0.01)
+            assert checked == [16000, 16000 + 6400]  # the first 0.4 s after the fire
+            assert acknowledged == ["acoustic_wake"]
+            activation.cancel()
+        else:
+            await asyncio.wait_for(activation, timeout=3.0)
+            assert checked == [16000]
+            assert acknowledged == [] and not handler.started.is_set()
+            assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    finally:
+        await runtime.close()
+
+
 @pytest.mark.parametrize(("heard", "opens"), [("Richie.", True), ("so", False)])
 @pytest.mark.asyncio
 async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(heard: str, opens: bool) -> None:

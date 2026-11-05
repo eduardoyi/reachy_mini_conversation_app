@@ -8,6 +8,8 @@ import time
 import asyncio
 import logging
 import tempfile
+import threading
+from typing import Any, TypeVar
 from pathlib import Path
 from collections.abc import Callable, Awaitable
 
@@ -36,13 +38,53 @@ MUSIC_STARTED_IN_CONVERSATION = (
 
 
 _CREDENTIALS_LOCK = asyncio.Lock()
+# The credentials file is read and written off the event loop, and given up on after this long: a read
+# stuck on a macOS privacy prompt (a file in ~/Documents) once froze the loop and wake word with it all night.
+CREDENTIALS_FILE_TIMEOUT_S = 5.0
+# Held by the thread touching the credentials file. A thread still stuck after the timeout keeps it, so later
+# looks fail at once instead of stacking stuck threads in the pool the rest of the app shares.
+_FILE_IN_USE = threading.Lock()
+_Result = TypeVar("_Result")
+
+
+def _holding_the_file(work: Callable[..., _Result], *args: Any) -> _Result:
+    try:
+        return work(*args)
+    finally:
+        _FILE_IN_USE.release()
+
+
+async def _off_the_loop(work: Callable[..., _Result], *args: Any) -> _Result:
+    """Run ``work`` on the credentials file in a thread, giving up after ``CREDENTIALS_FILE_TIMEOUT_S``."""
+    if not _FILE_IN_USE.acquire(blocking=False):
+        raise TimeoutError("The Spotify credentials file is still stuck from an earlier look")
+    try:
+        running = asyncio.get_running_loop().run_in_executor(None, _holding_the_file, work, *args)
+    except BaseException:
+        _FILE_IN_USE.release()
+        raise
+    return await asyncio.wait_for(running, CREDENTIALS_FILE_TIMEOUT_S)
+
+
+def _read_credentials(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_credentials(path: Path, credentials: dict[str, object]) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(credentials, output)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 async def spotify_access_token(client: httpx.AsyncClient, credentials_path: str) -> str:
     """Return a valid access token, refreshing and privately persisting it when it is about to expire."""
     async with _CREDENTIALS_LOCK:
         path = Path(credentials_path).expanduser()
-        credentials: object = json.loads(path.read_text(encoding="utf-8"))
+        credentials = await _off_the_loop(_read_credentials, path)
         if not isinstance(credentials, dict):
             raise ValueError("Invalid credentials")
         access = credentials.get("access_token")
@@ -84,13 +126,7 @@ async def spotify_access_token(client: httpx.AsyncClient, credentials_path: str)
         ):
             raise ValueError("Invalid token response")
         credentials.update(access_token=access, refresh_token=refresh, expires_at=time.time() + lifetime)
-        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".spotify-")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                json.dump(credentials, output)
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        await _off_the_loop(_write_credentials, path, credentials)
         return access
 
 

@@ -41,7 +41,7 @@ Other Mac sounds follow the Mac's output while the speaker is selected.
    `MUSIC_SPEAKER_BLUETOOTH`, `MUSIC_SPEAKER_OUTPUT` and `SPOTIFY_DEVICE_ID` to `.env`.
 6. Restart Reachy.
 
-On a new Mac, also copy `~/Documents/Reachy/private-spotify/credentials.json` (Reachy's Spotify
+On a new Mac, also copy `~/.local/share/reachy_mini_conversation_app/spotify/credentials.json` (Reachy's Spotify
 sign-in) or sign in again, and pair the speaker with the new Mac.
 
 ## Tests

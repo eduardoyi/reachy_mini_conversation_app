@@ -25,6 +25,7 @@ the implementation.
 | Local transcript wake word | [wake-word.md](wake-word.md) | in-progress |
 | Wake cue (antennas) | [wake-cue.md](wake-cue.md) | in-progress |
 | Wake clip capture | [wake-clip-capture.md](wake-clip-capture.md) | in-progress |
+| Conversation record | [conversation-record.md](conversation-record.md) | in-progress: built 2026-11-05, recording on the Mac mini |
 | Deterministic local intents | [local-intents.md](local-intents.md) | in-progress |
 | Speaker following | [speaker-following.md](speaker-following.md) | in-progress |
 | Face recognition | [face-recognition.md](face-recognition.md) | in-progress |

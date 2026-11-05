@@ -664,7 +664,8 @@ def create_app(
 
     @app.get("/api/wake/queue")
     async def _wake_queue() -> JSONResponse:
-        return JSONResponse({"items": await asyncio.to_thread(wake.to_check)})
+        items, checked = await asyncio.gather(asyncio.to_thread(wake.to_check), asyncio.to_thread(wake.checked))
+        return JSONResponse({"items": items, "checked": checked})
 
     @app.get("/api/wake/clip")
     async def _wake_clip(item: str) -> Response:
@@ -688,6 +689,18 @@ def create_app(
             return _error("That clip was already checked.", 404)
         audit.append({"who": _who(request), "action": "wake clip checked", "target": answer})
         return JSONResponse({"answered": True})
+
+    @app.post("/api/wake/take-back")
+    async def _wake_take_back(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        try:
+            await asyncio.to_thread(wake.take_back, str(payload.get("item") or ""), _who(request))
+        except LookupError:
+            return _error("That clip has no answer to take back.", 404)
+        audit.append({"who": _who(request), "action": "wake clip answer taken back"})
+        return JSONResponse({"taken_back": True})
 
     @app.post("/api/wake/missed")
     async def _wake_missed(request: Request) -> Response:

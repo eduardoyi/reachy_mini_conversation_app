@@ -583,7 +583,7 @@ const PROMPTS = [
 ];
 const TAKES = 20;
 const WAVE_BARS = 44;
-const wake = { data: null, mode: "main", items: [], index: 0, checked: 0, asking: false, clips: new Map(), audio: null, teach: null };
+const wake = { data: null, mode: "main", items: [], index: 0, checked: 0, asking: false, saving: null, clips: new Map(), audio: null, teach: null };
 
 function plural(count, one) {
   return `${count} ${count === 1 ? one : `${one}s`}`;
@@ -856,12 +856,38 @@ function reminderSetting(value) {
 
 // Checking clips: one card at a time, played as it comes in; swipe right for yes, left for no, down to skip.
 // A yes to "did someone say his name?" then asks whether it was said to him or about him.
+// Back takes the last answer back and shows that clip again, as far back as the clips answered from this list.
 
 async function startCheck(button) {
   const payload = await run(button, () => api("/api/wake/queue"));
   if (!payload) return;
-  Object.assign(wake, { mode: "check", items: payload.items, index: 0, checked: 0 });
+  const checked = payload.checked || [];
+  Object.assign(wake, { mode: "check", items: [...checked, ...payload.items], index: checked.length, checked: 0 });
   renderWake();
+}
+
+function answerLabel(item) {
+  return { call: item.follow_up ? "To him" : "Yes", mention: "About him", not_call: "No", unsure: "Not sure" }[item.answer];
+}
+
+async function goBack(button) {
+  const previous = wake.items[wake.index - 1];
+  if (!previous) return;
+  const taken = await run(button, async () => {
+    await wake.saving;
+    return api("/api/wake/take-back", { method: "POST", body: { item: previous.id } });
+  });
+  if (!taken || wake.mode !== "check") return;
+  if (previous.counted) wake.checked -= 1;
+  previous.counted = false;
+  wake.index -= 1;
+  renderCheck();
+}
+
+function backButton() {
+  const back = el("button", { className: "text-button", type: "button" }, [icon("left"), "Back"]);
+  back.addEventListener("click", () => goBack(back));
+  return back;
 }
 
 function clipBuffer(item) {
@@ -943,13 +969,14 @@ function renderCheck() {
   const body = $("#wake-body");
   const item = wake.items[wake.index];
   if (!item) {
-    const back = el("button", { className: "pill sun", type: "button" }, "Back");
-    back.addEventListener("click", () => leaveWakeMode());
+    const close = el("button", { className: "pill sun", type: "button" }, "Close");
+    close.addEventListener("click", () => leaveWakeMode());
     body.replaceChildren(el("div", { className: "clip-done" }, [
       el("span", { className: "done-tick" }, icon("check")),
       el("h2", {}, `Done: ${wake.checked} checked.`),
       el("p", {}, "Reachy learns from these tonight."),
-      back,
+      close,
+      wake.items.length ? backButton() : null,
     ]));
     return;
   }
@@ -970,8 +997,12 @@ function renderCheck() {
   body.replaceChildren(el("div", { className: "clip-stage" }, [
     card,
     el("div", { className: "clip-answers" }, [answerButton("No", "pill soft big", "not_call"), yes]),
-    answerButton("Not sure", "text-button unsure", "unsure"),
-    el("p", { className: "hint center clip-hint" }, "Swipe right for yes, left for no."),
+    el("div", { className: "clip-extra" }, [
+      wake.index > 0 ? backButton() : el("span"),
+      answerButton("Not sure", "text-button", "unsure"),
+    ]),
+    el("p", { className: "hint center clip-hint" },
+      item.answer ? `You said: ${answerLabel(item)}. Answer again.` : "Swipe right for yes, left for no."),
   ]));
   playClip(item, bars);
   const next = wake.items[wake.index + 1];
@@ -1004,9 +1035,11 @@ function answerClip(answer) {
   if (!item || !card || card.classList.contains("gone")) return;
   stopClip();
   card.classList.add("gone", { call: "out-right", mention: "out-right", not_call: "out-left", unsure: "out-down" }[answer]);
-  if (answer !== "unsure") wake.checked += 1;
+  item.answer = answer;
+  item.counted = answer !== "unsure";
+  if (item.counted) wake.checked += 1;
   wake.clips.delete(item.id);
-  api("/api/wake/answer", { method: "POST", body: { item: item.id, answer } }).catch((error) => toast(error.message, "bad"));
+  wake.saving = api("/api/wake/answer", { method: "POST", body: { item: item.id, answer } }).catch((error) => toast(error.message, "bad"));
   setTimeout(() => {
     wake.index += 1;
     if (wake.mode === "check") renderCheck();

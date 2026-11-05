@@ -332,7 +332,7 @@ input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius
 .clip-answers .pill { padding: 0 10px; }
 .pill.big { min-height: 64px; border-radius: 22px; font-size: 18px; }
 .pill.wide { display: flex; width: 100%; }
-.unsure { justify-self: center; }
+.clip-extra { display: flex; align-items: center; justify-content: space-between; }
 .hint.center { text-align: center; }
 .clip-done { display: grid; justify-items: center; text-align: center; gap: 6px; padding: 40px 12px; }
 .clip-done h2 { font: 700 24px/1.2 var(--display); letter-spacing: -.02em; margin: 10px 0 0; }

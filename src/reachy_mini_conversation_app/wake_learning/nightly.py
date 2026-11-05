@@ -4,9 +4,12 @@
    never words). The household's answers on the phone overrule it.
 2. Score: the live and shadow heads, next to the main model, over every hour of the feature log: how many calls
    each pair would have caught and how often it would have fired on everything else.
-3. Offer a switch when the shadow pair caught more calls and fired no more, over a full day it ran live.
-4. Train a challenger on all labelled days but the newest; it becomes the next shadow head if it beats the
-   current one on that day.
+3. Offer a switch when the shadow pair caught clearly more calls and fired no more, or as many calls on a fifth
+   fewer fires, over a full day it ran beside the live pair.
+4. Train a challenger from the live head's weights on all labelled days but the newest two; its threshold is
+   chosen on those two, and it becomes the next shadow head if it beats the current one there (more calls
+   without more fires, or as many calls on clearly fewer fires), or catches more than a shadow that is behind
+   the live pair.
 5. Pick tomorrow's clips to check, and write the scoreboard.
 
 Everything stays on this computer; training runs in a separate Python with PyTorch (``WAKE_TRAINER_PYTHON``).
@@ -33,6 +36,7 @@ import numpy as np
 import onnxruntime as ort
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.utils import behind_privacy_prompt
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.wake_word import TranscriptWakeWordDetector, transcript_aliases
 from reachy_mini_conversation_app.wake_clips import make_private_dir
@@ -61,9 +65,13 @@ COOLDOWN_S: Final[float] = 3.0
 # Main-head threshold at which the extra head's scaled score would count as a "trusted" wake (hybrid_runtime);
 # the extra head's own threshold stays above main/0.8 so it never can.
 TRUSTED_SCORE: Final[float] = 0.8
-EXTRA_THRESHOLDS: Final[tuple[float, ...]] = (0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
-# A switch is offered only for a clear gain: this many more calls caught (and at least 5% of them).
+EXTRA_THRESHOLDS: Final[tuple[float, ...]] = (0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.96, 0.97, 0.98, 0.985, 0.99)
+# A switch is offered only for a clear gain: this many more calls caught (and at least 5% of them) without
+# firing more, or as many calls caught with at most this share of the fires.
 SWITCH_MARGIN_CALLS: Final[int] = 2
+SWITCH_FIRES_SHARE: Final[float] = 0.8
+# A challenger becomes the shadow head when it catches more without firing more, or as many with this share.
+SHADOW_FIRES_SHARE: Final[float] = 0.9
 QUEUE_SIZE: Final[int] = 10
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
@@ -71,6 +79,12 @@ NEGATIVES_PER_DAY: Final[int] = 60_000
 # 1.8 GB of float16 windows, which the trainer turns into float32 a batch at a time.
 MAX_NEGATIVES: Final[int] = 600_000
 RECORDING_COPIES: Final[int] = 3
+# The name check finds where the name ends to within a quarter second; the main head reacts about 0.4 s
+# after that (checked on 140 recordings of the name). Calls are labelled where the head can tell, not before.
+NAME_LABEL_SHIFT_S: Final[float] = 0.4
+# A threshold chosen on one day did not hold: house-20261104 matched the live pair's 22 calls on 2026-11-03,
+# where it was chosen, and caught 15 to the live pair's 24 on 2026-11-04. Challengers are tuned on this many.
+DEV_DAYS: Final[int] = 2
 # Name checks: the whole clip in pieces of at most this, then 1.5 s windows every 0.25 s to find where it is.
 CHECK_PIECE_S: Final[float] = 10.0
 LOCATE_WINDOW_S: Final[float] = 1.5
@@ -413,15 +427,44 @@ def choose_threshold(days: list[tuple[DayScores, DayMoments]], main: str, main_t
         if main_threshold / threshold >= TRUSTED_SCORE:
             continue
         result = evaluate(days, main, main_threshold, extra, threshold)
-        if result.fires_per_day <= fire_budget and (best is None or result.caught > best[1].caught):
+        if result.fires_per_day <= fire_budget and (
+            best is None
+            or result.caught > best[1].caught
+            or (result.caught == best[1].caught and result.fires_per_day < best[1].fires_per_day)
+        ):
             best = (threshold, result)
     return best
 
 
+def dev_days(days: Iterable[str]) -> list[str]:
+    """Return the newest ``DEV_DAYS`` days a challenger is tuned on, always leaving one to train on."""
+    ordered = sorted(days)
+    return ordered[-min(DEV_DAYS, len(ordered) - 1) :] if len(ordered) > 1 else []
+
+
+def better(candidate: PairResult, current: PairResult, margin: int, fires_share: float) -> bool:
+    """Whether ``candidate`` catches ``margin`` more calls without firing more, or as many on a share of the fires."""
+    more = candidate.caught >= current.caught + margin and candidate.fires_per_day <= current.fires_per_day + 0.5
+    quieter = candidate.caught >= current.caught and candidate.fires_per_day <= fires_share * current.fires_per_day
+    return more or quieter
+
+
+def closer_to_live(candidate: PairResult, shadow: PairResult, live: PairResult) -> bool:
+    """Whether ``candidate`` catches more calls than a shadow behind the live pair, firing no more than live.
+
+    A shadow that fires little but misses calls would otherwise keep out a challenger nearer to replacing the live
+    pair (2026-11-05: 44 of 76 calls at 307 fires a day against the shadow's 37 at 231 and live's 46 at 352).
+    """
+    return (
+        shadow.caught < live.caught
+        and candidate.caught > shadow.caught
+        and candidate.fires_per_day <= live.fires_per_day
+    )
+
+
 def clearly_better(candidate: PairResult, current: PairResult) -> bool:
-    """Whether ``candidate`` catches clearly more calls without firing more."""
-    margin = max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999))
-    return candidate.caught >= current.caught + margin and candidate.fires_per_day <= current.fires_per_day + 0.5
+    """Whether ``candidate`` is better by enough to offer a switch."""
+    return better(candidate, current, max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999)), SWITCH_FIRES_SHARE)
 
 
 # ---- training data -------------------------------------------------------------------------------------------
@@ -431,7 +474,7 @@ def day_examples(day: DayScores, runs: list[FeatureRun], moments: DayMoments, rn
     ends = day.ends
     labels = np.full(len(ends), -1.0, dtype=np.float32)
     for at in moments.named:
-        first, last = np.searchsorted(ends, [at - 0.4, at + 0.25])
+        first, last = np.searchsorted(ends, [at - 0.4 + NAME_LABEL_SHIFT_S, at + 0.25 + NAME_LABEL_SHIFT_S])
         labels[first:last] = 1.0
     for at in moments.not_calls:
         first, last = np.searchsorted(ends, [at - 1.5, at + 0.5])
@@ -486,7 +529,9 @@ def recording_examples(store: WakeLearningStore, model_dir: Path, noise: list[ND
             clip = np.clip(clip, -32768, 32767).astype(np.int16)
             voice_end = (lead.size + voice.size) / rate - 0.25  # the recording keeps 0.25 s after the voice
             clip_windows, clip_ends = _stream_windows(features, clip, rate)
-            near = (clip_ends >= voice_end - 0.3) & (clip_ends <= voice_end + 0.3)
+            near = (clip_ends >= voice_end - 0.3 + NAME_LABEL_SHIFT_S) & (
+                clip_ends <= voice_end + 0.3 + NAME_LABEL_SHIFT_S
+            )
             windows.append(clip_windows[near])
             labels.append(np.ones(int(near.sum()), np.float32))
     if not windows:
@@ -666,9 +711,9 @@ def seed_live_head(settings: NightSettings) -> HeadRecord | None:
 
 
 def train_challenger(
-    settings: NightSettings, windows: NDArray[np.float16], labels: NDArray[np.float32]
+    settings: NightSettings, windows: NDArray[np.float16], labels: NDArray[np.float32], start: Path | None = None
 ) -> Path | None:
-    """Fine-tune the main head's shape on ``windows`` in the trainer's Python; return the ONNX file or None."""
+    """Fine-tune ``start`` (the main head when None) on ``windows`` in the trainer's Python; return the ONNX file."""
     if settings.trainer_python is None or not labels.size or not (labels == 1).any():
         logger.info("No challenger trained tonight (no trainer or no calls to learn from)")
         return None
@@ -677,7 +722,7 @@ def train_challenger(
     make_private_dir(work)
     np.savez(data, X=windows, Y=labels)
     trainer = Path(__file__).resolve().parents[3] / "scripts" / "wake_train.py"
-    command = [settings.trainer_python, str(trainer), "--data", str(data), "--init", str(settings.model_dir / MAIN_HEAD),
+    command = [settings.trainer_python, str(trainer), "--data", str(data), "--init", str(start or settings.model_dir / MAIN_HEAD),
                "--out", str(out)]  # fmt: skip
     result = subprocess.run(command, capture_output=True, text=True, timeout=3 * 3600, check=False)
     data.unlink(missing_ok=True)
@@ -735,8 +780,8 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             store.withdraw_proposal()
 
     if len(evaluated) >= 2:
-        newest = max(scored)
-        train_days = [day for day in scored if day != newest]
+        tuning = dev_days(scored)
+        train_days = [day for day in scored if day not in tuning]
         examples = [day_examples(scored[day], runs_by_day[day], labelled[day][2], rng) for day in train_days]
         noise = [_read_wav(store.clips / event["clip"])[1] for day in days for event in labelled[day][0]
                  if event["kind"] == "background" and event.get("clip")][:200]  # fmt: skip
@@ -751,14 +796,16 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             keep[drop] = False
             windows, labels = windows[keep], labels[keep]
         summary["trained_on"] = {"calls": int((labels == 1).sum()), "other": int((labels == 0).sum())}
-        challenger_file = train_challenger(settings, windows, labels)
+        # From the live head's weights: on 2026-11-03/04 that caught 44 of 76 calls (live 46), the main head's 35.
+        start = store.head_path(live) if live is not None and store.head_path(live).is_file() else None
+        challenger_file = train_challenger(settings, windows, labels, start)
         if challenger_file is not None:
             name = f"house-{settings.today:%Y%m%d}"
             path = store.heads / f"{name}.onnx"
             write_private(path, challenger_file.read_bytes())
             challenger_file.unlink()
-            dev_scores = score_day(runs_by_day[newest], [*heads, Head(path)], store.root / "scores" / newest)
-            dev = [(dev_scores, labelled[newest][2])]
+            dev = [(score_day(runs_by_day[day], [*heads, Head(path)], store.root / "scores" / day), labelled[day][2])
+                   for day in tuning]  # fmt: skip
             live_dev = evaluate(dev, main, settings.main_threshold, live.name if live else None,
                                 live.threshold if live else 1.0)  # fmt: skip
             choice = choose_threshold(dev, main, settings.main_threshold, name, max(live_dev.fires_per_day, 1.0))
@@ -770,10 +817,8 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             )
             summary["challenger"] = {"name": name, "threshold": choice[0] if choice else None,
                                      **(choice[1].as_json() if choice else {})}  # fmt: skip
-            if (
-                choice is not None
-                and choice[1].caught > current.caught
-                and (choice[1].fires_per_day <= current.fires_per_day + 0.5)
+            if choice is not None and (
+                better(choice[1], current, 1, SHADOW_FIRES_SHARE) or closer_to_live(choice[1], current, live_dev)
             ):
                 record = HeadRecord(name, choice[0], hashlib.sha256(path.read_bytes()).hexdigest(),
                                     datetime.now().isoformat(timespec="seconds"), choice[1].as_json())  # fmt: skip
@@ -823,16 +868,6 @@ def _prune(folder: Path, today: date, *, keep_days: int) -> None:
                 path.rmdir()
             else:
                 path.unlink(missing_ok=True)
-
-
-# macOS asks before a program reads these; run by launchd, the night would wait on that prompt until morning.
-_PROMPTED_FOLDERS: Final[tuple[str, ...]] = ("Desktop", "Documents", "Downloads")
-
-
-def behind_privacy_prompt(path: Path, home: Path | None = None) -> bool:
-    """Return whether reading ``path`` from a LaunchAgent would stop on a macOS privacy prompt."""
-    home = home or Path.home()
-    return any(path.expanduser().is_relative_to(home / folder) for folder in _PROMPTED_FOLDERS)
 
 
 def main() -> None:
