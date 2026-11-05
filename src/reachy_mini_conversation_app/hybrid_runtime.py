@@ -478,6 +478,10 @@ class HybridRuntime:
     # before Reachy reacts. On 2026-10-28, 59 of 86 wakes had no name (breakfast clinks) and real calls
     # scored 0.3-0.93; checking the name let a 0.3 threshold wake 34 of 38 named calls with no false wake.
     _WAKE_NAME_WINDOW_S = 2.5
+    # The wake model can fire mid-name: on 2026-11-05 "Richi, lights" took 0.9 s, the model fired 0.6 s in and
+    # the check heard half a word. A miss with a voice still going is checked again with this much more audio
+    # (replaying 490 rejected wakes, 0.3 s more found the name in 2 more calls).
+    _WAKE_NAME_REST_S = 0.4
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
     # Whisper can mishear a real call ("Reggie.", "Preciso.", "What did she do?" for three "Richie, lights
@@ -1476,6 +1480,10 @@ class HybridRuntime:
             trusted_unnamed = False
             if wake_audio is not None:
                 heard = await self._name_in_wake_audio(wake_audio, asleep=asleep)
+                if not heard:
+                    longer = self._wake_audio_with_rest_of_name(wake_audio)
+                    if longer is not None:
+                        heard = await self._name_in_wake_audio(longer, asleep=asleep)
                 trusted_unnamed = not heard and self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep)
                 self._note_wake(wake_event, heard=heard, trusted=trusted_unnamed)
                 if not heard and not trusted_unnamed:
@@ -2021,6 +2029,25 @@ class HybridRuntime:
             return not asleep
         logger.info("Wake name check heard=False")
         return False
+
+    def _wake_audio_with_rest_of_name(
+        self, wake_audio: tuple[int, NDArray[np.int16]]
+    ) -> tuple[int, NDArray[np.int16]] | None:
+        """Return the wake audio and the request clip's first moments, or None when nobody was still speaking.
+
+        The request clip records from the fire, so it holds the rest of a name the wake model fired in the middle
+        of; the first check (0.4 s and more) has given it time to.
+        """
+        rate = wake_audio[0]
+        frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
+        rest = np.concatenate(frames)[: int(rate * self._WAKE_NAME_REST_S)] if frames else None
+        try:
+            still_speaking = rest is not None and self._request_clip_vad.is_speech((rate, rest))
+        except (TypeError, ValueError):
+            still_speaking = False
+        if rest is None or not still_speaking:
+            return None
+        return rate, np.concatenate([wake_audio[1], rest])
 
     def _trusted_voice_wake(self, audio: tuple[int, NDArray[np.int16]], score: float | None, *, asleep: bool) -> bool:
         """Whether a sure wake model and a voice in the window outweigh Whisper missing the name (awake only)."""

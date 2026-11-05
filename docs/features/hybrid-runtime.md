@@ -958,6 +958,14 @@ before, about 2 s when only turbo heard it). Not heard: `_drop_unconfirmed_wake`
 the cloud. If every check fails with an error, an awake Reachy wakes as before and an asleep one
 stays asleep. Each check is bounded by `_WAKE_NAME_CHECK_TIMEOUT_S` (4 s).
 
+A miss is checked once more with the request clip's first 0.4 s (`_WAKE_NAME_REST_S`) added, when that
+audio is over the voice threshold (`_wake_audio_with_rest_of_name`). The wake model can fire mid-name: on
+2026-11-05 "Richi, lights" took 0.9 s, the model fired 0.6 s in, whisper heard half a word and the wake was
+dropped. The transcript backup heard the name a second later, without the command, so a silent conversation
+opened. Replaying the 490 rejected wakes of 2026-11-04/05, 0.3 s more audio found the name in 2 more calls.
+Quiet after the fire (a clink) skips the second check, so only a would-be rejection by someone still talking
+waits for it.
+
 With the check, a low `LOCAL_ACOUSTIC_WAKE_THRESHOLD` is safe: on the 269 saved clips, threshold
 0.3 with both checks woke 34 of 38 named calls with no false wake (threshold 0.95 alone: 27 and
 59). The Mac mini runs 0.3; the code default stays 0.5. Logs carry only
@@ -969,7 +977,8 @@ Tests (`tests/test_hybrid_runtime.py`):
 `test_a_wake_with_no_name_in_its_audio_goes_back_to_listening_without_reacting`,
 `test_when_whisper_is_down_an_awake_reachy_still_wakes_on_the_wake_model`,
 `test_asleep_only_the_name_leading_the_wake_audio_wakes_him`, `test_no_cue_until_the_name_check_passes`,
-`test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`.
+`test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`,
+`test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed`.
 
 The same wake audio also leads the request clip, for local transcription only
 (`_transcribe_request_clip(lead_in=...)`). The wake fires a moment after the name, so a request said in
