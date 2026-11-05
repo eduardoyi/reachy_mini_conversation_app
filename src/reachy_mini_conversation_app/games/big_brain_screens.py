@@ -492,4 +492,21 @@ def _pencil(draw: ImageDraw.ImageDraw, x: float, y: float, size: float, fill: in
     draw.line([at(-0.34, -half), at(-0.34, half)], fill=paper, width=max(2, round(size * 0.06)))
 
 
-_JOIN_ICONS: Final[dict[str, Icon]] = {"BIG BRAIN": _bulb, "SHEEPLE": _sheep, "SCRIBBLE RUSH": _pencil}
+def _range_mark(draw: ImageDraw.ImageDraw, x: float, y: float, size: float, fill: int) -> None:
+    """Draw Ballpark's mark, a range with its two ends and a pin on the answer, in a ``size`` square at ``(x, y)``."""
+    half, line = size * 0.46, max(3, round(size * 0.09))
+    bar_y = y + size * 0.2
+    draw.line((x - half, bar_y, x + half, bar_y), fill=fill, width=line)
+    for end in (x - half, x + half):
+        draw.line((end, bar_y - size * 0.2, end, bar_y + size * 0.2), fill=fill, width=line)
+    pin_x, head = x + size * 0.1, size * 0.17
+    draw.polygon([(pin_x - head, y - size * 0.22), (pin_x + head, y - size * 0.22), (pin_x, bar_y - line)], fill=fill)
+    draw.ellipse((pin_x - head, y - size * 0.22 - head, pin_x + head, y - size * 0.22 + head), fill=fill)
+
+
+_JOIN_ICONS: Final[dict[str, Icon]] = {
+    "BIG BRAIN": _bulb,
+    "SHEEPLE": _sheep,
+    "SCRIBBLE RUSH": _pencil,
+    "BALLPARK": _range_mark,
+}

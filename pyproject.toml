@@ -89,6 +89,7 @@ where = ["src"]
 reachy_mini_conversation_app = [
   "static/**/*",
   "games/detectives_cases/*.json",
+  "games/ballpark_questions.jsonl",
   ".env.example",
 ]
 reachy_talk_data = [

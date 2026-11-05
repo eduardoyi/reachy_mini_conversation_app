@@ -278,6 +278,48 @@ SHEEPLE: Final[GameInfo] = GameInfo(
 )
 
 
+BALLPARK: Final[GameInfo] = GameInfo(
+    key="ballpark",
+    names=frozenset(
+        {
+            "ballpark",
+            "el ballpark",
+            "ball park",
+            "bolpark",
+            "bol park",
+            "bolpar",
+            "ballpark game",
+            "mas o menos",
+            "el mas o menos",
+            "el de mas o menos",
+            "los rangos",
+            "el de los rangos",
+            "rangos",
+            "entre cuanto y cuanto",
+            "the range game",
+            "ranges",
+            "more or less",
+        }
+    ),  # fmt: skip
+    title={"es": "Ballpark", "en": "Ballpark"},
+    pitch={
+        "es": "No adivinen el número: escriban un rango donde estén seguros de que está. Gana el rango más chiquito "
+        "que acierte. Cada quien juega desde su teléfono.",
+        "en": "Don't guess the number: write a range you're sure it's in. The smallest right range wins. Everyone "
+        "plays on their phone.",
+    },
+    rules=(
+        "A range-guessing game for teams. Players scan the QR code on the e-ink screen with their phones, type a "
+        "name and pick a team. Each question has a number for an answer; each team writes a range (from, to) it is "
+        "sure holds it. A range that holds the answer scores 1, the smallest one that holds it scores 3, and when "
+        "every team is right the widest scores 0. Once per game each team may Copy another team's range, Swap two "
+        "other teams' ranges (three teams or more) or Double its points, in secret on the phone. One surprise "
+        "question per game: an exact answer scores 5, or everybody's points count double. The first team to 15 "
+        "points wins. Spanish or English. Silly facts and pop culture. 'Pausa' pauses, 'se acabó el juego' ends it."
+    ),
+)
+
+
 def _edition_names(subjects: tuple[str, ...]) -> frozenset[str]:
     """Return the ways to ask for a Big Brain edition: "big brain harry potter", "trivia de hogwarts"..."""
     shows = ("big brain", "bigbrain", "big brains", "big brein", "big brian", "el big brain")
@@ -491,6 +533,7 @@ GAMES: Final[dict[str, GameInfo]] = {
         BIG_BRAIN_DISNEY,
         SCRIBBLE_RUSH,
         SHEEPLE,
+        BALLPARK,
         DETECTIVES,
     )
 }

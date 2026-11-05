@@ -372,6 +372,7 @@ setInterval(() => {
 const GAME_CARDS = {
   bigbrain: { name: "Big Brain", shelf: "party", facts: ["2–4 teams", "Phones"] },
   sheeple: { name: "Sheeple", shelf: "party", facts: ["2–4 teams", "Phones"] },
+  ballpark: { name: "Ballpark", shelf: "party", facts: ["1–4 teams", "Phones"] },
   scribble: { name: "Scribble Rush", shelf: "party", facts: ["2–3 teams", "Phones", "Paper and pen"] },
   detectives: { name: "Detectives", shelf: "party", facts: ["Any number", "Phones"] },
   bigbrain_hp: { name: "Hogwarts", shelf: "editions", facts: ["Harry Potter films"] },

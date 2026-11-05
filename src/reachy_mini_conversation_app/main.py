@@ -153,6 +153,7 @@ def _build_games(
     from reachy_mini_conversation_app.games.host import GameHost
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
     from reachy_mini_conversation_app.games.sheeple import Sheeple, SheepleSetup
+    from reachy_mini_conversation_app.games.ballpark import Ballpark, BallparkSetup
     from reachy_mini_conversation_app.quick_commands import switch_wobble, restore_wobble
     from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
     from reachy_mini_conversation_app.tools.move_head import MoveHead
@@ -337,6 +338,13 @@ def _build_games(
     )
     if sheeple.bank.is_file():  # one phone game at a time, so it shares Big Brain's port and public address
         games["sheeple"] = lambda: Sheeple(sheeple)
+    ballpark = BallparkSetup(  # its questions ship with the app
+        data_dir=game_data,
+        port=config.BIG_BRAIN_PORT,
+        public_url=config.BIG_BRAIN_PUBLIC_URL,
+        elevenlabs_key=config.ELEVENLABS_API_KEY,
+    )
+    games["ballpark"] = lambda: Ballpark(ballpark)
     gemini_key = (config.GEMINI_API_KEY or "").strip()
     if gemini_key:  # the cases ship with the app; witnesses need the text model
         detectives = DetectivesSetup(

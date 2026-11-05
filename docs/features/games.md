@@ -40,7 +40,8 @@ Big Brain, the team quiz show played on phones, runs on the same host and has it
 
 **Scribble Rush**, the drawing race Reachy guesses with a vision model, uses Big Brain's phone server with its
 own page: [scribble-rush.md](scribble-rush.md).
-**Sheeple**, the survey game played on phones, has its own page too: [sheeple.md](sheeple.md).
+**Sheeple**, the survey game played on phones, has its own page too: [sheeple.md](sheeple.md). So does
+**Ballpark**, the range-guessing game on phones: [ballpark.md](ballpark.md).
 
 Detectives, the mystery party game played on phones, also runs on the host and has its own page:
 [detectives.md](detectives.md).
@@ -242,9 +243,9 @@ poster face, OFL) for game names, numbers and big titles.
   With a drawing, the drawing fills the left and the word and stars the right.
 - **Paused** (any game): a black pause disc beside PAUSA, the game's name on a grey pill, how to go on, and
   striped bands top and bottom.
-- **The party games** (Big Brain, Sheeple, Scribble Rush, Detectives) share a header: a black band with the
-  game's icon and name, a status pill on the right (points, round), and the game's motif under it (marquee bulbs,
-  wool, a checkered flag, crime-scene tape). Join screens keep the QR code exactly as large as before on white,
+- **The party games** (Big Brain, Sheeple, Scribble Rush, Detectives, Ballpark) share a header: a black band with
+  the game's icon and name, a status pill on the right (points, round), and the game's motif under it (marquee
+  bulbs, wool, a checkered flag, crime-scene tape, a measuring tape). Join screens keep the QR code exactly as large as before on white,
   with a black panel beside it: title, "scan to play" pointing at the code, the six-letter code as tiles, and the
   teams or players. Teams are told apart by shape and fill as well as name: red a black circle, blue a striped
   square, green a dark-grey triangle, yellow a light-grey diamond. Shared helpers live in `eink_display.py`

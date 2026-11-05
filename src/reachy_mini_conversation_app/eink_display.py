@@ -600,6 +600,10 @@ def _motif(canvas: Image.Image, top: int, motif: str) -> None:
     elif motif == "tape":
         _paint(canvas, (0, top, WIDTH, bottom), "tape")
         draw.line((0, bottom, WIDTH, bottom), fill=0, width=3)
+    elif motif == "ruler":  # a measuring tape: a tick every 10 px, longer every 50
+        draw.line((0, top, WIDTH, top), fill=0, width=3)
+        for x in range(0, WIDTH + 1, 10):
+            draw.line((x, top, x, top + (12 if x % 50 == 0 else 6)), fill=0, width=3 if x % 50 == 0 else 2)
     else:
         raise ValueError(f"unknown motif {motif}")
 

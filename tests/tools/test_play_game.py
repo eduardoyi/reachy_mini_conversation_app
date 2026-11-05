@@ -69,6 +69,7 @@ async def test_unknown_games_and_no_host() -> None:
         "bigbrain_disney",
         "scribble",
         "sheeple",
+        "ballpark",
         "detectives",
     ]
     missing = await tool(_deps(None), game="colors", action="rules")
