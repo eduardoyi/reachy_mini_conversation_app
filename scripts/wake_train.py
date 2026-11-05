@@ -1,11 +1,12 @@
 """Train a household wake head for the nightly wake-learning job (``wake_learning/nightly.py``).
 
 Runs in a separate Python with PyTorch and onnx (``WAKE_TRAINER_PYTHON``); the app itself never imports them.
-Fine-tunes the main head's weights (openWakeWord's 16x96 -> 32 -> 32 -> 1 network) on the dataset the job wrote:
+Fine-tunes the ``--init`` head's weights on the dataset the job wrote, in that head's shape: the main head's
+(openWakeWord's 16x96 -> 32 -> 32 -> 1) or the live "Richie" head's (16x96 -> 96 -> 64 -> 1). The dataset holds
 ``X`` float16 windows, ``Y`` 1 for a call and 0 for anything else. Calls are oversampled to one in eight. Writes
 an ONNX file whose batch size is free, so the job can score whole days quickly.
 
-Usage: python wake_train.py --data dataset.npz --init reachy-official33.onnx --out challenger.onnx
+Usage: python wake_train.py --data dataset.npz --init reachy-richi.onnx --out challenger.onnx
 """
 
 import sys
@@ -63,6 +64,28 @@ class Head(nn.Module):
         return torch.sigmoid(self.last_layer(x))
 
 
+class LiveHead(nn.Module):
+    """The "Richie" head's shape (two layers of 96 and 64), so a challenger can start from the live head."""
+
+    def __init__(self) -> None:
+        """Make the head; ``net.3`` stands where its dropout was, so the saved names line up."""
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(16 * 96, 96),
+            nn.ReLU(),
+            nn.Identity(),
+            nn.Linear(96, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Score windows."""
+        return self.net(x)
+
+
 def main() -> int:
     """Train and export; exit 0 on success."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -79,10 +102,10 @@ def main() -> int:
     if not len(calls) or not len(others):
         print("Need both calls and other windows", file=sys.stderr)
         return 2
-    model = Head()
     weights = {
         t.name: torch.from_numpy(numpy_helper.to_array(t).copy()) for t in onnx.load(str(args.init)).graph.initializer
     }
+    model: nn.Module = LiveHead() if "net.1.weight" in weights else Head()
     model.load_state_dict(weights)
     spread = float(np.asarray(windows[others[:: max(1, len(others) // 20000)]], dtype=np.float32).std())
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-3)

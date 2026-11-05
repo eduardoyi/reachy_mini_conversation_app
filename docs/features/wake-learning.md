@@ -139,12 +139,16 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
 - **Switch offer.** The shadow pair must catch at least 2 more calls (and 5% more) than the live pair over the days
   since the shadow started, with fires no higher than the live pair's plus 0.5 a day; or catch as many calls on at
   most 80% of the live pair's fires (`SWITCH_FIRES_SHARE`).
-- **Challenger.** It trains on every day but the newest two (`DEV_DAYS`; with only two days, the newest one). Its
+- **Challenger.** It starts from the live head's weights (`scripts/wake_train.py` loads either head's shape) and
+  trains on every day but the newest two (`DEV_DAYS`; with only two days, the newest one). Its
   threshold (0.4 to 0.99) is the one that catches the most calls on those two days without firing more than the
   live pair, the quieter one on a tie. It becomes the shadow if it beats the current shadow there: more calls
   without more fires, or as many on at most 90% of the fires (`SHADOW_FIRES_SHARE`). Until 2026-11-05 it was
   tuned on the newest day alone: house-20261104 matched the live pair's 22 calls on the day it was tuned on and
-  caught 15 to the live pair's 24 the next day.
+  caught 15 to the live pair's 24 the next day. A challenger also replaces a shadow that catches fewer calls
+  than the live pair when it catches more than that shadow, within the live pair's fires (`closer_to_live`).
+  On 2026-11-03/04 (76 calls), one started from the live head caught 44 at about 307 fires a day, one started
+  from the main head 35 at about 216; the live pair caught 46 at about 352, the shadow 37 at about 231.
 - **Call labels.** Training labels a call's windows from the located name end to 0.65 s after it
   (`NAME_LABEL_SHIFT_S`, 0.4 s later than the name check's end): the main head reacts about 0.4 s after the end
   the name check finds, on 140 Mac recordings. Labelled where the check put it, challengers learned to fire on

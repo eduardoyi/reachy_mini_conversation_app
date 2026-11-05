@@ -6,9 +6,10 @@
    each pair would have caught and how often it would have fired on everything else.
 3. Offer a switch when the shadow pair caught clearly more calls and fired no more, or as many calls on a fifth
    fewer fires, over a full day it ran beside the live pair.
-4. Train a challenger on all labelled days but the newest two; its threshold is chosen on those two, and it
-   becomes the next shadow head if it beats the current one there: more calls without more fires, or as many
-   calls on clearly fewer fires.
+4. Train a challenger from the live head's weights on all labelled days but the newest two; its threshold is
+   chosen on those two, and it becomes the next shadow head if it beats the current one there (more calls
+   without more fires, or as many calls on clearly fewer fires), or catches more than a shadow that is behind
+   the live pair.
 5. Pick tomorrow's clips to check, and write the scoreboard.
 
 Everything stays on this computer; training runs in a separate Python with PyTorch (``WAKE_TRAINER_PYTHON``).
@@ -448,6 +449,19 @@ def better(candidate: PairResult, current: PairResult, margin: int, fires_share:
     return more or quieter
 
 
+def closer_to_live(candidate: PairResult, shadow: PairResult, live: PairResult) -> bool:
+    """Whether ``candidate`` catches more calls than a shadow behind the live pair, firing no more than live.
+
+    A shadow that fires little but misses calls would otherwise keep out a challenger nearer to replacing the live
+    pair (2026-11-05: 44 of 76 calls at 307 fires a day against the shadow's 37 at 231 and live's 46 at 352).
+    """
+    return (
+        shadow.caught < live.caught
+        and candidate.caught > shadow.caught
+        and candidate.fires_per_day <= live.fires_per_day
+    )
+
+
 def clearly_better(candidate: PairResult, current: PairResult) -> bool:
     """Whether ``candidate`` is better by enough to offer a switch."""
     return better(candidate, current, max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999)), SWITCH_FIRES_SHARE)
@@ -697,9 +711,9 @@ def seed_live_head(settings: NightSettings) -> HeadRecord | None:
 
 
 def train_challenger(
-    settings: NightSettings, windows: NDArray[np.float16], labels: NDArray[np.float32]
+    settings: NightSettings, windows: NDArray[np.float16], labels: NDArray[np.float32], start: Path | None = None
 ) -> Path | None:
-    """Fine-tune the main head's shape on ``windows`` in the trainer's Python; return the ONNX file or None."""
+    """Fine-tune ``start`` (the main head when None) on ``windows`` in the trainer's Python; return the ONNX file."""
     if settings.trainer_python is None or not labels.size or not (labels == 1).any():
         logger.info("No challenger trained tonight (no trainer or no calls to learn from)")
         return None
@@ -708,7 +722,7 @@ def train_challenger(
     make_private_dir(work)
     np.savez(data, X=windows, Y=labels)
     trainer = Path(__file__).resolve().parents[3] / "scripts" / "wake_train.py"
-    command = [settings.trainer_python, str(trainer), "--data", str(data), "--init", str(settings.model_dir / MAIN_HEAD),
+    command = [settings.trainer_python, str(trainer), "--data", str(data), "--init", str(start or settings.model_dir / MAIN_HEAD),
                "--out", str(out)]  # fmt: skip
     result = subprocess.run(command, capture_output=True, text=True, timeout=3 * 3600, check=False)
     data.unlink(missing_ok=True)
@@ -782,7 +796,9 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             keep[drop] = False
             windows, labels = windows[keep], labels[keep]
         summary["trained_on"] = {"calls": int((labels == 1).sum()), "other": int((labels == 0).sum())}
-        challenger_file = train_challenger(settings, windows, labels)
+        # From the live head's weights: on 2026-11-03/04 that caught 44 of 76 calls (live 46), the main head's 35.
+        start = store.head_path(live) if live is not None and store.head_path(live).is_file() else None
+        challenger_file = train_challenger(settings, windows, labels, start)
         if challenger_file is not None:
             name = f"house-{settings.today:%Y%m%d}"
             path = store.heads / f"{name}.onnx"
@@ -801,7 +817,9 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
             )
             summary["challenger"] = {"name": name, "threshold": choice[0] if choice else None,
                                      **(choice[1].as_json() if choice else {})}  # fmt: skip
-            if choice is not None and better(choice[1], current, 1, SHADOW_FIRES_SHARE):
+            if choice is not None and (
+                better(choice[1], current, 1, SHADOW_FIRES_SHARE) or closer_to_live(choice[1], current, live_dev)
+            ):
                 record = HeadRecord(name, choice[0], hashlib.sha256(path.read_bytes()).hexdigest(),
                                     datetime.now().isoformat(timespec="seconds"), choice[1].as_json())  # fmt: skip
                 store.set_shadow(record)

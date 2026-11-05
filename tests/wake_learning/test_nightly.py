@@ -332,3 +332,12 @@ def test_a_challenger_is_tuned_on_the_newest_two_days_and_trained_on_the_rest() 
     assert nightly.dev_days(week) == ["2026-11-03", "2026-11-04"]
     assert nightly.dev_days(["2026-11-01", "2026-11-02"]) == ["2026-11-02"]
     assert nightly.dev_days(["2026-11-01"]) == []
+
+
+def test_a_challenger_nearer_the_live_pair_replaces_a_shadow_that_misses_calls() -> None:
+    """A quiet shadow behind the live pair gives way to more calls within the live pair's fires (2026-11-05)."""
+    live, shadow = nightly.PairResult(46, 76, 352.2), nightly.PairResult(37, 76, 230.7)
+    assert nightly.closer_to_live(nightly.PairResult(44, 76, 307.3), shadow, live)
+    assert not nightly.closer_to_live(nightly.PairResult(44, 76, 400.0), shadow, live)  # fires more than live
+    assert not nightly.closer_to_live(nightly.PairResult(36, 76, 200.0), shadow, live)  # fewer calls than the shadow
+    assert not nightly.closer_to_live(nightly.PairResult(47, 76, 300.0), nightly.PairResult(46, 76, 200.0), live)
