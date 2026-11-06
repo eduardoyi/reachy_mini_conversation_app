@@ -988,14 +988,15 @@ keeps `_WAKE_LEAD_S` = 4 s; the audio after the fire is the request clip's start
 accurate model look in each window and it stops at the first that hears the name (asleep, the name must lead,
 as before). `_run_activation` waits for it after the request clip, before a quick command runs or the
 conversation opens; if no model heard the name, the wake is dropped (`second_look` false and `outcome`
-`rejected` in the wake record, back asleep if he was) and the antennas go back down. The cue is not delayed. A
+`rejected` in the wake record, back asleep if he was) and the antennas go back down. A failed look stops the request clip at once (`_second_look_failed`), so the antennas drop about 2 s after the fire rather than when the speaker stops (on 2026-11-06 a dropped wake kept them up 5.6 s during room talk). The cue is not delayed. A
 name heard only with the rest of it (the 0.4 s re-check above) is not looked at again, and if the looks cannot
 run (Whisper down, or no audio after the fire within `_SECOND_LOOK_WAIT_S`), the wake stands. Replaying
 2026-10-31 to 11-05 (1,063 wakes), it kept 76 of 85 named calls, including all 49 a person confirmed, and let
 27 of 78 nameless wakes through instead of 45. Logs carry `Wake second look heard=… model=…`, never the text.
 Tests: `test_a_wake_whose_name_a_second_look_does_not_hear_again_is_dropped_after_the_cue`,
 `test_a_second_look_that_hears_the_name_in_the_widest_window_keeps_the_wake`,
-`test_the_cue_does_not_wait_for_the_second_look`, `test_a_name_heard_with_the_rest_of_it_needs_no_second_look`.
+`test_the_cue_does_not_wait_for_the_second_look`, `test_a_name_heard_with_the_rest_of_it_needs_no_second_look`,
+`test_a_failed_second_look_drops_the_wake_without_waiting_for_the_speaker_to_stop`.
 
 The same wake audio also leads the request clip, for local transcription only
 (`_transcribe_request_clip(lead_in=...)`). The wake fires a moment after the name, so a request said in

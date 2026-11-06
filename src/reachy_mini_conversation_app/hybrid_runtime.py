@@ -636,6 +636,7 @@ class HybridRuntime:
         self._wake_window_rate = 0
         self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
         self._wake_lead_audio: tuple[int, NDArray[np.int16]] | None = None  # the wider window, for the second look
+        self._second_look_failed: int | None = None  # the generation whose second look did not hear the name
         self._wake_score: float | None = None  # the wake model's score for that audio
         self._wake_event: str | None = None  # that fire's id in the wake clip record
         self._name_event: str | None = None  # a room-transcript wake's id in the record
@@ -1943,6 +1944,8 @@ class HybridRuntime:
             await asyncio.sleep(0.05)
             if self._request_clip is None or not self._quick_generation_current(generation):
                 return ""
+            if self._second_look_failed == generation:
+                return ""  # the wake is being dropped: the antennas go down now, not when the speaker stops
             clip = self._request_clip_frames()
             for frame in clip[index:]:
                 try:
@@ -2119,7 +2122,8 @@ class HybridRuntime:
     async def _second_look(self, lead: tuple[int, NDArray[np.int16]], *, asleep: bool, generation: int) -> bool:
         """Whether the name is heard again with more audio on both sides of the fire (True when it can't look).
 
-        ``lead`` is the widest window before the fire; what follows it comes from the request clip.
+        ``lead`` is the widest window before the fire; what follows it comes from the request clip. Not hearing it
+        stops that clip, so the wake is dropped at once rather than when the speaker stops.
         """
         rate, before = lead
         for before_s, after_s in self._SECOND_LOOK_WINDOWS:
@@ -2131,6 +2135,8 @@ class HybridRuntime:
             heard = await self._hear_name(audio, asleep=asleep, check="second look")
             if heard is None or heard:
                 return True
+        with self._lifecycle_lock:
+            self._second_look_failed = generation
         return False
 
     async def _audio_after_fire(self, rate: int, seconds: float, generation: int) -> NDArray[np.int16] | None:

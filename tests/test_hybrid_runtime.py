@@ -4609,6 +4609,22 @@ async def test_a_wake_whose_name_a_second_look_does_not_hear_again_is_dropped_af
 
 
 @pytest.mark.asyncio
+async def test_a_failed_second_look_drops_the_wake_without_waiting_for_the_speaker_to_stop() -> None:
+    """On 2026-11-06 a dropped wake kept the antennas up 5 s while room talk went on; now they go down at once."""
+    runtime, handler, _acknowledged, listening, _looked = _runtime_for_a_second_look(
+        lambda _m, _n: False, after_fire=3_000
+    )
+    try:
+        # Someone still talking keeps the request clip going for up to 10.6 s; the look ends it.
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=2.0)
+        await wait_until(lambda: listening == [True, False])
+        assert not handler.started.is_set()
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_a_second_look_that_hears_the_name_in_the_widest_window_keeps_the_wake() -> None:
     """Any model in any window is enough; it stops looking at the first one that hears the name."""
     runtime, handler, acknowledged, _listening, looked = _runtime_for_a_second_look(
