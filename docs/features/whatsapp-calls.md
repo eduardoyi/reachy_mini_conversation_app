@@ -19,7 +19,8 @@ and recording are out of scope.
   "liga para o Eduardo", and "calla Eduardo" / "Col Eduardo" (how the speech models heard "call Eduardo" on
   the first try). It is a call only when the name is on the approved list (its name or a `say`
   name); anything else ("call grandma", "llama la atención") goes to the conversation.
-- **In a conversation:** Gemini's `call_person` tool (a skill) takes the same request: it checks the name and
+- **In a conversation:** Gemini's `call_person` tool (a direct tool since 2026-11-06; as a skill it twice came
+  without the name) takes the same request: it checks the name and
   the face, then closes the conversation after Reachy's reply and hands "call x" (in the conversation's
   language) to the call command, which checks again and calls. Before 2026-10-30 Gemini had no way to call
   and said "I can't make calls right now".
@@ -82,7 +83,9 @@ flowchart LR
   0.35), `parent_in_front` (the face check shared with the tool), `call_request` (the hand-off text).
 - `tools/call_person.py`: Gemini's tool; enabled with the hybrid runtime once the token and approved list
   exist (`core_tools.CALL_TOOLS`). `HybridRuntime.request_after_close(text)` closes the conversation after
-  the reply and then activates locally with ``text`` as the request.
+  the reply and then activates locally with ``text`` as the request (reason `handoff`). Until 2026-11-06 it
+  activated as a spoken wake, which takes the request from the room transcript and the request clip: with the
+  room transcript on, the handed-over text never reached the call command and went back to Gemini.
 - `HybridRuntime.stream_call(link)`: during a quick command, sets `_call_tap` so post-activation frames go
   to the call instead of the post-activation queue, and queues the other side as reply audio until the
   call ends. Exposed to quick commands as `ToolDependencies.stream_call`.
@@ -165,6 +168,7 @@ flowchart LR
   the head moving with the voice; Reachy's side to the phone "rustling"; very loud speech on the phone
   side cut the audio from Reachy's speaker. The face check now looks for 3 s; `REACHY_CALLS_RECORD_DIR`
   records both directions of a call for checking these by hand.
+- 2026-11-06: The hand-off from Gemini works with the room transcript on (it activates as `handoff`, not as a spoken wake), and `call_person` is a direct tool again.
 - 2026-10-30: "calla" and "col" accepted for "call" (the first live try was heard as both).
 - 2026-10-30: Stage 2: outgoing calls through Reachy (service mode, `CallLink`, `stream_call`, "call x"
   with the face check).

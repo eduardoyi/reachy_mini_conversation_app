@@ -4122,7 +4122,9 @@ class HybridRuntime:
         if ended:
             self._notify_cloud_session(False)
             if after_close is not None:
-                self.request_activation("acoustic_wake", addressed_text=after_close)
+                # Not as a spoken wake: that reads the request from the room transcript and the request clip, so
+                # the handed-over text never reached the quick commands (2026-11-06, a call to Tío Sergio).
+                self.request_activation("handoff", addressed_text=after_close)
         if event is not None:
             self._notify_state_observer(*event)
 

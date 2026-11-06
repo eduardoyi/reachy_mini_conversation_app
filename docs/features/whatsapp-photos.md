@@ -16,8 +16,13 @@ WhatsApp server on this computer).
 "Reachy <> Sergio" group as a WhatsApp voice note; "send a picture to Sergio" sends the photo there. Each
 family group holds that relative, the spare number and both parents.
 
+In a Gemini conversation, the `send_voice_message` tool hands the same request over: it checks the name
+against the contacts file, closes the conversation after Reachy's reply and hands "send a message to x" (in
+the conversation's language) to the message command, which asks for the message and records it. Before
+2026-11-06 Gemini had no way to send one and said it could not send messages.
+
 Out of scope: sending anywhere but the photos group and the groups in the contacts file, photo edits,
-video, replies, and messages from a Gemini conversation.
+video, replies, and text messages.
 
 ## User-facing behavior
 
@@ -261,6 +266,7 @@ pytest tests/test_hybrid_runtime.py -v -k "countdown or message or beep"
 
 | Date | Change |
 |------|--------|
+| 2026-11-06 | `send_voice_message` tool (`tools/send_voice_message.py`, enabled with the hybrid runtime, quick commands and WhatsApp: `core_tools.VOICE_MESSAGE_TOOLS`): Gemini hands a voice message to the message command. Tests: `tests/tools/test_send_voice_message.py`. |
 | 2026-10-29 | A touch on his head ends a voice message; the silence ending is 5 s (was 3 s). |
 | 2026-10-29 | Speaker turns wait while a photo is framed; `take_photo` takes `to`; "pon una foto a [x]". |
 | 2026-10-29 | Photos frame the face in view during the countdown (live: the head did not turn to the person asking). |

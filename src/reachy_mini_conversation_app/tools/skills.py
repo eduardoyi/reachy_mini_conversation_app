@@ -6,7 +6,9 @@ instructions with ``skill_help`` when it needs them (they then sit in the conver
 compression drops them), or calls ``use_skill`` straight away and gets the instructions back with
 any argument error. Frequently used, latency-sensitive and system tools stay ordinary tools, and so do
 tools that take several calls in a row: behind a skill, Spotify's search-then-play stalled after the search,
-and the lights, used every day, came through as a skill call with no arguments about one time in four.
+and the lights, used every day, came through as a skill call with no arguments about one time in four. So
+do the hand-offs (calls, voice messages): on 2026-11-06 two of four call_person skill calls came without the
+name, and Gemini then said it was calling.
 """
 
 import logging
@@ -24,7 +26,6 @@ USE_SKILL = "use_skill"
 
 # One line each for the menu; the tool's own description is what skill_help returns.
 SKILL_SUMMARIES: Dict[str, str] = {
-    "call_person": "a WhatsApp voice call through you to someone on the call list, when Mom or Dad asks",
     "tv": "the TV: on/off, volume, mute, play/pause, remote buttons, open an app, search YouTube",
     "remember": "save a household memory, only when someone explicitly asks you to remember something",
     "forget": "remove a saved memory when someone asks you to forget it",

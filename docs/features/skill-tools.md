@@ -20,8 +20,10 @@ mid-session (Gemini Live cannot change its configuration while connected).
 - Nothing changes for always-on tools: camera, emotions, dances, head moves, sleep, end
   conversation, turn off, weather, time, the e-ink display, Spotify, the lights, and background task
   status/cancel.
-- Skills: `tv`, `call_person`, `remember`, `forget`, `update_memory`,
+- Skills: `tv`, `remember`, `forget`, `update_memory`,
   `remember_face`, `forget_face`, `who_is_here`, `head_tracking`, `sweep_look` (only those enabled).
+  The hand-offs `call_person` and `send_voice_message` are direct tools: on 2026-11-06 two of four
+  `call_person` skill calls came without the name and Gemini then said it was calling.
   The first use of a skill in a conversation usually adds one `skill_help` round trip, about 1–2 s
   and one extra model generation. Lights, TV and music are mostly handled by local quick commands
   before Gemini is involved; the lights are a direct tool for the requests that reach Gemini.

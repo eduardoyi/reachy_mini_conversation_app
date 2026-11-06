@@ -5446,9 +5446,15 @@ async def test_a_call_sends_the_room_to_the_other_side_and_plays_their_voice() -
         await runtime.close()
 
 
+@pytest.mark.parametrize("room_transcript", [False, True])
 @pytest.mark.asyncio
-async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes() -> None:
-    """request_after_close ends the conversation after the reply, then the request goes to the quick commands."""
+async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes(room_transcript: bool) -> None:
+    """request_after_close ends the conversation after the reply, then the request goes to the quick commands.
+
+    With the room transcript on (as on the Mac mini), handed over as a spoken wake the request was dropped and
+    went back to Gemini (2026-11-06: "call Tío Sergio" twice, no call).
+    """
+    processor = _processor_with_open_wake_segment("people are over there") if room_transcript else None
     clock = FakeClock()
     handler = FakeHandler()
     seen: list[str] = []
@@ -5461,7 +5467,13 @@ async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes() -
         yield 24_000, np.zeros(24, dtype=np.int16)
 
     runtime = HybridRuntime(
-        lambda: handler, inactivity_timeout_s=60, clock=clock, quick_commands=quick, reply_speaker=speak
+        lambda: handler,
+        inactivity_timeout_s=60,
+        clock=clock,
+        quick_commands=quick,
+        reply_speaker=speak,
+        context_processor=processor,
+        local_processing_close_callback=processor.close if processor is not None else None,
     )
     assert await runtime.activate()
     handler.set_connected(True)

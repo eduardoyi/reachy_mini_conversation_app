@@ -373,6 +373,8 @@ DISPLAY_TOOLS = ("show_on_display",)
 MARIBEL_TOOLS = ("ask_maribel",)
 WHATSAPP_TOOLS = ("take_photo",)
 CALL_TOOLS = ("call_person",)
+# Hands a voice message to the quick command that records it: needs the hybrid runtime and WhatsApp.
+VOICE_MESSAGE_TOOLS = ("send_voice_message",)
 # Enabled automatically with the hybrid runtime and a TypeSafe key (the color hunt's camera checks), unless customized.
 GAME_TOOLS = ("play_game",)
 
@@ -465,6 +467,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
         tool_names = [name for name in tool_names if name not in CALL_TOOLS]
     elif read_profile_tool_override(profile, instance_path) is None:
         tool_names.extend(name for name in CALL_TOOLS if name not in tool_names)
+
+    if not (config.HYBRID_RUNTIME_ENABLED and config.QUICK_COMMANDS_ENABLED and whatsapp_photos_configured()):
+        tool_names = [name for name in tool_names if name not in VOICE_MESSAGE_TOOLS]
+    elif read_profile_tool_override(profile, instance_path) is None:
+        tool_names.extend(name for name in VOICE_MESSAGE_TOOLS if name not in tool_names)
 
     if not games_configured():
         tool_names = [name for name in tool_names if name not in GAME_TOOLS]
