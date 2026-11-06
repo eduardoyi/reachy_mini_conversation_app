@@ -980,6 +980,23 @@ Tests (`tests/test_hybrid_runtime.py`):
 `test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`,
 `test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed`.
 
+**Second look (2026-11-06).** The check can turn a word or two in its 2.5 s into the name: on 2026-11-05 four
+of the ten false wakes came through it (adult talk, children playing, near silence). When the first check heard
+the name, a background task (`_second_look`) listens again once he has reacted, with more audio around the fire
+(`_SECOND_LOOK_WINDOWS`): 2.5 s before and 0.4 s after, then 4 s before and 0.8 s after (the wake window now
+keeps `_WAKE_LEAD_S` = 4 s; the audio after the fire is the request clip's start). The fast and then the
+accurate model look in each window and it stops at the first that hears the name (asleep, the name must lead,
+as before). `_run_activation` waits for it after the request clip, before a quick command runs or the
+conversation opens; if no model heard the name, the wake is dropped (`second_look` false and `outcome`
+`rejected` in the wake record, back asleep if he was) and the antennas go back down. The cue is not delayed. A
+name heard only with the rest of it (the 0.4 s re-check above) is not looked at again, and if the looks cannot
+run (Whisper down, or no audio after the fire within `_SECOND_LOOK_WAIT_S`), the wake stands. Replaying
+2026-10-31 to 11-05 (1,063 wakes), it kept 76 of 85 named calls, including all 49 a person confirmed, and let
+27 of 78 nameless wakes through instead of 45. Logs carry `Wake second look heard=… model=…`, never the text.
+Tests: `test_a_wake_whose_name_a_second_look_does_not_hear_again_is_dropped_after_the_cue`,
+`test_a_second_look_that_hears_the_name_in_the_widest_window_keeps_the_wake`,
+`test_the_cue_does_not_wait_for_the_second_look`, `test_a_name_heard_with_the_rest_of_it_needs_no_second_look`.
+
 The same wake audio also leads the request clip, for local transcription only
 (`_transcribe_request_clip(lead_in=...)`). The wake fires a moment after the name, so a request said in
 one breath can lose its first word to the clip: on 2026-10-28 "Richie, lights out" fired after

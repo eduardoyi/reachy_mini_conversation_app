@@ -483,6 +483,16 @@ class HybridRuntime:
     # the check heard half a word. A miss with a voice still going is checked again with this much more audio
     # (replaying 490 rejected wakes, 0.3 s more found the name in 2 more calls).
     _WAKE_NAME_REST_S = 0.4
+    # The check can turn a word or two in its window into the name: on 2026-11-05 it let four nameless fires
+    # through (adult talk, children playing, near silence). Once he has reacted, a second look listens again with
+    # more audio around the fire, first 0.4 s more after it, then 4 s before and 0.8 s after, and drops the wake
+    # before the request goes anywhere if neither model hears the name. Replaying 2026-10-31 to 11-05, it kept 76
+    # of 85 named calls (all 49 a person confirmed) and let 27 of 78 nameless wakes through instead of 45.
+    _SECOND_LOOK_WINDOWS = ((2.5, 0.4), (4.0, 0.8))  # (s before the fire, s after)
+    # The wake window holds the widest of those; the audio after the fire comes from the request clip.
+    _WAKE_LEAD_S = 4.0
+    # The audio after the fire normally arrives at once; without it within this much more, the wake stands.
+    _SECOND_LOOK_WAIT_S = 1.0
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
     # Whisper can mishear a real call ("Reggie.", "Preciso.", "What did she do?" for three "Richie, lights
@@ -625,6 +635,7 @@ class HybridRuntime:
         self._wake_window = bytearray()
         self._wake_window_rate = 0
         self._wake_name_audio: tuple[int, NDArray[np.int16]] | None = None
+        self._wake_lead_audio: tuple[int, NDArray[np.int16]] | None = None  # the wider window, for the second look
         self._wake_score: float | None = None  # the wake model's score for that audio
         self._wake_event: str | None = None  # that fire's id in the wake clip record
         self._name_event: str | None = None  # a room-transcript wake's id in the record
@@ -1418,6 +1429,7 @@ class HybridRuntime:
         handler: ConversationHandler | None = None
         generation = 0
         clip_task: asyncio.Task[str] | None = None
+        second_look: asyncio.Task[bool] | None = None
         listening_notified = False
         # Gemini hears the request itself (the clip's audio) with the local text only as a hint.
         request_in_audio = False
@@ -1471,11 +1483,13 @@ class HybridRuntime:
                     asleep = self._asleep
                     # The audio the wake model fired on: Whisper checks the name in it before Reachy reacts.
                     wake_audio = self._wake_name_audio if reason == "acoustic_wake" else None
+                    wake_lead = self._wake_lead_audio if wake_audio is not None else None
                     wake_score = self._wake_score if wake_audio is not None else None
                     wake_event = self._wake_event if reason == "acoustic_wake" else None
                     woken_by = wake_event or (self._name_event if reason == "wake_word" else None)
                     self._last_wake = (woken_by, self._activated_at or 0.0, generation) if woken_by else None
                     self._wake_name_audio = None
+                    self._wake_lead_audio = None
                     self._wake_score = None
                     self._wake_event = None
                     self._name_event = None
@@ -1512,10 +1526,17 @@ class HybridRuntime:
             trusted_unnamed = False
             if wake_audio is not None:
                 heard = await self._name_in_wake_audio(wake_audio, asleep=asleep)
+                heard_with_rest = False
                 if not heard:
                     longer = self._wake_audio_with_rest_of_name(wake_audio)
                     if longer is not None:
-                        heard = await self._name_in_wake_audio(longer, asleep=asleep)
+                        heard = heard_with_rest = await self._name_in_wake_audio(longer, asleep=asleep)
+                if heard and not heard_with_rest and wake_lead is not None and clip_request:
+                    # Heard with the rest of the name, it has already had the longer audio.
+                    second_look = asyncio.create_task(
+                        self._second_look(wake_lead, asleep=asleep, generation=generation),
+                        name=f"hybrid-second-look-{generation}",
+                    )
                 trusted_unnamed = not heard and self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep)
                 self._note_wake(wake_event, heard=heard, trusted=trusted_unnamed)
                 if not heard and not trusted_unnamed:
@@ -1663,6 +1684,18 @@ class HybridRuntime:
                     self._notify_listening(True)
                     listening_notified = True
                     await self._invoke_acknowledgement(reason)
+            if second_look is not None:
+                # Before a command runs or the conversation opens: the clip usually outlasts the look.
+                look, second_look = second_look, None
+                try:
+                    confirmed = await look
+                except Exception as error:
+                    logger.warning("Wake second look failed: %s", type(error).__name__)
+                    confirmed = True
+                if not confirmed:
+                    logger.info("Second look did not hear the name again; dropping the wake")
+                    self._note_wake(wake_event, second_look=False, outcome="rejected")
+                    return await self._drop_unconfirmed_wake(generation, asleep=asleep)
             if reason == "awaited_answer":
                 # Whatever was said is the answer; silence means none, and never opens the conversation.
                 answer = turn.answer if turn is not None else None
@@ -1832,6 +1865,8 @@ class HybridRuntime:
             self._request_clip_late = None
             if clip_task is not None and not clip_task.done():
                 clip_task.cancel()
+            if second_look is not None and not second_look.done():
+                second_look.cancel()
             with self._lifecycle_lock:
                 conversation_open = self._mode is RuntimeMode.CLOUD_CONVERSATION and self._generation == generation
             if listening_notified and not conversation_open:
@@ -2032,12 +2067,12 @@ class HybridRuntime:
             frames.append(frame)
 
     def _keep_wake_window(self, pcm: bytes, sample_rate: int) -> None:
-        """Keep the last ``_WAKE_NAME_WINDOW_S`` of the audio the wake model hears, in memory only."""
+        """Keep the last ``_WAKE_LEAD_S`` of the audio the wake model hears, in memory only."""
         if sample_rate != self._wake_window_rate:
             self._wake_window.clear()
             self._wake_window_rate = sample_rate
         self._wake_window += pcm
-        excess = len(self._wake_window) - int(sample_rate * self._WAKE_NAME_WINDOW_S) * 2
+        excess = len(self._wake_window) - int(sample_rate * self._WAKE_LEAD_S) * 2
         if excess > 0:
             del self._wake_window[:excess]
 
@@ -2048,6 +2083,14 @@ class HybridRuntime:
         name anywhere counts; asleep, it must lead a sentence. If no check could run at all (Whisper down),
         an awake Reachy wakes as he did before the check and an asleep one stays asleep.
         """
+        heard = await self._hear_name(audio, asleep=asleep, check="name check")
+        if heard is None:
+            logger.info("Wake name check could not run; %s", "staying asleep" if asleep else "waking anyway")
+            return not asleep
+        return heard
+
+    async def _hear_name(self, audio: tuple[int, NDArray[np.int16]], *, asleep: bool, check: str) -> bool | None:
+        """Ask the fast model, then the accurate one, for the name in ``audio``; None when neither could run."""
         transcribers = [
             (label, transcriber)
             for label, transcriber in (("fast", self._name_check_transcriber), ("accurate", self._request_transcriber))
@@ -2060,19 +2103,48 @@ class HybridRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                logger.warning("Wake name check failed model=%s: %s", label, type(error).__name__)
+                logger.warning("Wake %s failed model=%s: %s", check, label, type(error).__name__)
                 failed += 1
                 continue
             if isinstance(text, str) and (
                 _name_leads(text) if asleep else _WAKE_WORD_TRANSCRIPT_PATTERN.search(text) is not None
             ):
-                logger.info("Wake name check heard=True model=%s", label)
+                logger.info("Wake %s heard=True model=%s", check, label)
                 return True
         if transcribers and failed == len(transcribers):
-            logger.info("Wake name check could not run; %s", "staying asleep" if asleep else "waking anyway")
-            return not asleep
-        logger.info("Wake name check heard=False")
+            return None
+        logger.info("Wake %s heard=False", check)
         return False
+
+    async def _second_look(self, lead: tuple[int, NDArray[np.int16]], *, asleep: bool, generation: int) -> bool:
+        """Whether the name is heard again with more audio on both sides of the fire (True when it can't look).
+
+        ``lead`` is the widest window before the fire; what follows it comes from the request clip.
+        """
+        rate, before = lead
+        for before_s, after_s in self._SECOND_LOOK_WINDOWS:
+            after = await self._audio_after_fire(rate, after_s, generation)
+            if after is None:
+                logger.info("Wake second look skipped (no audio after the fire)")
+                return True
+            audio = (rate, np.concatenate([before[-int(rate * before_s) :], after]))
+            heard = await self._hear_name(audio, asleep=asleep, check="second look")
+            if heard is None or heard:
+                return True
+        return False
+
+    async def _audio_after_fire(self, rate: int, seconds: float, generation: int) -> NDArray[np.int16] | None:
+        """Return the request clip's first ``seconds``, waiting for them; None if they do not come."""
+        needed = int(rate * seconds)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds + self._SECOND_LOOK_WAIT_S
+        while True:
+            frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
+            if sum(frame.size for frame in frames) >= needed:
+                return np.concatenate(frames)[:needed]
+            if not self._quick_generation_current(generation) or loop.time() > deadline:
+                return None
+            await asyncio.sleep(0.05)
 
     def _wake_audio_with_rest_of_name(
         self, wake_audio: tuple[int, NDArray[np.int16]]
@@ -2183,6 +2255,8 @@ class HybridRuntime:
             with self._lifecycle_lock:
                 if self._mode is RuntimeMode.LOCAL_COMMAND and self._generation == generation:
                     self._last_wake = None  # he did not wake, so there is nothing to call a false wake
+                    if asleep:
+                        self._asleep = True  # a second look can drop a wake the first check woke him for
                     self._pending_acoustic_ack_generation = None
                     self._clear_wake_followup_waiter()
                     self._clear_postactivation_queue()
@@ -3366,7 +3440,10 @@ class HybridRuntime:
                     self._request_clip_queued = []
                     self._request_clip_queued_epoch = epoch
                     window = np.frombuffer(bytes(self._wake_window), dtype="<i2").copy()
-                    self._wake_name_audio = (self._wake_window_rate, window) if window.size else None
+                    rate = self._wake_window_rate
+                    name_window = window[-int(rate * self._WAKE_NAME_WINDOW_S) :]
+                    self._wake_name_audio = (rate, name_window) if window.size else None
+                    self._wake_lead_audio = (rate, window) if window.size else None
                     self._wake_score = detection.score
             # Activate in its own task: awaiting it here would stall this worker, so frames after the wake
             # (the spoken request) would not reach local STT until activation finished.

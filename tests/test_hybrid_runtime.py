@@ -4363,12 +4363,12 @@ async def test_asleep_the_accurate_model_without_the_name_keeps_him_asleep() -> 
 
 
 def test_the_wake_window_keeps_only_the_last_seconds_at_the_current_rate() -> None:
-    """The in-memory window holds at most 2.5 s, and a new sample rate starts it over."""
+    """The in-memory window holds at most 4 s (the second look's widest), and a new sample rate starts it over."""
     runtime = HybridRuntime(lambda: FakeHandler())
     second = np.ones(16000, dtype="<i2").tobytes()
-    for _ in range(4):
+    for _ in range(6):
         runtime._keep_wake_window(second, 16000)
-    assert len(runtime._wake_window) == int(16000 * runtime._WAKE_NAME_WINDOW_S) * 2
+    assert len(runtime._wake_window) == int(16000 * runtime._WAKE_LEAD_S) * 2
 
     runtime._keep_wake_window(np.ones(100, dtype="<i2").tobytes(), 24000)
     assert (len(runtime._wake_window), runtime._wake_window_rate) == (200, 24000)
@@ -4552,6 +4552,114 @@ async def test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed(af
             assert checked == [16000]
             assert acknowledged == [] and not handler.started.is_set()
             assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    finally:
+        await runtime.close()
+
+
+def _runtime_for_a_second_look(
+    heard_in: Callable[[str, int], bool], *, asleep: bool = False, after_fire: int = 20, first_heard: bool = True
+) -> tuple[HybridRuntime, FakeHandler, list[str], list[bool], list[tuple[str, int]]]:
+    """Return a runtime holding 1 s of wake audio, 4 s of lead and 1 s after the fire (quiet by default).
+
+    The first check hears "Richie." in the wake audio (nothing unless ``first_heard``); any other audio is checked by size and holds the name when
+    ``heard_in(model, samples)``. Each check after the first is recorded as (model, samples).
+    """
+    runtime, handler, acknowledged, listening, _asked = _runtime_with_wake_audio("", "", asleep=asleep)
+    wake_audio = runtime._wake_name_audio
+    looked: list[tuple[str, int]] = []
+
+    def model(label: str) -> Callable[[Any], Awaitable[str]]:
+        async def transcribe(audio: Any) -> str:
+            if audio is wake_audio:
+                return "Richie." if label == "fast" and first_heard else ""
+            looked.append((label, audio[1].size))
+            return "Richie, hello." if heard_in(label, audio[1].size) else "so"
+
+        return transcribe
+
+    runtime._name_check_transcriber = model("fast")
+    runtime._request_transcriber = model("accurate")
+    runtime._wake_lead_audio = (16000, np.full(64_000, 300, dtype=np.int16))
+    runtime._request_clip_queued = [(16000, np.full(16_000, after_fire, dtype=np.int16))]
+    return runtime, handler, acknowledged, listening, looked
+
+
+# 2.5 s before the fire and 0.4 s after; 4 s before and 0.8 s after.
+_NEAR, _WIDE = 40_000 + 6_400, 64_000 + 12_800
+
+
+@pytest.mark.parametrize("asleep", [False, True])
+@pytest.mark.asyncio
+async def test_a_wake_whose_name_a_second_look_does_not_hear_again_is_dropped_after_the_cue(asleep: bool) -> None:
+    """The check turned a word into the name (2026-11-05): he reacts, but nothing is sent and he goes back.
+
+    Both models look in both wider windows first; asleep, he stays asleep.
+    """
+    runtime, handler, acknowledged, listening, looked = _runtime_for_a_second_look(lambda _m, _n: False, asleep=asleep)
+    try:
+        assert not await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert looked == [("fast", _NEAR), ("accurate", _NEAR), ("fast", _WIDE), ("accurate", _WIDE)]
+        assert acknowledged == ["acoustic_wake"]
+        await wait_until(lambda: listening == [True, False])
+        assert not handler.started.is_set()
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert runtime._asleep is asleep
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_second_look_that_hears_the_name_in_the_widest_window_keeps_the_wake() -> None:
+    """Any model in any window is enough; it stops looking at the first one that hears the name."""
+    runtime, handler, acknowledged, _listening, looked = _runtime_for_a_second_look(
+        lambda model, size: model == "fast" and size == _WIDE
+    )
+    try:
+        assert await asyncio.wait_for(runtime.activate("acoustic_wake"), timeout=3.0)
+        assert looked == [("fast", _NEAR), ("accurate", _NEAR), ("fast", _WIDE)]
+        assert acknowledged == ["acoustic_wake"]
+        await asyncio.wait_for(handler.started.wait(), timeout=3.0)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_the_cue_does_not_wait_for_the_second_look() -> None:
+    """The antennas move once the first check hears the name; the second look runs while he listens."""
+    release = asyncio.Event()
+    runtime, handler, acknowledged, _listening, _looked = _runtime_for_a_second_look(lambda _m, _n: True)
+    fast = runtime._name_check_transcriber
+    assert fast is not None
+
+    async def slow_fast(audio: Any) -> str:
+        if audio is not runtime_wake_audio:
+            await release.wait()
+        return await fast(audio)
+
+    runtime_wake_audio = runtime._wake_name_audio
+    runtime._name_check_transcriber = slow_fast
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: acknowledged == ["acoustic_wake"], attempts=1_000)
+        assert not handler.started.is_set()
+        release.set()
+        assert await asyncio.wait_for(activation, timeout=3.0)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_heard_with_the_rest_of_it_needs_no_second_look() -> None:
+    """The re-check with 0.4 s more already listened past the fire; the wake goes on without looking again."""
+    runtime, _handler, acknowledged, _listening, looked = _runtime_for_a_second_look(
+        lambda _m, size: size == 16_000 + 6_400, after_fire=3_000, first_heard=False
+    )
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        await wait_until(lambda: bool(acknowledged), attempts=1_000)
+        await asyncio.sleep(0.2)
+        assert looked == [("fast", 16_000 + 6_400)]
+        activation.cancel()
     finally:
         await runtime.close()
 
