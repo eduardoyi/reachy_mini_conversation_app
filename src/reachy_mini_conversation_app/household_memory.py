@@ -184,7 +184,22 @@ class ReviewPromote:
     evidence_ids: tuple[str, ...]
 
 
-ReviewOperation = ReviewKeep | ReviewMerge | ReviewPromote
+@dataclass(frozen=True)
+class ReviewDrop:
+    """Delete an automatically captured entry that is not worth remembering."""
+
+    memory_id: str
+    evidence_ids: tuple[str, ...]
+
+
+ReviewOperation = ReviewKeep | ReviewMerge | ReviewPromote | ReviewDrop
+
+CAPTURE_SOURCE_PREFIX = "capture_"
+
+
+def is_auto_captured(entry: MemoryEntry) -> bool:
+    """Whether background capture wrote ``entry`` (not a person, the remember tool, or the admin app)."""
+    return entry.source_ref is not None and entry.source_ref.startswith(CAPTURE_SOURCE_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -392,6 +407,12 @@ def _review_operation_payload(operation: ReviewOperation) -> dict[str, object]:
             "operation": "promote",
             "memory_id": operation.memory_id,
             "target_kind": operation.target_kind,
+            "evidence_ids": operation.evidence_ids,
+        }
+    if isinstance(operation, ReviewDrop):
+        return {
+            "operation": "drop",
+            "memory_id": operation.memory_id,
             "evidence_ids": operation.evidence_ids,
         }
     raise MemoryValidationError("review operation has an invalid type")
@@ -1243,6 +1264,16 @@ class HouseholdMemoryStore:
                 changed = True
             return self._review_replace(entries, replacements), expected_ids, changed
 
+        if isinstance(operation, ReviewDrop):
+            entry = self._review_entry(entries, operation.memory_id)
+            if entry.status != "current":
+                raise MemoryValidationError("review drop requires a current memory")
+            if not is_auto_captured(entry):
+                raise MemoryValidationError("review drop is allowed only for automatically captured memory")
+            if set(operation.evidence_ids) != {entry.id}:
+                raise MemoryValidationError("review drop evidence must select only the dropped memory")
+            return tuple(candidate for candidate in entries if candidate.id != entry.id), {entry.id}, True
+
         if not isinstance(operation, ReviewPromote):
             raise MemoryValidationError("review operation has an invalid type")
         _validate_enum(operation.target_kind, frozenset({"fact", "situation"}), "target_kind")
@@ -1336,7 +1367,10 @@ class HouseholdMemoryStore:
         operation_batch = tuple(operations)
         if len(operation_batch) > MAX_REVIEW_OPERATIONS:
             raise MemoryValidationError(f"a review may contain at most {MAX_REVIEW_OPERATIONS} operations")
-        if any(not isinstance(operation, (ReviewKeep, ReviewMerge, ReviewPromote)) for operation in operation_batch):
+        if any(
+            not isinstance(operation, (ReviewKeep, ReviewMerge, ReviewPromote, ReviewDrop))
+            for operation in operation_batch
+        ):
             raise MemoryValidationError("review operations have an invalid type")
         normalized_checkpoint = _normalise_review_checkpoint(checkpoint)
         batch_digest = _review_batch_digest(operation_batch)

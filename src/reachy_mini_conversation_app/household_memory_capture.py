@@ -52,7 +52,14 @@ BUDGET_FILENAME: Final[str] = "memory.capture-budget.v1.json"
 _CANCEL_WAIT_TIMEOUT_S: Final[float] = 1.0
 _UNKNOWN_SUBJECTS: Final[frozenset[str]] = frozenset({"", "none", "null", "unknown", "unknown_subject", "n/a"})
 _EXTRACTION_INSTRUCTIONS: Final[str] = (
-    "Extract at most six ordinary household memories from the supplied active-conversation fragments. "
+    "Extract at most six household memories from the supplied active-conversation fragments, and only ones the "
+    "family would want recalled a week or more from now: lasting preferences, traits, relationships, routines, "
+    "health needs, birthdays, dated appointments, trips and other dated plans, and standing house rules. Most "
+    "conversations contain none, so an empty proposals list is the usual answer. Skip what someone is doing, "
+    "wearing, eating or feeling right now, where someone is, small mishaps, passing remarks and opinions about "
+    "objects in view, requests to the assistant (songs, drawings, games, volume, photos to send), game moves and "
+    "answers, undated wishes to play or do something, and names that look misheard or that you do not recognize "
+    "from the supplied memory. "
     'Return only JSON in the form {"proposals":[...]}. A new proposal must contain text, subject_id, kind, '
     "certainty, and evidence; a correction may omit unchanged fields. Evidence must contain one or more exact "
     "quotes and fragment IDs from user fragments. "

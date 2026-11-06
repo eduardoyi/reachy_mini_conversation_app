@@ -14,6 +14,7 @@ from openai.types.responses.response_output_message import ResponseOutputMessage
 import reachy_mini_conversation_app.household_memory_review as review_module
 from reachy_mini_conversation_app.household_memory import (
     MemoryKind,
+    ReviewDrop,
     ReviewKeep,
     MemoryEntry,
     ReviewMerge,
@@ -134,6 +135,8 @@ class _FakeStore:
                 touched.update(operation.evidence_ids)
                 index = next(index for index, entry in enumerate(updated) if entry.id == operation.memory_id)
                 updated[index] = replace(updated[index], kind=operation.target_kind)
+            elif isinstance(operation, ReviewDrop):
+                updated = [entry for entry in updated if entry.id != operation.memory_id]
             else:
                 raise AssertionError(f"unexpected operation {operation!r}")
         self.entries = tuple(updated)
@@ -159,6 +162,7 @@ def _entry(
     kind: MemoryKind = "note",
     certainty: MemoryCertainty = "stated",
     status: MemoryStatus = "current",
+    source_ref: str | None = None,
 ) -> MemoryEntry:
     return MemoryEntry(
         id=entry_id,
@@ -168,7 +172,7 @@ def _entry(
         source_person_id=None,
         kind=kind,
         certainty=certainty,
-        source_ref=None,
+        source_ref=source_ref,
         learned_at=learned_at,
         updated_at=learned_at,
         event_start=None,
@@ -704,4 +708,39 @@ async def test_merge_then_promote_of_the_kept_note_is_one_review(tmp_path: Path,
     else:
         assert [type(operation).__name__ for operation in store.apply_calls[0]] == ["ReviewMerge", "ReviewPromote"]
     assert result.status == "applied"
+    await review.close()
+
+
+@pytest.mark.asyncio
+async def test_drop_applies_only_to_auto_captured_entries(tmp_path: Path) -> None:
+    """Daily review can delete captured trivia but never what a person or the admin app saved."""
+    now = datetime(2026, 9, 13, 12, tzinfo=timezone.utc)
+    captured = _entry("m1", learned_at=now, text="Clara is eating toast", source_ref="capture_abc_0")
+    seeded = _entry("m2", learned_at=now, text="Clara is allergic to nuts", kind="fact")
+    store = _FakeStore(tmp_path, (captured, seeded))
+    requests: list[dict[str, object]] = []
+
+    def output(request: dict[str, object]) -> str:
+        requests.append(request)
+        return json.dumps(
+            {
+                "proposals": [
+                    {"action": "drop", "memory_id": "m1", "evidence_ids": ["m1"]},
+                    {"action": "drop", "memory_id": "m2", "evidence_ids": ["m2"]},
+                ]
+            }
+        )
+
+    review = _review(store, _FakeClient(output), _MutableClock(now))
+    review.activate()
+
+    result = await review.run_once()
+
+    assert result.status == "applied"
+    assert store.apply_calls[0] == (ReviewDrop("m1", ("m1",)),)
+    assert [entry.id for entry in store.entries] == ["m2"]
+    assert review.stats.proposals_rejected == 1
+    payload = json.loads(str(requests[0]["input"]))
+    flags = {entry["id"]: entry["auto_captured"] for entry in payload["changed_entries"]}
+    assert flags == {"m1": True, "m2": False}
     await review.close()

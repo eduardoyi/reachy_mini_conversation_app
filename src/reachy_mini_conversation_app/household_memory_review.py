@@ -19,6 +19,7 @@ from openai.types.shared_params.reasoning import Reasoning
 
 from reachy_mini_conversation_app.usage_costs import record_openai_usage
 from reachy_mini_conversation_app.household_memory import (
+    ReviewDrop,
     ReviewKeep,
     MemoryEntry,
     ReviewMerge,
@@ -29,6 +30,7 @@ from reachy_mini_conversation_app.household_memory import (
     ReviewCheckpoint,
     ReviewApplyResult,
     MemoryConflictError,
+    is_auto_captured,
 )
 from reachy_mini_conversation_app.household_memory_receipts import MutationWriterContext, mutation_writer
 
@@ -50,15 +52,21 @@ _MODEL_INSTRUCTIONS: Final[str] = (
     'Return only JSON with at most six proposals: {"proposals":[...]}. The exact allowed shapes are '
     '{"action":"keep","memory_id":"id","evidence_ids":["id"]}; '
     '{"action":"merge","keep_id":"id","merge_ids":["duplicate-id"],'
-    '"evidence_ids":["id","duplicate-id"]}; or '
+    '"evidence_ids":["id","duplicate-id"]}; '
     '{"action":"promote","memory_id":"id","target_kind":"fact"|"situation",'
-    '"evidence_ids":["id"]}. Use only IDs present in the supplied records. Keep has no mutation. Merge '
+    '"evidence_ids":["id"]}; or {"action":"drop","memory_id":"id","evidence_ids":["id"]}. '
+    "Use only IDs present in the supplied records. Keep has no mutation. Merge "
     "retains the keep_id and supersedes merge_ids without rewriting either text. Merge only records with the same "
     "subject, kind, certainty, event dates, and compatible retention; the kept record must have equal or longer "
     "active and deletion deadlines. Promote may change an existing note to kind fact or situation only when its "
     "certainty stays exactly unchanged and the supplied text already supports that durable fact. Never create a "
     "memory, invent evidence, rewrite text, change ownership, change dates, resolve a current entry, reopen a "
-    "resolved or superseded entry, delete a memory, or upgrade certainty. "
+    "resolved or superseded entry, or upgrade certainty. Drop deletes one record and is allowed only when "
+    "auto_captured is true; use it for records nobody would want recalled a week later: what someone was doing, "
+    "wearing, eating or feeling at the moment, where someone was, small mishaps, passing remarks or opinions about "
+    "objects, requests to the assistant (songs, drawings, games, volume, photos to send), game moves, undated "
+    "wishes to play or do something, and records whose names look misheard. Never drop lasting preferences, "
+    "relationships, birthdays, health needs, house rules, or dated appointments and plans. "
     "This is the household's daily tidy-up, so do the maintenance that is grounded rather than leaving it: "
     "merge records that say the same thing about the same subject even when worded differently, keeping the clearest "
     "and most complete one; promote notes that describe lasting traits, preferences, relationships, routines, "
@@ -205,6 +213,7 @@ def _entry_payload(entry: MemoryEntry) -> dict[str, object]:
         "event_end": entry.event_end,
         "active_until": entry.active_until.isoformat() if entry.active_until is not None else None,
         "delete_after": entry.delete_after.isoformat() if entry.delete_after is not None else None,
+        "auto_captured": is_auto_captured(entry),
     }
 
 
@@ -676,6 +685,23 @@ class HouseholdMemoryReview:
                 assert evidence_ids is not None
                 operation = ReviewPromote(memory_id, target_kind, evidence_ids)
                 operation_ids = frozenset(evidence_ids)
+            elif action == "drop":
+                allowed = {"action", "memory_id", "evidence_ids"}
+                memory_id = proposal.get("memory_id")
+                evidence_ids = _string_list(proposal.get("evidence_ids"))
+                entry = by_id.get(memory_id) if isinstance(memory_id, str) else None
+                if (
+                    set(proposal) != allowed
+                    or entry is None
+                    or entry.status != "current"
+                    or not is_auto_captured(entry)
+                    or evidence_ids != (memory_id,)
+                ):
+                    rejected += 1
+                    continue
+                assert isinstance(memory_id, str)
+                operation = ReviewDrop(memory_id, (memory_id,))
+                operation_ids = frozenset((memory_id,))
             else:
                 rejected += 1
                 continue

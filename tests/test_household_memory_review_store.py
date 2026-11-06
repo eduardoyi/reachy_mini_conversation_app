@@ -9,6 +9,7 @@ import pytest
 
 from reachy_mini_conversation_app.household_memory import (
     MemoryKind,
+    ReviewDrop,
     ReviewKeep,
     MemoryEntry,
     ReviewMerge,
@@ -470,3 +471,29 @@ def test_invalid_merge_is_atomic(tmp_path: Path, other_subject: bool, resolved: 
             checkpoint=_checkpoint(store, "2026-09-13", before.entries),
         )
     assert store.path.read_bytes() == original
+
+
+def test_review_drop_deletes_only_auto_captured_entries(tmp_path: Path) -> None:
+    """Drop removes a captured entry outright and refuses anything a person saved."""
+    clock = FakeClock(datetime(2026, 9, 13, 10, tzinfo=UTC))
+    store = HouseholdMemoryStore(tmp_path, clock=clock)
+    captured = store.remember("Clara is eating toast", subject_id="clara", kind="situation", source_ref="capture_x_0")
+    told = store.remember("Clara is allergic to nuts", subject_id="clara", kind="fact")
+    before = store.snapshot()
+
+    with pytest.raises(MemoryValidationError):
+        store.apply_review(
+            [ReviewDrop(told.id, (told.id,))],
+            expected_revision=before.revision,
+            checkpoint=_checkpoint(store, "2026-09-13", before.entries),
+        )
+    assert store.snapshot() == before
+
+    result = store.apply_review(
+        [ReviewDrop(captured.id, (captured.id,))],
+        expected_revision=before.revision,
+        checkpoint=_checkpoint(store, "2026-09-13", before.entries),
+    )
+
+    assert [entry.id for entry in store.snapshot().entries] == [told.id]
+    assert set(result.checkpoint.watermark) == {told.id}
