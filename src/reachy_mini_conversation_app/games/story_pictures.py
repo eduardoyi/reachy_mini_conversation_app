@@ -68,7 +68,10 @@ def scene_prompt(scene: str, cast: Sequence[str], looks: Mapping[str, str], styl
         keep = (
             f"{references} Draw these characters exactly as on their sheets: the same face, proportions, ears, "
             "outfit and accessories. Do not redesign the characters, do not add or swap clothes, and do not add "
-            "other characters. Use the same drawing style as the sheets."
+            "other characters. Use the same drawing style as the sheets. Keep every body exactly as on its sheet: "
+            "the same number of arms, legs, paws, wings and hands, never an extra limb, paw or hand. Animals drawn "
+            "on four legs stay on four legs and hold nothing in hands they do not have; a bird holds things in the "
+            "tips of its wings."
         )
     else:
         keep = "There are no characters in this picture."

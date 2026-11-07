@@ -287,3 +287,8 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   apart from animal-noise spellings; the Italian donkey's "Hi-ho" came out English, so it is "Ih-oh". 14 new anime
   sheets (one was blocked once by OpenAI's output filter and drew fine on retry) and 41 screens. Admin card art is
   each cover recoloured. Not checked yet: a play on the robot, and whether the mic hears brays and meows as noise.
+- 2026-11-07: Eduardo spotted extra limbs (the donkey drumming with arms on top of four legs, the rooster with
+  hands, a cat with an extra paw). Every scene prompt now says to keep each body exactly as on its sheet, with no
+  extra limb, paw or hand; the donkey, dog, cat and rooster looks say how many legs and wings they have; and the
+  Bremen scenes no longer ask the donkey to drum. All 40 scenes of the three new stories were redrawn and checked
+  one by one, and the Bremen card was redone. The pigs' scenes were not redrawn.

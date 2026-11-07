@@ -25,7 +25,7 @@ rules: >-
   for long: if nobody joins in, it carries on.
 cover:
   id: cover
-  picture: the donkey, the dog, the cat and the rooster marching happily together along a country road, the donkey playing his drum, the rooster riding on the donkey's back
+  picture: the donkey, the dog, the cat and the rooster walking happily together along a country road, each on its own legs, the rooster riding on the donkey's back
   with: [donkey, dog, cat, rooster]
 
 steps:
@@ -335,8 +335,8 @@ steps:
       about: instrument
       with: [donkey, dog, cat, rooster]
       options:
-        trumpet: the four animals playing music happily in front of their little cottage in the sunshine, the donkey drumming, the rooster blowing a little trumpet, the dog and the cat singing
-        maracas: the four animals playing music happily in front of their little cottage in the sunshine, the donkey drumming, the rooster shaking maracas, the dog and the cat singing
+        trumpet: the four animals playing music happily in front of their little cottage in the sunshine, the donkey standing on his four hooves with his drum at his side, the rooster blowing a little trumpet held in his wing tips, the dog and the cat singing
+        maracas: the four animals playing music happily in front of their little cottage in the sunshine, the donkey standing on his four hooves with his drum at his side, the rooster shaking maracas held in his wing tips, the dog and the cat singing
   - say: narrator
     es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
     it: "[warm, playful] E vissero tutti felici e contenti. Fine!"

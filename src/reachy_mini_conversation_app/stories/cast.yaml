@@ -95,7 +95,7 @@ dog:
   voice: "md3DYVVA3AQ29K3RXagc"
   look: >-
     a friendly scruffy medium-sized dog with one ear standing up and one floppy ear, a dark patch around one eye,
-    shaggy light fur, a collar with a round tag and a wagging tail
+    shaggy light fur, a collar with a round tag and a wagging tail; a real dog's body on exactly four legs, no hands
 
 cat:
   description: >-
@@ -104,7 +104,7 @@ cat:
   voice: "Xg2awBCZFaLbcri3rvNP"
   look: >-
     a plump, fluffy, lazy tabby cat with dark stripes, half-closed proud eyes, a white chest and four white paws,
-    a huge fluffy tail and a little bell on its collar
+    a huge fluffy tail and a little bell on its collar; a real cat's body on exactly four legs, no hands
 
 mouse:
   description: >-
@@ -155,14 +155,16 @@ donkey:
   voice: "ELKUz2Dml0Jmy3lgo9pY"
   look: >-
     a lanky old grey donkey with very long ears, a shaggy dark mane and fringe, a big goofy toothy smile and a
-    round drum hanging from a strap across his body
+    round drum hanging from a strap at his side; a real donkey's body standing on exactly four legs with hooves,
+    no arms and no hands
 
 rooster:
   description: >-
     Reuses "Detectives · Who Ate the Cookies? · Pepe the parrot": a high-pitched, squawky, fast and silly voice.
   voice: "jm73dj1U3A9MZpX2WFpP"
   look: >-
-    a proud skinny rooster with a big floppy comb, long curly tail feathers, a puffed-out chest and a tiny bow tie
+    a proud skinny rooster with a big floppy comb, long curly tail feathers, a puffed-out chest and a tiny bow tie;
+    a real bird's body with two wings and two legs, no arms and no hands
 
 robber_boss:
   description: >-
