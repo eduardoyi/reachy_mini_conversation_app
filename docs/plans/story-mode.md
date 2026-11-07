@@ -1,6 +1,6 @@
 # Plan: Story mode (Richie tells classic stories the kids join in)
 
-- Status: `in-progress` (built, tested and recorded on the laptop 2026-11-07; not deployed or played yet)
+- Status: `in-progress` (deployed to the Mac mini 2026-11-07; not played with the kids yet)
 - Owner: Eduardo
 - Created: 2026-11-07
 - Last updated: 2026-11-07
@@ -270,3 +270,8 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   "anime"`. Its sheets are now `stories/cast/`, its scenes `pictures/` and `screens/`; the picture-book set moved to
   `stories/cast-book/`, `pictures-book/`, `screens-book/` and `contact-book.png`. A build with the default style
   redraws nothing.
+- 2026-11-07: deployed (`4bdd8be`). The full suite passed (3,223), and ruff and mypy were clean. The 156 MB of
+  game-data/stories was copied to the mini (172 clips, 19 screens, 20 sounds), the code pulled, and the app
+  restarted (SIGINT, then `launchctl kickstart`). The log lists `tres_cerditos` under "Games enabled", and the
+  control API's `/status` shows it as a story in es and it. Not checked yet: a play on the robot (the mic catching
+  blows, pats, choices), and how the dithered pictures look on the TRMNL.
