@@ -384,6 +384,9 @@ const GAME_CARDS = {
   simon: { name: "Simon Says", shelf: "little", facts: ["Camera"] },
   gallina: { name: "Crazy Hen", shelf: "little", facts: ["Any number of kids", "No camera"] },
   tres_cerditos: { name: "Three Little Pigs", shelf: "stories", facts: ["About 6 minutes", "Kids knock, blow and pick"] },
+  nabo_gigante: { name: "The Enormous Turnip", shelf: "stories", facts: ["About 5 minutes", "Kids pull, call and make animal noises"] },
+  ricitos_de_oro: { name: "Goldilocks", shelf: "stories", facts: ["About 6 minutes", "Kids blow, snore and wake her up"] },
+  musicos_de_bremen: { name: "The Town Musicians", shelf: "stories", facts: ["About 6 minutes", "Kids bray, bark, meow and crow"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],

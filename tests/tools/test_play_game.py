@@ -71,6 +71,9 @@ async def test_unknown_games_and_no_host() -> None:
         "sheeple",
         "ballpark",
         "detectives",
+        "musicos_de_bremen",
+        "nabo_gigante",
+        "ricitos_de_oro",
         "tres_cerditos",
     ]
     missing = await tool(_deps(None), game="colors", action="rules")

@@ -178,18 +178,23 @@ async def _answer_clips(reachy: FakeReachy, answers: dict[str, str]) -> None:
 # Story files ---------------------------------------------------------------------------------------
 
 
-def test_the_shipped_stories_read() -> None:
-    """Los tres cerditos reads, with every line in both languages and every sound known."""
+SHIPPED = ("tres_cerditos", "nabo_gigante", "ricitos_de_oro", "musicos_de_bremen")
+
+
+@pytest.mark.parametrize("key", SHIPPED)
+def test_the_shipped_stories_read(key: str) -> None:
+    """Each shipped story reads, with every line in both languages, every sound known and every kind of moment."""
     stories = load_stories()
-    assert "tres_cerditos" in stories
-    story = stories["tres_cerditos"]
+    assert key in stories
+    story = stories[key]
     lines = list(story.lines())
     assert len(lines) > 50
     assert all(line.tagged("es") and line.tagged("it") for line in lines)
     kinds = {step.kind for step in story.steps}
-    assert {"noise", "chorus", "pat", "copy", "choice"} <= kinds
+    assert len({"noise", "chorus", "pat", "copy", "choice"} & kinds) >= 4
+    assert story.cover is not None and len(list(story.pictures())) >= 10
     assert set(load_common().lines) >= {"again", "goodbye"}
-    assert "tres_cerditos" in STORIES
+    assert key in STORIES
 
 
 def test_a_story_file_says_what_is_wrong(tmp_path: Path) -> None:
@@ -238,6 +243,13 @@ def test_a_clip_is_named_by_its_voice_language_and_text() -> None:
         ("raccontami una storia", None, "it", True),
         ("i tre porcellini", "tres_cerditos", "it", False),
         ("los tres cerditos", "tres_cerditos", "es", False),
+        ("cuéntanos el nabo gigante", "nabo_gigante", "es", False),
+        ("raccontaci la rapa gigante", "nabo_gigante", "it", False),
+        ("cuéntanos ricitos de oro", "ricitos_de_oro", "es", False),
+        ("cuéntanos el cuento de los tres osos", "ricitos_de_oro", "es", False),
+        ("raccontaci riccioli d'oro", "ricitos_de_oro", "it", False),
+        ("cuéntanos los músicos de Bremen", "musicos_de_bremen", "es", False),
+        ("raccontaci i musicanti di Brema", "musicos_de_bremen", "it", False),
     ],
 )
 def test_asking_for_a_story(said: str, key: str | None, language: str, which: bool) -> None:

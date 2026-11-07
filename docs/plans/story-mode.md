@@ -183,9 +183,10 @@ before anything is recorded.
 
 The softened ending (cold water, the wolf runs away) is on purpose for the 2-year-old.
 
-## Next stories (after the prototype is approved)
+## Next stories
 
-Ricitos de Oro, Los tres chivitos, El hombrecito de jengibre, La gallinita roja, La liebre y la tortuga, El león
+Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen. Ideas for later:
+Pinocchio in short episodes (Collodi's book, drawn from his descriptions), Los tres chivitos, El hombrecito de jengibre, La gallinita roja, La liebre y la tortuga, El león
 y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
 
 ## Implementation order
@@ -275,3 +276,14 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   restarted (SIGINT, then `launchctl kickstart`). The log lists `tres_cerditos` under "Games enabled", and the
   control API's `/status` shows it as a story in es and it. Not checked yet: a play on the robot (the mic catching
   blows, pats, choices), and how the dithered pictures look on the TRMNL.
+
+- 2026-11-07: three more stories, built straight to final at Eduardo's request (no voice or sheet review):
+  `nabo_gigante` (El nabo gigante / La rapa gigante, about 5 min, 12 moments), `ricitos_de_oro` (Ricitos de Oro /
+  Riccioli d'oro, kind ending where she says sorry, 13 moments) and `musicos_de_bremen` (Los músicos de Bremen / I
+  musicanti di Brema, silly robbers, 12 moments, mostly animal noises). ElevenLabs' 30 voice slots were full, so
+  the 14 new roles in cast.yaml reuse voices already on the account (the kids' Detectives cast and two pig voices);
+  each role's `description` names whose voice it is, and Lola and Goldilocks share one. 437 clips (about 27k
+  credits) and 19 new sounds and music beds (`story_march`, `story_tiptoe`). Whisper heard every clip as written
+  apart from animal-noise spellings; the Italian donkey's "Hi-ho" came out English, so it is "Ih-oh". 14 new anime
+  sheets (one was blocked once by OpenAI's output filter and drew fine on retry) and 41 screens. Admin card art is
+  each cover recoloured. Not checked yet: a play on the robot, and whether the mic hears brays and meows as noise.

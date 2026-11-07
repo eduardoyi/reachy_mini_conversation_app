@@ -71,6 +71,69 @@ sound:
     seconds: 1.5
     prompt: A short bright magical sparkle, twinkling chimes going up, for a children's game when something good happens.
 
+  # The second batch of stories (2026-11-07).
+  rain:
+    seconds: 3
+    prompt: Gentle light rain pattering on garden leaves and soil, soft and calm, for a children's story.
+  growing:
+    seconds: 2.5
+    prompt: >-
+      A magical cartoon growing sound: a rising slide whistle with soft twinkling chimes and a little stretchy
+      creak, something growing bigger and bigger, playful.
+  pull_strain:
+    seconds: 2
+    prompt: >-
+      A comic cartoon strain of something stuck being pulled hard: a rubbery creaky stretch that wobbles and does
+      not give, for a children's story.
+  pop_out:
+    seconds: 2.5
+    prompt: >-
+      A huge comic pop like a giant cork coming out, followed by a soft bouncy tumble of everyone falling over onto
+      the grass, cartoon thuds and boings.
+  dog_bark:
+    seconds: 1.5
+    prompt: Two friendly happy cartoon dog barks, woof woof, playful and warm, not loud.
+  cat_meow:
+    seconds: 1.5
+    prompt: A long, lazy, drawling cartoon cat meow, sleepy and a bit proud, cute.
+  mouse_squeak:
+    seconds: 1.5
+    prompt: A few tiny cute cartoon mouse squeaks, quick and high, eee eee, soft.
+  forest_birds:
+    seconds: 3
+    prompt: Cheerful little birds chirping in a sunny forest in the morning, gentle and calm.
+  porridge_slurp:
+    seconds: 2
+    prompt: A happy cartoon slurp of porridge and a few spoon clinks on a wooden bowl, comic and cute.
+  chair_break:
+    seconds: 2
+    prompt: >-
+      A little wooden chair cracking and collapsing in a cartoon, a creak then a light comic crash and one piece
+      falling with a boing, not loud.
+  snore:
+    seconds: 3
+    prompt: Soft cute cartoon snoring of a child sleeping, a gentle snore and a little whistle, two times.
+  bear_steps:
+    seconds: 2.5
+    prompt: Heavy friendly cartoon footsteps approaching on a wooden floor, thump, thump, thump, comic, not scary.
+  boing:
+    seconds: 1.5
+    prompt: A cartoon spring boing of someone jumping up in surprise, with a little slide whistle up.
+  hee_haw:
+    seconds: 2
+    prompt: A cartoon donkey braying hee-haw, comic and friendly, for a children's story.
+  rooster_crow:
+    seconds: 2
+    prompt: A cartoon rooster crowing cock-a-doodle-doo, proud and silly, a little off-key.
+  drum_beat:
+    seconds: 1.5
+    prompt: Two big friendly bass drum booms, boom, boom, like a small marching drum, warm.
+  animal_concert:
+    seconds: 4
+    prompt: >-
+      A comic animal concert all at once: a donkey braying, a dog barking, a cat yowling and a rooster crowing
+      together, loud silly cacophony with a drum boom, ending with a wooden cartoon crash and a boing.
+
 music:
   story_move:
     seconds: 15
@@ -87,3 +150,13 @@ music:
     prompt: >-
       Happy party dance music for preschool children, about 125 bpm: ukulele, bouncy bass, hand claps, toy piano
       and glockenspiel; joyful celebration, simple and catchy, no vocals.
+  story_march:
+    seconds: 15
+    prompt: >-
+      A cheerful little marching band for preschool children, about 110 bpm: a bass drum, a snare, a tuba and a
+      kazoo-like melody, silly and proud, simple, no vocals.
+  story_tiptoe:
+    seconds: 15
+    prompt: >-
+      Sneaky tiptoe music for a children's cartoon, about 90 bpm: soft pizzicato strings, a bassoon and light
+      woodblock taps, curious and comic, never scary, no vocals.

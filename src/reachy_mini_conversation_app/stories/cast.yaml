@@ -56,3 +56,126 @@ mama_pig:
   voice: "Xg76FEi4dbIiAKTuqhdB"
   look: >-
     a plump, kind mother pig with a flowered apron and a little bun of hair tied with a ribbon
+
+# The second batch of stories (2026-11-07). The account's 30 voice slots were full, so these roles reuse voices
+# already on it (the kids' Detectives cast and the pigs) instead of new designs; `description` says whose voice it is.
+# Two roles may share a voice when they are never in the same story.
+
+grandpa:
+  description: >-
+    Reuses "Detectives · The Last Toast · Doctor Julián Ferrer": a calm, kind man in his sixties, a deep, warm,
+    slow voice. A cheerful old grandfather who loves his vegetable garden.
+  voice: "EarNa3mBc7Rrt6ArOQi1"
+  look: >-
+    a small, round old grandfather with a big bushy white mustache, a flat cap, a checked shirt with rolled-up
+    sleeves, braces holding up baggy trousers and big rubber boots
+
+grandma:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Grandma": a sweet grandmother, warm, funny and a bit cheeky,
+    giggles easily, a soft, affectionate, slightly high voice.
+  voice: "FTUoMlBeU7pi34pUd8vh"
+  look: >-
+    a tiny, round old grandmother with white hair in a bun held by a pencil, round glasses, a knitted shawl over
+    her shoulders and a long skirt with an apron with big pockets
+
+girl:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Lucía Herrera": bright, eager and friendly, a clear, quick voice.
+    Lola, the grandparents' little granddaughter.
+  voice: "0QLnKAGnepQitThaQFxG"
+  look: >-
+    Lola, a little girl about six years old with two short bunches of dark hair tied with ribbons, a striped
+    t-shirt, dungaree shorts, sneakers and a big gap-toothed smile
+
+dog:
+  description: >-
+    Reuses "Detectives · The Last Toast · Tomás Rivas": warm, chatty, quick to laugh, a slightly husky voice.
+    A friendly, eager dog who loves to help and to play.
+  voice: "md3DYVVA3AQ29K3RXagc"
+  look: >-
+    a friendly scruffy medium-sized dog with one ear standing up and one floppy ear, a dark patch around one eye,
+    shaggy light fur, a collar with a round tag and a wagging tail
+
+cat:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Misifú the cat": a lazy, proud, sleepy cartoon cat, a drawling,
+    purring, slightly nasal voice that yawns and stretches its words.
+  voice: "Xg2awBCZFaLbcri3rvNP"
+  look: >-
+    a plump, fluffy, lazy tabby cat with dark stripes, half-closed proud eyes, a white chest and four white paws,
+    a huge fluffy tail and a little bell on its collar
+
+mouse:
+  description: >-
+    Reuses the little straw pig's voice (an adult voice actor doing a high, squeaky, giggly cartoon voice).
+    A tiny, brave mouse.
+  voice: "iVT2VOVHkBNE0J6nTdL5"
+  look: >-
+    a tiny round mouse with enormous round ears, big shining eyes, long whiskers, a long thin tail and a little
+    spotted neckerchief
+
+goldilocks:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Lucía Herrera" (also Lola's voice; never in the same story):
+    bright, curious and a little cheeky.
+  voice: "0QLnKAGnepQitThaQFxG"
+  look: >-
+    Goldilocks, a little girl about six years old with a huge mop of bouncy light golden curls, a pinafore dress
+    with big polka dots, white socks and little buckled shoes, a curious face
+
+papa_bear:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Uncle Pancho": big, jolly, loud and booming, a deep, hearty voice.
+  voice: "RmaSlHASRRFcAl1uxzhA"
+  look: >-
+    Papa Bear: a very big, tall, round bear with dark fur, a checked lumberjack shirt and a woolly hat with a
+    pompom, big and gentle
+
+mama_bear:
+  description: >-
+    Reuses "Detectives · The Last Toast · Rosa, the housekeeper": warm, chatty and expressive.
+  voice: "54EN6WFsqQUTL9ULPowR"
+  look: >-
+    Mama Bear: a medium-sized round bear with mid-grey fur, a flowered dress, a big ribbon bow between her ears
+    and a string of round beads
+
+baby_bear:
+  description: >-
+    Reuses the middle pig's voice (an adult voice actor doing a bright, bouncy, fast-talking cartoon voice).
+  voice: "QBjpKqr4CpQoOnbn40dM"
+  look: >-
+    Baby Bear: a small chubby bear cub with light fur and round ears, striped short dungarees with one big button
+    and a little cap worn backwards
+
+donkey:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Samuel, the bartender": relaxed, funny, an easygoing, smiling voice.
+    An old donkey who decides to become a musician.
+  voice: "ELKUz2Dml0Jmy3lgo9pY"
+  look: >-
+    a lanky old grey donkey with very long ears, a shaggy dark mane and fringe, a big goofy toothy smile and a
+    round drum hanging from a strap across his body
+
+rooster:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Pepe the parrot": a high-pitched, squawky, fast and silly voice.
+  voice: "jm73dj1U3A9MZpX2WFpP"
+  look: >-
+    a proud skinny rooster with a big floppy comb, long curly tail feathers, a puffed-out chest and a tiny bow tie
+
+robber_boss:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Marco Bellini": theatrical, grand and showy. A silly, clumsy robber.
+  voice: "hjcB1XpogPinAIk1gMPk"
+  look: >-
+    a tall, skinny, clumsy robber with a huge curly black mustache, a little black eye mask, a striped jumper and a
+    floppy hat; silly, never scary
+
+robber_small:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Ricardo Lamas": whiny, dramatic, a slightly nasal voice.
+  voice: "dW6rKJ2iTVB1rqMnnpWN"
+  look: >-
+    a short, round robber with a little black eye mask, a striped jumper, a bald head with one single curly hair on
+    top and a big empty sack; silly, never scary

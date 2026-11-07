@@ -1,0 +1,375 @@
+# El nabo gigante / La rapa gigante (docs/plans/story-mode.md).
+# Our own retelling of the folk tale for a 2- and a 4-year-old: a grandfather's turnip grows so big that the
+# grandmother, Lola, the dog, the cat and at last a tiny mouse all have to pull together. About 5 minutes, built on
+# repetition, with 12 moments where the children join in (rain, growing, pulling, calling, animal noises).
+# Spanish is Venezuelan (ustedes), Italian is standard.
+
+key: nabo_gigante
+title:
+  es: El nabo gigante
+  it: La rapa gigante
+names:
+  es: [nabo gigante, el nabo gigante, el nabo, nabo, el nabo grande, el cuento del nabo, el abuelo y el nabo,
+       el rabano gigante, el nabo enorme]
+  it: [rapa gigante, la rapa gigante, la rapa, rapa, la grande rapa, la rapa enorme, il nonno e la rapa,
+       la storia della rapa]
+pitch:
+  es: "Un nabo tan grande que hace falta todo el mundo para sacarlo, ¡y ustedes también!"
+  it: "Una rapa così grande che serve l'aiuto di tutti per tirarla fuori, anche il vostro!"
+rules: >-
+  Reachy tells The Enormous Turnip, about 5 minutes, in Spanish or Italian, with character voices, sounds and
+  music. The children join in: they make the rain, grow like the turnip, pull with everyone, call the next helper,
+  bark and meow, wake the mouse by patting his head and pick small things (the mouse's treat, soup or mash). The
+  story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the grandfather, the grandmother, Lola, the dog, the cat and the tiny mouse pulling a gigantic turnip together in a long line, holding on to each other, in a sunny vegetable garden
+  with: [grandpa, grandma, girl, dog, cat, mouse]
+
+steps:
+  # Planting ------------------------------------------------------------------------------------------------
+  - scene:
+      id: planting
+      picture: the old grandfather kneeling in his sunny vegetable garden, planting one tiny seed in a little hole in the soil, smiling, a watering can beside him
+      with: [grandpa]
+      move: welcoming
+  - say: narrator
+    es: "[warm] Había una vez un abuelito que tenía un huerto muy bonito."
+    it: "[warm] C'era una volta un nonnino che aveva un orto bellissimo."
+  - say: narrator
+    es: "[playful] Un día hizo un huequito en la tierra, y sembró una semillita de nabo. Chiquitica, chiquitica."
+    it: "[playful] Un giorno fece una piccola buca nella terra e ci mise un semino di rapa. Piccolo piccolo."
+  - say: grandpa
+    es: "[warmly] Ahora necesitas agüita, semillita. ¡Ojalá llueva!"
+    it: "[warmly] Adesso ti serve un po' d'acqua, semino. Speriamo che piova!"
+  - noise:
+      ask:
+        es: "[excited] ¿Hacemos la lluvia? Froten las manos y digan conmigo: ¡shhhhh!"
+        it: "[excited] Facciamo la pioggia? Strofinate le mani e dite con me: shhhhh!"
+      louder:
+        es: "[playful] ¡Más lluvia! ¡Shhhhhh!"
+        it: "[playful] Più pioggia! Shhhhhh!"
+      done:
+        es: "[delighted] ¡Qué lluvia tan buena! La semillita está feliz."
+        it: "[delighted] Che bella pioggia! Il semino è contento."
+      without:
+        es: "[softly] Y empezó a llover, suavecito. Shhhhh."
+        it: "[softly] E cominciò a piovere, piano piano. Shhhhh."
+      sound: rain
+
+  # Growing -------------------------------------------------------------------------------------------------
+  - say: grandpa
+    es: "[cheerful] ¡Crece, nabito, crece! ¡Grande y dulce!"
+    it: "[cheerful] Cresci, rapetta, cresci! Grande e dolce!"
+  - copy:
+      ask:
+        es: "[playful] ¡Crezcan con el nabo! Agáchense chiquiticos... y ahora crezcan, crezcan, ¡hasta el cielo!"
+        it: "[playful] Crescete con la rapa! Fatevi piccoli piccoli... e adesso crescete, crescete, fino al cielo!"
+      done:
+        es: "[amazed] ¡Uuuy, qué grandes se pusieron!"
+        it: "[amazed] Uuuh, come siete diventati grandi!"
+      move: excited
+      music: story_move
+      seconds: 6
+  - sound: growing
+  - scene:
+      id: huge_turnip
+      picture: a gigantic turnip with huge leaves sticking out of the soil, as tall as the grandfather, who looks up at it amazed with his cap falling off
+      with: [grandpa]
+      move: amazed
+  - say: narrator
+    es: "[amazed] Y el nabo creció, y creció, y creció... ¡hasta que se puso gigante!"
+    it: "[amazed] E la rapa crebbe, crebbe, crebbe... finché diventò gigante!"
+  - say: grandpa
+    es: "[surprised, laughing] ¡Pero qué nabo tan grande! Lo voy a sacar para hacer una comida riquísima."
+    it: "[surprised, laughing] Ma che rapa enorme! La tiro fuori e ci faccio una cena buonissima."
+
+  # Grandpa pulls -------------------------------------------------------------------------------------------
+  - say: narrator
+    es: "[playful] El abuelito agarró el nabo por las hojas... y tiró."
+    it: "[playful] Il nonnino afferrò la rapa per le foglie... e tirò."
+  - copy:
+      ask:
+        es: "[excited] ¡Ayúdenlo a tirar! Agarren fuerte... ¡y tiren, tiren, tiren!"
+        it: "[excited] Aiutatelo a tirare! Tenete forte... e tirate, tirate, tirate!"
+      done:
+        es: "[strained, playful] ¡Uf! ¡Qué fuerza!"
+        it: "[strained, playful] Uff! Che forza!"
+      move: impatient
+      music: story_move
+      seconds: 5
+  - sound: pull_strain
+  - say: narrator
+    es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+    it: "[playful] Tira e tira... [sighs] e non viene!"
+  - say: grandpa
+    es: "[out of breath] Ay, ay, ay... solo no puedo. ¡Voy a llamar a la abuela!"
+    it: "[out of breath] Ahi, ahi, ahi... da solo non ce la faccio. Chiamo la nonna!"
+  - chorus:
+      ask:
+        es: "[excited] ¿Me ayudan a llamarla? ¡Todos juntos, bien fuerte! ¡Abuelaaa!"
+        it: "[excited] Mi aiutate a chiamarla? Tutti insieme, forte forte! Nonnaaa!"
+      done:
+        who: grandma
+        es: "[giggles] ¡Aquí estoy, aquí estoy! ¡Qué buenos gritos!"
+        it: "[giggles] Eccomi, eccomi! Che bei richiami!"
+      without:
+        who: grandma
+        es: "[giggles] ¡Ya voy, ya voy! ¿Qué pasa, viejito?"
+        it: "[giggles] Arrivo, arrivo! Che succede, nonnino?"
+
+  # Grandma joins -------------------------------------------------------------------------------------------
+  - scene:
+      id: grandma_pulls
+      picture: the grandmother holding on to the grandfather's waist while he pulls the leaves of the gigantic turnip, both leaning back with their eyes squeezed shut
+      with: [grandpa, grandma]
+      move: happy
+  - say: narrator
+    es: "[playful] La abuela agarró al abuelo, el abuelo agarró el nabo... y tiraron."
+    it: "[playful] La nonna prese il nonno, il nonno prese la rapa... e tirarono."
+  - chorus:
+      ask:
+        es: "[excited] ¡Digan conmigo! ¡Tiran y tiran!"
+        it: "[excited] Dite con me! Tira e tira!"
+      done:
+        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        it: "[playful] Tira e tira... [sighs] e non viene!"
+      without:
+        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        it: "[playful] Tira e tira... [sighs] e non viene!"
+  - sound: pull_strain
+  - say: grandma
+    es: "[cheeky] ¡Uy, qué nabo tan testarudo! ¡Lola! ¡Lolita! ¡Ven a ayudarnos!"
+    it: "[cheeky] Uh, che rapa testarda! Lola! Lolina! Vieni ad aiutarci!"
+  - say: girl
+    es: "[excited] ¡Ya voy, abuela! ¡Yo soy muy fuerte!"
+    it: "[excited] Arrivo, nonna! Io sono fortissima!"
+
+  # Lola joins ----------------------------------------------------------------------------------------------
+  - scene:
+      id: lola_pulls
+      picture: Lola holding on to the grandmother, who holds on to the grandfather, who pulls the gigantic turnip, all three in a row leaning back
+      with: [grandpa, grandma, girl]
+  - say: narrator
+    es: "[playful] Lola agarró a la abuela, la abuela al abuelo, el abuelo el nabo... y tiraron, y tiraron..."
+    it: "[playful] Lola prese la nonna, la nonna il nonno, il nonno la rapa... e tirarono, tirarono..."
+  - say: narrator
+    es: "[sighs, playful] ¡Y no salió!"
+    it: "[sighs, playful] E non venne!"
+  - say: girl
+    es: "[thinking] Mmm... ¡ya sé! ¡Voy a llamar al perro!"
+    it: "[thinking] Mmm... ho un'idea! Chiamo il cane!"
+  - noise:
+      ask:
+        es: "[excited] ¿Cómo ladra el perro? ¡Llámenlo! ¡Guau, guau!"
+        it: "[excited] Come abbaia il cane? Chiamatelo! Bau, bau!"
+      louder:
+        es: "[playful] ¡Más fuerte, que está lejos! ¡Guau, guau!"
+        it: "[playful] Più forte, che è lontano! Bau, bau!"
+      done:
+        es: "[laughs] ¡Qué buenos ladridos! ¡Ahí viene el perro corriendo!"
+        it: "[laughs] Che begli abbai! Ecco il cane che arriva di corsa!"
+      without:
+        es: "[playful] Y el perro vino corriendo, moviendo la cola."
+        it: "[playful] E il cane arrivò di corsa, scodinzolando."
+      sound: dog_bark
+  - say: dog
+    es: "[eager] ¡Guau! ¡Aquí estoy! ¿Jugamos? ¿Tiramos? ¡Yo ayudo!"
+    it: "[eager] Bau! Eccomi! Giochiamo? Tiriamo? Io aiuto!"
+
+  # The dog joins -------------------------------------------------------------------------------------------
+  - scene:
+      id: dog_pulls
+      picture: the dog holding on to Lola's shorts with his teeth, Lola holding the grandmother, the grandmother holding the grandfather, who pulls the gigantic turnip
+      with: [grandpa, grandma, girl, dog]
+      move: happy
+  - chorus:
+      ask:
+        es: "[excited] ¡Todos a tirar! ¡Digan conmigo! ¡Tiran y tiran!"
+        it: "[excited] Tutti a tirare! Dite con me! Tira e tira!"
+      done:
+        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        it: "[playful] Tira e tira... [sighs] e non viene!"
+      without:
+        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        it: "[playful] Tira e tira... [sighs] e non viene!"
+  - sound: pull_strain
+  - say: dog
+    es: "[panting] Uf, uf... ¡Necesitamos más ayuda! ¡Gatooo!"
+    it: "[panting] Uff, uff... Serve più aiuto! Gattooo!"
+  - noise:
+      ask:
+        es: "[excited] ¿Cómo hace el gato? ¡Llámenlo! ¡Miauuu!"
+        it: "[excited] Come fa il gatto? Chiamatelo! Miaooo!"
+      louder:
+        es: "[playful] ¡Más fuerte, que está dormido! ¡Miauuu!"
+        it: "[playful] Più forte, che sta dormendo! Miaooo!"
+      done:
+        es: "[laughs] ¡Qué maullidos! ¡Despertaron al gato!"
+        it: "[laughs] Che miagolii! Avete svegliato il gatto!"
+      without:
+        es: "[playful] Y el gato se despertó, se estiró... y vino caminando despacito."
+        it: "[playful] E il gatto si svegliò, si stiracchiò... e arrivò piano piano."
+      sound: cat_meow
+  - say: cat
+    es: "[yawns] Miauuu... ¿Qué pasa? Yo estaba durmiendo la siesta... Bueno, está bien, los ayudo."
+    it: "[yawns] Miaooo... Che succede? Stavo facendo il pisolino... Va bene, va bene, vi aiuto."
+
+  # The cat joins -------------------------------------------------------------------------------------------
+  - scene:
+      id: cat_pulls
+      picture: the cat holding the dog's tail, the dog holding Lola, Lola holding the grandmother, the grandmother holding the grandfather, who pulls the gigantic turnip, a long funny line
+      with: [grandpa, grandma, girl, dog, cat]
+  - say: narrator
+    es: "[playful] El gato agarró al perro, el perro a Lola, Lola a la abuela, la abuela al abuelo, el abuelo el nabo..."
+    it: "[playful] Il gatto prese il cane, il cane Lola, Lola la nonna, la nonna il nonno, il nonno la rapa..."
+  - copy:
+      ask:
+        es: "[excited] ¡Tiren con ellos! ¡Fuerte, fuerte, más fuerte!"
+        it: "[excited] Tirate con loro! Forte, forte, più forte!"
+      done:
+        es: "[sighs, playful] Tiran y tiran... ¡y no sale!"
+        it: "[sighs, playful] Tira e tira... e non viene!"
+      move: impatient
+      music: story_move
+      seconds: 5
+  - say: cat
+    es: "[lazy, thinking] Mmm... Conozco a alguien chiquitico que vive en un huequito. ¡El ratón!"
+    it: "[lazy, thinking] Mmm... Conosco qualcuno piccolo piccolo che vive in un buchino. Il topolino!"
+
+  # The mouse -----------------------------------------------------------------------------------------------
+  - scene:
+      id: mouse_hole
+      picture: the tiny mouse asleep in a cozy little hole at the foot of the garden wall, curled up on a leaf, while the cat peeks in
+      with: [mouse, cat]
+      move: thinking
+  - pat:
+      ask:
+        es: "[whispers] El ratoncito está dormido. Para despertarlo, denle un golpecito a mi cabeza."
+        it: "[whispers] Il topolino dorme. Per svegliarlo, datemi un colpetto sulla testa."
+      done:
+        es: "[laughs] ¡Toc, toc! ¡Se despertó!"
+        it: "[laughs] Toc, toc! Si è svegliato!"
+      without:
+        es: "[whispers] Toc, toc, tocó el gato... y el ratoncito se despertó."
+        it: "[whispers] Toc, toc, bussò il gatto... e il topolino si svegliò."
+      sound: mouse_squeak
+  - say: mouse
+    es: "[squeaky] ¡Iii, iii! ¿Yo? ¿Ayudar a sacar un nabo gigante? ¡Pero si soy chiquitico!"
+    it: "[squeaky] Iii, iii! Io? Aiutare a tirare una rapa gigante? Ma io sono piccolissimo!"
+  - say: narrator
+    es: "[warm] Pero el ratoncito era chiquitico... y muy valiente. Y corrió al huerto."
+    it: "[warm] Ma il topolino era piccolo piccolo... e coraggiosissimo. E corse nell'orto."
+  - sound: run_away
+
+  # All together --------------------------------------------------------------------------------------------
+  - scene:
+      id: all_pull
+      picture: everyone pulling the gigantic turnip in one long line, the tiny mouse at the very end holding the cat's tail, the cat holding the dog, the dog holding Lola, Lola the grandmother, the grandmother the grandfather, all leaning back as hard as they can
+      with: [grandpa, grandma, girl, dog, cat, mouse]
+      move: excited
+  - say: narrator
+    es: "[building excitement] El ratón agarró al gato, el gato al perro, el perro a Lola, Lola a la abuela, la abuela al abuelo, y el abuelo... ¡el nabo!"
+    it: "[building excitement] Il topo prese il gatto, il gatto il cane, il cane Lola, Lola la nonna, la nonna il nonno, e il nonno... la rapa!"
+  - noise:
+      ask:
+        es: "[excited] ¡Ahora sí, todos juntos! ¡Uno, dos, tres... ¡TIREN!"
+        it: "[excited] Adesso sì, tutti insieme! Uno, due, tre... TIRATE!"
+      louder:
+        es: "[playful] ¡Ya casi! ¡Más fuerte! ¡TIREN!"
+        it: "[playful] Ci siamo quasi! Più forte! TIRATE!"
+      done:
+        es: "[amazed] ¡Uuuuy, se está moviendo... se está moviendo...!"
+        it: "[amazed] Uuuuh, si muove... si muove...!"
+      without:
+        es: "[building excitement] Y tiraron, y tiraron, y tiraron..."
+        it: "[building excitement] E tirarono, tirarono, tirarono..."
+      sound: pop_out
+  - scene:
+      id: pop
+      picture: the gigantic turnip popping out of the ground and everyone tumbling backwards into a funny happy pile on the grass, legs in the air, the tiny mouse sitting proudly on top of the turnip
+      with: [grandpa, grandma, girl, dog, cat, mouse]
+      move: surprised
+  - say: narrator
+    es: "[laughing] ¡PUM! ¡Salió el nabo! Y todos se cayeron patas arriba, uno encima del otro."
+    it: "[laughing] PUM! La rapa venne fuori! E caddero tutti a gambe all'aria, uno sopra l'altro."
+  - say: grandpa
+    es: "[laughing] ¡Lo logramos! ¡Gracias a todos! ¡Y gracias a ti, ratoncito!"
+    it: "[laughing] Ce l'abbiamo fatta! Grazie a tutti! E grazie a te, topolino!"
+  - choice:
+      id: treat
+      ask:
+        es: "[curious] El ratoncito ayudó muchísimo. ¿Qué premio le damos? ¿Un pedacito de queso... o una fresa?"
+        it: "[curious] Il topolino ha aiutato tantissimo. Che premio gli diamo? Un pezzetto di formaggio... o una fragola?"
+      options:
+        cheese:
+          words: {es: [queso, quesito, un queso], it: [formaggio, formaggino, il formaggio]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que un pedacito de queso!"
+            it: "[thoughtful] Mmm... secondo me, un pezzetto di formaggio!"
+          then:
+            who: mouse
+            es: "[squeaky, delighted] ¡Queso! ¡Mi favorito! Ñam, ñam, ñam. ¡Gracias!"
+            it: "[squeaky, delighted] Formaggio! Il mio preferito! Gnam, gnam, gnam. Grazie!"
+        strawberry:
+          words: {es: [fresa, fresas, una fresa, fresita], it: [fragola, fragole, la fragola, fragolina]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una fresa!"
+            it: "[thoughtful] Mmm... secondo me, una fragola!"
+          then:
+            who: mouse
+            es: "[squeaky, delighted] ¡Una fresa! ¡Qué rica, más grande que yo! Ñam, ñam. ¡Gracias!"
+            it: "[squeaky, delighted] Una fragola! Che buona, più grande di me! Gnam, gnam. Grazie!"
+
+  # Supper --------------------------------------------------------------------------------------------------
+  - choice:
+      id: food
+      ask:
+        es: "[excited] Y con el nabo gigante, la abuela hizo la cena. ¿Qué hizo? ¿Una sopa... o un puré?"
+        it: "[excited] E con la rapa gigante, la nonna preparò la cena. Che cosa fece? Una zuppa... o un purè?"
+      options:
+        soup:
+          words: {es: [sopa, sopita, una sopa], it: [zuppa, minestra, la zuppa, minestrina]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una sopa!"
+            it: "[thoughtful] Mmm... secondo me, una zuppa!"
+          then:
+            who: grandma
+            es: "[warmly] ¡Una sopa calentita! En la olla más grande de la casa. ¡A comer!"
+            it: "[warmly] Una zuppa calda calda! Nella pentola più grande di casa. A tavola!"
+        mash:
+          words: {es: [pure, puré, purecito, un pure], it: [pure, purè, il purè, pure di rapa]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que un puré!"
+            it: "[thoughtful] Mmm... secondo me, un purè!"
+          then:
+            who: grandma
+            es: "[warmly] ¡Un puré suavecito! Una montaña de puré. ¡A comer!"
+            it: "[warmly] Un purè morbido morbido! Una montagna di purè. A tavola!"
+  - scene:
+      id: supper
+      about: food
+      with: [grandpa, grandma, girl, dog, cat, mouse]
+      options:
+        soup: everyone sitting around a big wooden table in the cozy farmhouse kitchen sharing an enormous pot of steaming soup, the dog and the cat with their own bowls, the tiny mouse with a thimble
+        mash: everyone sitting around a big wooden table in the cozy farmhouse kitchen sharing an enormous mountain of mash, the dog and the cat with their own bowls, the tiny mouse with a thimble
+      move: happy
+  - say: narrator
+    es: "[warm] Y todos comieron juntos, el abuelo, la abuela, Lola, el perro, el gato... y el ratoncito."
+    it: "[warm] E mangiarono tutti insieme, il nonno, la nonna, Lola, il cane, il gatto... e il topolino."
+  - say: narrator
+    es: "[excited] ¡Y después hicieron una fiesta! ¡Bailen con ellos!"
+    it: "[excited] E poi fecero una festa! Ballate con loro!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - scene:
+      id: the_end
+      picture: the grandfather, the grandmother, Lola, the dog, the cat and the tiny mouse dancing together in a circle in the vegetable garden under a big smiling sun
+      with: [grandpa, grandma, girl, dog, cat, mouse]
+  - say: narrator
+    es: "[warm, slowing down] Porque cuando todos ayudan, hasta lo más difícil se puede hacer. Hasta con la ayuda de un ratoncito."
+    it: "[warm, slowing down] Perché quando tutti aiutano, si può fare anche la cosa più difficile. Anche con l'aiuto di un topolino."
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

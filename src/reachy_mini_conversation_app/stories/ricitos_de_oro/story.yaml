@@ -1,0 +1,406 @@
+# Ricitos de Oro y los tres osos / Riccioli d'oro e i tre orsi (docs/plans/story-mode.md).
+# Our own retelling for a 2- and a 4-year-old: the porridge, the chairs and the beds (too hot, too cold, just
+# right), the bears' big, middle and tiny voices, and a kind ending where Goldilocks says sorry and brings Baby Bear
+# a present. About 6 minutes with 13 moments where the children join in.
+# Spanish is Venezuelan (ustedes, avena, chiquitico), Italian is standard.
+
+key: ricitos_de_oro
+title:
+  es: Ricitos de Oro
+  it: Riccioli d'oro
+names:
+  es: [ricitos de oro, ricitos, los tres osos, tres osos, ricitos de oro y los tres osos, el cuento de los osos,
+       los osos, la niña y los tres osos, rizos de oro]
+  it: [riccioli d'oro, riccioli d oro, riccioli doro, i tre orsi, tre orsi, riccioli d'oro e i tre orsi,
+       gli orsi, la storia degli orsi, riccioli]
+pitch:
+  es: "Una niña curiosa entra en la casita de tres osos. ¡Ustedes la ayudan a soplar, roncar y despertar!"
+  it: "Una bambina curiosa entra nella casetta di tre orsi. Voi la aiutate a soffiare, russare e svegliarsi!"
+rules: >-
+  Reachy tells Goldilocks and the Three Bears (a kind ending: she says sorry), about 6 minutes, in Spanish or
+  Italian, with character voices, sounds and music. The children join in: they growl like the bears, walk with
+  them, knock by patting his head, blow on the porridge, shiver, rock in the chair, snore, say the bears' lines,
+  tiptoe, wake Goldilocks up and pick small things (honey or strawberries, a flower or a biscuit for Baby Bear). The
+  story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: Goldilocks and the three bears waving together in front of a cozy little wooden cottage in a sunny forest
+  with: [goldilocks, papa_bear, mama_bear, baby_bear]
+
+steps:
+  # The bears -----------------------------------------------------------------------------------------------
+  - scene:
+      id: bears_home
+      picture: the three bears sitting at a wooden table in their cozy cottage kitchen with three bowls of steaming porridge, a big bowl, a middle bowl and a tiny bowl
+      with: [papa_bear, mama_bear, baby_bear]
+      move: welcoming
+  - say: narrator
+    es: "[warm] Había una vez, en medio del bosque, una casita donde vivían tres osos."
+    it: "[warm] C'era una volta, in mezzo al bosco, una casetta dove vivevano tre orsi."
+  - say: narrator
+    es: "[playful, deep] Papá Oso, que era grandote, grandote..."
+    it: "[playful, deep] Papà Orso, che era grande, grandissimo..."
+  - say: papa_bear
+    es: "[booming, jolly] ¡Hola! ¡Yo soy Papá Oso!"
+    it: "[booming, jolly] Ciao! Io sono Papà Orso!"
+  - say: narrator
+    es: "[playful] Mamá Osa, que era mediana..."
+    it: "[playful] Mamma Orsa, che era di media grandezza..."
+  - say: mama_bear
+    es: "[warmly] ¡Y yo soy Mamá Osa!"
+    it: "[warmly] E io sono Mamma Orsa!"
+  - say: narrator
+    es: "[playful, high] Y Osito, que era chiquitico, chiquitico."
+    it: "[playful, high] E Orsetto, che era piccolo, piccolissimo."
+  - say: baby_bear
+    es: "[excited] ¡Y yo soy Osito! ¡Hola, hola!"
+    it: "[excited] E io sono Orsetto! Ciao, ciao!"
+  - noise:
+      ask:
+        es: "[playful] ¿Saben gruñir como un oso grandote? ¡Grrrr!"
+        it: "[playful] Sapete brontolare come un orso grande grande? Grrrr!"
+      louder:
+        es: "[playful] ¡Más grandote! ¡GRRRR!"
+        it: "[playful] Più grande! GRRRR!"
+      done:
+        who: papa_bear
+        es: "[laughing] ¡Jo, jo, jo! ¡Qué buenos osos!"
+        it: "[laughing] Oh, oh, oh! Che bravi orsi!"
+      without:
+        who: papa_bear
+        es: "[booming] ¡Grrrr! ¡Jo, jo, jo!"
+        it: "[booming] Grrrr! Oh, oh, oh!"
+  - say: mama_bear
+    es: "[warmly] La avena está muy caliente. Vamos a dar un paseo por el bosque mientras se enfría."
+    it: "[warmly] Il porridge è troppo caldo. Facciamo una passeggiata nel bosco mentre si raffredda."
+
+  # The walk ------------------------------------------------------------------------------------------------
+  - scene:
+      id: walk
+      picture: the three bears walking happily in a line along a forest path among tall trees, Papa Bear in front with big steps, Baby Bear skipping at the back
+      with: [papa_bear, mama_bear, baby_bear]
+      move: happy
+  - sound: forest_birds
+  - copy:
+      ask:
+        es: "[playful] ¡Caminen con los osos! Pasos grandotes como Papá Oso... pom, pom, pom."
+        it: "[playful] Camminate con gli orsi! Passi grandi come Papà Orso... pom, pom, pom."
+      done:
+        es: "[delighted] ¡Qué bien caminan! ¡Parecen osos de verdad!"
+        it: "[delighted] Come camminate bene! Sembrate orsi veri!"
+      move: happy
+      music: story_march
+      seconds: 6
+
+  # Goldilocks arrives --------------------------------------------------------------------------------------
+  - scene:
+      id: goldilocks_arrives
+      picture: Goldilocks walking out of the trees and finding the little wooden cottage, her hands clasped with delight
+      with: [goldilocks]
+      move: surprised
+  - say: narrator
+    es: "[curious] Mientras tanto, por el bosque venía una niña con el pelo lleno de rizos dorados. Se llamaba... Ricitos de Oro."
+    it: "[curious] Nel frattempo, nel bosco arrivò una bambina con i capelli pieni di riccioli dorati. Si chiamava... Riccioli d'oro."
+  - say: goldilocks
+    es: "[delighted] ¡Qué casita tan linda! ¿Habrá alguien en casa?"
+    it: "[delighted] Che bella casetta! Ci sarà qualcuno in casa?"
+  - pat:
+      ask:
+        es: "[whispers] ¿Tocamos la puerta? Denle un golpecito a mi cabeza."
+        it: "[whispers] Bussiamo alla porta? Datemi un colpetto sulla testa."
+      done:
+        es: "[laughs] ¡Toc, toc! ¡Muy bien!"
+        it: "[laughs] Toc, toc! Bravissimi!"
+      without:
+        es: "[whispers] Toc, toc, tocó Ricitos de Oro."
+        it: "[whispers] Toc, toc, bussò Riccioli d'oro."
+      sound: door_knock
+  - say: narrator
+    es: "[whispers] Nadie contestó... y la puerta estaba abierta. [playful] Uy, uy, uy... ¡y Ricitos de Oro entró sin permiso!"
+    it: "[whispers] Nessuno rispose... e la porta era aperta. [playful] Uh, uh, uh... e Riccioli d'oro entrò senza permesso!"
+
+  # The porridge --------------------------------------------------------------------------------------------
+  - scene:
+      id: porridge
+      picture: Goldilocks at the bears' kitchen table tasting from the big bowl of porridge with a spoon, steam rising, the middle and the tiny bowls beside it
+      with: [goldilocks]
+      move: thinking
+  - say: narrator
+    es: "[playful] En la mesa había tres platos de avena. Primero probó la del plato grandote..."
+    it: "[playful] Sulla tavola c'erano tre ciotole di porridge. Prima assaggiò quella della ciotola grande..."
+  - say: goldilocks
+    es: "[surprised] ¡Ay! ¡Esta está muy caliente!"
+    it: "[surprised] Ahi! Questa è troppo calda!"
+  - noise:
+      ask:
+        es: "[excited] ¡Ayúdenla a soplar! Uno, dos, tres... ¡soplen!"
+        it: "[excited] Aiutatela a soffiare! Uno, due, tre... soffiate!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Fuuuuu!"
+        it: "[playful] Più forte! Fuuuuu!"
+      done:
+        es: "[amazed] ¡Qué soplido! Pero seguía muy caliente."
+        it: "[amazed] Che soffio! Ma era ancora troppo caldo."
+      without:
+        who: goldilocks
+        es: "[blowing] Fuuu, fuuu... ¡Igual está muy caliente!"
+        it: "[blowing] Fuuu, fuuu... È ancora troppo caldo!"
+  - say: narrator
+    es: "[playful] Después probó la del plato mediano..."
+    it: "[playful] Poi assaggiò quella della ciotola media..."
+  - say: goldilocks
+    es: "[shivering] ¡Brrr! ¡Esta está muy fría!"
+    it: "[shivering] Brrr! Questo è troppo freddo!"
+  - chorus:
+      ask:
+        es: "[playful] ¡Qué frío! ¿Pueden temblar y decir conmigo? ¡Brrrrr!"
+        it: "[playful] Che freddo! Sapete tremare e dire con me? Brrrrr!"
+      done:
+        es: "[laughs] ¡Uy, qué friolentos!"
+        it: "[laughs] Uh, che freddolosi!"
+      without:
+        es: "[shivering, playful] ¡Brrrrr! ¡Qué fría!"
+        it: "[shivering, playful] Brrrrr! Che freddo!"
+  - say: narrator
+    es: "[playful] Y después probó la del plato chiquitico..."
+    it: "[playful] E poi assaggiò quella della ciotola piccolina..."
+  - say: goldilocks
+    es: "[delighted] Mmm... ¡esta está perfecta!"
+    it: "[delighted] Mmm... questo è perfetto!"
+  - choice:
+      id: topping
+      ask:
+        es: "[curious] Y para que estuviera más rica, le puso algo encima. ¿Miel... o fresas?"
+        it: "[curious] E per renderlo ancora più buono, ci mise qualcosa sopra. Miele... o fragole?"
+      options:
+        honey:
+          words: {es: [miel, mielita, la miel], it: [miele, il miele]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que miel!"
+            it: "[thoughtful] Mmm... secondo me, miele!"
+          then:
+            es: "[delighted] ¡Miel! Dulce y pegajosa. Mmm, ¡qué rica!"
+            it: "[delighted] Miele! Dolce e appiccicoso. Mmm, che buono!"
+        strawberries:
+          words: {es: [fresas, fresa, fresitas], it: [fragole, fragola, fragoline]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que fresas!"
+            it: "[thoughtful] Mmm... secondo me, fragole!"
+          then:
+            es: "[delighted] ¡Fresas! Rojitas y dulces. Mmm, ¡qué ricas!"
+            it: "[delighted] Fragole! Rosse e dolci. Mmm, che buone!"
+  - chorus:
+      ask:
+        es: "[excited] ¡Y se la comió toda! Digan conmigo: ¡ñam, ñam, ñam!"
+        it: "[excited] E se lo mangiò tutto! Dite con me: gnam, gnam, gnam!"
+      done:
+        es: "[laughs] ¡Ñam, ñam! ¡No dejó ni una gotita!"
+        it: "[laughs] Gnam, gnam! Non ne lasciò neanche un goccio!"
+      without:
+        es: "[playful] Ñam, ñam, ñam... ¡No dejó ni una gotita!"
+        it: "[playful] Gnam, gnam, gnam... Non ne lasciò neanche un goccio!"
+  - sound: porridge_slurp
+
+  # The chairs ----------------------------------------------------------------------------------------------
+  - scene:
+      id: chairs
+      picture: Goldilocks sitting happily in a tiny wooden rocking chair in the bears' living room, next to a huge armchair and a middle-sized soft armchair
+      with: [goldilocks]
+      move: happy
+  - say: narrator
+    es: "[playful] Después vio tres sillas. La silla grandota era muy dura... la mediana era muy blandita... ¡y la chiquitica era perfecta!"
+    it: "[playful] Poi vide tre sedie. La sedia grande era troppo dura... quella media era troppo morbida... e quella piccolina era perfetta!"
+  - copy:
+      ask:
+        es: "[playful] ¡Siéntense en la sillita y mézanse con ella! Para adelante... para atrás..."
+        it: "[playful] Sedetevi sulla seggiolina e dondolate con lei! Avanti... indietro..."
+      done:
+        es: "[suspense] Se meció, y se meció, y se meció... y..."
+        it: "[suspense] Dondolò, dondolò, dondolò... e..."
+      move: calming
+      music: story_tiptoe
+      seconds: 6
+  - sound: chair_break
+  - say: goldilocks
+    es: "[surprised] ¡Ay! ¡Se rompió la sillita!"
+    it: "[surprised] Ahi! Si è rotta la seggiolina!"
+
+  # The beds ------------------------------------------------------------------------------------------------
+  - scene:
+      id: beds
+      picture: Goldilocks asleep and smiling in a tiny bed in the bears' bedroom upstairs, next to a huge bed and a middle-sized bed with a fluffy quilt
+      with: [goldilocks]
+      move: sleepy
+  - say: goldilocks
+    es: "[yawns] Ahhh... qué sueño tengo."
+    it: "[yawns] Ahhh... che sonno che ho."
+  - say: narrator
+    es: "[softly] Subió las escaleras y vio tres camas. La grandota era muy alta... la mediana era muy esponjosa... y la chiquitica... [whispers] era perfecta."
+    it: "[softly] Salì le scale e vide tre letti. Quello grande era troppo alto... quello medio era troppo soffice... e quello piccolino... [whispers] era perfetto."
+  - noise:
+      ask:
+        es: "[whispers] Ricitos de Oro se quedó dormida. ¿Saben roncar? ¡Rrrrr... rrrrr!"
+        it: "[whispers] Riccioli d'oro si addormentò. Sapete russare? Rrrrr... rrrrr!"
+      louder:
+        es: "[playful whisper] ¡Más ronquidos! Rrrrr..."
+        it: "[playful whisper] Russate di più! Rrrrr..."
+      done:
+        es: "[laughs softly] ¡Qué ronquidos tan graciosos!"
+        it: "[laughs softly] Che russate buffe!"
+      without:
+        es: "[whispers] Y se quedó dormida, profundita. Rrrrr..."
+        it: "[whispers] E si addormentò profondamente. Rrrrr..."
+      sound: snore
+
+  # The bears come home -------------------------------------------------------------------------------------
+  - sound: bear_steps
+  - scene:
+      id: bears_back
+      picture: the three bears back in their kitchen looking at their bowls of porridge, Papa Bear frowning at his spoon, Baby Bear holding up his empty tiny bowl
+      with: [papa_bear, mama_bear, baby_bear]
+      move: surprised
+  - say: narrator
+    es: "[suspense] En eso... ¡los tres osos volvieron a casa!"
+    it: "[suspense] Proprio in quel momento... i tre orsi tornarono a casa!"
+  - say: papa_bear
+    es: "[booming] ¡Alguien probó mi avena!"
+    it: "[booming] Qualcuno ha assaggiato il mio porridge!"
+  - say: mama_bear
+    es: "[surprised] ¡Y alguien probó mi avena!"
+    it: "[surprised] E qualcuno ha assaggiato il mio porridge!"
+  - say: baby_bear
+    es: "[upset, squeaky] ¡Y alguien se comió mi avena... y se la comió toda!"
+    it: "[upset, squeaky] E qualcuno ha mangiato il mio porridge... e se l'è mangiato tutto!"
+  - chorus:
+      ask:
+        es: "[playful] ¡Digan como Papá Oso, con voz grandota! ¡Alguien se sentó en mi silla!"
+        it: "[playful] Dite come Papà Orso, con una voce grande grande! Qualcuno si è seduto sulla mia sedia!"
+      done:
+        who: papa_bear
+        es: "[booming, laughing] ¡Eso! ¡Alguien se sentó en mi silla!"
+        it: "[booming, laughing] Esatto! Qualcuno si è seduto sulla mia sedia!"
+      without:
+        who: papa_bear
+        es: "[booming] ¡Alguien se sentó en mi silla!"
+        it: "[booming] Qualcuno si è seduto sulla mia sedia!"
+  - say: mama_bear
+    es: "[surprised] ¡Y alguien se sentó en mi silla!"
+    it: "[surprised] E qualcuno si è seduto sulla mia sedia!"
+  - scene:
+      id: broken_chair
+      picture: Baby Bear sitting on the floor of the living room holding the pieces of his broken tiny rocking chair, Papa Bear and Mama Bear looking at him with surprise
+      with: [baby_bear, papa_bear, mama_bear]
+  - say: baby_bear
+    es: "[sad, squeaky] ¡Y alguien se sentó en mi sillita... y la rompió!"
+    it: "[sad, squeaky] E qualcuno si è seduto sulla mia seggiolina... e l'ha rotta!"
+  - copy:
+      ask:
+        es: "[whispers] Vamos a ver arriba. ¡Suban con los osos de puntillas, sin hacer ruido! Shhh..."
+        it: "[whispers] Andiamo a vedere di sopra. Salite con gli orsi in punta di piedi, senza fare rumore! Shhh..."
+      done:
+        es: "[whispers] Muy bien... qué silenciosos."
+        it: "[whispers] Bravissimi... che silenziosi."
+      move: attentive
+      music: story_tiptoe
+      seconds: 6
+
+  # Found ---------------------------------------------------------------------------------------------------
+  - scene:
+      id: found
+      picture: the three bears in the bedroom doorway looking with big surprised eyes at Goldilocks fast asleep in Baby Bear's tiny bed
+      with: [papa_bear, mama_bear, baby_bear, goldilocks]
+  - say: papa_bear
+    es: "[booming whisper] Alguien se acostó en mi cama..."
+    it: "[booming whisper] Qualcuno si è sdraiato nel mio letto..."
+  - say: mama_bear
+    es: "[whispers] Y alguien se acostó en mi cama..."
+    it: "[whispers] E qualcuno si è sdraiato nel mio letto..."
+  - say: baby_bear
+    es: "[excited whisper] ¡Y alguien se acostó en mi cama... y todavía está aquí!"
+    it: "[excited whisper] E qualcuno si è sdraiato nel mio letto... ed è ancora qui!"
+  - noise:
+      ask:
+        es: "[excited] ¡Vamos a despertarla! Uno, dos, tres... ¡DESPIERTA!"
+        it: "[excited] Svegliamola! Uno, due, tre... SVEGLIA!"
+      louder:
+        es: "[playful] ¡Más fuerte, que duerme mucho! ¡DESPIERTA!"
+        it: "[playful] Più forte, che dorme tanto! SVEGLIA!"
+      done:
+        es: "[laughs] ¡Uy! ¡Se despertó de un brinco!"
+        it: "[laughs] Uh! Si è svegliata con un salto!"
+      without:
+        who: baby_bear
+        es: "[squeaky, loud] ¡Despierta!"
+        it: "[squeaky, loud] Sveglia!"
+      sound: boing
+  - scene:
+      id: wake_up
+      picture: Goldilocks sitting bolt upright in the tiny bed with her golden curls sticking out in every direction and big surprised eyes, and the three bears just as surprised
+      with: [goldilocks, papa_bear, mama_bear, baby_bear]
+      move: surprised
+  - say: goldilocks
+    es: "[gasps] ¡Ay! ¡Tres osos!"
+    it: "[gasps] Ahi! Tre orsi!"
+  - say: narrator
+    es: "[playful] Ricitos de Oro saltó de la cama y bajó corriendo las escaleras... pero en la puerta se paró."
+    it: "[playful] Riccioli d'oro saltò giù dal letto e corse giù per le scale... ma sulla porta si fermò."
+  - say: goldilocks
+    es: "[sorry, sincere] Perdón, osos. Entré sin permiso, me comí la avena y rompí la sillita. ¡Lo siento mucho!"
+    it: "[sorry, sincere] Scusate, orsi. Sono entrata senza permesso, ho mangiato il porridge e ho rotto la seggiolina. Mi dispiace tanto!"
+
+  # Friends -------------------------------------------------------------------------------------------------
+  - choice:
+      id: present
+      ask:
+        es: "[curious] Ricitos de Oro quería darle un regalo a Osito. ¿Qué le dio? ¿Una flor... o una galleta?"
+        it: "[curious] Riccioli d'oro voleva fare un regalo a Orsetto. Che cosa gli diede? Un fiore... o un biscotto?"
+      options:
+        flower:
+          words: {es: [flor, flores, una flor, florecita], it: [fiore, fiori, un fiore, fiorellino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una flor!"
+            it: "[thoughtful] Mmm... secondo me, un fiore!"
+          then:
+            es: "[warm] ¡Una flor! La flor más bonita del bosque."
+            it: "[warm] Un fiore! Il fiore più bello del bosco."
+        biscuit:
+          words: {es: [galleta, galletas, galletita, una galleta], it: [biscotto, biscotti, un biscotto, biscottino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una galleta!"
+            it: "[thoughtful] Mmm... secondo me, un biscotto!"
+          then:
+            es: "[warm] ¡Una galleta! Grande y redondita, con chispas de chocolate."
+            it: "[warm] Un biscotto! Grande e rotondo, con le gocce di cioccolato."
+  - scene:
+      id: gift
+      about: present
+      with: [goldilocks, baby_bear]
+      move: loving
+      options:
+        flower: Goldilocks shyly giving a pretty flower to a delighted Baby Bear at the cottage door, both smiling
+        biscuit: Goldilocks shyly giving a big round chocolate chip biscuit to a delighted Baby Bear at the cottage door, both smiling
+  - say: baby_bear
+    es: "[happy] ¡Gracias! ¡Te perdono! ¿Quieres ser mi amiga?"
+    it: "[happy] Grazie! Ti perdono! Vuoi essere mia amica?"
+  - say: goldilocks
+    es: "[delighted] ¡Sí! ¡Claro que sí!"
+    it: "[delighted] Sì! Certo che sì!"
+  - say: narrator
+    es: "[warm] Y entonces Papá Oso arregló la sillita, Mamá Osa hizo más avena, y todos comieron juntos."
+    it: "[warm] E allora Papà Orso aggiustò la seggiolina, Mamma Orsa preparò altro porridge, e mangiarono tutti insieme."
+  - say: narrator
+    es: "[excited] ¡Y después, a bailar! ¡Bailen con los osos!"
+    it: "[excited] E poi, tutti a ballare! Ballate con gli orsi!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - scene:
+      id: the_end
+      picture: Goldilocks and the three bears sitting together around the kitchen table eating porridge and laughing, the tiny rocking chair mended beside them
+      with: [goldilocks, papa_bear, mama_bear, baby_bear]
+  - say: narrator
+    es: "[warm, slowing down] Y desde ese día, Ricitos de Oro siempre toca la puerta... y espera a que le digan: ¡pasa!"
+    it: "[warm, slowing down] E da quel giorno, Riccioli d'oro bussa sempre alla porta... e aspetta che le dicano: avanti!"
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

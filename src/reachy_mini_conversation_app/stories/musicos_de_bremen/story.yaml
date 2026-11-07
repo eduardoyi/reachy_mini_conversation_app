@@ -1,0 +1,343 @@
+# Los músicos de Bremen / I musicanti di Brema (docs/plans/story-mode.md).
+# Our own retelling of the Grimm tale for a 2- and a 4-year-old: an old donkey sets off to be a musician and picks up
+# a dog, a cat and a rooster on the way; their "concert" at a cottage window scares away two silly robbers, and they
+# stay there to play music every day. Nothing sad lingers and the robbers are clowns. About 6 minutes with 12
+# moments where the children join in, most of them animal noises.
+# Spanish is Venezuelan (ustedes), Italian is standard.
+
+key: musicos_de_bremen
+title:
+  es: Los músicos de Bremen
+  it: I musicanti di Brema
+names:
+  es: [musicos de bremen, los musicos de bremen, los musicos, musicos, bremen, el burro musico, el cuento del burro,
+       los animales musicos, la banda de animales]
+  it: [musicanti di brema, i musicanti di brema, i musicanti, musicanti, brema, l asino musicista,
+       la storia dell asino, gli animali musicisti, la banda degli animali]
+pitch:
+  es: "Un burro, un perro, un gato y un gallo arman una banda. ¡Ustedes hacen la música!"
+  it: "Un asino, un cane, un gatto e un gallo formano una banda. La musica la fate voi!"
+rules: >-
+  Reachy tells The Town Musicians of Bremen (two silly robbers, nobody gets hurt), about 6 minutes, in Spanish or
+  Italian, with character voices, sounds and music. The children join in: they bray, bark, meow and crow with each
+  new musician, march with the band, tiptoe, stretch tall like the animal tower, play the drum by patting his head,
+  make the big concert and pick small things (the rooster's instrument, carrots or apples). The story never waits
+  for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the donkey, the dog, the cat and the rooster marching happily together along a country road, the donkey playing his drum, the rooster riding on the donkey's back
+  with: [donkey, dog, cat, rooster]
+
+steps:
+  # The donkey ----------------------------------------------------------------------------------------------
+  - scene:
+      id: donkey_sets_off
+      picture: the old donkey setting off cheerfully down a country road away from a little farm, his drum on his chest, sunshine and rolling hills
+      with: [donkey]
+      move: welcoming
+  - say: narrator
+    es: "[warm] Había una vez un burro que ya estaba viejito, y ya no podía cargar sacos pesados."
+    it: "[warm] C'era una volta un asino che era diventato vecchietto, e non riusciva più a portare i sacchi pesanti."
+  - say: narrator
+    es: "[playful] Pero en vez de ponerse triste, el burro tuvo una idea."
+    it: "[playful] Ma invece di diventare triste, l'asino ebbe un'idea."
+  - say: donkey
+    es: "[cheerful] ¡Me voy a la ciudad de Bremen a ser músico! ¡Voy a tocar el tambor! Pum, pum, pum."
+    it: "[cheerful] Vado nella città di Brema a fare il musicista! Suonerò il tamburo! Pum, pum, pum."
+  - noise:
+      ask:
+        es: "[excited] ¿Cómo canta el burro? ¡Todos juntos! ¡Iii-aaa!"
+        it: "[excited] Come canta l'asino? Tutti insieme! Ih-oh!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Iii-aaa!"
+        it: "[playful] Più forte! Ih-oh!"
+      done:
+        who: donkey
+        es: "[laughing] ¡Qué bien rebuznan! ¡Ustedes también pueden ser músicos!"
+        it: "[laughing] Come ragliate bene! Anche voi potete fare i musicisti!"
+      without:
+        who: donkey
+        es: "[cheerful] ¡Iii-aaa! ¡Iii-aaa!"
+        it: "[cheerful] Ih-oh! Ih-oh!"
+      sound: hee_haw
+  - copy:
+      ask:
+        es: "[playful] ¡Marchen con el burro! Un, dos, un, dos... ¡pum, pum!"
+        it: "[playful] Marciate con l'asino! Un, due, un, due... pum, pum!"
+      done:
+        es: "[delighted] ¡Qué bien marchan!"
+        it: "[delighted] Come marciate bene!"
+      move: happy
+      music: story_march
+      seconds: 6
+
+  # The dog -------------------------------------------------------------------------------------------------
+  - scene:
+      id: dog
+      picture: the dog sitting alone by the side of the road with his ears drooping, looking up hopefully as the donkey with his drum walks up to him
+      with: [dog, donkey]
+  - say: narrator
+    es: "[playful] En el camino, el burro se encontró a un perro sentado, solito."
+    it: "[playful] Per strada, l'asino incontrò un cane seduto tutto solo."
+  - say: dog
+    es: "[sighs] Ay... en mi casa nadie quiere jugar conmigo."
+    it: "[sighs] Ahi... a casa mia nessuno vuole giocare con me."
+  - say: donkey
+    es: "[friendly] ¡Vente conmigo a Bremen! Vamos a hacer una banda. ¡Tú puedes cantar!"
+    it: "[friendly] Vieni con me a Brema! Facciamo una banda. Tu puoi cantare!"
+  - noise:
+      ask:
+        es: "[excited] ¿Cómo canta el perro? ¡Guau, guau!"
+        it: "[excited] Come canta il cane? Bau, bau!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Guau, guau!"
+        it: "[playful] Più forte! Bau, bau!"
+      done:
+        who: dog
+        es: "[eager] ¡Guau! ¡Sí! ¡Me voy con ustedes!"
+        it: "[eager] Bau! Sì! Vengo con voi!"
+      without:
+        who: dog
+        es: "[eager] ¡Guau, guau! ¡Sí! ¡Me voy con ustedes!"
+        it: "[eager] Bau, bau! Sì! Vengo con voi!"
+      sound: dog_bark
+
+  # The cat -------------------------------------------------------------------------------------------------
+  - scene:
+      id: cat
+      picture: the cat lying lazily on top of a wooden fence, yawning, while the donkey and the dog stop below and look up at it
+      with: [cat, donkey, dog]
+  - say: narrator
+    es: "[playful] Más adelante, encima de una cerca, había un gato bostezando."
+    it: "[playful] Più avanti, sopra uno steccato, c'era un gatto che sbadigliava."
+  - say: cat
+    es: "[yawns] Miauuu... qué aburrido. Ya no quiero atrapar ratones. Yo solo quiero cantar."
+    it: "[yawns] Miaooo... che noia. Non ho più voglia di acchiappare topi. Io voglio solo cantare."
+  - say: dog
+    es: "[eager] ¡Pues ven con nosotros a Bremen! ¡Estamos haciendo una banda!"
+    it: "[eager] Allora vieni con noi a Brema! Stiamo facendo una banda!"
+  - noise:
+      ask:
+        es: "[excited] ¿Cómo canta el gato? ¡Miauuu!"
+        it: "[excited] Come canta il gatto? Miaooo!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Miauuu!"
+        it: "[playful] Più forte! Miaooo!"
+      done:
+        who: cat
+        es: "[pleased, drawling] Miau... qué bonito cantan. Está bien, voy con ustedes."
+        it: "[pleased, drawling] Miao... che bel canto. Va bene, vengo con voi."
+      without:
+        who: cat
+        es: "[drawling] Miauuu... Está bien, voy con ustedes."
+        it: "[drawling] Miaooo... Va bene, vengo con voi."
+      sound: cat_meow
+
+  # The rooster ---------------------------------------------------------------------------------------------
+  - scene:
+      id: rooster
+      picture: the rooster standing on a farm gate with his chest puffed out, crowing with his beak wide open, while the donkey, the dog and the cat watch from the road
+      with: [rooster, donkey, dog, cat]
+      move: excited
+  - say: narrator
+    es: "[playful] Y en la puerta de una granja, había un gallo cantando a todo pulmón."
+    it: "[playful] E sul cancello di una fattoria, c'era un gallo che cantava a squarciagola."
+  - noise:
+      ask:
+        es: "[excited] ¡Canten como el gallo! ¡Kikirikí!"
+        it: "[excited] Cantate come il gallo! Chicchirichì!"
+      louder:
+        es: "[playful] ¡Más fuerte, que despierte a todo el mundo! ¡Kikirikí!"
+        it: "[playful] Più forte, che svegli tutti! Chicchirichì!"
+      done:
+        who: rooster
+        es: "[squawky, delighted] ¡Por fin alguien que canta como yo! ¡Kikirikí!"
+        it: "[squawky, delighted] Finalmente qualcuno che canta come me! Chicchirichì!"
+      without:
+        who: rooster
+        es: "[squawky] ¡Kikirikííí!"
+        it: "[squawky] Chicchirichììì!"
+      sound: rooster_crow
+  - say: rooster
+    es: "[squawky] ¡Nadie me deja cantar aquí! ¿Una banda, dijeron? ¡Yo quiero!"
+    it: "[squawky] Qui nessuno mi lascia cantare! Una banda, avete detto? Ci sto!"
+  - choice:
+      id: instrument
+      ask:
+        es: "[curious] ¿Y qué instrumento tocó el gallo? ¿Una trompeta... o unas maracas?"
+        it: "[curious] E che strumento suonò il gallo? Una trombetta... o le maracas?"
+      options:
+        trumpet:
+          words: {es: [trompeta, trompetica, una trompeta, corneta], it: [trombetta, tromba, la tromba, trombettina]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una trompeta!"
+            it: "[thoughtful] Mmm... secondo me, una trombetta!"
+          then:
+            es: "[playful] ¡Una trompeta! Tuu, tu, tuuu. ¡Qué bonito!"
+            it: "[playful] Una trombetta! Tuu, tu, tuuu. Che bello!"
+        maracas:
+          words: {es: [maracas, maraca, unas maracas], it: [maracas, maraca, le maracas]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que unas maracas!"
+            it: "[thoughtful] Mmm... secondo me, le maracas!"
+          then:
+            es: "[playful] ¡Unas maracas! Chiqui, chiqui, chiqui. ¡Qué bonito!"
+            it: "[playful] Le maracas! Ciki, ciki, ciki. Che bello!"
+
+  # The cottage ---------------------------------------------------------------------------------------------
+  - scene:
+      id: cottage
+      picture: the four animals walking on a forest path at sunset towards a little cottage with a warm glowing window, a big friendly moon rising
+      with: [donkey, dog, cat, rooster]
+      move: thinking
+  - say: narrator
+    es: "[softly] Caminaron y caminaron, hasta que se hizo de noche. Y entonces vieron una casita con la ventana encendida."
+    it: "[softly] Camminarono, camminarono, finché si fece sera. E allora videro una casetta con la finestra accesa."
+  - copy:
+      ask:
+        es: "[whispers] Vamos a acercarnos de puntillas, sin hacer ruido. Shhh..."
+        it: "[whispers] Avviciniamoci in punta di piedi, senza fare rumore. Shhh..."
+      done:
+        es: "[whispers] Muy bien... qué silenciosos."
+        it: "[whispers] Bravissimi... che silenziosi."
+      move: attentive
+      music: story_tiptoe
+      seconds: 6
+  - scene:
+      id: robbers
+      picture: through a cottage window, two silly robbers sitting at a table piled high with food, the tall one with the huge mustache holding up a chicken leg and laughing, the short round one grabbing a cake, while the four animals peek in from the bottom corner of the window
+      with: [robber_boss, robber_small, donkey, dog, cat, rooster]
+  - say: narrator
+    es: "[whispers] Por la ventana vieron a dos ladrones con una mesa llena de comida."
+    it: "[whispers] Dalla finestra videro due ladroni con una tavola piena di cibo."
+  - say: robber_boss
+    es: "[grandly, silly] ¡Ja, ja, ja! ¡Toda esta comida es mía! ¡Mía, mía, mía!"
+    it: "[grandly, silly] Ah, ah, ah! Tutto questo cibo è mio! Mio, mio, mio!"
+  - say: robber_small
+    es: "[whiny] ¿Y para mí? ¡Yo también quiero torta!"
+    it: "[whiny] E per me? Anch'io voglio la torta!"
+  - say: donkey
+    es: "[whispers, clever] Tengo una idea. Hagamos una torre... ¡y cantemos todos juntos!"
+    it: "[whispers, clever] Ho un'idea. Facciamo una torre... e cantiamo tutti insieme!"
+
+  # The concert ---------------------------------------------------------------------------------------------
+  - scene:
+      id: tower
+      picture: the animal tower at the cottage window, the donkey at the bottom, the dog standing on the donkey's back, the cat on the dog, and the rooster on top with his wings spread, all about to sing
+      with: [donkey, dog, cat, rooster]
+      move: excited
+  - say: narrator
+    es: "[playful] El perro se subió encima del burro, el gato encima del perro... ¡y el gallo arriba de todo!"
+    it: "[playful] Il cane salì sulla schiena dell'asino, il gatto sul cane... e il gallo in cima a tutti!"
+  - copy:
+      ask:
+        es: "[excited] ¡Estírense bien alto, como la torre! ¡Más alto, más alto, hasta el techo!"
+        it: "[excited] Allungatevi in alto, come la torre! Più in alto, più in alto, fino al soffitto!"
+      done:
+        es: "[amazed] ¡Qué torre tan alta!"
+        it: "[amazed] Che torre altissima!"
+      move: excited
+      music: story_move
+      seconds: 5
+  - pat:
+      ask:
+        es: "[whispers] El burro empieza con el tambor. ¡Denle un golpecito a mi cabeza! Pum..."
+        it: "[whispers] L'asino comincia col tamburo. Datemi un colpetto sulla testa! Pum..."
+      done:
+        es: "[excited whisper] ¡Pum, pum! ¡Empezó el concierto!"
+        it: "[excited whisper] Pum, pum! Comincia il concerto!"
+      without:
+        es: "[whispers] Pum, pum, tocó el burro su tambor."
+        it: "[whispers] Pum, pum, suonò l'asino il suo tamburo."
+      sound: drum_beat
+  - noise:
+      ask:
+        es: "[excited] ¡Ahora todos juntos, el concierto! ¡Rebuznen, ladren, maúllen y canten! Uno, dos, tres... ¡ya!"
+        it: "[excited] Adesso tutti insieme, il concerto! Ragliate, abbaiate, miagolate e cantate! Uno, due, tre... via!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Iii-aaa! ¡Guau! ¡Miau! ¡Kikirikí!"
+        it: "[playful] Più forte! Ih-oh! Bau! Miao! Chicchirichì!"
+      done:
+        es: "[laughing] ¡Qué concierto tan ruidoso!"
+        it: "[laughing] Che concerto rumoroso!"
+      without:
+        es: "[playful] ¡Iii-aaa! ¡Guau, guau! ¡Miauuu! ¡Kikirikí!"
+        it: "[playful] Ih-oh! Bau, bau! Miaooo! Chicchirichì!"
+      sound: animal_concert
+  - scene:
+      id: robbers_run
+      picture: the two silly robbers running out of the cottage door in a comic panic, hats flying off, the tall one's mustache flapping, the short one dropping his sack, while the animal tower sings at the window
+      with: [robber_boss, robber_small, donkey, dog, cat, rooster]
+      move: surprised
+  - say: robber_boss
+    es: "[screaming, silly] ¡Ayyy! ¡Un monstruo cantante! ¡Corran!"
+    it: "[screaming, silly] Aiuto! Un mostro che canta! Scappiamo!"
+  - say: robber_small
+    es: "[whiny, panicked] ¡Espérame! ¡Espérame! ¡Yo no corro tan rápido!"
+    it: "[whiny, panicked] Aspettami! Aspettami! Io non corro così veloce!"
+  - sound: run_away
+  - say: narrator
+    es: "[laughs] ¡Y los ladrones salieron corriendo y nunca, nunca, nunca volvieron!"
+    it: "[laughs] E i ladroni scapparono via e non tornarono mai, mai, mai più!"
+
+  # Home ----------------------------------------------------------------------------------------------------
+  - choice:
+      id: food
+      ask:
+        es: "[excited] Los músicos se sentaron a cenar. ¿Qué comió el burro? ¿Zanahorias... o manzanas?"
+        it: "[excited] I musicanti si sedettero a cena. Che cosa mangiò l'asino? Carote... o mele?"
+      options:
+        carrots:
+          words: {es: [zanahorias, zanahoria, una zanahoria], it: [carote, carota, le carote]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que zanahorias!"
+            it: "[thoughtful] Mmm... secondo me, carote!"
+          then:
+            who: donkey
+            es: "[happy, munching] ¡Zanahorias! ¡Crunch, crunch! ¡Mis favoritas!"
+            it: "[happy, munching] Carote! Crunch, crunch! Le mie preferite!"
+        apples:
+          words: {es: [manzanas, manzana, una manzana], it: [mele, mela, le mele]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que manzanas!"
+            it: "[thoughtful] Mmm... secondo me, mele!"
+          then:
+            who: donkey
+            es: "[happy, munching] ¡Manzanas! ¡Crunch, crunch! ¡Mis favoritas!"
+            it: "[happy, munching] Mele! Crunch, crunch! Le mie preferite!"
+  - scene:
+      id: supper
+      about: food
+      with: [donkey, dog, cat, rooster]
+      move: happy
+      options:
+        carrots: the four animals having a happy supper around the robbers' table inside the cozy cottage, the donkey munching a big bunch of carrots
+        apples: the four animals having a happy supper around the robbers' table inside the cozy cottage, the donkey munching a basket of shiny apples
+  - say: narrator
+    es: "[warm] Y les gustó tanto la casita que se quedaron a vivir ahí, los cuatro juntos. ¡Y nunca llegaron a Bremen!"
+    it: "[warm] E la casetta gli piacque così tanto che ci rimasero a vivere, tutti e quattro insieme. E a Brema non ci arrivarono mai!"
+  - say: narrator
+    about: instrument
+    options:
+      trumpet:
+        es: "[playful] Pero todos los días hacían música: el burro con su tambor, el gallo con su trompeta, y el perro y el gato cantando."
+        it: "[playful] Ma ogni giorno facevano musica: l'asino col tamburo, il gallo con la trombetta, e il cane e il gatto a cantare."
+      maracas:
+        es: "[playful] Pero todos los días hacían música: el burro con su tambor, el gallo con sus maracas, y el perro y el gato cantando."
+        it: "[playful] Ma ogni giorno facevano musica: l'asino col tamburo, il gallo con le maracas, e il cane e il gatto a cantare."
+  - say: narrator
+    es: "[excited] ¡Bailen con la banda!"
+    it: "[excited] Ballate con la banda!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - scene:
+      id: the_end
+      about: instrument
+      with: [donkey, dog, cat, rooster]
+      options:
+        trumpet: the four animals playing music happily in front of their little cottage in the sunshine, the donkey drumming, the rooster blowing a little trumpet, the dog and the cat singing
+        maracas: the four animals playing music happily in front of their little cottage in the sunshine, the donkey drumming, the rooster shaking maracas, the dog and the cat singing
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end
