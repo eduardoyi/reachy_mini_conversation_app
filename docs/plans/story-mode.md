@@ -185,7 +185,7 @@ The softened ending (cold water, the wolf runs away) is on purpose for the 2-yea
 
 ## Next stories
 
-Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen. Ideas for later:
+Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera. Ideas for later:
 Pinocchio in short episodes (Collodi's book, drawn from his descriptions), Los tres chivitos, El hombrecito de jengibre, La gallinita roja, La liebre y la tortuga, El león
 y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
 
@@ -310,3 +310,11 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   it (15 s for the first after the cover), stays up less than 7 s, or is dropped for the next one. With the old 20 s
   gap, or without showing a choice's picture as it is made, it fails. It found the pigs' ball/kite picture replaced
   after about 5 s; the wolf's picture now waits for "¡el lobo!". A new story must pass it.
+- 2026-11-07: `la_gran_carrera` (La gran carrera / La grande corsa), a car story Enzo asked for: our own telling of
+  the tortoise and the hare with Flecha, a show-off sports car, and Tito, a slow little old truck, announced by Don
+  Bus. Flecha stops for ice cream, a car wash and a nap; Tito never stops and wins ("poquito a poquito se llega
+  lejos"). 13 moments (rev, Tito's saying three times, cap or sunglasses, the countdown, steering, chocolate or
+  strawberry, a pat for the horn, the car wash, pushing up the hill, tiptoeing past, cheering). The three roles reuse
+  Marco Bellini (Flecha), the oldest pig (Tito) and Uncle Pancho (Don Bus). The image model kept drawing a race car
+  with eyes on its windshield, the look of Pixar's Cars, so Flecha is an open-top roadster whose headlights are his
+  eyes; nothing in the story comes from any film. 142 clips (about 11k credits), 7 sounds and a race music loop.

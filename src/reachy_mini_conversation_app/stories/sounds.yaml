@@ -133,6 +133,37 @@ sound:
     prompt: >-
       A comic animal concert all at once: a donkey braying, a dog barking, a cat yowling and a rooster crowing
       together, loud silly cacophony with a drum boom, ending with a wooden cartoon crash and a boing.
+  engine_rev:
+    seconds: 2.5
+    prompt: >-
+      A cartoon racing car engine revving twice, vroom vroom, punchy and playful, for a children's cartoon, not too
+      loud.
+  truck_putter:
+    seconds: 2.5
+    prompt: >-
+      A little old cartoon truck puttering along slowly, a friendly chug-chug-chug engine with a small backfire pop,
+      cute and comic.
+  car_zoom:
+    seconds: 2
+    prompt: A cartoon race car zooming past very fast, a rising whoosh and a short tyre squeal, comic, not too loud.
+  car_horn:
+    seconds: 1.5
+    prompt: A cute little cartoon car horn honking twice, beep beep, friendly and bright.
+  crowd_cheer:
+    seconds: 3
+    prompt: >-
+      A small happy crowd of children and toy cars cheering at a race, with little horns beeping and clapping,
+      joyful, not too loud.
+  car_wash:
+    seconds: 3
+    prompt: >-
+      A cartoon car wash: water spraying, soapy foam squishing and big brushes swishing, with bubbles popping,
+      playful.
+  truck_climb:
+    seconds: 3
+    prompt: >-
+      A little old cartoon truck straining up a steep hill, its engine chugging slower and slower, then a happy
+      toot as it reaches the top, comic.
 
 music:
   story_move:
@@ -160,3 +191,8 @@ music:
     prompt: >-
       Sneaky tiptoe music for a children's cartoon, about 90 bpm: soft pizzicato strings, a bassoon and light
       woodblock taps, curious and comic, never scary, no vocals.
+  story_race:
+    seconds: 15
+    prompt: >-
+      Fast fun racing music for preschool children, about 140 bpm: a driving bouncy bass, snare rolls, a bright
+      brass melody and slide whistles, like a cartoon car chase, playful, never scary, no vocals.

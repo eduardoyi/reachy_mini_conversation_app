@@ -1,0 +1,392 @@
+# La gran carrera / La grande corsa (docs/plans/story-mode.md).
+# Our own story for a 2- and a 4-year-old, after the fable of the tortoise and the hare, told with cars for Enzo:
+# Flecha, a fast show-off sports car, races Tito, a slow little old truck. Flecha stops for ice cream, a car wash and
+# a nap; Tito never stops, and wins. About 6 minutes with 13 moments where the children join in. Our own characters,
+# nothing from any film. Spanish is Venezuelan (ustedes, carro, corneta, chévere, la barra), Italian is standard.
+
+key: la_gran_carrera
+title:
+  es: La gran carrera
+  it: La grande corsa
+names:
+  es: [la gran carrera, gran carrera, la carrera, carrera, el cuento de la carrera, el cuento de los carros,
+       la carrera de carros, flecha y tito, el carro y el camioncito, el cuento de carros]
+  it: [la grande corsa, grande corsa, la corsa, corsa, la storia della corsa, la storia delle macchine,
+       la corsa delle macchine, freccia e tito]
+pitch:
+  es: "Flecha es el carro más rápido del pueblo, y Tito el más lento. ¿Quién ganará la carrera?"
+  it: "Freccia è il bolide più veloce del paese, e Tito il più lento. Chi vincerà la corsa?"
+rules: >-
+  Reachy tells La gran carrera (the tortoise and the hare with cars: Flecha, a fast show-off sports car, races Tito,
+  a slow little old truck, and Tito wins by never stopping), about 6 minutes, in Spanish or Italian, with character
+  voices, sounds and music. The children join in: they rev the engine, count down the start, steer, honk Tito's horn
+  by patting his head, wash the car, push Tito up the hill, tiptoe past the sleeping car, cheer, say Tito's saying
+  ("poquito a poquito se llega lejos") and pick small things (a cap or sunglasses, chocolate or strawberry ice
+  cream). The story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the sleek sports car and the little old pickup truck side by side behind a starting line painted on a country road, the jolly bus with his checkered flag behind them, green hills and a sunny sky
+  with: [flecha, tito, don_bus]
+
+steps:
+  # Flecha --------------------------------------------------------------------------------------------------
+  - scene:
+      id: show_off
+      picture: the sleek sports car zooming along a winding country road past a little town, a cloud of dust and speed lines behind him, a proud cheeky grin
+      with: [flecha]
+      move: excited
+  - say: narrator
+    es: "[warm] Había una vez, en un pueblito lleno de curvas, un carro de carreras que se llamaba Flecha."
+    it: "[warm] C'era una volta, in un paesino pieno di curve, un bolide da corsa che si chiamava Freccia."
+  - say: narrator
+    es: "[playful] Flecha era rapidísimo. Y le encantaba que todo el mundo lo supiera."
+    it: "[playful] Freccia era velocissimo. E gli piaceva tanto che tutti lo sapessero."
+  - say: flecha
+    es: "[boastful] ¡Miren qué rápido soy! ¡Brrrum, brrrum! ¡Nadie me gana!"
+    it: "[boastful] Guardate quanto sono veloce! Brum, brum! Nessuno mi batte!"
+  - noise:
+      ask:
+        es: "[excited] ¿Saben hacer el motor de Flecha? Uno, dos, tres... ¡brrrum!"
+        it: "[excited] Sapete fare il motore di Freccia? Uno, due, tre... brum!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Brrrruuum!"
+        it: "[playful] Più forte! Brruuum!"
+      done:
+        es: "[amazed] ¡Qué motor tan potente!"
+        it: "[amazed] Che motore potente!"
+      without:
+        who: flecha
+        es: "[boastful] ¡Brrrruuum! ¡Así suena el más rápido del pueblo!"
+        it: "[boastful] Brruuum! Ecco il più veloce del paese!"
+      sound: engine_rev
+
+  # Tito ----------------------------------------------------------------------------------------------------
+  - sound: truck_putter
+  - scene:
+      id: tito
+      picture: the little old pickup truck chugging slowly along the road with a wooden crate of oranges in his back, a little puff of smoke behind him, smiling calmly, flowers by the roadside
+      with: [tito]
+      move: happy
+  - say: narrator
+    es: "[warm] En ese mismo pueblito vivía Tito, un camioncito viejito. Tito iba despacito, despacito... pero nunca se paraba."
+    it: "[warm] Nello stesso paesino viveva Tito, un camioncino vecchiotto. Tito andava piano piano... ma non si fermava mai."
+  - say: tito
+    es: "[calm, cheerful] Buenos días, Flecha. Yo voy poquito a poquito... pero siempre llego."
+    it: "[calm, cheerful] Buongiorno, Freccia. Io vado pian pianino... ma arrivo sempre."
+  - say: flecha
+    es: "[laughs, mocking] ¡Ja, ja, ja! ¿Tú? ¡Eres más lento que una tortuga! A ver... ¡te reto a una carrera!"
+    it: "[laughs, mocking] Ah, ah, ah! Tu? Sei più lento di una tartaruga! Sai che c'è? Ti sfido a una corsa!"
+  - say: tito
+    es: "[calm, kind] Está bien, Flecha. Acepto."
+    it: "[calm, kind] Va bene, Freccia. Accetto."
+  - chorus:
+      ask:
+        es: "[warm] Tito siempre dice lo mismo. Díganlo conmigo: ¡poquito a poquito se llega lejos!"
+        it: "[warm] Tito dice sempre la stessa cosa. Ditelo con me: pian pianino si va lontano!"
+      done:
+        who: tito
+        es: "[warmly] ¡Eso es! Poquito a poquito se llega lejos."
+        it: "[warmly] Proprio così! Pian pianino si va lontano."
+      without:
+        who: tito
+        es: "[calm] Poquito a poquito se llega lejos."
+        it: "[calm] Pian pianino si va lontano."
+
+  # The start -----------------------------------------------------------------------------------------------
+  - choice:
+      id: gear
+      ask:
+        es: "[curious] Tito se preparó para la carrera. ¿Qué se puso? ¿Una gorrita... o unos lentes de sol?"
+        it: "[curious] Tito si preparò per la corsa. Che cosa si mise? Un cappellino... o degli occhiali da sole?"
+      options:
+        cap:
+          words: {es: [gorra, gorrita, una gorra, gorro, cachucha], it: [cappellino, cappello, berretto, il cappellino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que una gorrita!"
+            it: "[thoughtful] Mmm... secondo me, un cappellino!"
+          then:
+            who: tito
+            es: "[proud, cheerful] ¡Una gorrita de carreras! ¡Me queda chévere!"
+            it: "[proud, cheerful] Un cappellino da corsa! Mi sta benissimo!"
+        sunglasses:
+          words: {es: [lentes, lentes de sol, anteojos, gafas, los lentes], it: [occhiali, occhiali da sole, gli occhiali]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que unos lentes de sol!"
+            it: "[thoughtful] Mmm... secondo me, degli occhiali da sole!"
+          then:
+            who: tito
+            es: "[proud, cheerful] ¡Unos lentes de sol! ¡Qué elegante me veo!"
+            it: "[proud, cheerful] Degli occhiali da sole! Come sono elegante!"
+  - scene:
+      id: start
+      about: gear
+      with: [tito, flecha, don_bus]
+      options:
+        cap: the little old pickup truck wearing a little racing cap on his roof, next to the sleek sports car at a starting line painted on the road, the jolly bus with his checkered flag beside them, a crowd of little cars watching
+        sunglasses: the little old pickup truck wearing big round sunglasses over his headlight eyes, next to the sleek sports car at a starting line painted on the road, the jolly bus with his checkered flag beside them, a crowd of little cars watching
+      move: excited
+  - sound: crowd_cheer
+  - say: don_bus
+    es: "[booming, cheerful] ¡Bienvenidos a la gran carrera del pueblo! ¡Flecha contra Tito! ¡Hasta el árbol grande de la colina!"
+    it: "[booming, cheerful] Benvenuti alla grande corsa del paese! Freccia contro Tito! Fino al grande albero sulla collina!"
+  - chorus:
+      ask:
+        es: "[excited] ¡Ayuden a Don Bus a contar! Todos juntos: ¡tres, dos, uno!"
+        it: "[excited] Aiutate il signor Bus a contare! Tutti insieme: tre, due, uno!"
+      done:
+        who: don_bus
+        es: "[booming] ¡ARRANQUEN!"
+        it: "[booming] VIA!"
+      without:
+        who: don_bus
+        es: "[booming] ¡Tres, dos, uno... ARRANQUEN!"
+        it: "[booming] Tre, due, uno... VIA!"
+  - sound: car_zoom
+  - scene:
+      id: race_start
+      picture: the sleek sports car zooming off in a big cloud of dust with speed lines, already far ahead, while the little old pickup truck starts slowly with a little puff of smoke, the jolly bus at the starting line with his checkered flag
+      with: [flecha, tito, don_bus]
+      move: surprised
+  - say: narrator
+    es: "[excited] ¡Fiuuuuu! Flecha salió disparado. Y Tito... arrancó despacito. Brrr... brrr..."
+    it: "[excited] Fiuuuu! Freccia partì come un razzo. E Tito... partì piano piano. Brrr... brrr..."
+  - copy:
+      ask:
+        es: "[playful] ¡Manejen con Tito! Agarren el volante... curva para acá... ¡y curva para allá!"
+        it: "[playful] Guidate con Tito! Tenete il volante... curva di qua... e curva di là!"
+      done:
+        es: "[delighted] ¡Qué buenos choferes!"
+        it: "[delighted] Che bravi autisti!"
+      move: excited
+      music: story_race
+      seconds: 6
+
+  # Ice cream -----------------------------------------------------------------------------------------------
+  - say: narrator
+    es: "[playful] Flecha iba tan adelante que pensó: ¡tengo tiempo de sobra!"
+    it: "[playful] Freccia era così avanti che pensò: ho tutto il tempo che voglio!"
+  - say: flecha
+    es: "[smug] Tito está lejísimos. Me voy a comer un heladito."
+    it: "[smug] Tito è lontanissimo. Mi mangio un bel gelato."
+  - choice:
+      id: flavor
+      ask:
+        es: "[curious] ¿De qué sabor pidió el helado? ¿De chocolate... o de fresa?"
+        it: "[curious] Di che gusto lo prese il gelato? Al cioccolato... o alla fragola?"
+      options:
+        chocolate:
+          words: {es: [chocolate, chocolatico, de chocolate], it: [cioccolato, cioccolata, al cioccolato]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que de chocolate!"
+            it: "[thoughtful] Mmm... secondo me, al cioccolato!"
+          then:
+            who: flecha
+            es: "[delighted] ¡De chocolate! Ñam, ñam... ¡qué sabroso!"
+            it: "[delighted] Al cioccolato! Gnam, gnam... che buono!"
+        strawberry:
+          words: {es: [fresa, fresita, de fresa], it: [fragola, alla fragola, fragolina]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que de fresa!"
+            it: "[thoughtful] Mmm... secondo me, alla fragola!"
+          then:
+            who: flecha
+            es: "[delighted] ¡De fresa! Ñam, ñam... ¡riquísimo!"
+            it: "[delighted] Alla fragola! Gnam, gnam... buonissimo!"
+  - scene:
+      id: ice_cream
+      about: flavor
+      with: [flecha]
+      options:
+        chocolate: the sleek sports car parked at a little ice cream stand by the road, happily licking a giant chocolate ice cream cone that stands in a holder on the counter, his eyes closed in delight
+        strawberry: the sleek sports car parked at a little ice cream stand by the road, happily licking a giant strawberry ice cream cone that stands in a holder on the counter, his eyes closed in delight
+      move: happy
+  - sound: truck_putter
+  - say: narrator
+    es: "[whispers] Y mientras Flecha comía helado... ¿quién pasó por ahí? ¡Tito! Poquito a poquito."
+    it: "[whispers] E mentre Freccia mangiava il gelato... chi passò di lì? Tito! Pian pianino."
+  - pat:
+      ask:
+        es: "[excited] Tito quiere saludar con su corneta. ¡Denle un golpecito a mi cabeza para tocarla!"
+        it: "[excited] Tito vuole salutare con il clacson. Datemi un colpetto sulla testa per suonarlo!"
+      done:
+        es: "[laughs] ¡Pi, pi! ¡Hola, Flecha!"
+        it: "[laughs] Bip, bip! Ciao, Freccia!"
+      without:
+        es: "[playful] Pi, pi, tocó Tito su corneta."
+        it: "[playful] Bip, bip, suonò Tito col clacson."
+      sound: car_horn
+  - say: flecha
+    es: "[surprised] ¿Tito? ¡Ay, no! ¡Me pasó!"
+    it: "[surprised] Tito? Oh, no! Mi ha superato!"
+
+  # The car wash --------------------------------------------------------------------------------------------
+  - sound: car_zoom
+  - say: narrator
+    es: "[playful] Flecha arrancó, ¡fiuuu!, y pasó a Tito otra vez. Pero se había manchado todo de helado."
+    it: "[playful] Freccia ripartì, fiuuu!, e superò di nuovo Tito. Ma si era sporcato tutto di gelato."
+  - say: flecha
+    es: "[fussy] ¡Ay, qué asco, estoy todo pegajoso! ¡Un carro tan bonito como yo tiene que brillar!"
+    it: "[fussy] Che schifo, sono tutto appiccicoso! Un bolide bello come me deve brillare!"
+  - scene:
+      id: car_wash
+      picture: the sleek sports car inside a car wash full of bubbles and foam, big round brushes spinning around him, looking delighted, bubbles floating everywhere
+      with: [flecha]
+      move: happy
+  - sound: car_wash
+  - copy:
+      ask:
+        es: "[playful] ¡Ayúdenlo a lavarse! Froten, froten, con mucha espuma... ¡y sacúdanse las burbujas!"
+        it: "[playful] Aiutatelo a lavarsi! Strofinate, strofinate, con tanta schiuma... e scrollatevi le bolle!"
+      done:
+        es: "[laughing] ¡Quedó brillante como un espejo!"
+        it: "[laughing] È lucido come uno specchio!"
+      move: happy
+      music: story_move
+      seconds: 6
+  - say: narrator
+    es: "[whispers] Y mientras Flecha se lavaba... ¿quién pasó otra vez? ¡Tito!"
+    it: "[whispers] E mentre Freccia si lavava... chi passò di nuovo? Tito!"
+  - chorus:
+      ask:
+        es: "[warm] Y Tito iba diciendo... ¡poquito a poquito se llega lejos!"
+        it: "[warm] E Tito diceva... pian pianino si va lontano!"
+      done:
+        who: tito
+        es: "[warmly] ¡Eso es! Poquito a poquito."
+        it: "[warmly] Proprio così! Pian pianino."
+      without:
+        who: tito
+        es: "[calm] Poquito a poquito se llega lejos."
+        it: "[calm] Pian pianino si va lontano."
+
+  # The hill ------------------------------------------------------------------------------------------------
+  - scene:
+      id: hill
+      picture: the little old pickup truck slowly climbing a steep green hill, puffing a little smoke, determined and smiling, the big tree at the top of the hill far away
+      with: [tito]
+      move: excited
+  - say: narrator
+    es: "[playful] Pero entonces llegó una colina muy empinada. ¡Uf, qué subida!"
+    it: "[playful] Ma poi arrivò una collina ripidissima. Uff, che salita!"
+  - noise:
+      ask:
+        es: "[excited] ¡Ayudemos a Tito a subir! Empujen fuerte y griten: ¡arriba, Tito!"
+        it: "[excited] Aiutiamo Tito a salire! Spingete forte e gridate: su, Tito!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Arriba, Tito!"
+        it: "[playful] Più forte! Su, Tito!"
+      done:
+        who: tito
+        es: "[happy, out of breath] ¡Gracias, amigos! ¡Ya subí!"
+        it: "[happy, out of breath] Grazie, amici! Ce l'ho fatta!"
+      without:
+        who: tito
+        es: "[straining] Uf... uf... poquito a poquito... ¡ya subí!"
+        it: "[straining] Uff... uff... pian pianino... ce l'ho fatta!"
+      sound: truck_climb
+
+  # The nap -------------------------------------------------------------------------------------------------
+  - scene:
+      id: nap
+      picture: the sleek sports car parked fast asleep with his headlight eyes shut tight and a sleepy smile, in the shade of a big tree beside the road, little Zzz letters floating above him, a small bird sitting on his spoiler, the finish line banner in the distance
+      with: [flecha]
+      move: sleepy
+  - say: narrator
+    es: "[softly] ¿Y Flecha? Flecha ya estaba cerquita de la meta. Pero se sentía tan rápido... que se echó una siestecita debajo de un árbol."
+    it: "[softly] E Freccia? Freccia era già vicino al traguardo. Ma si sentiva così veloce... che si fece un pisolino sotto un albero."
+  - say: flecha
+    es: "[yawning, smug] Ahhh... Tito tarda horas. Duermo un ratico y gano igual."
+    it: "[yawning, smug] Aaah... Tito ci metterà ore. Faccio un pisolino e vinco lo stesso."
+  - sound: snore
+  - scene:
+      id: tiptoe
+      picture: the little old pickup truck quietly creeping past the sports car sleeping under the big tree, heading towards the finish line banner, with a happy secret smile
+      with: [tito, flecha]
+  - copy:
+      ask:
+        es: "[whispers] Shhh... Tito viene llegando. ¡Pasen con él de puntillas, sin hacer ruido! Shhh..."
+        it: "[whispers] Shhh... Tito sta arrivando. Passate con lui in punta di piedi, senza fare rumore! Shhh..."
+      done:
+        es: "[whispers, giggling] ¡Flecha ni se enteró!"
+        it: "[whispers, giggling] Freccia non si è accorto di niente!"
+      move: attentive
+      music: story_tiptoe
+      seconds: 6
+
+  # The finish ----------------------------------------------------------------------------------------------
+  - say: narrator
+    es: "[building excitement] ¡La meta estaba ahí nomás! Y todos los carritos del pueblo empezaron a gritar..."
+    it: "[building excitement] Il traguardo era lì vicino! E tutte le macchinine del paese cominciarono a gridare..."
+  - noise:
+      ask:
+        es: "[excited] ¡Griten con ellos! ¡Vamos, Tito! ¡Vamos, Tito!"
+        it: "[excited] Gridate con loro! Forza, Tito! Forza, Tito!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Vamos, Tito!"
+        it: "[playful] Più forte! Forza, Tito!"
+      done:
+        es: "[amazed] ¡Qué barra tan bonita tiene Tito!"
+        it: "[amazed] Che tifo meraviglioso per Tito!"
+      without:
+        es: "[excited] ¡Vamos, Tito! ¡Vamos, Tito!, gritaba todo el pueblo."
+        it: "[excited] Forza, Tito! Forza, Tito!, gridava tutto il paese."
+      sound: crowd_cheer
+  - say: narrator
+    es: "[playful] Con tanto ruido... ¡Flecha se despertó!"
+    it: "[playful] Con tutto quel rumore... Freccia si svegliò!"
+  - say: flecha
+    es: "[panicked] ¿Qué? ¿Tito? ¡Noooo! ¡Brrrum, brrrum!"
+    it: "[panicked] Cosa? Tito? Nooo! Brum, brum!"
+  - sound: car_zoom
+  - scene:
+      id: finish
+      picture: the little old pickup truck crossing the finish line under a big banner just ahead of the sports car racing up behind him in a cloud of dust, the jolly bus with his checkered flag, little cars cheering
+      with: [tito, flecha, don_bus]
+      move: success
+  - say: narrator
+    es: "[excited] Flecha corrió, corrió y corrió... ¡pero Tito cruzó la meta primero!"
+    it: "[excited] Freccia corse, corse e corse... ma Tito tagliò il traguardo per primo!"
+  - say: don_bus
+    es: "[booming, delighted] ¡Y el ganador de la gran carrera es... ¡Tito!"
+    it: "[booming, delighted] E il vincitore della grande corsa è... Tito!"
+
+  # Friends -------------------------------------------------------------------------------------------------
+  - scene:
+      id: friends
+      picture: the sports car looking a little embarrassed and the little old pickup truck smiling kindly, side by side at the finish line, a shiny medal hanging from the truck's side mirror
+      with: [flecha, tito]
+      move: loving
+  - say: flecha
+    es: "[embarrassed, sincere] Tito... perdóname por burlarme de ti. ¡Ganaste!"
+    it: "[embarrassed, sincere] Tito... scusami se ti ho preso in giro. Hai vinto!"
+  - say: tito
+    es: "[warm] No importa, Flecha. Ser rápido es chévere... pero lo importante es no parar."
+    it: "[warm] Non importa, Freccia. Essere veloci è bello... ma la cosa importante è non fermarsi mai."
+  - chorus:
+      ask:
+        es: "[warm] ¿Y qué aprendió Flecha? ¡Díganlo todos juntos: poquito a poquito se llega lejos!"
+        it: "[warm] E che cosa imparò Freccia? Ditelo tutti insieme: pian pianino si va lontano!"
+      done:
+        who: flecha
+        es: "[laughing] ¡Poquito a poquito se llega lejos! ¡Ahora sí lo sé!"
+        it: "[laughing] Pian pianino si va lontano! Adesso lo so!"
+      without:
+        who: flecha
+        es: "[laughing] Poquito a poquito se llega lejos. ¡Ahora sí lo sé!"
+        it: "[laughing] Pian pianino si va lontano. Adesso lo so!"
+  - say: narrator
+    es: "[excited] ¡Y esa noche el pueblo hizo una gran fiesta! ¡Bailen con Flecha y con Tito!"
+    it: "[excited] E quella sera il paese fece una grande festa! Ballate con Freccia e Tito!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - scene:
+      id: the_end
+      picture: the sports car and the little old pickup truck driving happily side by side along a country road at sunset, the jolly bus and the little cars of the town following behind in a parade
+      with: [flecha, tito, don_bus]
+  - say: narrator
+    es: "[warm, slowing down] Y desde ese día, Flecha y Tito fueron muy buenos amigos. A veces rapidito... y a veces, poquito a poquito."
+    it: "[warm, slowing down] E da quel giorno, Freccia e Tito furono grandi amici. A volte velocissimi... e a volte, pian pianino."
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

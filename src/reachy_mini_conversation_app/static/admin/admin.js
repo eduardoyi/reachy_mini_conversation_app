@@ -389,6 +389,7 @@ const GAME_CARDS = {
   nabo_gigante: { name: "The Enormous Turnip", shelf: "stories", facts: ["About 5 minutes", "Kids pull, call and make animal noises"] },
   ricitos_de_oro: { name: "Goldilocks", shelf: "stories", facts: ["About 6 minutes", "Kids blow, snore and wake her up"] },
   musicos_de_bremen: { name: "The Town Musicians", shelf: "stories", facts: ["About 6 minutes", "Kids bray, bark, meow and crow"] },
+  la_gran_carrera: { name: "The Big Race", shelf: "stories", facts: ["About 6 minutes", "Kids rev, honk, steer and cheer"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],

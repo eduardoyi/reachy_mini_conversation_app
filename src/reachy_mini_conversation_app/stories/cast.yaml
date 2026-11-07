@@ -181,3 +181,34 @@ robber_small:
   look: >-
     a short, round robber with a little black eye mask, a striped jumper, a bald head with one single curly hair on
     top and a big empty sack; silly, never scary
+
+flecha:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Marco Bellini": theatrical, grand and showy. Flecha, a fast,
+    boastful racing car who learns not to show off.
+  voice: "hjcB1XpogPinAIk1gMPk"
+  look: >-
+    a sleek, low, shiny open-top sports roadster with no roof, only a tiny low windscreen, a big rear spoiler, two
+    bold racing stripes over his long pointed hood and a big plain white circle on each door; his face is on the front of his
+    nose: his two round headlights are his big confident eyes with cocky eyebrows, and a wide cheeky grin is his
+    front grille; nobody sits inside; a car only, with four wheels, no arms, no hands and no legs
+
+tito:
+  description: >-
+    Reuses the oldest pig's voice (calm, patient, brave and confident). Tito, a slow little old truck who never
+    stops.
+  voice: "bK8pCj0hy6BYv8VxrfSx"
+  look: >-
+    a small, round, old-fashioned pickup truck with a short rounded hood, a little dent on one front fender, a
+    wooden crate in his open back and chunky round tyres; his two round headlights are his big gentle eyes and a
+    kind smile sits on his grille; a truck only, with four wheels, no arms, no hands and no legs
+
+don_bus:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Uncle Pancho": big, jolly, loud and booming, a deep, hearty voice.
+    Don Bus, the town's bus, who announces the race.
+  voice: "RmaSlHASRRFcAl1uxzhA"
+  look: >-
+    a big, boxy, jolly old town bus with a row of round windows along his side, a megaphone on his roof and a
+    checkered race flag on a pole fixed to his roof; his two headlights are his big happy eyes with a bushy mustache
+    under them, above a broad smiling grille; a bus only, with four wheels, no arms, no hands and no legs
