@@ -168,6 +168,8 @@ class StoryGame(Game):
         self._title = ""
         self._waiting: Picture | None = None  # a picture that came too soon after the last one
         self._shown_at: float | None = None  # story time of the last picture
+        self._next: Step | None = None  # the step after the one playing
+        self._early: Step | None = None  # a choice's scene already shown before its line
 
     # Playing -------------------------------------------------------------------------------------
 
@@ -179,6 +181,7 @@ class StoryGame(Game):
         self._pending.append("story_intro")
         steps = self._story.steps
         for number, step in enumerate(steps, 1):
+            self._next = steps[number] if number < len(steps) else None
             await context.playing()
             context.progress = f"{number}/{len(steps)}"
             context.played()
@@ -197,6 +200,8 @@ class StoryGame(Game):
         elif kind == "sound":
             self._pending.append(step.name)
         elif kind == "scene":
+            if step is self._early:  # shown as its choice was made
+                return
             picture = step.pictures.get(self._chosen.get(step.choice, "") if step.choice else "")
             if picture is None and step.pictures:  # a choice that was never asked
                 picture = next(iter(step.pictures.values()))
@@ -281,6 +286,13 @@ class StoryGame(Game):
             logger.info("Story choice %s: %s (picked by Richie)", step.choice, option.key)
             await self._say(context, option.picked)
         self._chosen[step.choice] = option.key
+        # The picture of what was picked goes up now, as Richie says what happened, not after it.
+        following = self._next
+        if following is not None and following.kind == "scene" and following.choice == step.choice:
+            self._early = following
+            self._scene(context, following.pictures.get(option.key))
+            if following.move:
+                context.services.emotion(following.move)
         await self._say(context, option.then)
 
     async def _again(self, context: GameContext) -> None:

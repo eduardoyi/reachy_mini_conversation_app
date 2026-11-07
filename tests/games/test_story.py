@@ -388,6 +388,28 @@ async def test_yes_to_another_story_tells_it_again(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_choices_picture_is_up_before_richie_says_what_happened(tmp_path: Path) -> None:
+    """The red house shows as soon as red is picked, before "¡Roja!", and is not put up a second time."""
+    reachy = FakeReachy(real_clock=True, recorded=True)
+    factory = _game(_folder(tmp_path), tmp_path / "data", record=True)
+    host = GameHost(reachy.services, {"test_story": factory})
+    screens_by_line: dict[str, list[bytes]] = {}
+
+    class Clips(list):  # what was on screen as each line played
+        def append(self, item: tuple[str, int]) -> None:
+            screens_by_line[item[0]] = list(reachy.screens)
+            super().append(item)
+
+    reachy.clips = Clips()
+    answering = asyncio.create_task(_answer_clips(reachy, {"¿Roja o azul?": "roja", "¿Otro cuento?": "no"}))
+    assert host.start("test_story", "es") is None
+    await _until(lambda: host.state.value == "idle", 8.0)
+    answering.cancel()
+    assert screens_by_line["¡Roja!"][-1] == b"screen house-red"
+    assert reachy.screens.count(b"screen house-red") == 1
+
+
+@pytest.mark.asyncio
 async def test_pictures_wait_for_the_gap_so_the_screen_does_not_flash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -344,6 +344,10 @@ steps:
         es: "[inhales deeply] ¡Fuuuuuuuu! [panting] Fuuu... fu..."
         it: "[inhales deeply] Fuuuuuuuu! [panting] Fuuu... fu..."
       sound: big_blow
+  - scene:
+      id: wolf_dizzy
+      picture: the goofy wolf sitting on the ground, out of breath and dizzy, with little stars and birds circling his head, the brick house standing strong behind him
+      with: [wolf]
   - say: narrator
     about: color
     options:
@@ -353,10 +357,6 @@ steps:
       blue:
         es: "[playful] El lobo sopló tanto que se mareó. Y la casita azul seguía ahí, fuerte y bonita."
         it: "[playful] Il lupo soffiò così tanto che gli girò la testa. E la casetta blu era sempre lì, forte e bella."
-  - scene:
-      id: wolf_dizzy
-      picture: the goofy wolf sitting on the ground, out of breath and dizzy, with little stars and birds circling his head, the brick house standing strong behind him
-      with: [wolf]
   - sound: dizzy
   - say: wolf
     es: "[dizzy, silly] Uy... todo me da vueltas... [mischievously] ¡Ya sé! ¡Entraré por la chimenea!"

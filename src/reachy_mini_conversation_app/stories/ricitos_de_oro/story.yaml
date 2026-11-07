@@ -226,17 +226,17 @@ steps:
     it: "[surprised] Ahi! Si è rotta la seggiolina!"
 
   # The beds ------------------------------------------------------------------------------------------------
-  - scene:
-      id: beds
-      picture: Goldilocks asleep and smiling in a tiny bed in the bears' bedroom upstairs, next to a huge bed and a middle-sized bed with a fluffy quilt
-      with: [goldilocks]
-      move: sleepy
   - say: goldilocks
     es: "[yawns] Ahhh... qué sueño tengo."
     it: "[yawns] Ahhh... che sonno che ho."
   - say: narrator
     es: "[softly] Subió las escaleras y vio tres camas. La grandota era muy alta... la mediana era muy esponjosa... y la chiquitica... [whispers] era perfecta."
     it: "[softly] Salì le scale e vide tre letti. Quello grande era troppo alto... quello medio era troppo soffice... e quello piccolino... [whispers] era perfetto."
+  - scene:
+      id: beds
+      picture: Goldilocks asleep and smiling in a tiny bed in the bears' bedroom upstairs, next to a huge bed and a middle-sized bed with a fluffy quilt
+      with: [goldilocks]
+      move: sleepy
   - noise:
       ask:
         es: "[whispers] Ricitos de Oro se quedó dormida. ¿Saben roncar? ¡Rrrrr... rrrrr!"

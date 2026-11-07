@@ -300,3 +300,7 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   gap is now 5 s (the TRMNL takes about 5 s more to fetch and draw), and in a simulation from the clip lengths no
   scene of the four stories is late except the first after the cover (about 9 s, while the opening plays). El nabo
   gigante now says "jalar" (jalan, jalen, jalaron), as in Venezuela, instead of "tirar": 13 clips re-recorded.
+- 2026-11-07: every scene of Los tres cerditos, Ricitos de Oro and Los músicos de Bremen checked against the lines
+  around it. A picture that depends on a choice (the ball or the kite, the feast, Baby Bear's present, the animals'
+  supper) now goes up as soon as the choice is made, before Richie says what happened, not after. The dizzy wolf
+  now shows before "el lobo sopló tanto que se mareó", and Goldilocks asleep after she climbs the stairs, not before.
