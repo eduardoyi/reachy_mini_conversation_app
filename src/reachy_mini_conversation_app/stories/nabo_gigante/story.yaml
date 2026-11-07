@@ -86,11 +86,11 @@ steps:
 
   # Grandpa pulls -------------------------------------------------------------------------------------------
   - say: narrator
-    es: "[playful] El abuelito agarró el nabo por las hojas... y tiró."
+    es: "[playful] El abuelito agarró el nabo por las hojas... y jaló."
     it: "[playful] Il nonnino afferrò la rapa per le foglie... e tirò."
   - copy:
       ask:
-        es: "[excited] ¡Ayúdenlo a tirar! Agarren fuerte... ¡y tiren, tiren, tiren!"
+        es: "[excited] ¡Ayúdenlo a jalar! Agarren fuerte... ¡y jalen, jalen, jalen!"
         it: "[excited] Aiutatelo a tirare! Tenete forte... e tirate, tirate, tirate!"
       done:
         es: "[strained, playful] ¡Uf! ¡Qué fuerza!"
@@ -100,7 +100,7 @@ steps:
       seconds: 5
   - sound: pull_strain
   - say: narrator
-    es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+    es: "[playful] Jalan y jalan... [sighs] ¡y no sale!"
     it: "[playful] Tira e tira... [sighs] e non viene!"
   - say: grandpa
     es: "[out of breath] Ay, ay, ay... solo no puedo. ¡Voy a llamar a la abuela!"
@@ -125,17 +125,17 @@ steps:
       with: [grandpa, grandma]
       move: happy
   - say: narrator
-    es: "[playful] La abuela agarró al abuelo, el abuelo agarró el nabo... y tiraron."
+    es: "[playful] La abuela agarró al abuelo, el abuelo agarró el nabo... y jalaron."
     it: "[playful] La nonna prese il nonno, il nonno prese la rapa... e tirarono."
   - chorus:
       ask:
-        es: "[excited] ¡Digan conmigo! ¡Tiran y tiran!"
+        es: "[excited] ¡Digan conmigo! ¡Jalan y jalan!"
         it: "[excited] Dite con me! Tira e tira!"
       done:
-        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        es: "[playful] Jalan y jalan... [sighs] ¡y no sale!"
         it: "[playful] Tira e tira... [sighs] e non viene!"
       without:
-        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        es: "[playful] Jalan y jalan... [sighs] ¡y no sale!"
         it: "[playful] Tira e tira... [sighs] e non viene!"
   - sound: pull_strain
   - say: grandma
@@ -151,7 +151,7 @@ steps:
       picture: Lola holding on to the grandmother, who holds on to the grandfather, who pulls the gigantic turnip, all three in a row leaning back
       with: [grandpa, grandma, girl]
   - say: narrator
-    es: "[playful] Lola agarró a la abuela, la abuela al abuelo, el abuelo el nabo... y tiraron, y tiraron..."
+    es: "[playful] Lola agarró a la abuela, la abuela al abuelo, el abuelo el nabo... y jalaron, y jalaron..."
     it: "[playful] Lola prese la nonna, la nonna il nonno, il nonno la rapa... e tirarono, tirarono..."
   - say: narrator
     es: "[sighs, playful] ¡Y no salió!"
@@ -174,7 +174,7 @@ steps:
         it: "[playful] E il cane arrivò di corsa, scodinzolando."
       sound: dog_bark
   - say: dog
-    es: "[eager] ¡Guau! ¡Aquí estoy! ¿Jugamos? ¿Tiramos? ¡Yo ayudo!"
+    es: "[eager] ¡Guau! ¡Aquí estoy! ¿Jugamos? ¿Jalamos? ¡Yo ayudo!"
     it: "[eager] Bau! Eccomi! Giochiamo? Tiriamo? Io aiuto!"
 
   # The dog joins -------------------------------------------------------------------------------------------
@@ -185,13 +185,13 @@ steps:
       move: happy
   - chorus:
       ask:
-        es: "[excited] ¡Todos a tirar! ¡Digan conmigo! ¡Tiran y tiran!"
+        es: "[excited] ¡Todos a jalar! ¡Digan conmigo! ¡Jalan y jalan!"
         it: "[excited] Tutti a tirare! Dite con me! Tira e tira!"
       done:
-        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        es: "[playful] Jalan y jalan... [sighs] ¡y no sale!"
         it: "[playful] Tira e tira... [sighs] e non viene!"
       without:
-        es: "[playful] Tiran y tiran... [sighs] ¡y no sale!"
+        es: "[playful] Jalan y jalan... [sighs] ¡y no sale!"
         it: "[playful] Tira e tira... [sighs] e non viene!"
   - sound: pull_strain
   - say: dog
@@ -225,10 +225,10 @@ steps:
     it: "[playful] Il gatto prese il cane, il cane Lola, Lola la nonna, la nonna il nonno, il nonno la rapa..."
   - copy:
       ask:
-        es: "[excited] ¡Tiren con ellos! ¡Fuerte, fuerte, más fuerte!"
+        es: "[excited] ¡Jalen con ellos! ¡Fuerte, fuerte, más fuerte!"
         it: "[excited] Tirate con loro! Forte, forte, più forte!"
       done:
-        es: "[sighs, playful] Tiran y tiran... ¡y no sale!"
+        es: "[sighs, playful] Jalan y jalan... ¡y no sale!"
         it: "[sighs, playful] Tira e tira... e non viene!"
       move: impatient
       music: story_move
@@ -273,16 +273,16 @@ steps:
     it: "[building excitement] Il topo prese il gatto, il gatto il cane, il cane Lola, Lola la nonna, la nonna il nonno, e il nonno... la rapa!"
   - noise:
       ask:
-        es: "[excited] ¡Ahora sí, todos juntos! ¡Uno, dos, tres... ¡TIREN!"
+        es: "[excited] ¡Ahora sí, todos juntos! ¡Uno, dos, tres... ¡JALEN!"
         it: "[excited] Adesso sì, tutti insieme! Uno, due, tre... TIRATE!"
       louder:
-        es: "[playful] ¡Ya casi! ¡Más fuerte! ¡TIREN!"
+        es: "[playful] ¡Ya casi! ¡Más fuerte! ¡JALEN!"
         it: "[playful] Ci siamo quasi! Più forte! TIRATE!"
       done:
         es: "[amazed] ¡Uuuuy, se está moviendo... se está moviendo...!"
         it: "[amazed] Uuuuh, si muove... si muove...!"
       without:
-        es: "[building excitement] Y tiraron, y tiraron, y tiraron..."
+        es: "[building excitement] Y jalaron, y jalaron, y jalaron..."
         it: "[building excitement] E tirarono, tirarono, tirarono..."
       sound: pop_out
   - scene:

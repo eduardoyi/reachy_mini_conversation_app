@@ -49,8 +49,10 @@ PAT_WAIT_S: Final[float] = 8.0
 COPY_S: Final[float] = 5.0
 # How long "¿Otro cuento?" listens.
 AGAIN_LISTEN_S: Final[float] = 8.0
-# The least story time between two pictures, so the screen does not flash too often.
-MIN_SCENE_GAP_S: Final[float] = 20.0
+# The least story time between two pictures: only enough that two back to back do not flash the screen twice. It
+# was 20 s, and pictures then came half a minute after the lines they show (Eduardo, 2026-11-07); the TRMNL itself
+# takes about 5 s to fetch and draw one.
+MIN_SCENE_GAP_S: Final[float] = 5.0
 # Text that goes to the transcript for sounds played without a line.
 SOUND_TEXT: Final[str] = "♪"
 

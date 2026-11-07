@@ -148,7 +148,7 @@ The other games stay es/en. Only what an Italian story needs while it plays:
 
 - **Paced by the story:** a picture at each important event, which can be as often as every 30 s. Los tres cerditos
   has 17 scenes, and the play and feast scenes each have two versions, one per choice. The screen flashes at every
-  change, so in code a new picture waits until 20 s of story (`MIN_SCENE_GAP_S`) have passed since the last one and
+  change, so in code a new picture waits until 5 s of story (`MIN_SCENE_GAP_S`) have passed since the last one and
   changes only between steps, never during an interaction. A picture still waiting when the next arrives is skipped.
 - **Full screen, no title** (`story_pictures.screen_png`: cut to 5:3 from the 3:2 drawing, four greys).
 - **Consistent characters** (OpenAI's image prompting guide):
@@ -250,7 +250,7 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   - The full listening previews (`--play es`, `--play it`) are 8 minutes each with every pause left for answers.
   - Next: copy `~/.local/share/reachy/game-data/stories` to the mini, deploy the code, and play it with the kids.
 - 2026-11-07: pictures. Scenes now have an `id`, the characters in them (`with:`) and, with `about:`, a picture per
-  option. The story game shows the prepared screens full-screen with the 20 s gap. `story_build.py` has `--sheets`
+  option. The story game shows the prepared screens full-screen with the 5 s gap (20 s until 2026-11-07). `story_build.py` has `--sheets`
   and `--pictures` on gpt-image-2.6-flare (falling back to 2.5-flare). Five character sheets were drawn; the wolf
   and the straw pig were redrawn because their first versions had a black vignette background, and the sheet
   prompt now asks for pure white. Waiting for Eduardo to approve the sheets before the 19 scenes are drawn.
@@ -295,3 +295,8 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
 - 2026-11-07: stories got their own tab in the admin app (in People's old place; People is now a row in
   Settings). The story cards are full width and show the whole 3:2 picture, like the party game cards, and the
   Español/Italiano switch sits at the top of the tab.
+- 2026-11-07: after the first plays, two fixes. Pictures came half a minute after the lines they show: a picture
+  waited 20 s after the last one, so a scene asked for during the intro or a quick run of events showed late. The
+  gap is now 5 s (the TRMNL takes about 5 s more to fetch and draw), and in a simulation from the clip lengths no
+  scene of the four stories is late except the first after the cover (about 9 s, while the opening plays). El nabo
+  gigante now says "jalar" (jalan, jalen, jalaron), as in Venezuela, instead of "tirar": 13 clips re-recorded.
