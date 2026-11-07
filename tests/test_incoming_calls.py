@@ -48,6 +48,7 @@ class _Runtime:
         self.announced.append((text, language))
 
     def request_activation(self, reason: str, addressed_text: str = "") -> None:
+        assert reason == "handoff"  # the text is the request, not whatever the room transcript heard
         self.activations.append(addressed_text)
         if len(self.activations) == 3:
             self.calls.ringing = None  # answered on the third try (he was still talking)

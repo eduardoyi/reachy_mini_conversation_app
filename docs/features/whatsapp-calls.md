@@ -1,7 +1,7 @@
 # Feature: WhatsApp calls through Reachy
 
 - Status: `in-progress` (stage 3: calls both ways through Reachy's speaker and mic; live check of incoming pending)
-- Last updated: 2026-10-30
+- Last updated: 2026-11-07
 - Plan: [WhatsApp voice calls through Reachy](../plans/whatsapp-calls.md)
 
 ## Overview
@@ -169,6 +169,10 @@ flowchart LR
   side cut the audio from Reachy's speaker. The face check now looks for 3 s; `REACHY_CALLS_RECORD_DIR`
   records both directions of a call for checking these by hand.
 - 2026-11-06: The hand-off from Gemini works with the room transcript on (it activates as `handoff`, not as a spoken wake), and `call_person` is a direct tool again.
+- 2026-11-07: A pat answers again with the room transcript on. The ringer handed "Reachy, answer" over as a
+  spoken wake, which reads the request from the room transcript, so on 2026-11-06 two pats (Tío Sergio's and
+  Eduardo's calls) opened conversations and the calls rang on; it now hands it over as `handoff`. The "sí"
+  windows that day heard nothing, then "He llamado al dijo.".
 - 2026-10-30: "calla" and "col" accepted for "call" (the first live try was heard as both).
 - 2026-10-30: Stage 2: outgoing calls through Reachy (service mode, `CallLink`, `stream_call`, "call x"
   with the face check).

@@ -28,6 +28,7 @@ from reachy_mini_conversation_app.hybrid_runtime import (
     _merge_local_items,
     frame_activation_context,
 )
+from reachy_mini_conversation_app.quick_commands import CALL_ANSWER_REQUEST
 from reachy_mini_conversation_app.ambient_context import (
     TranscriptSegment,
     AmbientContextConfig,
@@ -5483,6 +5484,36 @@ async def test_a_call_handed_off_by_gemini_runs_once_the_conversation_closes(roo
     assert await runtime.check_inactivity()
     await wait_until(lambda: seen == ["llama a Eduardo"], attempts=500)
     assert not runtime.request_after_close("Reachy, llama a Eduardo")  # no conversation is open now
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pat_answering_a_call_reaches_the_answer_command_with_the_room_transcript_on() -> None:
+    """The ringer's "Reachy, answer" goes to the quick commands, not to Gemini.
+
+    As a spoken wake it was read from the room transcript instead, which had nothing: two pats on 2026-11-06
+    opened conversations and the calls rang on.
+    """
+    processor = _processor_with_open_wake_segment("people are over there")
+    seen: list[str] = []
+
+    async def quick(text: str) -> _QuickReply | None:
+        seen.append(text)
+        return _QuickReply(None)
+
+    async def speak(_text: str, _language: str):  # type: ignore[no-untyped-def]
+        yield 24_000, np.zeros(24, dtype=np.int16)
+
+    runtime = HybridRuntime(
+        lambda: FakeHandler(),
+        quick_commands=quick,
+        reply_speaker=speak,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+    )
+    assert await runtime.activate("handoff", addressed_text=CALL_ANSWER_REQUEST)
+    assert seen == ["answer"]
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
     await runtime.close()
 
 

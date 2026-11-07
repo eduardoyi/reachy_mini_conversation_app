@@ -101,5 +101,7 @@ class IncomingRinger:
         for _ in range(int(CALL_ANSWER_RETRY_S / _ANSWER_RETRY_STEP_S)):
             if self._calls.ringing is None:
                 return
-            self._runtime.request_activation("acoustic_wake", addressed_text=CALL_ANSWER_REQUEST)
+            # Not as a spoken wake: that reads the request from the room transcript, so with it on the pat's
+            # "answer" went to Gemini and the call kept ringing (2026-11-06, Tío Sergio and Eduardo calling).
+            self._runtime.request_activation("handoff", addressed_text=CALL_ANSWER_REQUEST)
             self._sleep(_ANSWER_RETRY_STEP_S)
