@@ -304,3 +304,9 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   around it. A picture that depends on a choice (the ball or the kite, the feast, Baby Bear's present, the animals'
   supper) now goes up as soon as the choice is made, before Richie says what happened, not after. The dizzy wolf
   now shows before "el lobo sopló tanto que se mareó", and Goldilocks asleep after she climbs the stairs, not before.
+- 2026-11-07: `tests/games/test_story_timing.py` plays every story, in both languages, with the children joining in
+  and without, through the real story player on a pretend clock (lines at 11 characters a second, as the recordings
+  average; sounds as long as sounds.yaml says). It fails when a picture goes up more than 6 s after the story gets to
+  it (15 s for the first after the cover), stays up less than 7 s, or is dropped for the next one. With the old 20 s
+  gap, or without showing a choice's picture as it is made, it fails. It found the pigs' ball/kite picture replaced
+  after about 5 s; the wolf's picture now waits for "¡el lobo!". A new story must pass it.

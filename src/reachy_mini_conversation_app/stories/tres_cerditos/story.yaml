@@ -99,14 +99,14 @@ steps:
       options:
         ball: the smallest little pig bouncing a big ball and laughing in the meadow in front of his straw house
         kite: the smallest little pig running happily with a kite flying high in the sky above his straw house
+  - say: narrator
+    es: "[mysterious] Pero de repente... por el camino venía... ¡el lobo!"
+    it: "[mysterious] Ma all'improvviso... lungo il sentiero arrivava... il lupo!"
   - scene:
       id: straw_door
       picture: the goofy wolf knocking on the door of the little straw house, rubbing his big round tummy, while the smallest little pig peeks out of the window
       with: [wolf, pig_straw]
       move: surprised
-  - say: narrator
-    es: "[mysterious] Pero de repente... por el camino venía... ¡el lobo!"
-    it: "[mysterious] Ma all'improvviso... lungo il sentiero arrivava... il lupo!"
   - sound: tummy_rumble
   - say: wolf
     es: "[grumbling] Ay, ay, ay, qué hambre tengo. ¡Mi barriga hace grrr!"
