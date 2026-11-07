@@ -95,6 +95,10 @@ button { cursor: pointer; }
 .gear {
   width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2);
 }
+.back {
+  width: 40px; height: 40px; margin-left: -10px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2);
+}
+.back .icon { transform: scaleX(-1); }
 .gear[aria-current="page"] { background: color-mix(in srgb, var(--sun) 40%, transparent); color: var(--ink); }
 
 main { max-width: 560px; margin: 0 auto; padding: 4px 16px 24px; }
@@ -562,6 +566,7 @@ dialog { color: var(--ink); }
   background: var(--paper); font-size: 16px;
 }
 .settings .open-row { width: 100%; text-align: left; }
+.settings a.open-row { color: inherit; text-decoration: none; }
 .settings .open-row .icon:last-child { color: var(--ink-3); }
 
 /* Crop ---------------------------------------------------------------------------------------- */
@@ -800,7 +805,7 @@ dialog { color: var(--ink); }
 /* Games ---------------------------------------------------------------------------------------- */
 
 .now-slot { margin-top: 14px; }
-#view-games .now-slot { margin: 0 0 18px; }
+#view-games .now-slot, #view-stories .now-slot { margin: 0 0 18px; }
 .now-card {
   position: relative; isolation: isolate; overflow: hidden; border-radius: 26px; min-height: 176px;
   display: flex; align-items: flex-end; gap: 14px; padding: 18px; color: #fff; background: #1a1e3b;
@@ -874,11 +879,13 @@ dialog { color: var(--ink); }
 .game-tile-foot { padding: 10px 12px 12px; display: grid; gap: 10px; }
 .game-tile-foot .pill { width: 100%; }
 
-.game-card.little, .game-card.stories { display: grid; grid-template-columns: 42% 1fr; }
-.game-card.little .game-art, .game-card.stories .game-art { aspect-ratio: auto; min-height: 150px; }
-.game-card.little .game-art h4, .game-card.stories .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
-.game-card.little .game-body, .game-card.stories .game-body { padding: 12px 14px 14px; gap: 8px; }
-.game-card.little .game-pitch, .game-card.stories .game-pitch { font-size: 14px; }
+.game-card.little { display: grid; grid-template-columns: 42% 1fr; }
+.game-card.little .game-art { aspect-ratio: auto; min-height: 150px; }
+.game-card.little .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
+.game-card.little .game-body { padding: 12px 14px 14px; gap: 8px; }
+.game-card.little .game-pitch { font-size: 14px; }
+/* Story pictures are 3:2 and shown whole, full width. */
+.game-card.stories .game-art { aspect-ratio: 3 / 2; }
 .game-card.little .game-say { display: none; }
 .game-card.little .game-foot { justify-content: flex-end; }
 

@@ -140,7 +140,7 @@ The other games stay es/en. Only what an Italian story needs while it plays:
 
 - Italian titles, names and pitches for stories, and the yes / no / pause / resume / quit words in Italian ("sì",
   "dai", "va bene"; "aspetta", "pausa"; "basta", "abbiamo finito"), heard only while a story is offered or playing.
-- An Italian button on the admin app's Stories shelf only (the Games tab picker keeps es/en).
+- An Italian button on the admin app's Stories tab only (the Games tab picker keeps es/en).
 - Scribe and the local speech model told to expect Italian while an Italian story plays.
 - Voice starts in Italian ("raccontaci una storia", "raccontami i tre porcellini") in the quick-command grammar.
 
@@ -292,3 +292,6 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   extra limb, paw or hand; the donkey, dog, cat and rooster looks say how many legs and wings they have; and the
   Bremen scenes no longer ask the donkey to drum. All 40 scenes of the three new stories were redrawn and checked
   one by one, and the Bremen card was redone. The pigs' scenes were not redrawn.
+- 2026-11-07: stories got their own tab in the admin app (in People's old place; People is now a row in
+  Settings). The story cards are full width and show the whole 3:2 picture, like the party game cards, and the
+  Español/Italiano switch sits at the top of the tab.

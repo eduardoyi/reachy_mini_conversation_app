@@ -179,8 +179,8 @@ function setFill(slider) {
 
 // Tabs ------------------------------------------------------------------------------------------
 
-const views = { home: loadHome, games: loadGames, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
-const titles = { games: "Games", people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
+const views = { home: loadHome, games: loadGames, stories: loadGames, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
+const titles = { games: "Games", stories: "Stories", people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
 let currentTab = "";
 
 function showTab() {
@@ -194,8 +194,10 @@ function showTab() {
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  if (tab === "settings") $(".gear").setAttribute("aria-current", "page");
+  // People lives in Settings: the gear stays lit and a back arrow returns there.
+  if (tab === "settings" || tab === "people") $(".gear").setAttribute("aria-current", "page");
   else $(".gear").removeAttribute("aria-current");
+  $("#back").hidden = tab !== "people";
   showTitle();
   if (tab !== "camera") closeCamera();
   if ($("#person-sheet").open) $("#person-sheet").close();
@@ -363,7 +365,7 @@ $("#restart").addEventListener("click", (event) => restart(event.currentTarget))
 setInterval(() => {
   if (document.hidden) return;
   if (currentTab === "home") loadHome();
-  if (currentTab === "games") loadGames();
+  if (isGamesTab()) loadGames();
 }, 8000);
 
 // Games -----------------------------------------------------------------------------------------
@@ -392,10 +394,9 @@ const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
   ["editions", "Big Brain editions", "The same show with a whole board about one world."],
   ["little", "For little ones", "No phones: kids play with Reachy out loud, and he watches or listens."],
-  ["stories", "Stories", "Richie tells a classic story; the kids knock, shout, blow and pick along."],
 ];
 const SAY = { es: (title) => `Juguemos ${title}`, en: (title) => `Let's play ${title}` };
-// Stories are told in Spanish or Italian, picked on their own shelf.
+// Stories are told in Spanish or Italian, picked on the Stories tab.
 const SAY_STORY = { es: (title) => `Cuéntanos ${title}`, it: (title) => `Raccontaci ${title}` };
 const STORY_LANGUAGES = [["es", "Español"], ["it", "Italiano"]];
 const isStory = (key) => (GAME_CARDS[key] || {}).shelf === "stories";
@@ -439,7 +440,7 @@ async function gameAction(action, key) {
   const { language, kids, storyLanguage } = gamePrefs();
   const spoken = isStory(key) ? storyLanguage : language;
   await api("/api/game", { method: "POST", body: action === "start" ? { action, game: key, language: spoken, kids } : { action } });
-  await (currentTab === "games" ? loadGames() : loadHome());
+  await (isGamesTab() ? loadGames() : loadHome());
 }
 
 // Now playing: the game on, with pause or resume, end, and the join code for whoever arrives late.
@@ -495,15 +496,29 @@ async function loadGames() {
   if (!status) return;
   state.status = status;
   showPrivacy(status.privacy.on);
-  if (currentTab === "games") renderGames(status);
+  if (isGamesTab()) renderGames(status);
 }
 
+// Games and Stories share one status and one renderer.
+const isGamesTab = () => currentTab === "games" || currentTab === "stories";
+
 function showGameOptions() {
-  const { language, kids } = gamePrefs();
+  const { language, kids, storyLanguage } = gamePrefs();
   for (const button of document.querySelectorAll("#view-games [data-lang]")) {
     button.setAttribute("aria-selected", String(button.dataset.lang === language));
   }
   $("#kids-mode").setAttribute("aria-checked", String(kids));
+  for (const button of document.querySelectorAll("[data-story-lang]")) {
+    button.setAttribute("aria-selected", String(button.dataset.storyLang === storyLanguage));
+  }
+}
+
+for (const button of document.querySelectorAll("[data-story-lang]")) {
+  button.addEventListener("click", () => {
+    saveGamePrefs({ storyLanguage: button.dataset.storyLang });
+    showGameOptions();
+    if (state.status) renderGames(state.status);
+  });
 }
 
 for (const button of document.querySelectorAll("#view-games [data-lang]")) {
@@ -521,11 +536,14 @@ $("#kids-mode").addEventListener("click", () => {
 
 function renderGames(status) {
   renderNowPlaying($("#games-now"), status);
+  renderNowPlaying($("#stories-now"), status);
   const game = status.app.running ? status.app.game : null;
   const mood = reachyState(status);
   const blocked = mood === "private" ? "Privacy is on. Turn it off to play." : !status.app.running ? "Reachy isn't running." : !game ? "Games aren't set up on Reachy." : "";
-  $("#games-note").textContent = blocked;
-  $("#games-note").hidden = !blocked;
+  for (const note of [$("#games-note"), $("#stories-note")]) {
+    note.textContent = blocked;
+    note.hidden = !blocked;
+  }
   const games = game ? game.games || [] : [];
   const playing = game && (game.state === "playing" || game.state === "paused") ? game.game : null;
   const { language, storyLanguage } = gamePrefs();
@@ -553,19 +571,6 @@ function renderGames(status) {
     const words = (isStory(each.key) ? SAY_STORY : SAY)[spoken](each.title[spoken] || each.title.en);
     return el("span", { className: "game-say" }, [icon("mic"), `“${words}”`]);
   };
-  const storyPicker = () => {
-    const picker = el("div", { className: "segmented story-language", role: "tablist", "aria-label": "Story language" });
-    for (const [code, label] of STORY_LANGUAGES) {
-      const button = el("button", { type: "button", role: "tab", "aria-selected": String(code === storyLanguage) }, label);
-      button.onclick = () => {
-        saveGamePrefs({ storyLanguage: code });
-        renderGames(state.status);
-      };
-      picker.append(button);
-    }
-    return picker;
-  };
-
   const card = (each, shelf) => {
     const name = gameName(each.key, each.title);
     const shortName = GAME_CARDS[each.key] ? GAME_CARDS[each.key].name : name;
@@ -586,17 +591,19 @@ function renderGames(status) {
     ]);
   };
 
+  const shelfOf = (each) => (GAME_CARDS[each.key] ? GAME_CARDS[each.key].shelf : "party");
   const shelves = SHELVES.map(([shelf, title, hint]) => {
-    const members = games.filter((each) => (GAME_CARDS[each.key] ? GAME_CARDS[each.key].shelf : "party") === shelf);
+    const members = games.filter((each) => shelfOf(each) === shelf);
     if (!members.length) return null;
     return el("section", { className: `game-shelf ${shelf}` }, [
       el("h3", { className: "section-title" }, title),
       el("p", { className: "hint shelf-hint" }, hint),
-      shelf === "stories" ? storyPicker() : null,
       el("div", { className: `game-${shelf === "editions" ? "tiles" : "cards"}` }, members.map((each) => card(each, shelf))),
     ]);
   });
   $("#game-list").replaceChildren(...shelves.filter(Boolean));
+  // Stories have their own tab; its hint and language switch are in the page.
+  $("#story-list").replaceChildren(...games.filter((each) => shelfOf(each) === "stories").map((each) => card(each, "stories")));
 }
 
 // Wake word -------------------------------------------------------------------------------------
@@ -2835,7 +2842,12 @@ function renderSettings() {
     icon("chevron"),
   ]);
   remembered.addEventListener("click", () => openMemory());
-  panels.push(el("div", { className: "panel" }, [open, remembered]));
+  const people = el("a", { className: "row open-row", href: "#people" }, [
+    icon("people"),
+    el("span", { className: "row-text" }, [el("span", { className: "row-label" }, "People"), el("span", { className: "row-sub" }, "Who he knows: names, faces and voices")]),
+    icon("chevron"),
+  ]);
+  panels.push(el("div", { className: "panel" }, [people, open, remembered]));
 
   if (meta.QUIET_HOURS) {
     const [from, to] = (draft.QUIET_HOURS || "21:30-07:00").split("-");
