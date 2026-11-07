@@ -46,16 +46,59 @@ HOLD_RENEW_S: Final[float] = 60.0
 _TICK_S: Final[float] = 0.05
 
 _ASK: Final[dict[str, str]] = {"es": "¿Jugamos {title}? {pitch}", "en": "Shall we play {title}? {pitch}"}
+_ASK_STORY: Final[dict[str, str]] = {
+    "es": "¿Les cuento {title}? {pitch}",
+    "it": "Vi racconto {title}? {pitch}",
+    "en": "Shall I tell {title}? {pitch}",
+}
 _MENU: Final[dict[str, str]] = {
     "es": "¿A qué jugamos? Puedo jugar {titles}.",
     "en": "What shall we play? I know {titles}.",
 }
-_NOT_NOW: Final[dict[str, str]] = {"es": "Bueno, otro día.", "en": "Okay, another time."}
-_PAUSED_ASK: Final[dict[str, str]] = {"es": "Pausa. ¿Seguimos o terminamos?", "en": "Paused. Keep playing, or stop?"}
-_PAUSED: Final[dict[str, str]] = {"es": "Pausa.", "en": "Paused."}
-_RESUMED: Final[dict[str, str]] = {"es": "¡Seguimos!", "en": "Let's keep going!"}
-_ENDED: Final[dict[str, str]] = {"es": "Listo, se acabó el juego.", "en": "Okay, game over."}
+_STORY_MENU: Final[dict[str, str]] = {
+    "es": "¿Qué cuento les cuento? Me sé {titles}.",
+    "it": "Quale storia vi racconto? Conosco {titles}.",
+    "en": "Which story shall I tell? I know {titles}.",
+}
+_NOT_NOW: Final[dict[str, str]] = {
+    "es": "Bueno, otro día.",
+    "en": "Okay, another time.",
+    "it": "Va bene, un'altra volta.",
+}
+_PAUSED_ASK: Final[dict[str, str]] = {
+    "es": "Pausa. ¿Seguimos o terminamos?",
+    "en": "Paused. Keep playing, or stop?",
+    "it": "Pausa. Continuiamo o finiamo?",
+}
+_PAUSED: Final[dict[str, str]] = {"es": "Pausa.", "en": "Paused.", "it": "Pausa."}
+_RESUMED: Final[dict[str, str]] = {"es": "¡Seguimos!", "en": "Let's keep going!", "it": "Andiamo avanti!"}
+_ENDED: Final[dict[str, str]] = {
+    "es": "Listo, se acabó el juego.",
+    "en": "Okay, game over.",
+    "it": "Va bene, abbiamo finito.",
+}
+_ENDED_STORY: Final[dict[str, str]] = {
+    "es": "Listo, se acabó el cuento.",
+    "en": "Okay, that's the end of the story.",
+    "it": "Va bene, la storia è finita.",
+}
 _END_FOR: Final[dict[str, str]] = {"es": "Estamos jugando {title}. ¿Lo terminamos?", "en": "We're playing {title}. Shall we stop?"}  # fmt: skip
+_END_FOR_STORY: Final[dict[str, str]] = {
+    "es": "Estoy contando {title}. ¿Lo terminamos?",
+    "en": "I'm telling {title}. Shall we stop?",
+    "it": "Sto raccontando {title}. Finiamo qui?",
+}
+# "¿Seguimos o terminamos?" answered with an end.
+_STOP_ANSWERS: Final[tuple[str, ...]] = (
+    "terminamos",
+    "terminar",
+    "stop",
+    "para",
+    "acabamos",
+    "we stop",
+    "finiamo",
+    "basta",
+)
 
 
 class GameState(enum.Enum):
@@ -67,22 +110,45 @@ class GameState(enum.Enum):
     PAUSED = "paused"
 
 
-def _titles(language: str, keys: Iterable[str] = GAMES) -> str:
-    """Name the games ``keys`` for the "which game?" question: "a los colores y a buscar tesoros"."""
-    titles = [GAMES[key].title[language] for key in keys if key in GAMES]
-    joiner = " y " if language == "es" else " and "
+def _titles(language: str, keys: Iterable[str] = GAMES, kind: str = "game") -> str:
+    """Name the games (or stories) ``keys`` for the "which one?" question: "a los colores y a buscar tesoros"."""
+    titles = [
+        GAMES[key].title[language]
+        for key in keys
+        if key in GAMES and GAMES[key].kind == kind and language in GAMES[key].languages
+    ]
+    if not titles:
+        return ""
+    joiner = {"es": " y ", "it": " e "}.get(language, " and ")
     return titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + joiner + titles[-1]
 
 
+def _asking(info: GameInfo, language: str) -> str:
+    """Return the question before ``info`` starts: "¿Jugamos a los colores? …" or "¿Les cuento Los tres cerditos? …"."""
+    table = _ASK_STORY if info.kind == "story" else _ASK
+    return table[language].format(title=info.title[language], pitch=info.pitch[language])
+
+
+def _ending_for(info: GameInfo, language: str) -> str:
+    """Return the question before ending ``info`` for another request."""
+    table = _END_FOR_STORY if info.kind == "story" else _END_FOR
+    return table[language].format(title=info.title[language])
+
+
 def host_phrases() -> frozenset[str]:
-    """Return the host's fixed lines in both languages, for the speech cache."""
+    """Return the host's fixed lines in every language, for the speech cache."""
     lines: set[str] = set()
-    for language in ("es", "en"):
-        lines |= {_NOT_NOW[language], _PAUSED_ASK[language], _PAUSED[language], _RESUMED[language], _ENDED[language]}
-        lines.add(_MENU[language].format(titles=_titles(language)))
+    for language in ("es", "en", "it"):
+        lines |= {_NOT_NOW[language], _PAUSED_ASK[language], _PAUSED[language], _RESUMED[language]}
+        lines |= {_ENDED[language], _ENDED_STORY[language]}
+        if language in _MENU:
+            lines.add(_MENU[language].format(titles=_titles(language)))
+        if stories := _titles(language, kind="story"):
+            lines.add(_STORY_MENU[language].format(titles=stories))
         for game in GAMES.values():
-            lines.add(_ASK[language].format(title=game.title[language], pitch=game.pitch[language]))
-            lines.add(_END_FOR[language].format(title=game.title[language]))
+            if language in game.languages and (game.kind == "story" or language in _ASK):
+                lines.add(_asking(game, language))
+                lines.add(_ending_for(game, language))
     return frozenset(lines)
 
 
@@ -133,7 +199,13 @@ class GameHost:
             "kids": context.kids if context is not None and self.active else False,
             "join_url": context.join_url if context is not None and self.active else "",
             "games": [
-                {"key": game.key, "title": game.title, "pitch": game.pitch}
+                {
+                    "key": game.key,
+                    "title": game.title,
+                    "pitch": game.pitch,
+                    "kind": game.kind,
+                    "languages": list(game.languages),
+                }
                 for game in GAMES.values()
                 if game.key in self._factories
             ],
@@ -145,12 +217,19 @@ class GameHost:
         """Ask whether to play the requested game (or which one); the yes, a pat or a name starts it."""
         language = request.language
         game = request.game if request.game is not None and request.game.key in self._factories else None
+        if game is not None and language not in game.languages:
+            language = game.languages[0]
         self._offered, self._language, self._asked_at = game, language, self._services.clock()
         self._set_state(GameState.ASKING)
-        if game is None:
+        story = request.story or (request.game is not None and request.game.kind == "story")
+        if game is None and story and (stories := _titles(language, self._factories, kind="story")):
+            text = _STORY_MENU[language].format(titles=stories)
+        elif game is None:
+            language = language if language in _MENU else "es"
+            self._language = language
             text = _MENU[language].format(titles=_titles(language, self._factories))
         else:
-            text = _ASK[language].format(title=game.title[language], pitch=game.pitch[language])
+            text = _asking(game, language)
         logger.info("Game offered: %s", game.key if game is not None else "which game")
 
         async def listen() -> str | None:
@@ -189,6 +268,8 @@ class GameHost:
         if self.active:
             self.end("another game", say=False)
         game = factory()
+        if language not in game.info.languages:
+            language = game.info.languages[0]
         services = self._services
         context = GameContext(info=game.info, language=language, services=services, kids=kids)
         services.hint_answers([])  # the last game's words are not this one's
@@ -258,8 +339,9 @@ class GameHost:
         if self._state is GameState.PLAYING:
             self.pause()
         if said in QUIT_WORDS:
+            ended = self._ended_line()
             self.end("asked", say=False)
-            return QuickReply(_ENDED[language], language, "game")
+            return QuickReply(ended, language, "game")
         if said in RESUME_WORDS or said in YES_WORDS:
             self.resume()
             return QuickReply(_RESUMED[language], language, "game")
@@ -268,13 +350,12 @@ class GameHost:
         if not said or said in NO_WORDS:
             return self._question(_PAUSED_ASK[language], self._pause_answer)
         assert self._context is not None
-        title = self._context.info.title[language]
         self._resume_at = self._services.clock() + END_QUESTION_RESUME_S
 
         async def end_for(answer: str) -> QuickReply:
             return self._end_for(words(answer), text)
 
-        return self._question(_END_FOR[language].format(title=title), end_for)
+        return self._question(_ending_for(self._context.info, language), end_for)
 
     def _question(self, text: str, answer: Callable[[str], Awaitable[object]]) -> QuickReply:
         async def listen() -> str | None:
@@ -291,9 +372,10 @@ class GameHost:
         if said in RESUME_WORDS or said in YES_WORDS:
             self.resume()
             return QuickReply(_RESUMED[language], language, "game")
-        if said in QUIT_WORDS or said in ("terminamos", "terminar", "stop", "para", "acabamos", "we stop"):
+        if said in QUIT_WORDS or said in _STOP_ANSWERS:
+            ended = self._ended_line()
             self.end("asked", say=False)
-            return QuickReply(_ENDED[language], language, "game")
+            return QuickReply(ended, language, "game")
         return QuickReply(None, language, "game")
 
     def _end_for(self, said: str, request: str) -> QuickReply:
@@ -342,10 +424,10 @@ class GameHost:
         task, self._task = self._task, None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-        language = self._language
+        ended = self._ended_line()
         self._finish()
         if say:
-            self._say(_ENDED[language])
+            self._say(ended)
 
     def _finish(self) -> None:
         """Put back what the game took and go idle."""
@@ -359,6 +441,12 @@ class GameHost:
                 logger.warning("Screen not restored after the game: %s", type(error).__name__)
 
     # Plumbing ------------------------------------------------------------------------------------
+
+    def _ended_line(self) -> str:
+        """Return "Listo, se acabó el juego." (or "el cuento") in the game's language."""
+        context = self._context
+        story = context is not None and context.info.kind == "story"
+        return (_ENDED_STORY if story else _ENDED)[self._language]
 
     def _set_state(self, state: GameState) -> None:
         self._state = state

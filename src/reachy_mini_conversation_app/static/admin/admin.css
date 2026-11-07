@@ -833,6 +833,7 @@ dialog { color: var(--ink); }
 .game-options .panel { margin-top: 0; }
 .game-shelf .section-title { margin-bottom: 2px; }
 .shelf-hint { margin: 0 4px 12px; }
+.story-language { margin: 0 4px 12px; max-width: 280px; }
 .game-cards { display: grid; gap: 14px; }
 .game-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
@@ -873,11 +874,11 @@ dialog { color: var(--ink); }
 .game-tile-foot { padding: 10px 12px 12px; display: grid; gap: 10px; }
 .game-tile-foot .pill { width: 100%; }
 
-.game-card.little { display: grid; grid-template-columns: 42% 1fr; }
-.game-card.little .game-art { aspect-ratio: auto; min-height: 150px; }
-.game-card.little .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
-.game-card.little .game-body { padding: 12px 14px 14px; gap: 8px; }
-.game-card.little .game-pitch { font-size: 14px; }
+.game-card.little, .game-card.stories { display: grid; grid-template-columns: 42% 1fr; }
+.game-card.little .game-art, .game-card.stories .game-art { aspect-ratio: auto; min-height: 150px; }
+.game-card.little .game-art h4, .game-card.stories .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
+.game-card.little .game-body, .game-card.stories .game-body { padding: 12px 14px 14px; gap: 8px; }
+.game-card.little .game-pitch, .game-card.stories .game-pitch { font-size: 14px; }
 .game-card.little .game-say { display: none; }
 .game-card.little .game-foot { justify-content: flex-end; }
 

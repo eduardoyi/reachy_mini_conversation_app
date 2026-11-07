@@ -383,13 +383,19 @@ const GAME_CARDS = {
   treasure: { name: "Treasure Hunt", shelf: "little", facts: ["Camera"] },
   simon: { name: "Simon Says", shelf: "little", facts: ["Camera"] },
   gallina: { name: "Crazy Hen", shelf: "little", facts: ["Any number of kids", "No camera"] },
+  tres_cerditos: { name: "Three Little Pigs", shelf: "stories", facts: ["About 6 minutes", "Kids knock, blow and pick"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
   ["editions", "Big Brain editions", "The same show with a whole board about one world."],
   ["little", "For little ones", "No phones: kids play with Reachy out loud, and he watches or listens."],
+  ["stories", "Stories", "Richie tells a classic story; the kids knock, shout, blow and pick along."],
 ];
 const SAY = { es: (title) => `Juguemos ${title}`, en: (title) => `Let's play ${title}` };
+// Stories are told in Spanish or Italian, picked on their own shelf.
+const SAY_STORY = { es: (title) => `Cuéntanos ${title}`, it: (title) => `Raccontaci ${title}` };
+const STORY_LANGUAGES = [["es", "Español"], ["it", "Italiano"]];
+const isStory = (key) => (GAME_CARDS[key] || {}).shelf === "stories";
 
 function gamePrefs() {
   let prefs = {};
@@ -398,7 +404,11 @@ function gamePrefs() {
   } catch (error) {
     // Private browsing or a bad value: the defaults below.
   }
-  return { language: prefs.language === "en" ? "en" : "es", kids: prefs.kids === true };
+  return {
+    language: prefs.language === "en" ? "en" : "es",
+    kids: prefs.kids === true,
+    storyLanguage: prefs.storyLanguage === "it" ? "it" : "es",
+  };
 }
 
 function saveGamePrefs(change) {
@@ -423,8 +433,9 @@ function gameArt(key, className = "game-art-img") {
 }
 
 async function gameAction(action, key) {
-  const { language, kids } = gamePrefs();
-  await api("/api/game", { method: "POST", body: action === "start" ? { action, game: key, language, kids } : { action } });
+  const { language, kids, storyLanguage } = gamePrefs();
+  const spoken = isStory(key) ? storyLanguage : language;
+  await api("/api/game", { method: "POST", body: action === "start" ? { action, game: key, language: spoken, kids } : { action } });
   await (currentTab === "games" ? loadGames() : loadHome());
 }
 
@@ -514,9 +525,9 @@ function renderGames(status) {
   $("#games-note").hidden = !blocked;
   const games = game ? game.games || [] : [];
   const playing = game && (game.state === "playing" || game.state === "paused") ? game.game : null;
-  const { language } = gamePrefs();
+  const { language, storyLanguage } = gamePrefs();
   // The 8-second refresh redraws only on a change, so the art does not flicker.
-  const drawn = JSON.stringify([games.map((each) => each.key), playing, blocked, language]);
+  const drawn = JSON.stringify([games.map((each) => each.key), playing, blocked, language, storyLanguage]);
   if (drawn === renderGames.drawn) return;
   renderGames.drawn = drawn;
 
@@ -534,7 +545,23 @@ function renderGames(status) {
     return button;
   };
   const facts = (key) => el("ul", { className: "game-facts" }, ((GAME_CARDS[key] || {}).facts || []).map((fact) => el("li", {}, fact)));
-  const say = (each) => el("span", { className: "game-say" }, [icon("mic"), `“${SAY[language](each.title[language] || each.title.en)}”`]);
+  const say = (each) => {
+    const spoken = isStory(each.key) ? storyLanguage : language;
+    const words = (isStory(each.key) ? SAY_STORY : SAY)[spoken](each.title[spoken] || each.title.en);
+    return el("span", { className: "game-say" }, [icon("mic"), `“${words}”`]);
+  };
+  const storyPicker = () => {
+    const picker = el("div", { className: "segmented story-language", role: "tablist", "aria-label": "Story language" });
+    for (const [code, label] of STORY_LANGUAGES) {
+      const button = el("button", { type: "button", role: "tab", "aria-selected": String(code === storyLanguage) }, label);
+      button.onclick = () => {
+        saveGamePrefs({ storyLanguage: code });
+        renderGames(state.status);
+      };
+      picker.append(button);
+    }
+    return picker;
+  };
 
   const card = (each, shelf) => {
     const name = gameName(each.key, each.title);
@@ -549,7 +576,7 @@ function renderGames(status) {
     return el("article", { className: `game-card ${shelf}${playingNow ? " on" : ""}` }, [
       el("div", { className: "game-art" }, [gameArt(each.key), el("h4", {}, shortName)]),
       el("div", { className: "game-body" }, [
-        el("p", { className: "game-pitch" }, (each.pitch && (each.pitch[language] || each.pitch.en)) || ""),
+        el("p", { className: "game-pitch" }, (each.pitch && (each.pitch[isStory(each.key) ? storyLanguage : language] || each.pitch.en)) || ""),
         facts(each.key),
         el("div", { className: "game-foot" }, [say(each), play(each)]),
       ]),
@@ -562,6 +589,7 @@ function renderGames(status) {
     return el("section", { className: `game-shelf ${shelf}` }, [
       el("h3", { className: "section-title" }, title),
       el("p", { className: "hint shelf-hint" }, hint),
+      shelf === "stories" ? storyPicker() : null,
       el("div", { className: `game-${shelf === "editions" ? "tiles" : "cards"}` }, members.map((each) => card(each, shelf))),
     ]);
   });

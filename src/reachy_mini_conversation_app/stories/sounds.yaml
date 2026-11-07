@@ -1,0 +1,89 @@
+# Sounds and music for story mode, made with ElevenLabs by scripts/story_build.py (seconds, and the prompt).
+# A story plays a sound just before its next line; music plays for a while (a dance, a move to copy).
+# Kept short and gentle: a living room with adults in it, and a 2-year-old listening.
+
+sound:
+  story_intro:
+    seconds: 4
+    prompt: >-
+      A short magical opening jingle for a children's story: a soft harp glissando, twinkling chimes and a gentle
+      warm music-box phrase, like opening a picture book.
+  story_end:
+    seconds: 3.5
+    prompt: >-
+      A short happy ending flourish for a children's story: a bright ukulele strum, a tiny glockenspiel run and soft
+      claps, cheerful and warm.
+  door_knock:
+    seconds: 1.5
+    prompt: Three clear friendly knocks on a wooden door, a cartoon knock-knock-knock, dry and close.
+  tummy_rumble:
+    seconds: 1.5
+    prompt: A long silly cartoon tummy rumble, a hungry stomach growl, comic and gurgly, for a children's cartoon.
+  big_blow:
+    seconds: 2.5
+    prompt: >-
+      A big cartoon gust of wind from someone blowing very hard, a long whooshing blow that swirls, comic and
+      exaggerated, for a children's story.
+  straw_flies:
+    seconds: 2.5
+    prompt: >-
+      A pile of dry straw blown away by the wind: rustling, swishing and fluttering hay flying off into the air,
+      ending with a soft comic pop.
+  sticks_fall:
+    seconds: 2.5
+    prompt: >-
+      A little house of wooden sticks falling down: light wooden clattering and tumbling sticks, a comic cartoon
+      crash, not loud, ending with one last stick dropping.
+  bricks_build:
+    seconds: 2.5
+    prompt: >-
+      Building with bricks in a cartoon: a few gentle taps of a trowel and bricks being stacked, clink, tap, clunk,
+      cheerful and rhythmic.
+  straw_build:
+    seconds: 2
+    prompt: Quick cheerful rustling of straw being piled up fast, swish swish, light and comic, for a cartoon.
+  sticks_build:
+    seconds: 2
+    prompt: Quick wooden taps and little hammer knocks building with sticks, tok tok tok, light and playful.
+  run_away:
+    seconds: 2
+    prompt: Tiny cartoon feet running away very fast, a quick pitter-patter scamper with a little whistle zoom.
+  dizzy:
+    seconds: 2
+    prompt: A cartoon dizzy sound effect, a wobbly spinning slide whistle with little twinkling birds, comic.
+  roof_climb:
+    seconds: 2
+    prompt: Clumsy cartoon footsteps creeping on a tiled roof, tiptoe clacks and a little slip, sneaky and comic.
+  splash:
+    seconds: 2
+    prompt: >-
+      A big comic cartoon splash into a pot of water, sploosh, followed by a silly surprised yelp-like boing and
+      water dripping.
+  wolf_runs:
+    seconds: 2.5
+    prompt: >-
+      A cartoon character running far away very fast into the distance, quick scampering feet and a zooming
+      whistle that fades out.
+  oink:
+    seconds: 1.5
+    prompt: Two cute happy little piglet oinks and a tiny squeal of joy, friendly and soft, for a children's story.
+  sparkle:
+    seconds: 1.5
+    prompt: A short bright magical sparkle, twinkling chimes going up, for a children's game when something good happens.
+
+music:
+  story_move:
+    seconds: 15
+    prompt: >-
+      Bouncy playful music for small children doing a silly move, about 115 bpm: ukulele, pizzicato strings, light
+      hand claps and a xylophone melody; cheerful, simple, no vocals.
+  story_build:
+    seconds: 15
+    prompt: >-
+      Busy cheerful working music for a children's cartoon, about 120 bpm: plucky strings, woodblocks and a
+      whistled-sounding flute melody, like little pigs building a house; no vocals.
+  story_dance:
+    seconds: 20
+    prompt: >-
+      Happy party dance music for preschool children, about 125 bpm: ukulele, bouncy bass, hand claps, toy piano
+      and glockenspiel; joyful celebration, simple and catchy, no vocals.

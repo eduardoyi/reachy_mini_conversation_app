@@ -46,6 +46,12 @@ own page: [scribble-rush.md](scribble-rush.md).
 Detectives, the mystery party game played on phones, also runs on the host and has its own page:
 [detectives.md](detectives.md).
 
+**Story mode** runs on the same host too. Richie tells a classic story (Los tres cerditos first) in Spanish or
+Italian, and the kids knock, shout, blow, copy moves and pick small things. Each story is a data file under
+`stories/`, and its audio is recorded ahead of time by `scripts/story_build.py`. Plan:
+[story-mode.md](../plans/story-mode.md). Stories are catalog entries with `kind="story"`, and Italian is used only
+for them.
+
 ## User-facing behavior
 
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's

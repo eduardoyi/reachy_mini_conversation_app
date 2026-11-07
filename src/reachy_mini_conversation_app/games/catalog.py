@@ -3,15 +3,22 @@
 What matters in a request is the game's name, wherever it sits in a usual way of asking: "juguemos a los
 colores", "vamos a jugar al juego de los colores", "let's play color hunt", "can we play the color game".
 A request to play without a known name ("juguemos", "let's play a game") asks which game.
+
+Stories (story_file.py) are told through the same host, in Spanish and Italian: "cuéntanos los tres cerditos",
+"raccontaci i tre porcellini"; "cuéntanos un cuento" asks which one.
 """
 
 import re
 import difflib
+import logging
 from typing import Final
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 from collections.abc import Iterable
 
 from reachy_mini_conversation_app.quick_commands import normalize, strip_politeness
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,12 @@ class GameInfo:
     pitch: dict[str, str]
     # For Gemini (play_game rules): how it goes, in English.
     rules: str
+    # "game", or "story" for a story told from a story file (asked about and listed apart from the games).
+    kind: str = "game"
+    # The languages it is played in.
+    languages: tuple[str, ...] = ("es", "en")
+    # Its names by language, when they tell the language apart (a story asked for in Italian is told in Italian).
+    spoken: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 COLOR_HUNT: Final[GameInfo] = GameInfo(
@@ -519,6 +532,35 @@ DETECTIVES: Final[GameInfo] = GameInfo(
     ),
 )
 
+
+def _story_infos() -> list[GameInfo]:
+    """Return a GameInfo for each story file that reads; a broken one is logged and left out."""
+    from reachy_mini_conversation_app.games.story_file import LANGUAGES, STORIES_DIR, StoryError, load_story
+
+    infos = []
+    for path in sorted(STORIES_DIR.glob("*/story.yaml")):
+        try:
+            story = load_story(path)
+        except StoryError as error:
+            logger.warning("Story left out: %s", error)
+            continue
+        spoken = {language: frozenset(story.names[language]) for language in LANGUAGES}
+        infos.append(
+            GameInfo(
+                key=story.key,
+                names=frozenset().union(*spoken.values()),
+                title={**story.title, "en": story.title["es"]},
+                pitch={**story.pitch, "en": story.pitch["es"]},
+                rules=story.rules
+                or f"A story Reachy tells ({story.title['es']}), with moments where the children join in.",
+                kind="story",
+                languages=LANGUAGES,
+                spoken=spoken,
+            )
+        )
+    return infos
+
+
 GAMES: Final[dict[str, GameInfo]] = {
     game.key: game
     for game in (
@@ -535,8 +577,10 @@ GAMES: Final[dict[str, GameInfo]] = {
         SHEEPLE,
         BALLPARK,
         DETECTIVES,
+        *_story_infos(),
     )
 }
+STORIES: Final[tuple[str, ...]] = tuple(key for key, game in GAMES.items() if game.kind == "story")
 
 
 @dataclass(frozen=True)
@@ -545,6 +589,8 @@ class GameRequest:
 
     game: GameInfo | None
     language: str
+    # Asked for a story without saying which ("cuéntanos un cuento"): Reachy asks which story.
+    story: bool = False
 
 
 # "Juguemos a…", "¿podemos jugar al…?", "let's play…": the frame around the game's name.
@@ -560,6 +606,20 @@ _FRAMES: Final[dict[str, re.Pattern[str]]] = {
         r"(?: (?:a|the))?(?: game(?: of)?)?(?P<name>(?: .*)?)$"
     ),
 }
+# "Cuéntanos…", "raccontaci…": the frame around a story's name; "un cuento" / "una storia" alone asks which.
+_STORY_FRAMES: Final[dict[str, re.Pattern[str]]] = {
+    "es": re.compile(
+        r"^(?:cuentame|cuentanos|cuentenos|cuentanme|me cuentas|nos cuentas|leeme|leenos|puedes contarme|"
+        r"puedes contarnos|quiero|queremos|ponme|ponnos)"
+        r"(?: (?:un|una|el|la|los|las|otro|otra))?(?P<noun> cuento| cuentico| historia)?(?: de| del)?"
+        r"(?P<name>(?: .*)?)$"
+    ),
+    "it": re.compile(
+        r"^(?:raccontami|raccontaci|mi racconti|ci racconti|leggimi|leggici|voglio|vogliamo|un altra|unaltra)"
+        r"(?: (?:una|un|la|il|lo|i|gli|le|unaltra|un altra|unaltro))?(?P<noun> storia| storiella| favola| fiaba)?"
+        r"(?: di| dei| della| del| degli)?(?P<name>(?: .*)?)$"
+    ),
+}
 # Said instead of a name: no game picked yet.
 _NO_NAME: Final[frozenset[str]] = frozenset(
     {"", "algo", "un juego", "juego", "contigo", "conmigo", "a game", "game", "something", "with me", "with you"}
@@ -569,27 +629,35 @@ _NAME_EDGES: Final[re.Pattern[str]] = re.compile(r"^(?:a |al |el |la |los |las |
 # Answers and commands, each a whole transcript (normalized, politeness stripped).
 YES_WORDS: Final[frozenset[str]] = frozenset(
     {"si", "si si", "vale", "dale", "claro", "bueno", "venga", "vamos", "si vamos", "si quiero", "si porfa", "listo",
-     "chevere", "si va", "dale pues", "fino", "va pues",
+     "chevere", "si va", "dale pues", "fino", "va pues", "si cuentalo", "si cuentanos",
+     "dai", "va bene", "certo", "si dai", "si grazie", "andiamo", "si raccontala", "si per favore",
      "yes", "yeah", "yep", "sure", "ok", "okay", "yes please", "lets go", "lets play", "sure lets play"}
 )  # fmt: skip
 NO_WORDS: Final[frozenset[str]] = frozenset(
     {"no", "no gracias", "ahora no", "ahorita no", "luego", "despues", "mas tarde", "otro dia", "no quiero", "nope",
-     "no thanks",
+     "no thanks", "no grazie", "non ora", "dopo", "piu tardi", "un altro giorno", "non voglio",
      "not now", "later", "maybe later"}
 )  # fmt: skip
 PAUSE_WORDS: Final[frozenset[str]] = frozenset(
     {"pausa", "pausa el juego", "espera", "esperate", "un momento", "un momentico", "ya va", "para el juego",
+     "pausa el cuento", "para el cuento", "aspetta", "aspettate", "un attimo", "un momentino", "metti in pausa",
+     "ferma la storia",
      "pause", "pause the game",
      "wait", "hold on", "time out"}
 )  # fmt: skip
 RESUME_WORDS: Final[frozenset[str]] = frozenset(
     {"seguimos", "sigue", "seguir", "sigamos", "continua", "continuamos", "sigue jugando", "seguimos jugando",
+     "sigue el cuento", "continua el cuento", "riprendi", "andiamo avanti", "vai avanti", "continuiamo",
+     "continua la storia",
      "otra vez a jugar", "continue", "keep playing", "go on", "resume", "lets keep playing", "unpause"}
 )  # fmt: skip
 # A bare "para" or "stop" is shouted in games; ending needs the game named or "terminar".
 QUIT_WORDS: Final[frozenset[str]] = frozenset(
     {"se acabo el juego", "termina el juego", "terminar el juego", "terminamos", "termina", "terminar",
      "ya no quiero jugar", "no quiero jugar mas", "ya no quiero jugar mas", "fin del juego", "acaba el juego",
+     "se acabo el cuento", "termina el cuento", "ya no quiero el cuento", "ya no quiero mas cuento",
+     "abbiamo finito", "basta storia", "basta con la storia", "finisci la storia", "fine della storia",
+     "non voglio piu la storia", "stop alla storia",
      "stop the game", "end the game", "game over", "quit the game", "quit", "were done", "we are done",
      "i dont want to play anymore", "no more games"}
 )  # fmt: skip
@@ -664,6 +732,9 @@ def parse_game_request(text: str) -> GameRequest | None:
     "Play" alone in English starts music too ("play Coldplay"), so it counts only with a known game's name.
     """
     said = words(text)
+    story = _story_request(said)
+    if story is not None:
+        return story
     for language, frame in _FRAMES.items():
         match = frame.match(said)
         if match is None:
@@ -680,7 +751,34 @@ def parse_game_request(text: str) -> GameRequest | None:
         return None
     # Just the name, of two words or more: "el juego de los colores", "color hunt" (not "colores" alone).
     game = find_game(said) if len(said.split()) >= 2 else None
-    return GameRequest(game, guess_language(said)) if game is not None else None
+    if game is None:
+        return None
+    return GameRequest(game, spoken_language(game, said) or guess_language(said))
+
+
+def _story_request(said: str) -> GameRequest | None:
+    """Return a request for a story ("cuéntanos los tres cerditos"), or None when ``said`` is not one."""
+    for language, frame in _STORY_FRAMES.items():
+        match = frame.match(said)
+        if match is None:
+            continue
+        name = match.group("name").strip()
+        game = find_game(name) if name else None
+        if game is not None and game.kind == "story":
+            return GameRequest(game, spoken_language(game, name) or language)
+        # "Cuéntanos un cuento" asks which; "quiero agua" or "cuéntame un chiste" is not about stories.
+        if match.group("noun") and (not name or name in _NO_NAME):
+            return GameRequest(None, language, story=True)
+    return None
+
+
+def spoken_language(game: GameInfo, name: str) -> str | None:
+    """Return the language whose names for ``game`` hold ``name`` (normalized), or None when none tells."""
+    name = _NAME_EDGES.sub("", name.strip()).strip()
+    for language, names in game.spoken.items():
+        if name in names or difflib.get_close_matches(name, list(names), n=1, cutoff=0.82):
+            return language
+    return None
 
 
 def guess_language(said: str) -> str:

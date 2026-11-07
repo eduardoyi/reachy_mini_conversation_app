@@ -422,6 +422,9 @@ class _PendingTurn:
     audio: tuple[int, NDArray[np.int16]] | None = None
     # How long an awaited answer may take to start (None: _ANSWER_START_S); a quiz gives less.
     listen_s: float | None = None
+    # A game's answer goes to the cloud game model; False keeps it on the local model (a story only needs to know
+    # someone joined in, not the words).
+    cloud_answer: bool = True
 
 
 class HybridRuntime:
@@ -1557,7 +1560,9 @@ class HybridRuntime:
                 if turn is not None:
                     await self._speak_locally(turn.text, turn.language, generation, audio=turn.audio)
                     if turn.answer is not None:
-                        self.expect_answer(turn.answer, turn.language, listen_s=turn.listen_s, game=turn.game)
+                        self.expect_answer(
+                            turn.answer, turn.language, listen_s=turn.listen_s, game=turn.game and turn.cloud_answer
+                        )
                     if turn.on_spoken is not None:
                         turn.on_spoken()
                 await self._return_to_ambient(generation, "announcement_spoken")
@@ -2589,12 +2594,14 @@ class HybridRuntime:
         game: bool = False,
         audio: tuple[int, NDArray[np.int16]] | None = None,
         listen_s: float | None = None,
+        cloud_answer: bool = True,
     ) -> None:
         """Say ``text`` once Reachy is free (no conversation or command), then await ``answer`` if given.
 
         ``on_spoken`` runs on the runtime's loop once it has been heard; ``game`` marks a game's own line, said
         while other announcements are held; ``audio`` (sample rate, samples) is played instead of saying ``text``,
-        which then only goes to the transcript; ``listen_s`` is how long ``answer`` may take to start.
+        which then only goes to the transcript; ``listen_s`` is how long ``answer`` may take to start;
+        ``cloud_answer`` False keeps a game's answer on the local speech model.
         Thread-safe; dropped if he stays busy for ``_ANNOUNCEMENT_PENDING_S``.
         """
         self._queue_turn(
@@ -2608,6 +2615,7 @@ class HybridRuntime:
                 game=game,
                 audio=audio,
                 listen_s=listen_s,
+                cloud_answer=cloud_answer,
             )
         )
 

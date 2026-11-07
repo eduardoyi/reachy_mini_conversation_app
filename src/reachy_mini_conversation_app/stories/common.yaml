@@ -1,0 +1,9 @@
+# Lines every story shares, in the narrator's voice (docs/plans/story-mode.md).
+
+again:
+  es: "[warm] ¿Les gustó? [excited] ¿Les cuento otro cuento?"
+  it: "[warm] Vi è piaciuta? [excited] Ne racconto un'altra?"
+
+goodbye:
+  es: "[warm] ¡Gracias por escuchar! [whispers] Chao, chao."
+  it: "[warm] Grazie per avere ascoltato! [whispers] Ciao, ciao."

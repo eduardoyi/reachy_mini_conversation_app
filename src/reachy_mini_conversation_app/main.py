@@ -201,6 +201,7 @@ def _build_games(
         answer: Callable[[str], Awaitable[object]] | None,
         *,
         listen_s: float | None = None,
+        cloud: bool = True,
     ) -> None:
         """Play a game host's recorded line as Reachy's announcement; return once heard (then listen if asked)."""
         heard = asyncio.get_running_loop().create_future()
@@ -210,7 +211,14 @@ def _build_games(
                 heard.set_result(None)
 
         runtime.request_announcement(
-            text, language, on_spoken=spoken, game=True, audio=(rate, samples), answer=answer, listen_s=listen_s
+            text,
+            language,
+            on_spoken=spoken,
+            game=True,
+            audio=(rate, samples),
+            answer=answer,
+            listen_s=listen_s,
+            cloud_answer=cloud,
         )
         try:
             await asyncio.wait_for(heard, SPEAK_TIMEOUT_S + len(samples) / rate)
@@ -358,11 +366,36 @@ def _build_games(
             elevenlabs_key=config.ELEVENLABS_API_KEY,
         )
         games["detectives"] = lambda: Detectives(detectives)
+    games.update(_story_games(game_data))
     host = GameHost(services, games)
     runtime.set_cloud_gate(host.addressed)
     runtime.set_announcement_hold(host.holding)
     log.info("Games enabled: %s", ", ".join(games) or "none (no camera, no Big Brain clue bank)")
     return host
+
+
+def _story_games(game_data: Path) -> dict[str, Callable[[], Any]]:
+    """Return a factory for each story file that reads (games/story.py), recordings under ``game_data/stories``."""
+    from reachy_mini_conversation_app.games.story import StoryGame, StoryVoice
+    from reachy_mini_conversation_app.games.catalog import GAMES
+    from reachy_mini_conversation_app.games.kids_audio import KidsAudio
+    from reachy_mini_conversation_app.games.story_file import StoryError, load_cast, load_common, load_stories
+
+    log = logging.getLogger(__name__)
+    try:
+        cast, common, stories = load_cast(), load_common(), load_stories()
+    except StoryError as error:
+        log.warning("Stories not available: %s", error)
+        return {}
+    folder = game_data / "stories"
+    sounds = KidsAudio(folder, {})  # stories/sounds/<name>/<take>.wav and chosen.json, as story_build.py makes them
+    common_voice = StoryVoice(folder / "common", cast)
+
+    def factory(story: Any) -> Callable[[], Any]:
+        voice = StoryVoice(folder / story.key, cast)
+        return lambda: StoryGame(story, GAMES[story.key], voice, common, common_voice, sounds)
+
+    return {key: factory(story) for key, story in stories.items() if key in GAMES}
 
 
 def _build_display() -> Any:

@@ -1,0 +1,58 @@
+# The voices of story mode (docs/plans/story-mode.md): one ElevenLabs voice per role, the same in every story and
+# language (they are multilingual). `voice` is empty until the voice is designed and picked:
+#   uv run python scripts/story_build.py --design ROLE    (previews to listen to; then put the chosen id here)
+# Changing a voice re-records that role's lines on the next build, and nobody else's.
+# `look` is how a character is drawn, restated in every scene with its character sheet (stories/cast/<role>.png) as
+# the reference, so it looks the same in every picture and every story. The screen shows four greys, so characters
+# are told apart by shape and outfit, never by color.
+
+narrator:
+  description: >-
+    A friendly adult male storyteller for preschool children, warm, cozy and smiling, very expressive and theatrical,
+    clear and unhurried diction, lots of variety between whispering and excitement, like a beloved children's
+    audiobook narrator reading at a library story time.
+  voice: "mbYQdM7WrwsxTHfGw7CR"
+
+wolf:
+  description: >-
+    A silly, goofy cartoon wolf for small children: a deep but comic, slightly nasal voice, grumbly and
+    over-dramatic, always hungry, a clumsy villain who always fails. Funny, never scary.
+  voice: "W7E3KNQawoiz0OiRXuF3"
+  look: >-
+    a tall, skinny-legged goofy cartoon wolf with a big round tummy, shaggy mid-grey fur, a long snout with a big
+    black nose, droopy sleepy eyes, a floppy tongue and a scruffy striped scarf; silly and clumsy, never scary,
+    no sharp teeth showing
+
+pig_straw:
+  description: >-
+    An adult voice actor doing a high, squeaky, cheerful cartoon voice for a little pig character in an animated
+    show: giggly, carefree and playful, a bit lazy, always wanting to go and play.
+  voice: "iVT2VOVHkBNE0J6nTdL5"
+  look: >-
+    the smallest of the three little pigs: round and chubby, big floppy ears, a curly tail, a wide-brimmed straw
+    hat and bold striped overalls, a cheeky grin
+
+pig_sticks:
+  description: >-
+    An adult voice actor doing a bright, bouncy, fast-talking cartoon voice for a little pig character in an
+    animated show: silly and a little nervous, humming while he works.
+  voice: "QBjpKqr4CpQoOnbn40dM"
+  look: >-
+    the middle little pig: a little taller and thinner than his brothers, pointy ears, a polka-dot bandana around
+    his neck, shorts with one suspender strap, often holding a small wooden hammer
+
+pig_bricks:
+  description: >-
+    An adult voice actor doing a warm, friendly, slightly high cartoon voice for a sensible little pig character in
+    an animated show: calm, patient, brave and confident.
+  voice: "bK8pCj0hy6BYv8VxrfSx"
+  look: >-
+    the oldest little pig: sturdy and round, round glasses, plain dark overalls and a tool belt with a trowel, a
+    calm kind smile
+
+mama_pig:
+  description: >-
+    A kind, loving mother pig, a warm gentle adult voice, soft and caring, a little emotional saying goodbye.
+  voice: "Xg76FEi4dbIiAKTuqhdB"
+  look: >-
+    a plump, kind mother pig with a flowered apron and a little bun of hair tied with a ribbon

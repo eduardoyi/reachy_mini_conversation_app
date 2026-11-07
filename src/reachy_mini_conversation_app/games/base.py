@@ -36,8 +36,12 @@ class SayAudio(Protocol):
         answer: Optional[Callable[[str], Awaitable[object]]],
         *,
         listen_s: Optional[float] = None,
+        cloud: bool = True,
     ) -> Coroutine[Any, Any, None]:
-        """Play the line; ``listen_s`` is how long the answer may take to start (Reachy's default when None)."""
+        """Play the line; ``listen_s`` is how long the answer may take to start (Reachy's default when None).
+
+        ``cloud`` False keeps the answer on the local speech model (only whether someone spoke matters).
+        """
         ...
 
 

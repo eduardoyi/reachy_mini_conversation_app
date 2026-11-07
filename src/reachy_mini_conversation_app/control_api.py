@@ -146,7 +146,7 @@ class ControlApi:
         if action == "start" and PRIVACY.on:
             return "Privacy is on.", 409
         game = str(payload.get("game") or "")
-        language = "en" if payload.get("language") == "en" else "es"
+        language = str(payload.get("language")) if payload.get("language") in ("en", "it") else "es"
         kids = payload.get("kids") is True
 
         def act() -> str | None:

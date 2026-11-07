@@ -45,8 +45,9 @@ class FakeReachy:
         # Recorded lines played (their text and length in samples), and the answer each one waited for.
         self.clips: list[tuple[str, int]] = []
         self.clip_answers: list[Answer] = []
-        # How long each recorded question let its answer take to start.
+        # How long each recorded question let its answer take to start, and whether its answer may go to the cloud.
         self.clip_listen: list[float | None] = []
+        self.clip_cloud: list[bool] = []
         # The words each game told the speech model to expect, in order ([] when cleared).
         self.hints: list[list[str]] = []
         self.services = GameServices(
@@ -84,11 +85,13 @@ class FakeReachy:
         answer: Answer | None,
         *,
         listen_s: float | None = None,
+        cloud: bool = True,
     ) -> None:
         self.clips.append((text, len(samples)))
         if answer is not None:
             self.clip_answers.append(answer)
             self.clip_listen.append(listen_s)
+            self.clip_cloud.append(cloud)
 
     def _save_screen(self) -> Callable[[], None]:
         def restore() -> None:

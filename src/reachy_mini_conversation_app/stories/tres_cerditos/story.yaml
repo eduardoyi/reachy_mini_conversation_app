@@ -1,0 +1,468 @@
+# Los tres cerditos / I tre porcellini: story mode's first story (docs/plans/story-mode.md).
+# Our own retelling of the folk tale for a 2- and a 4-year-old: a silly wolf, no pig gets eaten, the wolf lands in a
+# pot of cold water and runs away. About 6 minutes with 13 moments where the children join in.
+# Spanish is Venezuelan (ustedes, papagayo for a kite), Italian is standard.
+
+key: tres_cerditos
+title:
+  es: Los tres cerditos
+  it: I tre porcellini
+names:
+  es: [tres cerditos, los tres cerditos, los cerditos, cerditos, el cuento de los cerditos, tres chanchitos,
+       tres cochinitos, los tres cochinitos, tres puerquitos, el lobo y los cerditos]
+  it: [tre porcellini, i tre porcellini, porcellini, i porcellini, tre maialini, i tre maialini, maialini,
+       il lupo e i porcellini]
+pitch:
+  es: "El lobo sopla y sopla, y ustedes me ayudan a contarlo."
+  it: "Il lupo soffia e soffia, e voi mi aiutate a raccontarla."
+rules: >-
+  Reachy tells The Three Little Pigs (a silly wolf, nobody gets eaten), about 6 minutes, in Spanish or Italian, with
+  character voices, sounds and music. The children join in: they knock on the door by patting his head, shout the
+  pigs' answer, blow with the wolf, copy moves and pick small things (a ball or a kite, the house's color, pizza or
+  cake). The story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the three little pigs standing together in front of a small brick house on a sunny hill, waving and smiling
+  with: [pig_straw, pig_sticks, pig_bricks]
+
+steps:
+  # The beginning -------------------------------------------------------------------------------------------
+  - scene:
+      id: goodbye
+      picture: mama pig at the door of a little farmhouse waving goodbye to the three little pigs, who set off down a country path waving back
+      with: [mama_pig, pig_straw, pig_sticks, pig_bricks]
+      move: welcoming
+  - say: narrator
+    es: "[warm] Había una vez tres cerditos que vivían con su mamá en el campo."
+    it: "[warm] C'era una volta, in campagna, una mamma con tre porcellini."
+  - say: narrator
+    es: "[playful] Un día, los cerditos ya estaban grandes, y la mamá les dijo:"
+    it: "[playful] Un giorno i porcellini erano diventati grandi, e la mamma disse:"
+  - say: mama_pig
+    es: "[softly] Hijitos, ya es hora de que cada uno construya su casita. ¡Cuídense mucho del lobo!"
+    it: "[softly] Piccoli miei, è ora che ognuno costruisca la sua casetta. E state attenti al lupo!"
+  - chorus:
+      ask:
+        es: "[excited] Los cerditos le dijeron adiós a su mamá. ¡Díganle adiós ustedes también! ¡Adiós, mamá!"
+        it: "[excited] I porcellini salutarono la mamma. Salutatela anche voi! Ciao, mamma!"
+      done:
+        who: mama_pig
+        es: "[warmly] ¡Adiós, mis cerditos! ¡Qué lindo se despiden!"
+        it: "[warmly] Ciao, porcellini miei! Che bel saluto!"
+      without:
+        who: mama_pig
+        es: "[warmly] ¡Adiós, mis cerditos! ¡Los quiero mucho!"
+        it: "[warmly] Ciao, porcellini miei! Vi voglio tanto bene!"
+  - sound: oink
+
+  # The straw house -----------------------------------------------------------------------------------------
+  - scene:
+      id: straw_house
+      picture: the smallest little pig happily piling up straw into a small wobbly straw house, bits of straw flying, in a sunny meadow
+      with: [pig_straw]
+      move: happy
+  - say: narrator
+    es: "[playful] El primer cerdito tenía muchas ganas de jugar. Así que hizo su casa de paja, rapidito, rapidito."
+    it: "[playful] Il primo porcellino aveva tanta voglia di giocare. Così fece la sua casa di paglia, in fretta in fretta."
+  - sound: straw_build
+  - say: pig_straw
+    es: "[giggles] ¡Listo! ¡Mi casa de paja está lista! Ahora... ¡a jugar!"
+    it: "[giggles] Fatto! La mia casa di paglia è pronta! E adesso... si gioca!"
+  - choice:
+      id: toy
+      ask:
+        es: "[curious] ¿Y con qué jugó el cerdito? ¿Con una pelota... o con un papagayo?"
+        it: "[curious] E con che cosa giocò il porcellino? Con una palla... o con un aquilone?"
+      options:
+        ball:
+          words: {es: [pelota, pelotas, balon, bola], it: [palla, pallone, la palla]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que con una pelota!"
+            it: "[thoughtful] Mmm... secondo me, con una palla!"
+          then:
+            es: "[excited] ¡Con una pelota! Bota, bota, bota la pelota. ¡Qué divertido!"
+            it: "[excited] Con una palla! Rimbalza, rimbalza, rimbalza la palla. Che divertimento!"
+        kite:
+          words: {es: [papagayo, papagayos, cometa, papagallo, volador], it: [aquilone, aquiloni, l aquilone]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que con un papagayo!"
+            it: "[thoughtful] Mmm... secondo me, con un aquilone!"
+          then:
+            es: "[excited] ¡Con un papagayo! Sube, sube, sube el papagayo, alto en el cielo. ¡Qué divertido!"
+            it: "[excited] Con un aquilone! Su, su, su vola l'aquilone, in alto nel cielo. Che divertimento!"
+
+  # The wolf comes ------------------------------------------------------------------------------------------
+  - scene:
+      id: play
+      about: toy
+      with: [pig_straw]
+      options:
+        ball: the smallest little pig bouncing a big ball and laughing in the meadow in front of his straw house
+        kite: the smallest little pig running happily with a kite flying high in the sky above his straw house
+  - scene:
+      id: straw_door
+      picture: the goofy wolf knocking on the door of the little straw house, rubbing his big round tummy, while the smallest little pig peeks out of the window
+      with: [wolf, pig_straw]
+      move: surprised
+  - say: narrator
+    es: "[mysterious] Pero de repente... por el camino venía... ¡el lobo!"
+    it: "[mysterious] Ma all'improvviso... lungo il sentiero arrivava... il lupo!"
+  - sound: tummy_rumble
+  - say: wolf
+    es: "[grumbling] Ay, ay, ay, qué hambre tengo. ¡Mi barriga hace grrr!"
+    it: "[grumbling] Ahi, ahi, ahi, che fame che ho. La mia pancia fa grrr!"
+  - pat:
+      ask:
+        es: "[whispers] El lobo quiere tocar la puerta. ¿Me ayudan? Denle un golpecito a mi cabeza."
+        it: "[whispers] Il lupo vuole bussare alla porta. Mi aiutate? Datemi un colpetto sulla testa."
+      done:
+        es: "[laughs] ¡Toc, toc! ¡Muy bien!"
+        it: "[laughs] Toc, toc! Bravissimi!"
+      without:
+        es: "[whispers] Y el lobo tocó la puerta. Toc, toc."
+        it: "[whispers] E il lupo bussò alla porta. Toc, toc."
+      sound: door_knock
+  - say: wolf
+    es: "[sweetly, pretending] Cerdito, cerdito... ¡déjame entrar!"
+    it: "[sweetly, pretending] Porcellino, porcellino... fammi entrare!"
+  - chorus:
+      ask:
+        es: "[excited] ¿Y qué le dijo el cerdito? ¡Todos juntos, bien fuerte! ¡No, no y no!"
+        it: "[excited] E che cosa rispose il porcellino? Tutti insieme, forte forte! No, no e poi no!"
+      done:
+        who: pig_straw
+        es: "[brave] ¡Eso! ¡No, no y no! ¡No te abro!"
+        it: "[brave] Esatto! No, no e poi no! Non ti apro!"
+      without:
+        who: pig_straw
+        es: "[brave] ¡No, no y no! ¡No te abro!"
+        it: "[brave] No, no e poi no! Non ti apro!"
+  - say: wolf
+    es: "[dramatic] ¡Entonces soplaré, y soplaré, y tu casa derribaré!"
+    it: "[dramatic] Allora soffierò, soffierò, e la tua casa butterò giù!"
+  - noise:
+      ask:
+        es: "[excited] ¡Ayuden al lobo a soplar! Uno, dos, tres... ¡soplen!"
+        it: "[excited] Aiutate il lupo a soffiare! Uno, due, tre... soffiate!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Fuuuuu!"
+        it: "[playful] Più forte! Fuuuuu!"
+      done:
+        es: "[amazed] ¡Uuuy, qué soplido tan fuerte!"
+        it: "[amazed] Uuuh, che soffio fortissimo!"
+      without:
+        who: wolf
+        es: "[inhales deeply] ¡Fuuuuuuuu!"
+        it: "[inhales deeply] Fuuuuuuuu!"
+      sound: straw_flies
+  - scene:
+      id: straw_blown
+      picture: the goofy wolf blowing hard with huge puffed cheeks, the straw house flying apart in a swirl of straw, the smallest little pig running away
+      with: [wolf, pig_straw]
+  - say: narrator
+    es: "[gasps] ¡Y la casita de paja salió volando! El cerdito corrió y corrió a la casa de su hermano."
+    it: "[gasps] E la casetta di paglia volò via! Il porcellino corse, corse, fino alla casa di suo fratello."
+  - sound: run_away
+
+  # The stick house -----------------------------------------------------------------------------------------
+  - scene:
+      id: stick_house
+      picture: the middle little pig hammering sticks and branches into a little stick house while the smallest little pig runs up to him, out of breath
+      with: [pig_sticks, pig_straw]
+      move: happy
+  - say: narrator
+    es: "[playful] El segundo cerdito había hecho su casa de palitos. Toc, toc, toc, cantaba mientras trabajaba."
+    it: "[playful] Il secondo porcellino aveva fatto la sua casa di legnetti. Toc, toc, toc, cantava mentre lavorava."
+  - sound: sticks_build
+  - say: pig_sticks
+    es: "[cheerful, fast] ¡Entra, hermanito, entra! ¡Aquí estamos seguros!"
+    it: "[cheerful, fast] Entra, fratellino, entra! Qui siamo al sicuro!"
+  - scene:
+      id: stick_door
+      picture: the goofy wolf standing outside the little stick house, while the smallest and the middle little pigs tremble and hug each other behind the window
+      with: [wolf, pig_straw, pig_sticks]
+  - say: narrator
+    es: "[mysterious] Pero el lobo los había seguido... ¡y llegó a la casa de palitos!"
+    it: "[mysterious] Ma il lupo li aveva seguiti... ed eccolo alla casa di legnetti!"
+  - copy:
+      ask:
+        es: "[nervous] ¡Los cerditos tenían mucho miedo! ¿Pueden temblar como ellos? ¡Tiemblen, tiemblen!"
+        it: "[nervous] I porcellini avevano tanta paura! Sapete tremare come loro? Tremate, tremate!"
+      done:
+        es: "[laughs] ¡Ay, qué cerditos tan temblorosos!"
+        it: "[laughs] Ah, che porcellini tremolanti!"
+      move: scared
+      music: story_move
+      seconds: 5
+  - pat:
+      ask:
+        es: "[whispers] El lobo toca otra vez. ¡Denle un golpecito a mi cabeza!"
+        it: "[whispers] Il lupo bussa di nuovo. Datemi un colpetto sulla testa!"
+      done:
+        es: "[laughs] ¡Toc, toc! ¡Eso!"
+        it: "[laughs] Toc, toc! Così!"
+      without:
+        es: "[whispers] Toc, toc, tocó el lobo."
+        it: "[whispers] Toc, toc, bussò il lupo."
+      sound: door_knock
+  - say: wolf
+    es: "[sweetly, pretending] Cerditos, cerditos... ¡déjenme entrar!"
+    it: "[sweetly, pretending] Porcellini, porcellini... fatemi entrare!"
+  - chorus:
+      ask:
+        es: "[excited] ¿Qué le dicen los cerditos? ¡Todos juntos! ¡No, no y no!"
+        it: "[excited] Che cosa rispondono i porcellini? Tutti insieme! No, no e poi no!"
+      done:
+        who: pig_sticks
+        es: "[brave] ¡No, no y no! ¡No te abrimos!"
+        it: "[brave] No, no e poi no! Non ti apriamo!"
+      without:
+        who: pig_sticks
+        es: "[brave] ¡No, no y no! ¡No te abrimos!"
+        it: "[brave] No, no e poi no! Non ti apriamo!"
+  - say: wolf
+    es: "[dramatic] ¡Entonces soplaré, y soplaré, y su casa derribaré!"
+    it: "[dramatic] Allora soffierò, soffierò, e la vostra casa butterò giù!"
+  - noise:
+      ask:
+        es: "[excited] ¡A soplar otra vez! Uno, dos, tres... ¡soplen!"
+        it: "[excited] Soffiamo di nuovo! Uno, due, tre... soffiate!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Fuuuuu!"
+        it: "[playful] Più forte! Fuuuuu!"
+      done:
+        es: "[amazed] ¡Qué soplido! ¡Parecían un huracán!"
+        it: "[amazed] Che soffio! Sembravate un uragano!"
+      without:
+        who: wolf
+        es: "[inhales deeply] ¡Fuuuuuuuu!"
+        it: "[inhales deeply] Fuuuuuuuu!"
+      sound: sticks_fall
+  - scene:
+      id: sticks_fall
+      picture: the little stick house tumbling down in a clatter of sticks while the goofy wolf blows, and the smallest and the middle little pigs run away together
+      with: [wolf, pig_straw, pig_sticks]
+  - say: narrator
+    es: "[gasps] ¡Y la casita de palitos se cayó! Los dos cerditos corrieron a la casa del hermano mayor."
+    it: "[gasps] E la casetta di legnetti cadde giù! I due porcellini corsero alla casa del fratello più grande."
+  - sound: run_away
+
+  # The brick house -----------------------------------------------------------------------------------------
+  - scene:
+      id: brick_house
+      picture: the oldest little pig building a sturdy brick house with his trowel while his two little brothers carry bricks to him
+      with: [pig_straw, pig_sticks, pig_bricks]
+      move: success
+  - say: narrator
+    es: "[warm] El tercer cerdito había trabajado mucho, mucho, mucho. Su casa era de ladrillos."
+    it: "[warm] Il terzo porcellino aveva lavorato tanto, tanto, tanto. La sua casa era di mattoni."
+  - copy:
+      ask:
+        es: "[playful] ¿Lo ayudamos a cargar ladrillos? ¡Uf, qué pesados! ¡Arriba, arriba!"
+        it: "[playful] Lo aiutiamo a portare i mattoni? Uff, come pesano! Su, su!"
+      done:
+        es: "[proud] ¡Qué fuertes son! ¡Gracias por ayudar!"
+        it: "[proud] Che forti che siete! Grazie dell'aiuto!"
+      move: excited
+      music: story_build
+      seconds: 6
+  - sound: bricks_build
+  - choice:
+      id: color
+      ask:
+        es: "[curious] Y ahora hay que pintar la casa. ¿De qué color la pintamos? ¿Roja... o azul?"
+        it: "[curious] E adesso bisogna dipingere la casa. Di che colore la facciamo? Rossa... o blu?"
+      options:
+        red:
+          words: {es: [roja, rojo, rojita], it: [rossa, rosso]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que roja!"
+            it: "[thoughtful] Mmm... secondo me, rossa!"
+          then:
+            es: "[delighted] ¡Roja! Una casita roja, como una fresa. ¡Qué bonita!"
+            it: "[delighted] Rossa! Una casetta rossa come una fragola. Che bella!"
+        blue:
+          words: {es: [azul, azulito, azulita], it: [blu, azzurra, azzurro, celeste]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que azul!"
+            it: "[thoughtful] Mmm... secondo me, blu!"
+          then:
+            es: "[delighted] ¡Azul! Una casita azul, como el cielo. ¡Qué bonita!"
+            it: "[delighted] Blu! Una casetta blu come il cielo. Che bella!"
+  - say: pig_bricks
+    es: "[calm, kind] ¡Pasen, hermanitos! En mi casa estamos a salvo."
+    it: "[calm, kind] Entrate, fratellini! A casa mia siamo al sicuro."
+  - scene:
+      id: brick_door
+      picture: the goofy wolf arriving at the sturdy brick house, while the three little pigs look out safely from the window
+      with: [wolf, pig_straw, pig_sticks, pig_bricks]
+      move: surprised
+  - say: narrator
+    es: "[mysterious] Pero el lobo llegó... ¡también a la casa de ladrillos!"
+    it: "[mysterious] Ma il lupo arrivò... anche alla casa di mattoni!"
+  - pat:
+      ask:
+        es: "[whispers] ¡Toquen la puerta una vez más! Un golpecito en mi cabeza."
+        it: "[whispers] Bussate ancora una volta! Un colpetto sulla mia testa."
+      done:
+        es: "[laughs] ¡Toc, toc! ¡Perfecto!"
+        it: "[laughs] Toc, toc! Perfetto!"
+      without:
+        es: "[whispers] Toc, toc, tocó el lobo otra vez."
+        it: "[whispers] Toc, toc, bussò di nuovo il lupo."
+      sound: door_knock
+  - say: wolf
+    es: "[sweetly, pretending] Cerditos, cerditos... ¡déjenme entrar!"
+    it: "[sweetly, pretending] Porcellini, porcellini... fatemi entrare!"
+  - chorus:
+      ask:
+        es: "[excited] ¡Ustedes ya se lo saben! ¡Todos juntos! ¡No, no y no!"
+        it: "[excited] Ormai lo sapete! Tutti insieme! No, no e poi no!"
+      done:
+        who: pig_bricks
+        es: "[confident] ¡No, no y no! ¡Nunca te vamos a abrir!"
+        it: "[confident] No, no e poi no! Non ti apriremo mai!"
+      without:
+        who: pig_bricks
+        es: "[confident] ¡No, no y no! ¡Nunca te vamos a abrir!"
+        it: "[confident] No, no e poi no! Non ti apriremo mai!"
+  - say: wolf
+    es: "[dramatic] ¡Entonces soplaré, y soplaré, y su casa derribaré!"
+    it: "[dramatic] Allora soffierò, soffierò, e la vostra casa butterò giù!"
+  - noise:
+      ask:
+        es: "[excited] ¡Soplen con todas sus fuerzas! Uno, dos, tres... ¡soplen!"
+        it: "[excited] Soffiate con tutta la forza che avete! Uno, due, tre... soffiate!"
+      louder:
+        es: "[playful] ¡Más, más fuerte! ¡Fuuuuu!"
+        it: "[playful] Di più, più forte! Fuuuuu!"
+      done:
+        es: "[amazed] ¡Qué fuerte soplaron! Pero la casa de ladrillos... [whispers] ¡ni se movió!"
+        it: "[amazed] Che soffio fortissimo! Ma la casa di mattoni... [whispers] non si mosse nemmeno!"
+      without:
+        who: wolf
+        es: "[inhales deeply] ¡Fuuuuuuuu! [panting] Fuuu... fu..."
+        it: "[inhales deeply] Fuuuuuuuu! [panting] Fuuu... fu..."
+      sound: big_blow
+  - say: narrator
+    about: color
+    options:
+      red:
+        es: "[playful] El lobo sopló tanto que se mareó. Y la casita roja seguía ahí, fuerte y bonita."
+        it: "[playful] Il lupo soffiò così tanto che gli girò la testa. E la casetta rossa era sempre lì, forte e bella."
+      blue:
+        es: "[playful] El lobo sopló tanto que se mareó. Y la casita azul seguía ahí, fuerte y bonita."
+        it: "[playful] Il lupo soffiò così tanto che gli girò la testa. E la casetta blu era sempre lì, forte e bella."
+  - scene:
+      id: wolf_dizzy
+      picture: the goofy wolf sitting on the ground, out of breath and dizzy, with little stars and birds circling his head, the brick house standing strong behind him
+      with: [wolf]
+  - sound: dizzy
+  - say: wolf
+    es: "[dizzy, silly] Uy... todo me da vueltas... [mischievously] ¡Ya sé! ¡Entraré por la chimenea!"
+    it: "[dizzy, silly] Uh... mi gira tutto... [mischievously] Ho un'idea! Entrerò dal camino!"
+
+  # The chimney ---------------------------------------------------------------------------------------------
+  - scene:
+      id: roof
+      picture: the goofy wolf tiptoeing sneakily on the roof of the brick house towards the chimney
+      with: [wolf]
+      move: thinking
+  - sound: roof_climb
+  - say: narrator
+    es: "[whispers] Shhh... el lobo se subió al techo. Pero el cerdito más grande tuvo una idea."
+    it: "[whispers] Shhh... il lupo salì sul tetto. Ma il porcellino più grande ebbe un'idea."
+  - say: pig_bricks
+    es: "[whispers, clever] ¡Rápido! Pongamos una olla grande de agua fría debajo de la chimenea."
+    it: "[whispers, clever] Presto! Mettiamo una grande pentola d'acqua fredda sotto il camino."
+  - say: narrator
+    es: "[suspense] Y el lobo bajó por la chimenea... bajó... bajó... y..."
+    it: "[suspense] E il lupo scese giù per il camino... giù... giù... e..."
+  - sound: splash
+  - scene:
+      id: splash
+      picture: inside the cozy brick house, the goofy wolf landing in a big pot of water in the fireplace with a huge comic splash, eyes wide, while the three little pigs laugh
+      with: [wolf, pig_straw, pig_sticks, pig_bricks]
+  - say: wolf
+    es: "[yelps, silly] ¡AY, AY, AY! ¡Qué fría! ¡Qué fría está el agua!"
+    it: "[yelps, silly] AHI, AHI, AHI! Che fredda! Che fredda quest'acqua!"
+  - sound: wolf_runs
+  - say: narrator
+    es: "[laughs] ¡Y el lobo salió corriendo, todo mojado, y nunca, nunca, nunca volvió!"
+    it: "[laughs] E il lupo scappò via, tutto bagnato, e non tornò mai, mai, mai più!"
+  - noise:
+      ask:
+        es: "[excited] ¡Los cerditos están a salvo! ¡Griten bien fuerte: bravo!"
+        it: "[excited] I porcellini sono salvi! Gridate forte forte: evviva!"
+      louder:
+        es: "[playful] ¡Más fuerte, que nos oiga el lobo! ¡Bravo!"
+        it: "[playful] Più forte, che ci senta il lupo! Evviva!"
+      done:
+        es: "[cheering] ¡Bravo, bravo! ¡Qué buen grito!"
+        it: "[cheering] Evviva, evviva! Che bel grido!"
+      without:
+        es: "[cheering] ¡Bravooo! ¡Bravo por los cerditos!"
+        it: "[cheering] Evvivaaa! Evviva i porcellini!"
+      sound: sparkle
+
+  # The party -----------------------------------------------------------------------------------------------
+  - scene:
+      id: safe
+      picture: the three little pigs cheering and jumping for joy in front of their brick house, the wet wolf tiny in the distance running away over the hill
+      with: [pig_straw, pig_sticks, pig_bricks]
+      move: happy
+  - choice:
+      id: food
+      ask:
+        es: "[excited] ¡Los cerditos hicieron una fiesta! ¿Qué comieron? ¿Pizza... o torta?"
+        it: "[excited] I porcellini fecero una festa! Che cosa mangiarono? Pizza... o torta?"
+      options:
+        pizza:
+          words: {es: [pizza, pizzas, pisa], it: [pizza, pizze]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que pizza!"
+            it: "[thoughtful] Mmm... secondo me, pizza!"
+          then:
+            es: "[delighted] ¡Pizza! Una pizza gigante, con mucho queso. ¡Ñam, ñam!"
+            it: "[delighted] Pizza! Una pizza gigante, con tanta mozzarella. Gnam, gnam!"
+        cake:
+          words: {es: [torta, tortas, pastel, ponque, bizcocho], it: [torta, dolce, la torta]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que torta!"
+            it: "[thoughtful] Mmm... secondo me, torta!"
+          then:
+            es: "[delighted] ¡Torta! Una torta de chocolate, enorme. ¡Ñam, ñam!"
+            it: "[delighted] Torta! Una torta al cioccolato, enorme. Gnam, gnam!"
+  - scene:
+      id: feast
+      about: food
+      with: [pig_straw, pig_sticks, pig_bricks]
+      options:
+        pizza: the three little pigs at a table inside the cozy brick house sharing a giant pizza, happy and messy
+        cake: the three little pigs at a table inside the cozy brick house sharing a giant chocolate cake, happy and messy
+  - say: narrator
+    about: toy
+    options:
+      ball:
+        es: "[playful] Y el primer cerdito trajo su pelota, para jugar todos juntos."
+        it: "[playful] E il primo porcellino portò la sua palla, per giocare tutti insieme."
+      kite:
+        es: "[playful] Y el primer cerdito trajo su papagayo, para jugar todos juntos."
+        it: "[playful] E il primo porcellino portò il suo aquilone, per giocare tutti insieme."
+  - say: narrator
+    es: "[excited] Y después... ¡a bailar! ¡Bailen con los cerditos!"
+    it: "[excited] E poi... tutti a ballare! Ballate con i porcellini!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - sound: oink
+  - scene:
+      id: the_end
+      picture: the three little pigs dancing together in a circle in front of their brick house, with a big smiling sun
+      with: [pig_straw, pig_sticks, pig_bricks]
+  - say: narrator
+    es: "[warm, slowing down] Y desde ese día, los tres cerditos vivieron juntos y felices en su casita de ladrillos."
+    it: "[warm, slowing down] E da quel giorno i tre porcellini vissero insieme, felici, nella loro casetta di mattoni."
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end
