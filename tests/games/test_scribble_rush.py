@@ -4,7 +4,7 @@ import io
 import random
 import asyncio
 from typing import Any
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import numpy as np
 import pytest
@@ -26,10 +26,17 @@ from reachy_mini_conversation_app.games.scribble_rush import (
     ScribbleSetup,
     deal,
     guessed,
+    word_level,
     read_guesses,
     judge_guesses,
 )
-from reachy_mini_conversation_app.games.scribble_words import CATEGORIES, KIDS_WORDS, ADULT_WORDS, Word
+from reachy_mini_conversation_app.games.scribble_words import (
+    CATEGORIES,
+    KIDS_WORDS,
+    ADULT_WORDS,
+    VENEZUELAN_WORDS,
+    Word,
+)
 from reachy_mini_conversation_app.games.big_brain_judge import plain
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 from reachy_mini_conversation_app.games.scribble_screens import render_track
@@ -52,6 +59,33 @@ def test_the_word_lists_are_big_enough_and_every_word_has_both_languages() -> No
         assert not {form: names for form, names in owners.items() if len(names) > 1}
         assert len({word.es for word in words}) == len(words)
     assert not {word.category for word in KIDS_WORDS} & {"movie", "saying", "action"}
+
+
+def test_every_adult_word_has_a_level_and_each_level_is_big_enough() -> None:
+    """Adults' words are easy, medium or hard, with at least 100 of each; kids' words have none."""
+    counts = Counter(word.level for word in ADULT_WORDS)
+    assert set(counts) == {"easy", "medium", "hard"} and min(counts.values()) >= 100
+    assert all(word.level == "" for word in KIDS_WORDS)
+
+
+def test_the_venezuelan_words_are_set_aside_from_the_adult_game() -> None:
+    """The Venezuelan-only words wait for an edition: none is dealt, and each still reads in both languages."""
+    assert len(VENEZUELAN_WORDS) >= 40
+    assert not {word.es for word in VENEZUELAN_WORDS} & {word.es for word in ADULT_WORDS}
+    assert all(word.es in word.accept and word.en in word.accept for word in VENEZUELAN_WORDS)
+    assert "venezuela" not in {word.category for word in ADULT_WORDS}
+
+
+def test_a_team_draws_harder_words_as_it_climbs_the_track() -> None:
+    """Easy words below square 8, medium below 16, hard from there; a level that runs out falls back to any word."""
+    assert [word_level(squares) for squares in (0, 7, 8, 15, 16, 23)] == ["easy"] * 2 + ["medium"] * 2 + ["hard"] * 2
+    game = ScribbleRush(ScribbleSetup(port=0, guess=None), rng=random.Random(3))  # type: ignore[arg-type]
+    game._team = "red"
+    for squares, level in ((0, "easy"), (10, "medium"), (20, "hard")):
+        game._squares["red"] = squares
+        assert {game._pick_word().level for _ in range(20)} == {level}
+    game._used = {word.es for word in ADULT_WORDS if word.level == "hard"}
+    assert game._pick_word().level != "hard"
 
 
 @pytest.mark.parametrize(
@@ -97,14 +131,16 @@ async def test_jev_rules_only_on_guesses_code_did_not_match_and_a_failure_is_a_m
     assert await judge_guesses(["un perro"], cat, None) == [False]
 
 
-def test_the_vision_answer_is_read_least_to_most_confident_and_at_most_three() -> None:
-    """Guesses are sorted by confidence (most confident last) and cut to three; nonsense raises VisionError."""
-    answer = (
-        '{"remark": "¡Qué obra!", "guesses": [{"guess": "un gato", "confidence": 0.9}, {"guess": "un perro", '
-        '"confidence": 0.2}, {"guess": "un zorro", "confidence": 0.5}, {"guess": "un oso", "confidence": 0.1}, '
+def test_the_vision_answer_puts_the_best_guess_first_and_drops_backups_when_sure() -> None:
+    """Guesses are sorted most confident first and cut to three; a sure best guess comes alone."""
+    unsure = (
+        '{"remark": "¡Qué obra!", "guesses": [{"guess": "un perro", "confidence": 0.2}, {"guess": "un gato", '
+        '"confidence": 0.6}, {"guess": "un zorro", "confidence": 0.5}, {"guess": "un oso", "confidence": 0.1}, '
         '{"guess": "  ", "confidence": 1}]}'
     )
-    assert read_guesses(answer) == Guesses("¡Qué obra!", ["un perro", "un zorro", "un gato"])
+    assert read_guesses(unsure) == Guesses("¡Qué obra!", ["un gato", "un zorro", "un perro"])
+    sure = '{"guesses": [{"guess": "un perro", "confidence": 0.3}, {"guess": "un gato", "confidence": 0.9}]}'
+    assert read_guesses(sure) == Guesses("", ["un gato"])
     assert read_guesses('{"guesses": []}') == Guesses("", [])
     for bad in ("not json", "[1, 2]"):
         with pytest.raises(VisionError):

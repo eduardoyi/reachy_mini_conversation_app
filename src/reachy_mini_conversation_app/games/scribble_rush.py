@@ -3,7 +3,7 @@
 Players join by scanning the QR code on the TRMNL and pick a team, as for Big Brain (the same phone server serves
 ``static/scribble/index.html``). Teams take turns; each turn the next player of the team sees a word on their
 phone and draws it on paper while a tick-tock speeds up, then holds the drawing up to Richie's camera. One frame
-goes to a vision model (Gemini), which gives up to three guesses, least to most confident; Richie says them one
+goes to a vision model (Gemini), which gives its best guess first and, only when unsure, up to two backups; Richie says them one
 by one, and code then Jev check each against the word's forms in both languages. The earlier the hit, the more
 squares the team moves on the TRMNL's track; kids mode moves one square for a miss too. The first team to the
 finish wins, or the one furthest along after ROUNDS rounds. Pause, quit and the idle end come from the game host.
@@ -59,9 +59,13 @@ MIN_DRAW_S: Final[float] = 8.0
 HOLD_S: Final[float] = 2.5
 VISION_TIMEOUT_S: Final[float] = 15.0
 LOBBY_REMINDER_S: Final[float] = 75.0
+# An adult team draws easy words until this square, then medium ones, then hard ones from the second.
+LEVEL_SQUARES: Final[tuple[int, int]] = (8, 16)
 # The guesses and the word stay on the phones this long before the next turn.
 RESULT_S: Final[float] = 3.0
 AFTER_S: Final[float] = 30.0
+# A best guess this confident is said alone; below it, up to two backups follow a miss.
+SURE: Final[float] = 0.7
 # Jev counts a guess the code did not match at this probability.
 JEV_HIT_P: Final[float] = 0.6
 # The tick-tock: two notes a beat, from START_BPM to END_BPM over the drawing time.
@@ -73,8 +77,8 @@ _VISION_PROMPT: Final[str] = (
     "You are Richie, a friendly robot playing a drawing game with a family. Someone drew a secret word on paper in "
     "about 20 seconds and is holding the drawing up to your camera. The word is a {category}. {audience}{handicap} "
     'Guess what the drawing shows. Answer in JSON: {{"remark": a short playful comment on the drawing (at most 10 '
-    'words, naming none of your guesses), "guesses": [{{"guess": ..., "confidence": 0 to 1}}]}}. Give one '
-    "guess when the drawing is clear and up to three different ones when unsure, from least to most confident. "
+    'words, naming none of your guesses), "guesses": [{{"guess": ..., "confidence": 0 to 1}}]}}. Your best '
+    "guess first. Add one or two different backup guesses only when you are really unsure, most likely first. "
     "Write in {language}; each guess short, as you would say it aloud, with its article ('un gato', 'el Rey "
     "León'): for a movie its title, for a saying the saying itself. With no drawing in view, give no guesses."
 )
@@ -188,8 +192,8 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "first": {"es": ("¿Es {guess}?",), "en": ("Is it {guess}?",)},
     "middle": {"es": ("¿No? Mmm… ¿{guess}?", "¿Entonces {guess}?"), "en": ("No? Hmm… {guess}?", "Then {guess}?")},
     "last": {
-        "es": ("¡Ya sé! ¿{guess}?", "¡Último intento! ¿{guess}?"),
-        "en": ("I know! {guess}?", "Last try! {guess}?"),
+        "es": ("¡Último intento! ¿{guess}?", "Bueno, una última… ¿{guess}?"),
+        "en": ("Last try! {guess}?", "OK, one last guess… {guess}?"),
     },  # fmt: skip
     "hit": {
         "es": (
@@ -256,7 +260,7 @@ _SCREEN: Final[dict[str, dict[str, str]]] = {
 
 @dataclass(frozen=True)
 class Guesses:
-    """What the vision model made of a drawing: a remark, and its guesses from least to most confident."""
+    """What the vision model made of a drawing: a remark, and its guesses, the best first."""
 
     remark: str
     guesses: list[str]
@@ -314,7 +318,7 @@ class GeminiGuesser:
 
 
 def read_guesses(text: str) -> Guesses:
-    """Read the vision model's JSON answer: at most three guesses, ordered from least to most confident."""
+    """Read the vision model's JSON answer: the best guess first, then backups only when it was unsure."""
     try:
         answer = json.loads(text)
     except ValueError as error:
@@ -329,9 +333,11 @@ def read_guesses(text: str) -> Guesses:
             except (TypeError, ValueError):
                 confidence = 0.0
             ranked.append((confidence, " ".join(item["guess"].split())[:60]))
-    ranked.sort(key=lambda pair: pair[0])  # stable: equal confidences keep the model's order
+    ranked.sort(key=lambda pair: -pair[0])  # stable: equal confidences keep the model's order
+    if ranked and ranked[0][0] >= SURE:
+        ranked = ranked[:1]  # sure of it: no backups to fall back on
     remark = answer.get("remark")
-    return Guesses(" ".join(remark.split())[:100] if isinstance(remark, str) else "", [g for _, g in ranked[-3:]])
+    return Guesses(" ".join(remark.split())[:100] if isinstance(remark, str) else "", [g for _, g in ranked[:3]])
 
 
 def _forms(form: str) -> set[str]:
@@ -371,6 +377,12 @@ async def judge_guesses(guesses: list[str], word: Word, jev: JevAsk | None) -> l
     except (JevError, KeyError, TypeError, ValueError) as error:
         logger.warning("Scribble Rush guesses not judged by Jev: %s", type(error).__name__)
     return hits
+
+
+def word_level(squares: int) -> str:
+    """Return the level of the adult words a team on square ``squares`` draws: easy, medium, then hard."""
+    medium, hard = LEVEL_SQUARES
+    return "easy" if squares < medium else "medium" if squares < hard else "hard"
 
 
 def deal(teams: list[str], rng: random.Random) -> dict[str, list[str]]:
@@ -663,8 +675,12 @@ class ScribbleRush(Game):
         return True
 
     def _pick_word(self) -> Word:
+        """Pick a word not drawn yet this game; for adults, of the level the drawing team has reached."""
         pool = KIDS_WORDS if self._kids else ADULT_WORDS
         left = [word for word in pool if word.es not in self._used] or list(pool)
+        if not self._kids:
+            level = word_level(self._squares.get(self._team or "", 0))
+            left = [word for word in left if word.level == level] or left
         word = self._rng.choice(left)
         self._used.add(word.es)
         return word
@@ -693,7 +709,8 @@ class ScribbleRush(Game):
         context = self._context
         assert context is not None
         language = self._language
-        self._team, self._drawer, self._word = team, drawer, self._pick_word()
+        self._team, self._drawer = team, drawer
+        self._word = self._pick_word()
         self._skipped = self._done = False
         self._said, self._message = [], None
         self._curses = self._thrown.pop(team, [])

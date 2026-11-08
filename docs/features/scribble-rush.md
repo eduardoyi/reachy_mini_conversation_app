@@ -2,7 +2,7 @@
 
 - Status: `in-progress` (first version built and tested with fakes on 2026-11-01; not deployed or played; the
   vision guesses not yet measured on real drawings)
-- Last updated: 2026-11-08 (sabotage cards)
+- Last updated: 2026-11-08 (best guess first, word levels, Venezuelan words set aside)
 - Plan: [party-games.md](../plans/party-games.md) ("Scribble Rush", "Vision guesser")
 - Part of: [games.md](games.md) (the shared game host); phones as in [big-brain.md](big-brain.md)
 
@@ -35,8 +35,10 @@ two secret sabotage cards to throw at another team's turn (other hand, eyes clos
 4. **A turn:** teams go in turn from a random first team, each team's players drawing in the order they joined.
    The TRMNL shows "ROJO DIBUJA" and, under it, a black "CATEGORÍA: ANIMAL" label beside the drawer and the round,
    over the track. Richie calls the drawer
-   ("¡Ana, del equipo Rojo, te toca dibujar! Mira tu teléfono… ¡ya!"); only the drawer's phone shows the word,
-   with an "Otra palabra" button (once a turn; the clock keeps running) and "¡Listo! Enseñárselo a Richie". The
+   ("¡Ana, del equipo Rojo, te toca dibujar! Mira tu teléfono… ¡ya!"); only the drawer's phone shows the word.
+   An adult team draws easy words until square 8, medium ones until 16 and hard ones after, so nobody gets a
+   saying on the first turn and the leader gets the tough ones ("Otra palabra" draws one of the same level). The
+   drawer's phone has an "Otra palabra" button (once a turn; the clock keeps running) and "¡Listo! Enseñárselo a Richie". The
    drawer's card has the category as a big black label above the word ("Categoría / animal"), and the other
    phones show who is drawing, the same label and the countdown. A tick-tock speeds up for 20 s (30 s in kids
    mode). A cursed turn starts with Richie revealing each card before the call ("¡Ojo! El equipo Azul le lanza a
@@ -44,8 +46,9 @@ two secret sabotage cards to throw at another team's turn (other hand, eyes clos
    de Azul"), above the word on the drawer's, and the TRMNL caption reads "Ana · ¡Ojos cerrados + Medio tiempo!".
 5. **Showing:** on "Listo" or when time runs out, Richie says "¡Muéstramelo!", waits 2.5 s for the drawing to be
    held up, takes one camera frame and shows it on the TRMNL ("¿Qué será?") while he says "Mmm… déjame ver…".
-6. **Guessing:** the model's short remark on the drawing, then each guess from least to most confident: "¿Es un
-   perro?", "¿No? Mmm… ¿un zorro?", "¡Ya sé! ¿Un gato?". The phones list each guess as it is said and mark the
+6. **Guessing:** the model's short remark on the drawing, then its best guess: "¿Es un gato?". Only when it is
+   unsure (best guess under `SURE` 0.7 confidence) do up to two backups follow a miss, most likely first: "¿No?
+   Mmm… ¿un zorro?", "¡Último intento! ¿Un perro?". The phones list each guess as it is said and mark the
    hit. A hit on the first, second or third guess moves the team 6, 4 or 2 squares ("¡Sí! ¡Era gato! ¡El equipo
    Rojo avanza 4 casillas!", a happy move); a miss says the word ("¡Me rindo! Era gato.", a sad move) and moves 1
    square in kids mode ("¡Qué buen intento!"). The TRMNL then shows "ERA: GATO" and the track. A hit while cursed
@@ -78,13 +81,19 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 - `games/scribble_rush.py`: the game, `ScribbleSetup(port, guess, public_url)`, `GeminiGuesser`, `read_guesses`,
   `guessed`, `judge_guesses` and `deal(teams, rng)` (one or two distinct cards a team). Timings and scoring are
   module constants: `DRAW_S` 20, `KIDS_DRAW_S` 30, `MIN_DRAW_S` 8 (Half time's floor), `HOLD_S` 2.5,
-  `VISION_TIMEOUT_S` 15, `GOAL` 24, `ROUNDS` 6, `SQUARES` (6, 4, 2), `KIDS_MISS` 1, `JEV_HIT_P` 0.6; `CARDS`
+  `VISION_TIMEOUT_S` 15, `GOAL` 24, `ROUNDS` 6, `SQUARES` (6, 4, 2), `KIDS_MISS` 1, `JEV_HIT_P` 0.6, `SURE` 0.7
+  (a best guess this confident comes without backups), `LEVEL_SQUARES` (8, 16) and `word_level(squares)`; `CARDS`
   ("hand", "eyes", "line", "half"). Richie's lines are plain text in `_LINES` (no audio tags; said in his own
   voice, the fixed ones cached): the sabotage moments are `cards_rules`, `sabotage_<card>` and `bonus`.
 - `games/scribble_words.py`: `KIDS_WORDS` (139: animals, food, things, vehicles, nature, body and clothes) and
-  `ADULT_WORDS` (512: actions, movies, Venezuelan sayings, harder things and Venezuelan food, places, characters
-  and jobs, sports and games, and since 2026-11-08 absurd scenes, everyday disasters, mythical creatures and
-  monsters, wacky inventions, internet and pop culture, and Venezuelan life). A scene's forms always name both
+  `ADULT_WORDS` (470: actions, movies, sayings, harder things, places, characters and jobs, sports and games,
+  absurd scenes, everyday disasters, mythical creatures and monsters, wacky inventions, internet and pop culture),
+  each `level` "easy" (143), "medium" (185) or "hard" (142): how hard it is to draw in 20 s and for the vision
+  model to recognise, rated by a Claude agent on 2026-11-08. `_ADULTS` is category → level → entries.
+  `VENEZUELAN_WORDS` (42: Venezuelan life, sayings like "Cachicamo diciéndole a morrocoy conchúo", tequeño,
+  hallaca, cachapa, cuatro, tostiarepa, Salto Ángel, tepuy) are set aside for a Venezuelan edition and not dealt;
+  they have no level yet. Words with a Venezuelan name for an everyday thing show the widely used one (inodoro,
+  not poceta) and still accept the Venezuelan one. A scene's forms always name both
   things ("pulpo en una patineta"), so one noun alone is not a hit by code; Jev may still accept a near guess. Each entry is `"Spanish forms / English forms"`, forms separated by `;`, the first
   of each side the word the drawer sees; every form counts as guessed.
 - `games/scribble_screens.py`: `render_track(title, caption, lanes, goal, turn=, tag=)` (`tag`: the category label).
@@ -115,8 +124,10 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 
 ## Extension guide
 
-- More words: add entries to `scribble_words.py`; the tests check both languages, unique words and that no form
-  belongs to two words of the same list.
+- More words: add entries to `scribble_words.py` under their category and level; the tests check both
+  languages, unique words, that no form belongs to two words of the same list and at least 100 words a level.
+- A Venezuelan edition: deal `VENEZUELAN_WORDS` (rated by level first), the way Big Brain's editions are their
+  own catalog games.
 - Scoring or length: the constants above.
 - A new sabotage card: add its key to `CARDS`, a `sabotage_<key>` moment, its `_CARD_NAMES` and `_CURSED` (the
   vision hint) entries, and its name, hint and icon on the phone page (`T.*.cards`, `T.*.how`, `ICONS`).
@@ -144,11 +155,13 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 
 ## Testing
 
-- `uv run pytest tests/games/test_scribble_rush.py` (21, all passing on 2026-11-08): the category label on the
+- `uv run pytest tests/games/test_scribble_rush.py` (24, all passing on 2026-11-08): the category label on the
   track; word lists (sizes, both
   languages, no shared forms, no adult categories for kids); code judging in both languages with articles,
   plurals and extra words, and a lion not counting for "El Rey León"; one Jev call for unmatched guesses and a
-  Jev failure as a miss; reading the vision answer (confidence order, three at most, nonsense rejected); the
+  Jev failure as a miss; reading the vision answer (most confident first, three at most, no backups when sure, nonsense rejected);
+  every adult word has a level with at least 100 a level; the Venezuelan words not dealt; a team's square picking
+  the level, and a level that runs out falling back; the
   Gemini call with a fake client (category but not the word in the prompt, the usage recorded); the phone server
   serving this page and the start phrases; a whole two-team game on a pretend Reachy with a fake camera and a
   fake vision call (a first-guess hit, a miss, a vision error, a second-guess hit; only the drawer's phone sees the
@@ -167,11 +180,17 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
   `uv run ruff format` on the touched files clean; `uv run mypy --pretty --show-error-codes` → no issues in 181
   source files. The phone page's `?demo=cards|pick|cursed|cursedwatch` (and `&lang=en`) were looked at in a
   desktop browser at phone width.
+- 2026-11-08 (best guess first, levels): full suite → 3,277 passed, 4 skipped; ruff clean; mypy src clean.
 - Not yet done: the phone page on a real phone or in a real game, the real Gemini model on real drawings (hit
   rate and latency), the tick-tock and timings in a real room, and the TRMNL screens on the device.
 
 ## Changelog
 
+- 2026-11-08: Richie says his best guess first, with backups only when unsure (he had been saving his best guess
+  for last: in 30 turns from three game nights his most confident guess was right 24 times, but usually said
+  third, for 2 squares instead of 6). Adult words are rated easy, medium or hard and a team draws harder ones as
+  it climbs. The Venezuelan-only words (42) are set aside for a Venezuelan edition, since the household often
+  plays with non-Venezuelans; Venezuelan names for everyday things show the widely used one.
 - 2026-11-08: The adult list grew from 238 to 512 words with six new categories (absurd scenes, everyday
   disasters, mythical creatures, wacky inventions, internet and pop culture, Venezuelan life); the kids' list is
   unchanged.
