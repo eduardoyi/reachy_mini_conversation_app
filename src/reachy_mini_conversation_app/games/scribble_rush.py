@@ -7,6 +7,10 @@ goes to a vision model (Gemini), which gives up to three guesses, least to most 
 by one, and code then Jev check each against the word's forms in both languages. The earlier the hit, the more
 squares the team moves on the TRMNL's track; kids mode moves one square for a miss too. The first team to the
 finish wins, or the one furthest along after ROUNDS rounds. Pause, quit and the idle end come from the game host.
+
+Sabotage: at the start each team is dealt one or two different cards (other hand, eyes closed, one line, half time)
+and throws each once, from any of its phones, at another team's next turn. Throws stay secret until that turn,
+when Richie announces them; a hit while cursed moves one extra square per curse.
 """
 
 import json
@@ -48,6 +52,9 @@ SQUARES: Final[tuple[int, ...]] = (6, 4, 2)
 KIDS_MISS: Final[int] = 1
 DRAW_S: Final[float] = 20.0
 KIDS_DRAW_S: Final[float] = 30.0
+# Sabotage cards: other hand, eyes closed, one line without lifting the pen, half time (never below MIN_DRAW_S).
+CARDS: Final[tuple[str, ...]] = ("hand", "eyes", "line", "half")
+MIN_DRAW_S: Final[float] = 8.0
 # After "¡muéstramelo!", time to lift the drawing up to the camera before the frame is taken.
 HOLD_S: Final[float] = 2.5
 VISION_TIMEOUT_S: Final[float] = 15.0
@@ -64,8 +71,8 @@ _TICK_TOCK: Final[tuple[float, float]] = (1318.5, 987.77)
 
 _VISION_PROMPT: Final[str] = (
     "You are Richie, a friendly robot playing a drawing game with a family. Someone drew a secret word on paper in "
-    "about 20 seconds and is holding the drawing up to your camera. The word is a {category}. {audience} Guess "
-    'what the drawing shows. Answer in JSON: {{"remark": a short playful comment on the drawing (at most 10 '
+    "about 20 seconds and is holding the drawing up to your camera. The word is a {category}. {audience}{handicap} "
+    'Guess what the drawing shows. Answer in JSON: {{"remark": a short playful comment on the drawing (at most 10 '
     'words, naming none of your guesses), "guesses": [{{"guess": ..., "confidence": 0 to 1}}]}}. Give one '
     "guess when the drawing is clear and up to three different ones when unsure, from least to most confident. "
     "Write in {language}; each guess short, as you would say it aloud, with its article ('un gato', 'el Rey "
@@ -74,6 +81,15 @@ _VISION_PROMPT: Final[str] = (
 _AUDIENCE: Final[dict[bool, str]] = {
     True: "A young child drew it: expect a few simple lines or a scribble of an everyday thing.",
     False: "An adult drew it in a hurry.",
+}
+_HANDICAP: Final[str] = (
+    " Other players sabotaged it: it was drawn {how}, so expect it to be messy and read it generously."
+)
+_CURSED: Final[dict[str, str]] = {
+    "hand": "with the wrong hand",
+    "eyes": "with eyes closed",
+    "line": "in one continuous line without lifting the pen",
+    "half": "in half the time",
 }
 _JEV_RULE: Final[str] = (
     "In a drawing guessing game, does Richie's guess `{key}` name the secret word `secret` (any of "
@@ -97,6 +113,61 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "begin": {
         "es": ("¡Empezamos! Yo adivino, ustedes dibujan. ¡Prepárense lápiz y papel!",),
         "en": ("Let's go! You draw, I guess. Get your pencils and paper ready!",),
+    },
+    "cards_rules": {
+        "es": (
+            "¡Y ojo con los sabotajes! Cada equipo tiene una o dos cartas en el teléfono: mano contraria, ojos "
+            "cerrados, una sola línea o medio tiempo. Láncenselas a otro equipo para su próximo turno. Y si igual "
+            "adivino, ¡casilla extra!",
+            "Una cosa más: en sus teléfonos tienen cartas de sabotaje. Escojan una y un equipo rival, y le toca en su "
+            "próximo turno. ¡Si adivino igual, ganan una casilla extra por carta!",
+        ),
+        "en": (
+            "And watch out for sabotage! Each team has one or two cards on its phones: other hand, eyes closed, one "
+            "line or half time. Throw them at another team for its next turn. And if I still guess it, extra squares!",
+            "One more thing: your phones have sabotage cards. Pick one and a rival team, and it hits their next turn. "
+            "If I still guess the drawing, they get an extra square per card!",
+        ),
+    },
+    "sabotage_hand": {
+        "es": (
+            "¡Ojo! El equipo {by} le lanza a {team}… ¡mano contraria! A dibujar con la otra mano.",
+            "¡Sabotaje de {by}! {team}, hoy se dibuja con la otra mano.",
+        ),
+        "en": (
+            "Watch out! Team {by} throws a card at {team}… other hand! Draw with your other hand.",
+            "Sabotage from team {by}! {team}, you're drawing with your other hand.",
+        ),
+    },
+    "sabotage_eyes": {
+        "es": (
+            "¡Ojo! El equipo {by} le lanza a {team}… ¡ojos cerrados! Nada de espiar.",
+            "¡Sabotaje de {by}! {team}, a dibujar con los ojos cerrados.",
+        ),
+        "en": (
+            "Watch out! Team {by} throws a card at {team}… eyes closed! No peeking.",
+            "Sabotage from team {by}! {team}, you're drawing with your eyes closed.",
+        ),
+    },
+    "sabotage_line": {
+        "es": (
+            "¡Ojo! El equipo {by} le lanza a {team}… ¡una sola línea! Sin levantar el lápiz.",
+            "¡Sabotaje de {by}! {team}, todo de un solo trazo, sin levantar el lápiz.",
+        ),
+        "en": (
+            "Watch out! Team {by} throws a card at {team}… one line! Don't lift your pen.",
+            "Sabotage from team {by}! {team}, it's all one line, pen on the paper.",
+        ),
+    },
+    "sabotage_half": {
+        "es": (
+            "¡Ojo! El equipo {by} le lanza a {team}… ¡medio tiempo! A correr.",
+            "¡Sabotaje de {by}! {team}, solo tienen la mitad del tiempo.",
+        ),
+        "en": (
+            "Watch out! Team {by} throws a card at {team}… half time! Hurry.",
+            "Sabotage from team {by}! {team}, you only get half the time.",
+        ),
     },
     "turn": {
         "es": ("¡{player}, del equipo {team}, te toca dibujar! Mira tu teléfono… ¡ya!",),
@@ -134,6 +205,16 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "es": ("¡Me rindo! Era {word}.", "¡Ay, no! Era {word}."),
         "en": ("I give up! It was {word}.", "Oh no! It was {word}."),
     },
+    "bonus": {
+        "es": (
+            "¡Y con sabotaje y todo! Les doy {extra} más de premio.",
+            "¡Ni el sabotaje los paró! Ganan {extra} más.",
+        ),
+        "en": (
+            "And sabotaged too! Here's {extra} more as a prize.",
+            "Sabotage couldn't stop you! You get {extra} more.",
+        ),
+    },
     "kids_miss": {
         "es": ("¡Qué buen intento! Una casilla por dibujar.",),
         "en": ("Great try! One square for drawing.",),
@@ -155,11 +236,18 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "thanks": {"es": ("¡Gracias por jugar Scribble Rush!",), "en": ("Thanks for playing Scribble Rush!",)},
 }
 _SQUARES: Final[dict[str, tuple[str, str]]] = {"es": ("una casilla", "{n} casillas"), "en": ("one square", "{n} squares")}  # fmt: skip
+_CARD_NAMES: Final[dict[str, dict[str, str]]] = {
+    "hand": {"es": "Mano contraria", "en": "Other hand"},
+    "eyes": {"es": "Ojos cerrados", "en": "Eyes closed"},
+    "line": {"es": "Una sola línea", "en": "One line"},
+    "half": {"es": "Medio tiempo", "en": "Half time"},
+}
 _SCREEN: Final[dict[str, dict[str, str]]] = {
     "draws": {"es": "{team} DIBUJA", "en": "{team} DRAWS"},
     "turn": {"es": "{player} · Ronda {round} de {rounds}", "en": "{player} · Round {round} of {rounds}"},
     # Big on the screen while a team draws: players missed it as part of the caption (2026-11-02).
     "category": {"es": "CATEGORÍA: {category}", "en": "CATEGORY: {category}"},
+    "cursed": {"es": "{player} · ¡{curses}!", "en": "{player} · {curses}!"},
     "looking": {"es": "¿Qué será?", "en": "What could it be?"},
     "was": {"es": "ERA: {word}", "en": "IT WAS: {word}"},
     "moved": {"es": "{team} +{squares}", "en": "{team} +{squares}"},
@@ -174,7 +262,8 @@ class Guesses:
     guesses: list[str]
 
 
-Guesser = Callable[[bytes, Word, str, bool], Coroutine[Any, Any, Guesses]]
+# The drawing, the secret word, the language, kids mode, and the sabotage cards it was drawn under.
+Guesser = Callable[[bytes, Word, str, bool, tuple[str, ...]], Coroutine[Any, Any, Guesses]]
 
 
 class VisionError(RuntimeError):
@@ -189,11 +278,13 @@ class GeminiGuesser:
         self._client = genai.Client(api_key=api_key)
         self._model = model
 
-    async def __call__(self, jpeg: bytes, word: Word, language: str, kids: bool) -> Guesses:
+    async def __call__(self, jpeg: bytes, word: Word, language: str, kids: bool, curses: tuple[str, ...]) -> Guesses:
         """Return the guesses for the drawing in ``jpeg`` (the secret ``word`` gives only its category)."""
+        how = " and ".join(_CURSED[card] for card in dict.fromkeys(curses) if card in _CURSED)
         prompt = _VISION_PROMPT.format(
             category=category_name(word.category, "en"),
             audience=_AUDIENCE[kids],
+            handicap=_HANDICAP.format(how=how) if how else "",
             language="Spanish" if language == "es" else "English",
         )
         contents: list[types.PartUnionDict] = [prompt, types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")]
@@ -282,6 +373,11 @@ async def judge_guesses(guesses: list[str], word: Word, jev: JevAsk | None) -> l
     return hits
 
 
+def deal(teams: list[str], rng: random.Random) -> dict[str, list[str]]:
+    """Deal each team one or two different sabotage cards at random."""
+    return {team: rng.sample(CARDS, rng.choice((1, 2))) for team in teams}
+
+
 def scribble_phrases() -> frozenset[str]:
     """Every fixed line Richie says (no name, word or guess in it), in both languages, for the speech cache."""
     return frozenset(
@@ -328,6 +424,10 @@ class ScribbleRush(Game):
         self._said: list[dict[str, Any]] = []  # the guesses said so far this turn, for the phones
         self._message: str | None = None
         self._deadline: float | None = None  # in playing seconds
+        self._seconds = DRAW_S  # this turn's drawing time
+        self._hand: dict[str, list[str]] = {}  # team -> sabotage cards still to throw
+        self._thrown: dict[str, list[tuple[str, str]]] = {}  # target team -> (thrower, card), secret until its turn
+        self._curses: list[tuple[str, str]] = []  # (thrower, card) on the turn being played
         self._event = asyncio.Event()
 
     @classmethod
@@ -361,6 +461,8 @@ class ScribbleRush(Game):
             can += ["start", "settings"]
         elif self._phase == "drawing" and drawing:
             can += ["done"] + ([] if self._skipped else ["skip"])
+        if player is not None and not paused and self._phase != "over" and self._hand.get(player.team):
+            can.append("sabotage")
         word = self._word
         deadline = None
         if self._deadline is not None and context is not None and not paused:
@@ -389,6 +491,16 @@ class ScribbleRush(Game):
             "category": category_name(word.category, language) if word else None,
             "word": word.name(language) if show_word and word else None,
             "guesses": self._said,
+            "seconds": self._seconds,
+            # Only the team's own phones see its cards and what it threw; a curse is public once its turn starts.
+            "cards": list(self._hand.get(player.team, [])) if player else [],
+            "thrown": [
+                {"card": card, "target": target}
+                for target, plays in self._thrown.items()
+                for by, card in plays
+                if player is not None and by == player.team
+            ],
+            "curses": [{"card": card, "by": by} for by, card in self._curses],
             "deadline": deadline,
             "can": can,
             "message": self._message,
@@ -422,7 +534,19 @@ class ScribbleRush(Game):
         elif kind == "skip" and drawing and not self._skipped:
             self._skipped = True
             self._word = self._pick_word()
+        elif kind == "sabotage":
+            self._throw(player, message)
         self._changed()
+
+    def _throw(self, player: Player, message: dict[str, Any]) -> None:
+        """Throw one of the team's cards at another team's next turn (during its turn: the one after)."""
+        card, target, hand = message.get("card"), message.get("target"), self._hand.get(player.team, [])
+        if self._phase == "over" or card not in hand or target == player.team or target not in self._teams_playing():
+            logger.info("Scribble Rush: a sabotage from %s refused", player.team)
+            return
+        hand.remove(card)
+        self._thrown.setdefault(str(target), []).append((player.team, str(card)))
+        logger.info("Scribble Rush: %s threw %s at %s", player.team, card, target)
 
     def heard(self, context: GameContext, text: str) -> bool:
         """In the lobby, "¡empezamos!" heard in the room starts the game."""
@@ -526,10 +650,16 @@ class ScribbleRush(Game):
             self._started = False
             if not await self._wait(LOBBY_REMINDER_S) and not self._started:
                 await self._say("waiting")
-        for team in self._teams_playing():
+        teams = self._teams_playing()
+        for team in teams:
             self._squares[team] = 0
-        logger.info("Scribble Rush started: %d players, %d teams", len(phones.players), len(self._teams_playing()))
+        self._hand = deal(teams, self._rng) if len(teams) > 1 else {}
+        logger.info("Scribble Rush started: %d players, %d teams", len(phones.players), len(teams))
         await self._say("begin")
+        if self._hand:
+            self._phase = "cards"
+            self._changed()
+            await self._say("cards_rules")
         return True
 
     def _pick_word(self) -> Word:
@@ -566,18 +696,28 @@ class ScribbleRush(Game):
         self._team, self._drawer, self._word = team, drawer, self._pick_word()
         self._skipped = self._done = False
         self._said, self._message = [], None
+        self._curses = self._thrown.pop(team, [])
+        cards = [card for _, card in self._curses]
+        seconds = KIDS_DRAW_S if self._kids else DRAW_S
+        self._seconds = max(MIN_DRAW_S, seconds / 2) if "half" in cards else seconds  # halved once, however many
         self._phase = "drawing"
         name = team_name(team, language)
         context.progress = f"Round {self._round} of {ROUNDS}: {team} draws"
         category = category_name(self._word.category, language)
-        caption = _SCREEN["turn"][language].format(player=drawer.name, round=self._round, rounds=ROUNDS)
+        if cards:
+            curses = " + ".join(_CARD_NAMES[card][language] for card in dict.fromkeys(cards))
+            caption = _SCREEN["cursed"][language].format(player=drawer.name, curses=curses)
+        else:
+            caption = _SCREEN["turn"][language].format(player=drawer.name, round=self._round, rounds=ROUNDS)
         tag = _SCREEN["category"][language].format(category=category.upper())
         self._show_track(_SCREEN["draws"][language].format(team=name.upper()), caption, tag=tag)
         self._changed()
+        for by, card in self._curses:
+            await self._say(f"sabotage_{card}", by=team_name(by, language), team=name)
         await self._say("turn", player=drawer.name, team=name)
         context.played()
         started = context.played_s
-        seconds = KIDS_DRAW_S if self._kids else DRAW_S
+        seconds = self._seconds
         tune = asyncio.get_running_loop().create_task(self._tick_tock(started, seconds), name="scribble-tune")
         try:
             await self._wait(seconds)
@@ -617,7 +757,8 @@ class ScribbleRush(Game):
             context.show(render_photo(picture, _SCREEN["looking"][language]))
             context.services.emotion("thinking")
             jpeg = await asyncio.to_thread(sized_jpeg, picture)
-            asking = asyncio.get_running_loop().create_task(guess(jpeg, word, language, self._kids))
+            cards = tuple(card for _, card in self._curses)
+            asking = asyncio.get_running_loop().create_task(guess(jpeg, word, language, self._kids, cards))
             await self._say("looking")
             try:
                 guesses = await asking
@@ -642,16 +783,20 @@ class ScribbleRush(Game):
             await self._say(moment, guess=said)
             self._said[-1]["hit"] = hit
             if hit:
-                await self._result(team, SQUARES[index], "hit", name)
+                await self._result(team, SQUARES[index], "hit", name, bonus=len(self._curses))
                 return
         await self._result(team, KIDS_MISS if self._kids else 0, "miss" if guesses.guesses else "no_drawing", name)
 
-    async def _result(self, team: str, squares: int, moment: str, word: str) -> None:
-        """Move ``team`` by ``squares``, show the track and say how it went."""
+    async def _result(self, team: str, squares: int, moment: str, word: str, *, bonus: int = 0) -> None:
+        """Move ``team`` by ``squares`` (and ``bonus`` for the curses on a hit), show the track and say how it went."""
         context = self._context
         assert context is not None
         language = self._language
         name = team_name(team, language)
+        one, many = _SQUARES[language]
+        said = one if squares == 1 else many.format(n=squares)
+        extra = one if bonus == 1 else many.format(n=bonus)
+        squares += bonus
         self._squares[team] = min(GOAL, self._squares.get(team, 0) + squares)
         self._phase = "result"
         self._message = _SCREEN["moved"][language].format(team=name, squares=squares) if squares else None
@@ -660,8 +805,9 @@ class ScribbleRush(Game):
         self._changed()
         if moment == "hit":
             context.services.emotion("happy")
-            one, many = _SQUARES[language]
-            await self._say("hit", word=word, team=name, squares=one if squares == 1 else many.format(n=squares))
+            await self._say("hit", word=word, team=name, squares=said)
+            if bonus:
+                await self._say("bonus", extra=extra)
         else:
             context.services.emotion("sad")
             await self._say(moment, word=word)
@@ -676,6 +822,7 @@ class ScribbleRush(Game):
         assert context is not None
         language = self._language
         self._phase, self._team, self._drawer, self._word = "over", None, None, None
+        self._curses = []
         scores = {team: self._squares.get(team, 0) for team in self._teams_playing()}
         context.show(render_winner([(team_name(team, language), squares) for team, squares in scores.items()], language))  # fmt: skip
         self._changed()

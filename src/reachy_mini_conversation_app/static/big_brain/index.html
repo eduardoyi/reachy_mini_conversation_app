@@ -207,6 +207,7 @@ button.cell:active,button.cell.chosen{transform:scale(.92);background:var(--gold
  background:var(--pink);color:#fff;box-shadow:0 4px 0 #a3125c,0 0 26px rgba(255,79,163,.6)}
 .twist.double .tag{background:var(--gold);color:#2a1600;box-shadow:0 4px 0 var(--goldd),0 0 26px rgba(255,203,61,.6)}
 .twist.everyone .tag{background:var(--ok);color:#03301a;box-shadow:0 4px 0 var(--okd),0 0 26px rgba(62,224,138,.55)}
+.twist.bomb .tag{background:#16091f;color:var(--bad);box-shadow:0 4px 0 #000,0 0 26px rgba(255,90,106,.65);animation:beat 1s ease-out infinite}
 .twist p{margin:10px 4px 0;font-weight:700;font-size:15.5px;color:var(--ink)}
 .answer{position:relative;margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(10,4,30,.55);box-shadow:inset 0 0 0 2px var(--ok);font-size:15px;font-weight:700;color:#b9f5d4}
 .answer b{display:block;color:#fff;font-size:22px;font-weight:800;line-height:1.2;margin-top:2px}
@@ -244,6 +245,32 @@ button.cell:active,button.cell.chosen{transform:scale(.92);background:var(--gold
 .bz-note{margin:10px 0 0;text-align:center;color:var(--dim);font-weight:700;font-size:15.5px}
 .buzzwrap.hit .bz-base::after{content:'';position:absolute;inset:-6px;border-radius:50%;border:6px solid var(--tc);animation:ring .6s ease-out forwards}
 @keyframes ring{0%{transform:scale(.9);opacity:1}100%{transform:scale(1.35);opacity:0}}
+
+.buzzwrap.frozen #buzzer:disabled{color:#06324a;text-shadow:none;
+ background:radial-gradient(circle at 50% 28%,rgba(255,255,255,.7),rgba(255,255,255,0) 40%),radial-gradient(circle at 50% 40%,#c9eeff 40%,#5aa9d6 100%)}
+
+/* ---------- power cards ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:0 0 10px}
+.chip{padding:5px 12px;border-radius:999px;font-weight:800;font-size:14px}
+.chip.ice{background:#c9eeff;color:#06324a;box-shadow:0 0 14px rgba(150,220,255,.5)}
+.chip.shield{background:var(--ok);color:#03301a;box-shadow:0 0 14px rgba(62,224,138,.45)}
+.hintbox{margin:0 0 12px;padding:12px 14px;border-radius:16px;text-align:center;background:rgba(10,4,30,.55);box-shadow:inset 0 0 0 2px var(--gold),0 0 22px rgba(255,203,61,.25)}
+.hintbox small{display:block;font-weight:800;font-size:13px;color:var(--gold2)}
+.hintbox b{display:block;margin:4px 0;font-family:var(--disp);font-weight:400;font-size:26px;letter-spacing:.14em;color:var(--gold);word-break:break-word}
+.hintbox span{font-weight:700;font-size:15px;color:var(--dim)}
+#hand .lbl{margin:16px 0 8px}
+.cards{display:flex;gap:8px;margin:0 0 12px}
+.pc{flex:1 1 0;min-width:0;min-height:64px;border:none;border-radius:16px;padding:8px 6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1.1;
+ background:linear-gradient(180deg,#fff4c2,var(--gold) 60%,#e6a300);color:#2a1600;box-shadow:0 5px 0 var(--goldd),0 0 18px rgba(255,203,61,.35);rotate:-1.5deg;transition:translate .08s,box-shadow .08s}
+.pc:nth-child(2){rotate:1.5deg}
+.pc b{font-family:var(--disp);font-weight:400;font-size:16px}
+.pc small{font-weight:700;font-size:12px;opacity:.85}
+.pc:active:not(:disabled),.pc.on{translate:0 4px;box-shadow:0 1px 0 var(--goldd),0 0 0 3px #fff}
+.pc:disabled{filter:saturate(.3) brightness(.6);cursor:default;box-shadow:0 3px 0 #5a4a20}
+.cardpick{margin:-2px 0 12px;padding:12px;border-radius:16px;background:rgba(0,0,0,.28)}
+.cardpick p{margin:0 0 8px;text-align:center;font-weight:800}
+.cardpick .row{display:flex;flex-wrap:wrap;gap:8px}
+.cardpick button{flex:1 1 40%;min-height:50px;border:none;border-radius:14px;background:var(--tc);color:var(--tx);font-weight:800;font-size:17px;box-shadow:0 4px 0 color-mix(in srgb,var(--tc) 50%,#000)}
 
 /* ---------- answering ---------- */
 .say{position:relative;overflow:hidden;border-radius:26px;padding:30px 18px 28px;text-align:center;background:var(--tc);color:var(--tx);
@@ -372,6 +399,7 @@ button.cell:active,button.cell.chosen{transform:scale(.92);background:var(--gold
  <div id="msg" aria-live="polite" aria-atomic="true"></div>
  <div id="extra"></div>
  <main id="stage"></main>
+ <div id="hand"></div>
 </div>
 <div id="sr" class="sr" aria-live="assertive" aria-atomic="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -398,10 +426,18 @@ var T = {
   paused: 'Pausa', pausedSub: 'Richie creyó que alguien lo llamó, o le tocaron una antena.', resume: '¡Seguimos!', next: 'Atento a Richie…',
   vote: function (y, n) { return '¡Eso vale! (' + y + '/' + n + ')'; }, voted: 'Votaste',
   voteHint: function (n, s) { return '¿«' + s + '» de ' + n + ' era buena?'; },
-  hidden: {double: '¡Doble!', steal: '¡Robo!', everyone: '¡Todos responden!'}, pts: 'pts', you: 'tú',
+  hidden: {double: '¡Doble!', steal: '¡Robo!', everyone: '¡Todos responden!', bomb: '¡Bomba!'}, pts: 'pts', you: 'tú',
   explain: {double: 'Puntos dobles. Si fallan, no pierden nada.',
    steal: function (p) { return 'Si aciertan: +' + p + ', y le quitan ' + p + ' al equipo que va ganando.'; },
-   everyone: 'Todos escriben su respuesta en el teléfono.'},
+   everyone: 'Todos escriben su respuesta en el teléfono.',
+   bomb: function (p) { return 'Solo responde el equipo que la escogió. Si acierta: +' + 2 * p + (S && S.kids ? '.' : '. Si falla o se calla: −' + p + '.'); }},
+  cards: {freeze: 'Congelar', shield: 'Escudo', hint: 'Pista', hijack: 'Secuestro'}, yourCards: 'Tus cartas',
+  cardSub: {freeze: 'Un equipo no pulsa', shield: 'Fallar no cuesta', hint: 'Primera letra', hijack: 'Roba el turno'},
+  freezeWho: '¿A qué equipo congelan?', frozen: '¡Congelados!', frozenNote: 'Tu equipo está congelado en esta pista.',
+  frozenChip: function (t) { return t + ': congelado'; }, shieldChip: function (t) { return t + ': escudo'; },
+  hintTitle: 'Pista secreta (solo tu equipo)',
+  hintLine: function (h) { return 'Empieza con ' + h.first + ' · ' + h.letters + ' letras · ' + h.words + (h.words === 1 ? ' palabra' : ' palabras'); },
+  bombNote: function (t) { return 'Bomba: solo responde el equipo ' + t + '.'; },
   answerIs: 'Respuesta:', finalAnswer: 'Respuesta de la final:', myTurn: '¡Les toca escoger!', myTurnSub: 'Toca una casilla del tablero',
   notMyTurn: function (t) { return 'Escoge el equipo ' + t; }, notMyTurnSub: 'Todavía no les toca',
   buzzNote: '¡El primero que toque responde!', lockedNote: 'Tu equipo ya respondió esta pregunta.', waitNote: 'Se enciende cuando Richie termine de leer.'
@@ -424,10 +460,18 @@ var T = {
   paused: 'Paused', pausedSub: 'Richie thought someone called him, or an antenna got bumped.', resume: 'Keep playing!', next: 'Listen to Richie…',
   vote: function (y, n) { return 'That counts! (' + y + '/' + n + ')'; }, voted: 'You voted',
   voteHint: function (n, s) { return 'Was ' + n + '’s “' + s + '” right?'; },
-  hidden: {double: 'Double!', steal: 'Steal!', everyone: 'Everyone answers!'}, pts: 'pts', you: 'you',
+  hidden: {double: 'Double!', steal: 'Steal!', everyone: 'Everyone answers!', bomb: 'Bomb!'}, pts: 'pts', you: 'you',
   explain: {double: 'Double points. A miss costs nothing.',
    steal: function (p) { return 'Get it right: +' + p + ', and take ' + p + ' from the team in the lead.'; },
-   everyone: 'Everyone types an answer on their phone.'},
+   everyone: 'Everyone types an answer on their phone.',
+   bomb: function (p) { return 'Only the team that picked it answers. Right: +' + 2 * p + (S && S.kids ? '.' : '. Wrong or silent: −' + p + '.'); }},
+  cards: {freeze: 'Freeze', shield: 'Shield', hint: 'Hint', hijack: 'Hijack'}, yourCards: 'Your cards',
+  cardSub: {freeze: "A team can't buzz", shield: 'A miss costs nothing', hint: 'First letter', hijack: 'Steal the pick'},
+  freezeWho: 'Which team do you freeze?', frozen: 'Frozen!', frozenNote: 'Your team is frozen on this clue.',
+  frozenChip: function (t) { return t + ': frozen'; }, shieldChip: function (t) { return t + ': shield'; },
+  hintTitle: 'Secret hint (your team only)',
+  hintLine: function (h) { return 'Starts with ' + h.first + ' · ' + h.letters + ' letters · ' + h.words + (h.words === 1 ? ' word' : ' words'); },
+  bombNote: function (t) { return 'Bomb: only ' + t + ' team can answer.'; },
   answerIs: 'Answer:', finalAnswer: 'Final answer:', myTurn: "Your team's pick!", myTurnSub: 'Tap a square on the board',
   notMyTurn: function (t) { return t + ' team is picking'; }, notMyTurnSub: 'Not your turn yet',
   buzzNote: 'First to tap gets to answer!', lockedNote: 'Your team already answered this one.', waitNote: 'It lights up when Richie finishes reading.'
@@ -443,12 +487,14 @@ var ICON = {
  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
  trophy: '<svg class="trophy" viewBox="0 0 64 64" fill="currentColor"><path d="M18 8h28v14a14 14 0 0 1-28 0z"/><path d="M18 12H8a10 10 0 0 0 10 12M46 12h10a10 10 0 0 1-10 12" fill="none" stroke="currentColor" stroke-width="5"/><path d="M28 36h8v10h-8z" opacity=".75"/><rect x="20" y="46" width="24" height="9" rx="2"/></svg>'
 };
-var code = (new URLSearchParams(location.search).get('c') || '').trim();
+var QS = new URLSearchParams(location.search);
+var demo = QS.get('demo');
+var code = demo ? 'DEMO' : (QS.get('c') || '').trim();
 var STORE = 'bigbrain:' + code;
 var lang = /^es/i.test(navigator.language || '') ? 'es' : 'en';
 var S = null, ws = null, retry = 0, timer = null, cache = {}, lastMsg = null, lastPhase = null, talking = false;
 var draft = {name: '', team: null, answer: '', bet: ''};
-var sent = {answer: null, bet: null}, buzzLock = false, pickLock = false, voteLock = false, startLock = false;
+var sent = {answer: null, bet: null}, buzzLock = false, pickLock = false, voteLock = false, startLock = false, cardLock = false, cardPick = null;
 var dl = {key: null, total: 1};
 var scores = null, deltas = [], shownPhase = null, enterTimer = null, seen = {}, said = '', lastSecs = null, mood = '';
 var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -462,7 +508,7 @@ function forget() { try { localStorage.removeItem(STORE); } catch (e) {} }
 function can(a) { return !!(S && S.can && S.can.indexOf(a) >= 0); }
 function team(k) { var l = (S && S.teams) || []; for (var i = 0; i < l.length; i++) if (l[i].key === k) return l[i]; return null; }
 function tname(k) { var x = team(k); return (x && x.name) || t().names[k] || k; }
-function send(o) { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast(t().reconnecting); return false; }
+function send(o) { if (demo) return true; if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast(t().reconnecting); return false; }
 // Haptics; Chrome refuses (and logs) before the first tap, so skip until then.
 function buzzv(p) { try { var u = navigator.userActivation; if (navigator.vibrate && (!u || u.hasBeenActive)) navigator.vibrate(p); } catch (x) {} }
 function initial(n) { var s = String(n || '?').trim(); return esc((s.charAt(0) || '?').toUpperCase()); }
@@ -496,7 +542,7 @@ function connect() {
 }
 function schedule() { if (timer) return; var d = Math.min(5000, 1000 + retry * 1000); retry++; timer = setTimeout(connect, d); }
 document.addEventListener('visibilitychange', function () {
- if (document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); }
+ if (!demo && document.visibilityState === 'visible' && code && (!ws || ws.readyState > 1)) { ws = null; connect(); }
 });
 
 function handle(m) {
@@ -512,7 +558,7 @@ function handle(m) {
   var before = S;
   S = m; lang = m.language === 'en' ? 'en' : 'es';
   if (m.phase !== lastPhase) {
-   sent = {answer: null, bet: null}; draft.answer = ''; draft.bet = ''; lastPhase = m.phase;
+   sent = {answer: null, bet: null}; draft.answer = ''; draft.bet = ''; lastPhase = m.phase; cardPick = null;
    if (m.phase === 'board' && m.can && m.can.indexOf('pick') >= 0) buzzv([120, 80, 120]);
   }
   // Your phone says "answer now" (and buzzes) only once the beep played and Richie listens.
@@ -520,7 +566,7 @@ function handle(m) {
   if (talk && !talking) buzzv([60, 40, 160]);
   talking = talk;
   trackScores(before);
-  buzzLock = false; pickLock = false; voteLock = false; startLock = false;
+  buzzLock = false; pickLock = false; voteLock = false; startLock = false; cardLock = false;
   render();
  }
 }
@@ -573,7 +619,8 @@ function render() {
   if (/ bad/.test(msgKind(m))) buzzv([30, 50, 30]);
  }
  lastMsg = m;
- setRegion('extra', voteHtml());
+ setRegion('extra', voteHtml() + cardNotes());
+ setRegion('hand', cardsHtml());
  setRegion('stage', stageHtml());
  announce();
  showDeltas();
@@ -693,6 +740,42 @@ function voteHtml() {
  return '<div class="votebox"><p class="votehint">' + esc(t().voteHint(v['for'], v.said || '')) + '</p><button type="button" class="vote" data-act="vote"' + (off ? ' disabled' : '') + '>' +
   esc(t().vote(v.yes, v.needed)) + (v.voted ? ' · ' + esc(t().voted) : '') + '</button></div>';
 }
+function cardTime() { return !!(S && S.you && /^(board|reading|buzzing|answering|everyone)$/.test(S.phase)); }
+// Who is frozen or shielded, and the team's secret hint, above the stage.
+function cardNotes() {
+ if (!cardTime()) return '';
+ var L = t(), h = '';
+ var chips = (S.frozen || []).map(function (k) { return '<span class="chip ice">' + esc(L.frozenChip(tname(k))) + '</span>'; })
+  .concat((S.shielded || []).map(function (k) { return '<span class="chip shield">' + esc(L.shieldChip(tname(k))) + '</span>'; }));
+ if (chips.length) h += '<div class="chips">' + chips.join('') + '</div>';
+ if (S.hint) h += '<div class="hintbox"><small>' + esc(L.hintTitle) + '</small><b>' + esc(S.hint.pattern) + '</b><span>' + esc(L.hintLine(S.hint)) + '</span></div>';
+ return h;
+}
+// The team's cards under the stage; any of its phones plays one.
+function cardsHtml() {
+ var cards = (S && S.cards) || [];
+ if (!cardTime() || !cards.length) return '';
+ var L = t(), playable = S.playable || [], frozen = S.frozen || [];
+ var h = '<p class="lbl center">' + esc(L.yourCards) + '</p><div class="cards" role="group" aria-label="' + esc(L.yourCards) + '">';
+ cards.forEach(function (k) {
+  var on = playable.indexOf(k) >= 0 && !cardLock;
+  h += '<button type="button" class="pc' + (cardPick === k ? ' on' : '') + '" data-act="card" data-v="' + esc(k) + '"' + (on ? '' : ' disabled') + '><b>' + esc(L.cards[k] || k) + '</b><small>' + esc(L.cardSub[k] || '') + '</small></button>';
+ });
+ h += '</div>';
+ if (cardPick === 'freeze' && playable.indexOf('freeze') >= 0) {
+  var others = (S.teams || []).filter(function (x) { return x.key !== S.you.team && frozen.indexOf(x.key) < 0; });
+  h += '<div class="cardpick"><p>' + esc(L.freezeWho) + '</p><div class="row">' + others.map(function (x) {
+   return '<button type="button" data-act="freeze" data-v="' + esc(x.key) + '" ' + ts(x.key) + '>' + esc(x.name) + '</button>'; }).join('') + '</div></div>';
+ }
+ return h;
+}
+function playCard(k, target) {
+ if (cardLock || (S.playable || []).indexOf(k) < 0 || !send({type: 'card', card: k, team: target})) return;
+ cardPick = null; buzzv(50); cache.hand = null;
+ if (demo) { S.cards = S.cards.filter(function (c) { return c !== k; }); S.playable = S.playable.filter(function (c) { return c !== k; }); if (target) S.frozen = (S.frozen || []).concat(target); }
+ else cardLock = true;
+ render();
+}
 function clueHead(huge) {
  var c = S.clue; if (!c) return '';
  var h = '';
@@ -738,11 +821,14 @@ function stageHtml() {
    return lb + '</div>';
   case 'board': return boardHtml();
   case 'reading':
-   return screen(clueHead(!(c && c.text)) + clueText()) + buzzer(false, L.wait, !!(c && c.text), 'wait', '');
+   var iced = (S.frozen || []).indexOf(S.you.team) >= 0 && c && c.hidden !== 'everyone';
+   return screen(clueHead(!(c && c.text)) + clueText()) + buzzer(false, iced ? L.frozen : L.wait, !!(c && c.text), iced ? 'wait frozen' : 'wait', '');
   case 'buzzing':
-   var on = can('buzz') && !buzzLock;
+   var on = can('buzz') && !buzzLock, ice = (S.frozen || []).indexOf(S.you.team) >= 0;
+   var bombed = c && c.hidden === 'bomb' && S.control && S.control !== S.you.team;
    return (c && (c.text || c.column) ? screen(clueHead(false) + clueText()) : '') +
-    buzzer(on, can('buzz') ? L.buzz : L.locked, !!(c && c.text), on ? 'live' : can('buzz') ? 'sent' : 'locked', on || can('buzz') || S.buzzed ? '' : L.lockedNote);
+    buzzer(on, can('buzz') ? L.buzz : ice ? L.frozen : L.locked, !!(c && c.text), on ? 'live' : can('buzz') ? 'sent' : ice ? 'locked frozen' : 'locked',
+     on || can('buzz') || S.buzzed ? '' : ice ? L.frozenNote : bombed ? L.bombNote(tname(S.control)) : L.lockedNote);
   case 'answering':
    var b = S.buzzed, me = b && b.name === S.you.name && b.team === S.you.team;
    var who = me ? '<div class="say" ' + ts(b.team) + '>' + (S.listening ? '<div class="mic" aria-hidden="true">' + ICON.mic + '</div>' : '') + '<b>' + esc(S.listening ? L.sayIt : L.waitBeep) + '</b></div>'
@@ -906,6 +992,12 @@ document.addEventListener('click', function (e) {
   if (!startLock && can('start') && send({type: 'start'})) { startLock = true; el.disabled = true; cache.stage = null; }
  } else if (a === 'resume') {
   if (can('resume') && send({type: 'resume'})) { el.disabled = true; }
+ } else if (a === 'card') {
+  var k = el.getAttribute('data-v');
+  if (k === 'freeze') { cardPick = cardPick === 'freeze' ? null : 'freeze'; cache.hand = null; render(); }
+  else playCard(k, null);
+ } else if (a === 'freeze') {
+  playCard('freeze', el.getAttribute('data-v'));
  } else if (a === 'vote') {
   if (send({type: 'vote'})) { voteLock = true; el.disabled = true; cache.extra = null; buzzv(40); }
  }
@@ -936,8 +1028,34 @@ document.addEventListener('change', function (e) {
 });
 function blur() { var a = document.activeElement; if (a && a.blur) a.blur(); }
 
+// ?demo=<cards|freeze|frozen|hint|bomb>&lang=en shows sample states of the power cards and the bomb (for the design).
+function runDemo(p) {
+ var en = QS.get('lang') === 'en', N = T[en ? 'en' : 'es'].names;
+ var titles = en ? ['Space', 'Greek myths', 'Pop music', 'Inventions', 'Animals'] : ['Espacio', 'Mitología griega', 'Música pop', 'Inventos', 'Animales'];
+ var cols = titles.map(function (title, i) { return {title: title, cells: [200, 400, 600, 800].map(function (pt, r) { return {points: pt, used: (i + r) % 4 === 0}; })}; });
+ var clue = {column: titles[1], points: 600, hidden: null, answer: null,
+  text: en ? 'This Titan was punished by holding up the sky on his shoulders.' : 'Este titán fue castigado a cargar el cielo sobre sus hombros.'};
+ var base = function (ph, o) {
+  var s = {type: 'state', phase: ph, language: en ? 'en' : 'es', title: 'Big Brain', kids: false, you: {player: 'd', name: 'Ana', team: 'red'},
+   teams: ['red', 'blue', 'green'].map(function (k, i) { return {key: k, name: N[k], score: [1200, 800, -400][i], players: [['Ana', 'Luis'], ['Eva'], ['Papá']][i]}; }),
+   board: {columns: cols}, control: 'red', clue: null, buzzed: null, listening: false, deadline: null, can: [], max_bet: null, vote: null, message: null, final: null,
+   cards: ['freeze', 'hint'], playable: [], frozen: [], shielded: [], hint: null};
+  for (var k in o) s[k] = o[k];
+  return s;
+ };
+ var mk = {
+  cards: base('board', {can: ['pick'], playable: ['freeze'], shielded: ['green'], deadline: Date.now() + 32000}),
+  freeze: base('board', {control: 'blue', cards: ['freeze', 'hijack'], playable: ['freeze', 'hijack'], deadline: Date.now() + 25000}),
+  frozen: base('buzzing', {control: 'blue', clue: clue, frozen: ['red'], shielded: ['blue'], deadline: Date.now() + 7000}),
+  hint: base('buzzing', {clue: clue, can: ['buzz'], cards: ['freeze'], hint: {first: 'A', letters: 6, words: 1, pattern: 'A_____'}, deadline: Date.now() + 7000}),
+  bomb: base('buzzing', {control: 'blue', clue: Object.assign({}, clue, {hidden: 'bomb', points: 800}), cards: ['shield'], deadline: Date.now() + 7000})
+ };
+ if (mk[p]) handle(mk[p]);
+ if (p === 'freeze') { cardPick = 'freeze'; cache.hand = null; render(); }
+}
+
 render();
-connect();
+if (demo) runDemo(demo); else connect();
 })();
 </script>
 </body>

@@ -255,6 +255,26 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;pa
 .plus{position:absolute;top:-10px;font-family:var(--mk);font-size:26px;color:var(--tc);pointer-events:none;animation:plus 1.8s ease-out forwards;text-shadow:0 2px 0 #fff,2px 0 0 #fff,-2px 0 0 #fff}
 @keyframes plus{0%{opacity:0;transform:translateY(8px) scale(.6)}20%{opacity:1;transform:translateY(-10px) scale(1.2)}100%{opacity:0;transform:translateY(-44px)}}
 
+/* Sabotage cards: the team's hand, the target picker, and the curses on a turn */
+#cards:empty{display:none}
+.cards{--fill:#fff;--off:4px;margin:22px 2px 4px;padding:12px 14px 14px}
+.cards h2{margin:0 0 8px;font-family:var(--mk);font-weight:400;font-size:20px;text-align:center;transform:rotate(-1deg)}
+.deck{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.scard{--fill:#fff3f7;--off:4px;min-height:100px;padding:10px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;transition:transform .25s var(--ease)}
+.scard .ci{font-size:30px;line-height:1}
+.scard b{font-family:var(--mk);font-weight:400;font-size:20px;line-height:1.05}
+.scard small{font-size:15px;color:var(--ink2);line-height:1.15}
+.scard[aria-pressed=true]{--fill:var(--hi);transform:rotate(-2deg) scale(1.05)}
+.pickq{font-family:var(--mk);font-size:20px;text-align:center;margin:14px 0 0}
+.targets{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.tbtn{--fill:var(--tc);--off:3px;flex:1 1 30%;min-height:56px;color:#fff;font-family:var(--mk);font-size:21px;padding:8px 12px}
+.thrown{list-style:none;margin:10px 0 0;padding:0;font-size:17px;color:var(--ink2);text-align:center}
+.curses{display:flex;flex-direction:column;align-items:center;gap:8px;margin:4px 0 2px}
+.curses .lead{font-family:var(--mk);font-size:18px;letter-spacing:.06em;text-transform:uppercase;color:var(--bad)}
+.curse{display:inline-flex;align-items:center;gap:10px;font-family:var(--mk);font-size:clamp(25px,7.4vw,34px);line-height:1.05;color:var(--bad);border:4px dashed var(--bad);border-radius:var(--r2);padding:6px 16px;background:rgba(211,47,47,.07);transform:rotate(-3deg);text-align:left}
+.curse:nth-child(odd){transform:rotate(2deg)}
+.curse small{display:block;font-family:var(--hand);font-size:16px;color:var(--ink2)}
+
 /* Confetti, toast */
 .confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:25}
 .confetti i{position:absolute;top:-30px;left:var(--x);width:var(--w);height:var(--h);background:var(--c);border-radius:var(--br);animation:fall var(--t) cubic-bezier(.3,.6,.6,1) var(--d) forwards}
@@ -280,6 +300,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;pa
 <div id="app">
  <header id="hdr"></header>
  <main id="stage"></main>
+ <div id="cards"></div>
  <div id="track"></div>
 </div>
 <div class="alarm" id="alarm"></div>
@@ -297,7 +318,12 @@ var T = {
   tagline: 'Tú dibujas. Richie adivina.', hello: 'Hola, me llamo', inTitle: '¡Ya estás dentro!', nobody: 'Nadie aún', you: 'tú',
   onlyYou: 'Solo tú la ves. ¡Shhh!', cheer: 'Solo Richie adivina. ¡Échenle porras!', holdTitle: '¡Arriba ese dibujo!',
   gotIt: '¡Richie lo adivinó!', missed: 'Richie no lo adivinó', blind: 'Richie no vio el dibujo', wins: '¡Gana el equipo {team}!', tie: '¡Empate!',
-  kidsOn: 'Modo niños', race: 'La carrera', watch: 'Mira la carrera desde aquí.'},
+  kidsOn: 'Modo niños', race: 'La carrera', watch: 'Mira la carrera desde aquí.',
+  hand: 'Tus cartas de sabotaje', pick: '¿A qué equipo se la lanzas?', thrown: '{card} → {team}, en su próximo turno', sent: '¡Lanzada! Es secreto.',
+  cardsTitle: '¡Cartas de sabotaje!', cardsSub: 'Lánzale una a otro equipo para su próximo turno. Nadie lo sabe hasta que le toque.',
+  sabotage: '¡Sabotaje!', by: 'de {team}',
+  cards: {hand: 'Mano contraria', eyes: 'Ojos cerrados', line: 'Una sola línea', half: 'Medio tiempo'},
+  how: {hand: 'Con la otra mano', eyes: '¡Nada de espiar!', line: 'Sin levantar el lápiz', half: 'La mitad del tiempo'}},
  en: {join: 'Join the game', name: 'Your name', team: 'Your team', go: 'Join!', start: 'Start!', kids: 'Kids mode (easy words)',
   waitStart: 'When everyone is in, press start.', drawYou: 'Your turn to draw!', category: 'Category', draw: 'Draw on paper:', done: 'Done! Show Richie',
   skip: 'Another word', drawing: '{name} is drawing', holdUp: 'Hold your drawing up to Richie\'s camera!', holding: 'Time to show Richie the drawing!',
@@ -307,7 +333,12 @@ var T = {
   tagline: 'You draw. Richie guesses.', hello: 'Hello, my name is', inTitle: 'You\'re in!', nobody: 'No one yet', you: 'you',
   onlyYou: 'Only you can see it. Shhh!', cheer: 'Only Richie guesses. Cheer them on!', holdTitle: 'Hold it up high!',
   gotIt: 'Richie got it!', missed: 'Richie missed it', blind: 'Richie couldn\'t see a drawing', wins: 'Team {team} wins!', tie: 'It\'s a tie!',
-  kidsOn: 'Kids mode', race: 'The race', watch: 'Watch the race from here.'}
+  kidsOn: 'Kids mode', race: 'The race', watch: 'Watch the race from here.',
+  hand: 'Your sabotage cards', pick: 'Which team do you throw it at?', thrown: '{card} → {team}, on their next turn', sent: 'Thrown! It\'s a secret.',
+  cardsTitle: 'Sabotage cards!', cardsSub: 'Throw one at another team for its next turn. Nobody knows until it\'s their turn.',
+  sabotage: 'Sabotage!', by: 'from {team}',
+  cards: {hand: 'Other hand', eyes: 'Eyes closed', line: 'One line', half: 'Half time'},
+  how: {hand: 'Draw with your other hand', eyes: 'No peeking!', line: 'Don\'t lift the pen', half: 'Half the time'}}
 };
 var KEYS = ['red', 'blue', 'green'];
 var TC = {red: '#d32f2f', blue: '#1767c8', green: '#23803f', yellow: '#b88a00'};
@@ -317,7 +348,8 @@ var code = (params.get('c') || '').trim();
 var STORE = 'scribble:' + code;
 var RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 var S = null, P = null, ws = null, retry = 0, timer = null, draft = {name: '', team: null}, shown = '', scene = '', sceneName = '', head = '', trackKey = '';
-var seenGuesses = [], lastSec = -1;
+var seenGuesses = [], lastSec = -1, pick = null, cardsKey = '';
+var ICONS = {hand: '✋', eyes: '🙈', line: '〰️', half: '⏱️'};
 function $(id) { return document.getElementById(id); }
 function lang() { return (S && S.language) || (/^es/i.test(navigator.language || '') ? 'es' : 'en'); }
 function t() { return T[lang()]; }
@@ -465,6 +497,17 @@ function guessList(mini) {
  });
  return h + '</div>';
 }
+// The curses on this turn as big red stamps ("¡Sabotaje! / Ojos cerrados, de Azul"); empty without any.
+function curseHTML() {
+ var c = S.curses || [];
+ if (!c.length) return '';
+ var h = '<div class="curses slap" style="--d:.1s"><span class="lead">' + t().sabotage + '</span>';
+ c.forEach(function (x) {
+  h += '<span class="curse"><span aria-hidden="true">' + (ICONS[x.card] || '') + '</span><span>' + esc(t().cards[x.card] || x.card) +
+   '<small>' + esc(t().how[x.card] || '') + ' · ' + fill(t().by, {team: tname(x.by)}) + '</small></span></span>';
+ });
+ return h + '</div>';
+}
 function remember() { seenGuesses = (S.guesses || []).map(function (g) { return g.hit === true ? 'hit' : g.hit === false ? 'miss' : 'wait'; }); }
 
 /* ---------- Scenes ---------- */
@@ -473,6 +516,7 @@ function sceneOf() {
  if (!you) return S.phase === 'lobby' ? 'join' : 'closed';
  if (S.phase === 'paused') return 'paused';
  if (S.phase === 'lobby') return 'lobby';
+ if (S.phase === 'cards') return 'cards';
  if (S.phase === 'over') return 'over';
  if (S.phase === 'drawing') return S.drawing ? 'draw' : 'watch';
  if (S.phase === 'showing') return 'show';
@@ -514,9 +558,12 @@ var SCENES = {
   if (can('settings')) h += '<label class="toggle"><input type="checkbox" id="kids"' + (S.kids ? ' checked' : '') + '>' + t().kids + '</label>';
   return h + '</section>';
  },
+ cards: function () {
+  return '<section class="center">' + richie('happy', 'sm pop') + '<h1 class="title slap">' + t().cardsTitle + '</h1><p class="sub">' + t().cardsSub + '</p></section>';
+ },
  draw: function () {
   var k = S.you.team;
-  var h = '<section class="center"><h1 class="title slap">' + t().drawYou + '</h1>' +
+  var h = '<section class="center"><h1 class="title slap">' + t().drawYou + '</h1>' + curseHTML() +
    '<div class="secret" ' + tc(k) + '><div class="card3"><div class="face front sk"><span class="tape" aria-hidden="true"></span>' +
    catHTML('') + '<p class="small">' + t().draw + '</p><p class="word" style="--ws:' + wsize(S.word) + 'px"><span>' + esc(S.word) + '</span></p>' +
    '</div><div class="face back sk" aria-hidden="true">?</div></div></div>' +
@@ -527,7 +574,7 @@ var SCENES = {
  },
  watch: function () {
   var d = S.drawer || {name: '', team: S.turn};
-  return '<section class="center" ' + tc(d.team) + '><h1 class="title tc slap">' + fill(t().drawing, {name: d.name}) + '</h1>' +
+  return '<section class="center" ' + tc(d.team) + '><h1 class="title tc slap">' + fill(t().drawing, {name: d.name}) + '</h1>' + curseHTML() +
    catHTML(' pop" style="--d:.15s') +
    '<div class="pad sk pop" style="--d:.2s">' + scribble(d.team) + '</div>' + (S.phase === 'drawing' ? timerHTML(true) : '') + '<p class="sub">' + t().cheer + '</p></section>';
  },
@@ -616,6 +663,38 @@ function confetti(colors) {
  setTimeout(function () { box.remove(); }, 4200);
 }
 
+/* ---------- Sabotage cards ---------- */
+// The team's cards (tap one, then a team) and what it threw; not on the drawer's phone while drawing or showing.
+function renderCards(sc) {
+ var el = $('cards'), mine = (S.cards || []), out = (S.thrown || []), h = '';
+ var shows = S.you && (['cards', 'watch', 'guess', 'result'].indexOf(sc) >= 0 || (sc === 'show' && !S.drawing));
+ if (pick && (mine.indexOf(pick) < 0 || !can('sabotage'))) pick = null;
+ var playable = mine.length && can('sabotage');
+ if (shows && (playable || out.length)) {
+  h = '<section class="cards sk"><h2>' + t().hand + '</h2>';
+  if (playable) {
+   h += '<div class="deck">';
+   mine.forEach(function (c) {
+    h += '<button type="button" class="scard sk" data-card="' + c + '" aria-pressed="' + (pick === c) + '"><span class="ci" aria-hidden="true">' + (ICONS[c] || '') +
+     '</span><b>' + esc(t().cards[c]) + '</b><small>' + esc(t().how[c]) + '</small></button>';
+   });
+   h += '</div>';
+   if (pick) {
+    h += '<p class="pickq">' + t().pick + '</p><div class="targets">';
+    (S.teams || []).forEach(function (x) { if (x.key !== S.you.team) h += '<button type="button" class="tbtn sk" ' + tc(x.key) + ' data-target="' + x.key + '">' + esc(x.name) + '</button>'; });
+    h += '</div>';
+   }
+  }
+  if (out.length) {
+   h += '<ul class="thrown">';
+   out.forEach(function (x) { h += '<li>' + (ICONS[x.card] || '') + ' ' + fill(t().thrown, {card: t().cards[x.card] || x.card, team: tname(x.target)}) + '</li>'; });
+   h += '</ul>';
+  }
+  h += '</section>';
+ }
+ if (h !== cardsKey) { el.innerHTML = h; cardsKey = h; }
+}
+
 /* ---------- Render ---------- */
 function gone() {
  $('hdr').innerHTML = '<span class="logo"><span>Scribble Rush</span></span>';
@@ -641,7 +720,8 @@ function render() {
  header();
  var sc = sceneOf(), stage = $('stage');
  $('hdr').classList.toggle('bare', sc === 'join');
- if (sc === 'join' && sceneName === 'join' && $('name') && stage.getAttribute('data-lang') === lang()) { updateJoin(); renderTrack(sc); return; }
+ if (sc === 'join' && sceneName === 'join' && $('name') && stage.getAttribute('data-lang') === lang()) { updateJoin(); renderTrack(sc); renderCards(sc); return; }
+ renderCards(sc);
  var key = sc + JSON.stringify(S) + draft.team;
  if (key === shown) return;
  shown = key;
@@ -671,8 +751,9 @@ function effects(sc, fresh) {
   if (seenGuesses[i] === undefined) say(esc(x.text) + '?');
  });
  if (!fresh) return;
- if (sc === 'draw') { buzz([80, 60, 80]); say(t().drawYou); }
- else if (sc === 'watch') say(fill(t().drawing, {name: S.drawer ? S.drawer.name : ''}));
+ var cursed = (S.curses || []).map(function (x) { return esc(t().cards[x.card] || x.card); }).join(', ');
+ if (sc === 'draw') { buzz(cursed ? [80, 60, 80, 60, 200] : [80, 60, 80]); say(t().drawYou + (cursed ? ' ' + t().sabotage + ' ' + cursed : '')); }
+ else if (sc === 'watch') say(fill(t().drawing, {name: S.drawer ? S.drawer.name : ''}) + (cursed ? ' ' + t().sabotage + ' ' + cursed : ''));
  else if (sc === 'show') { if (S.drawing) buzz(200); say(S.drawing ? t().holdUp : t().holding); }
  else if (sc === 'result') {
   var hit = anyHit(), none = !(S.guesses || []).length, back = old && old.phase === 'paused';
@@ -693,7 +774,7 @@ function tick() {
  var el = $('timer'), alarm = $('alarm');
  if (!el || !S || !S.deadline) { if (el) $('tnum').textContent = ''; alarm.classList.remove('on'); return; }
  var ms = Math.max(0, S.deadline - Date.now()), left = Math.ceil(ms / 1000);
- var total = Math.max(S.kids ? 30 : 20, left);  // the drawing time (20 s, 30 s in kids mode)
+ var total = Math.max(S.seconds || (S.kids ? 30 : 20), left);  // this turn's drawing time
  $('tnum').textContent = left;
  $('arc').setAttribute('stroke-dashoffset', String(100 - Math.max(0, Math.min(100, 100 * ms / (total * 1000)))));
  el.classList.toggle('mid', left <= 10 && left > 5);
@@ -715,6 +796,11 @@ document.addEventListener('click', function (e) {
  var el = e.target.closest('button');
  if (!el) return;
  if (el.getAttribute('data-team')) { draft.team = el.getAttribute('data-team'); buzz(15); updateJoin(); return; }
+ if (el.getAttribute('data-card')) { var c = el.getAttribute('data-card'); pick = pick === c ? null : c; buzz(15); renderCards(sceneOf()); return; }
+ if (el.getAttribute('data-target')) {
+  if (pick && send({type: 'sabotage', card: pick, target: el.getAttribute('data-target')})) { pick = null; buzz([30, 30, 60]); if (!DEMO) toast(t().sent); }
+  return;
+ }
  if (el.id === 'go') {
   var name = (draft.name || '').trim();
   if (!name || !draft.team) { toast(t().errName); return; }
@@ -725,22 +811,27 @@ document.addEventListener('click', function (e) {
  if (act && send({type: act})) el.disabled = true;
 });
 
-/* ---------- ?demo=<scene>: sample states without a game (join lobby closed draw watch show guess hit miss paused over all) ---------- */
+/* ---------- ?demo=<scene>: sample states without a game (join lobby closed cards pick draw cursed watch cursedwatch show guess hit miss paused over all) ---------- */
 function demo(kind) {
  var L = params.get('lang') === 'en' ? 'en' : 'es', N = T[L].names, en = L === 'en';
  function tm(k, sq, ps) { return {key: k, name: N[k], squares: sq, players: ps}; }
  var s = {phase: 'drawing', language: L, kids: params.has('kids'), you: {player: 'p1', name: 'Ana', team: 'red'},
   teams: [tm('red', 10, ['Ana', 'Sofi']), tm('blue', 16, ['Luis', en ? 'Dad' : 'Papá']), tm('green', 4, [en ? 'Mom' : 'Mamá'])], goal: 24, round: 3, rounds: 6,
   turn: 'red', drawer: {name: 'Ana', team: 'red'}, drawing: true, category: 'animal', word: en ? 'giraffe' : 'jirafa', guesses: [],
-  deadline: Date.now() + 16000, can: ['done', 'skip'], message: null};
- var other = params.has('other') || kind === 'watch';
+  deadline: Date.now() + 16000, seconds: 20, can: ['done', 'skip'], message: null, cards: ['eyes', 'half'], thrown: [], curses: []};
+ var curses = [{card: 'eyes', by: 'blue'}, {card: 'half', by: 'green'}];
+ var other = params.has('other') || kind === 'watch' || kind === 'cursedwatch';
  var lobby = {phase: 'lobby', round: 0, turn: null, drawer: null, drawing: false, category: null, word: null, deadline: null};
  var g1 = {text: en ? 'a horse' : 'un caballo', hit: false}, g2 = {text: en ? 'a llama' : 'una llama', hit: false};
  var o = {
   join: Object.assign({}, lobby, {you: null, can: ['join'], teams: [tm('red', 0, ['Sofi']), tm('blue', 0, ['Luis', en ? 'Dad' : 'Papá']), tm('green', 0, [])]}),
   lobby: Object.assign({}, lobby, {can: ['start', 'settings'], teams: [tm('red', 0, ['Ana', 'Sofi']), tm('blue', 0, ['Luis', en ? 'Dad' : 'Papá']), tm('green', 0, [])]}),
   closed: {you: null, can: [], drawing: false, word: null},
+  cards: {phase: 'cards', turn: null, drawer: null, drawing: false, category: null, word: null, deadline: null, can: ['sabotage'], round: 0},
+  pick: {phase: 'cards', turn: null, drawer: null, drawing: false, category: null, word: null, deadline: null, can: ['sabotage'], round: 0, thrown: [{card: 'line', target: 'green'}]},
   draw: {}, watch: {},
+  cursed: {curses: curses, seconds: 10, deadline: Date.now() + 9000, cards: []},
+  cursedwatch: {curses: curses, seconds: 10, deadline: Date.now() + 9000},
   show: {phase: 'showing', deadline: null, can: []},
   guess: {phase: 'guessing', deadline: null, can: [], guesses: [g1, {text: en ? 'a giraffe' : 'una jirafa', hit: null}]},
   hit: {phase: 'result', deadline: null, can: [], guesses: [g1, {text: en ? 'a giraffe' : 'una jirafa', hit: true}], message: N.red + ' +4',
@@ -751,13 +842,17 @@ function demo(kind) {
    teams: [tm('red', 24, ['Ana', 'Sofi']), tm('blue', 18, ['Luis']), tm('green', 9, [en ? 'Mom' : 'Mamá'])]}
  }[kind] || {};
  s = Object.assign(s, o);
- if (other && s.you) { s.you = {player: 'p2', name: 'Luis', team: 'blue'}; s.drawing = false; if (s.phase !== 'result') s.word = null; s.can = s.phase === 'paused' ? ['resume'] : []; }
+ if (other && s.you) {
+  s.you = {player: 'p2', name: 'Luis', team: 'blue'}; s.drawing = false; if (s.phase !== 'result') s.word = null;
+  s.can = s.phase === 'paused' ? ['resume'] : ['sabotage']; s.cards = ['hand']; s.thrown = kind === 'cursedwatch' ? [{card: 'line', target: 'red'}] : [];
+ }
  return s;
 }
 function runDemo() {
- var seq = DEMO === 'all' ? ['join', 'lobby', 'draw', 'watch', 'show', 'guess', 'hit', 'miss', 'paused', 'over', 'closed'] : [DEMO], i = 0;
+ var seq = DEMO === 'all' ? ['join', 'lobby', 'cards', 'pick', 'draw', 'cursed', 'watch', 'cursedwatch', 'show', 'guess', 'hit', 'miss', 'paused', 'over', 'closed'] : [DEMO], i = 0;
  function step() {
   var k = seq[i++ % seq.length];
+  pick = k === 'pick' ? 'eyes' : null;
   if (k === 'hit' || k === 'miss') { handle(Object.assign({type: 'state'}, demo('guess'))); setTimeout(function () { handle(Object.assign({type: 'state'}, demo(k))); }, 900); }
   else handle(Object.assign({type: 'state'}, demo(k)));
  }

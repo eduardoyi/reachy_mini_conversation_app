@@ -15,10 +15,10 @@ from .fakes import FakeReachy
 from reachy_mini_conversation_app import jev
 from reachy_mini_conversation_app.games import big_brain
 from reachy_mini_conversation_app.qr_code import qr_matrix
-from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
+from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, GameContext
 from reachy_mini_conversation_app.games.host import GameHost, GameState
 from reachy_mini_conversation_app.games.catalog import parse_game_request
-from reachy_mini_conversation_app.games.big_brain import EDITIONS, BigBrain, BigBrainSetup
+from reachy_mini_conversation_app.games.big_brain import CARDS, EDITIONS, BigBrain, BigBrainSetup, answer_hint
 from reachy_mini_conversation_app.games.big_brain_board import (
     POINTS,
     Clue,
@@ -29,6 +29,7 @@ from reachy_mini_conversation_app.games.big_brain_board import (
     read_history,
 )
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling, plain, matches
+from reachy_mini_conversation_app.games.big_brain_lines import LINES, shown
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 from reachy_mini_conversation_app.games.big_brain_screens import render_join
 
@@ -69,7 +70,7 @@ def _bank(size: int = 400) -> list[dict[str, Any]]:
 
 
 def test_a_board_has_five_columns_of_four_clues_from_easy_to_hard() -> None:
-    """Each column runs 200 to 800 points with harder clues lower down; three hidden squares, a final apart."""
+    """Each column runs 200 to 800 points with harder clues lower down; four hidden squares, a final apart."""
     board = build_board(_bank(), "es", rng=random.Random(1), now=0)
     assert len(board.titles) == 5 and all(len(column) == 4 for column in board.clues)
     for column in board.clues:
@@ -79,8 +80,8 @@ def test_a_board_has_five_columns_of_four_clues_from_easy_to_hard() -> None:
     hidden = [
         (c, r, clue.hidden) for c, column in enumerate(board.clues) for r, clue in enumerate(column) if clue.hidden
     ]
-    assert sorted(kind for _, _, kind in hidden) == ["double", "everyone", "steal"]
-    assert all(row > 0 for _, row, _ in hidden) and len({column for column, _, _ in hidden}) == 3
+    assert sorted(kind for _, _, kind in hidden) == ["bomb", "double", "everyone", "steal"]
+    assert all(row > 0 for _, row, _ in hidden) and len({column for column, _, _ in hidden}) == 4
     assert board.final.id not in {clue.id for column in board.clues for clue in column}
     assert len(set(board.ids)) == 21
 
@@ -338,12 +339,16 @@ def test_an_edition_plays_its_own_bank_title_and_columns(tmp_path: Path) -> None
 
 
 class _Room:
-    """Two pretend phones: red buzzes and types the answer, blue never buzzes but counts a ruling; both bet."""
+    """Two pretend phones: red buzzes and types the answer, blue never buzzes but counts a ruling; both bet.
+
+    Each plays its cards as soon as it may, on the other team.
+    """
 
     def __init__(self, game: BigBrain) -> None:
         self.game = game
         self.red = Player("p1", "Ana", "red", 0.0)
         self.blue = Player("p2", "Luis", "blue", 1.0)
+        self.cards: list[tuple[str, str]] = []
 
     def join(self) -> None:
         phones = self.game._phones
@@ -357,9 +362,14 @@ class _Room:
         while True:
             await asyncio.sleep(0.02)
             for player in (self.red, self.blue):
-                can = game.snapshot(player)["can"]
+                view = game.snapshot(player)
+                can = view["can"]
                 board = game._board
-                if "vote" in can and player is self.blue:
+                if view["playable"]:
+                    other = "blue" if player is self.red else "red"
+                    game.on_message(player, {"type": "card", "card": view["playable"][0], "team": other})
+                    self.cards.append((player.team, view["playable"][0]))
+                elif "vote" in can and player is self.blue:
                     game.on_message(player, {"type": "vote"})
                 elif "start" in can and player is self.red:
                     game.on_message(player, {"type": "start"})
@@ -382,7 +392,8 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     A phone plays on after a pause; red's first answer cannot be read, so Richie asks again; the second is ruled
     wrong and blue's vote ends that square at once; the bets end as soon as both teams bet. Each spoken answer
     opens with a beep after Richie's line, and only then does the phone say "answer now"; "¡Correcto!" goes when
-    the next pick starts, and nobody is asked to pick once the board is empty (2026-11-02).
+    the next pick starts, and nobody is asked to pick once the board is empty (2026-11-02). Both teams play
+    their cards and one square is a bomb (2026-11-08).
     """
     for name, value in {"PICK_S": 1.0, "BUZZ_S": 0.5, "REBUZZ_S": 0.3, "ANSWER_S": 1.0, "EVERYONE_S": 0.3,
                         "BET_S": 30.0, "FINAL_S": 0.3, "AFTER_S": 0.0, "FINAL_ANSWER_S": 0.0, "LOBBY_REMINDER_S": 5.0}.items():  # fmt: skip
@@ -475,6 +486,9 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
     assert any(listening for _, listening in played)
     assert any(len(words) >= 20 for words in reachy.hints)  # the board's answers, for the speech model
     assert parse_game_request("juguemos big brain") is not None
+    # Every card got played but a Hijack, which needs the other team to hold the pick.
+    assert room.cards and all(set(hand) <= {"hijack"} for hand in game._cards.values())
+    assert not game._calls and not game._frozen and not game._shields
 
 
 @pytest.mark.asyncio
@@ -512,3 +526,267 @@ async def test_misses_in_a_row_a_drop_below_zero_a_comeback_and_a_runaway_get_th
     game._scores = {"red": 3400, "blue": 3200}
     await game._standings("blue", "red")
     assert said[-1] == ("lead_change",)
+
+
+# Cards and the bomb (2026-11-08) ---------------------------------------------------------------------
+
+
+def test_the_bomb_is_never_in_the_200_row_nor_in_a_column_with_another_hidden_square() -> None:
+    """One bomb a board, in the 400 to 800 rows, alone among the hidden squares in its column."""
+    for seed in range(40):
+        board = build_board(_bank(), "en", rng=random.Random(seed), now=0)
+        hidden = [
+            (c, r, clue.hidden) for c, col in enumerate(board.clues) for r, clue in enumerate(col) if clue.hidden
+        ]
+        bombs = [(c, r) for c, r, kind in hidden if kind == "bomb"]
+        assert len(bombs) == 1 and bombs[0][1] > 0
+        assert [c for c, _, _ in hidden].count(bombs[0][0]) == 1
+
+
+def test_a_hint_shows_the_first_letter_and_how_many_letters_and_words() -> None:
+    """Worked out from the bank's answer, with no model call."""
+    assert answer_hint("Pacific  Ocean") == {"first": "P", "letters": 12, "words": 2, "pattern": "P______ _____"}
+    assert answer_hint("Coca-Cola") == {"first": "C", "letters": 8, "words": 1, "pattern": "C___-____"}
+    assert answer_hint("1969")["first"] == "1"
+
+
+class _Table:
+    """A game past its lobby with pretend phones: what Richie says, and scripted buzzes and spoken answers."""
+
+    def __init__(
+        self, tmp_path: Path, *, kids: bool = False, teams: tuple[str, ...] = ("red", "blue", "green")
+    ) -> None:
+        self.game = BigBrain(BigBrainSetup(data_dir=tmp_path, elevenlabs_key=None, port=0), rng=random.Random(4))
+        game = self.game
+        self.reachy = FakeReachy(real_clock=True)
+        game._context = GameContext(info=game.info, language="es", services=self.reachy.services)
+        game._context.running.set()
+        game._kids = kids
+        game._judge = Judge(tmp_path / "rulings.json", None)
+        game._phones = Phones(0, game.snapshot, game.on_message, lambda: False, code="ABCDEF")
+        self.players = {team: Player(f"p-{team}", team.title(), team, 0.0) for team in teams}
+        for player in self.players.values():
+            game._phones.players[player.id] = player
+        self.said: list[tuple[str, ...]] = []
+        self.buzzes: list[str | None] = []  # who buzzes at each wait (None: nobody)
+        self.answer = ""  # what the buzzing player says
+        self.seen: list[dict[str, dict[str, Any]]] = []  # every phone's view at each wait
+
+        async def say(*moments: str, sounds: tuple[str, ...] = (), after: Any = None) -> None:
+            self.said.append(moments)
+
+        async def wait(seconds: float | None) -> bool:
+            self.seen.append({team: game.snapshot(player) for team, player in self.players.items()})
+            team = self.buzzes.pop(0) if self.buzzes else None
+            if team is None:
+                return False
+            assert "buzz" in self.seen[-1][team]["can"]
+            game._buzz = self.players[team]
+            return True
+
+        async def play(samples: Any, text: str = "", *, listen: bool = False) -> str | None:
+            return self.answer if listen else None
+
+        game._say = say  # type: ignore[method-assign]
+        game._wait = wait  # type: ignore[method-assign]
+        game._play = play  # type: ignore[method-assign]
+        game._show = lambda png: None  # type: ignore[method-assign]
+
+    async def start(self) -> None:
+        """Run the lobby's end: control, the deal and the rules."""
+        self.game._started = True
+        await self.game._lobby()
+        self.game._board = build_board(_bank(), "es", rng=random.Random(1), now=0)
+        self.game._phase = "board"
+
+    async def square(self, clue: Clue) -> None:
+        """Play one square, fresh as each pick in the rounds starts."""
+        self.game._locked, self.game._buzz, self.game._clue_shown = set(), None, False
+        await self.game._square(clue)
+
+    def play(self, team: str, card: str, target: str | None = None) -> None:
+        self.game.on_message(self.players[team], {"type": "card", "card": card, "team": target})
+
+    def give(self, team: str, *cards: str) -> None:
+        self.game._cards[team] = list(cards)
+
+    def clue(self, points: int = 400, hidden: str | None = None) -> Clue:
+        return Clue(
+            f"c{len(self.said)}", "Cosas", points, "¿Qué océano?", "Pacífico", ["Pacífico"], 0.5, hidden=hidden
+        )
+
+
+@pytest.mark.asyncio
+async def test_each_team_is_dealt_two_different_cards_and_kids_mode_has_no_shield(tmp_path: Path) -> None:
+    """Two of the four cards a team, dealt by the game's rng; kids mode deals from the three without Shield."""
+    hands: list[list[str]] = []
+    for kids in (False, True):
+        for _ in range(8):
+            table = _Table(tmp_path, kids=kids)
+            table.game._rng = random.Random(len(hands))
+            await table.start()
+            for hand in table.game._cards.values():
+                assert len(hand) == 2 and len(set(hand)) == 2 and set(hand) <= set(CARDS)
+                assert not (kids and "shield" in hand)
+                hands.append(hand)
+            assert table.said[-1] == ("begin", "cards_rules_kids" if kids else "cards_rules")
+            assert table.game.snapshot(table.players["red"])["cards"] == table.game._cards["red"]
+    assert {card for hand in hands[:24] for card in hand} == set(CARDS)
+    again = _Table(tmp_path)
+    again.game._rng = random.Random(0)
+    await again.start()
+    assert list(again.game._cards.values()) == hands[:3]  # the same rng deals the same cards
+
+
+@pytest.mark.asyncio
+async def test_freeze_keeps_a_team_off_the_buzzer_on_the_next_clue_and_bad_plays_are_refused(tmp_path: Path) -> None:
+    """Played on another team while a square is picked; refused on the own team, a missing team or once spent."""
+    table = _Table(tmp_path)
+    await table.start()
+    game = table.game
+    table.give("red", "freeze", "hint")
+    table.play("red", "freeze", "red")
+    table.play("red", "freeze", "purple")
+    table.play("red", "freeze")
+    assert game._cards["red"] == ["freeze", "hint"] and not game._frozen
+    table.play("red", "freeze", "blue")
+    assert game._cards["red"] == ["hint"] and game._frozen == {"blue": None}
+    assert game.snapshot(table.players["green"])["frozen"] == ["blue"]
+    table.give("green", "freeze")
+    table.play("green", "freeze", "blue")  # already frozen
+    assert game._cards["green"] == ["freeze"]
+    table.play("red", "freeze", "green")  # spent
+    assert "green" not in game._frozen
+    await game._call_cards()
+    assert table.said[-1] == ("buzz_red", "freeze_blue")
+
+    clue = table.clue()
+    await table.square(clue)
+    assert "buzz" not in table.seen[0]["blue"]["can"] and "buzz" in table.seen[0]["green"]["can"]
+    assert game._frozen == {"blue": clue}  # until the square ends (game._rounds lets it go)
+    # Once the buzzers unlocked, a Freeze waits for the next square.
+    game._phase, game._answer_shown = "reading", False
+    assert "freeze" not in game._playable("green")
+
+
+@pytest.mark.asyncio
+async def test_a_shield_saves_one_miss_then_it_is_gone(tmp_path: Path) -> None:
+    """A Shield played before the pick holds for the next clue that can cost points; a later miss costs again."""
+    table = _Table(tmp_path, teams=("red", "blue"))
+    await table.start()
+    game = table.game
+    table.give("red", "shield")
+    table.play("red", "shield")
+    assert game._shields == {"red": None} and game._cards["red"] == []
+    game._scores = {"red": 1000, "blue": 0}
+    double = table.clue(hidden="double")
+    table.buzzes = ["red"]
+    await table.square(double)  # a double costs nothing anyway, so the shield waits
+    assert game._shields == {"red": None}
+    table.buzzes, table.answer = ["red"], "Atlántico"
+    clue = table.clue(600)
+    await table.square(clue)
+    assert game._scores["red"] == 1000 and ("wrong", "shield_saved") in table.said and not game._shields
+    assert game._vote is not None and game._vote.restore == 600
+    table.buzzes = ["red"]
+    await table.square(table.clue(400))
+    assert game._scores["red"] == 600
+
+
+@pytest.mark.asyncio
+async def test_a_hint_shows_only_on_its_teams_phones_and_only_during_the_clue(tmp_path: Path) -> None:
+    """Refused before the clue is shown; then the team's phones get the first letter, the others nothing."""
+    table = _Table(tmp_path)
+    await table.start()
+    game = table.game
+    table.give("red", "hint")
+    table.play("red", "hint")
+    assert game._cards["red"] == ["hint"]
+    clue = table.clue()
+    game._clue, game._phase, game._clue_shown = clue, "reading", True
+    table.play("red", "hint")
+    assert game.snapshot(table.players["red"])["hint"] == answer_hint("Pacífico")
+    assert game.snapshot(table.players["blue"])["hint"] is None and game._cards["red"] == []
+    await game._call_cards()
+    assert table.said[-1] == ("buzz_red", "hint")
+
+
+@pytest.mark.asyncio
+async def test_hijack_takes_another_teams_pick_and_richie_asks_the_new_team(tmp_path: Path) -> None:
+    """Only while another team has the pick; the hijacker's phones get the board and a fresh pick time."""
+    table = _Table(tmp_path)
+    await table.start()
+    game = table.game
+    game._control = "blue"
+    table.give("red", "hijack")
+    table.give("blue", "hijack")
+    table.play("blue", "hijack")  # its own pick
+    assert game._cards["blue"] == ["hijack"]
+    waits: list[str] = []
+
+    async def wait(seconds: float | None) -> bool:
+        waits.append(str(game._control))
+        if len(waits) == 1:
+            table.play("red", "hijack")
+        else:
+            game.on_message(table.players["red"], {"type": "pick", "column": 0, "row": 0})
+        return True
+
+    game._wait = wait  # type: ignore[method-assign]
+    await game._picking()
+    assert waits == ["blue", "red"] and game._pick == (0, 0) and game._control == "red"
+    assert table.said[-3:] == [("pick",), ("buzz_red", "hijack_blue"), ("pick",)]
+    assert game._cards["red"] == [] and "hijack" not in game._playable("blue")
+
+
+@pytest.mark.asyncio
+async def test_a_bomb_only_its_team_answers_right_doubles_and_a_miss_or_silence_blows_up(tmp_path: Path) -> None:
+    """Right: twice the points. Wrong or silence: the square's value lost, unless a Shield; kids lose nothing."""
+    table = _Table(tmp_path, teams=("red", "blue"))
+    await table.start()
+    game = table.game
+    game._control, game._scores = "red", {"red": 0, "blue": 0}
+    table.buzzes, table.answer = ["red"], "Pacífico"
+    await table.square(table.clue(600, "bomb"))
+    assert "buzz" not in table.seen[-1]["blue"]["can"]
+    assert game._scores["red"] == 1200 and ("bomb_defused",) in table.said and ("bomb",) in table.said
+    table.buzzes, table.answer = ["red"], "Atlántico"
+    await table.square(table.clue(400, "bomb"))
+    assert game._scores["red"] == 800 and table.said[-2] == ("bomb_boom",)
+    table.said.clear()
+    await table.square(table.clue(400, "bomb"))  # nobody buzzes
+    assert game._scores["red"] == 400 and ("bomb_boom",) in table.said
+    game._phase = "board"  # the next pick
+    table.give("red", "shield")
+    table.play("red", "shield")
+    assert game._shields == {"red": None}
+    await table.square(table.clue(800, "bomb"))
+    assert game._scores["red"] == 400 and ("bomb_boom", "shield_saved") in table.said
+
+    kids = _Table(tmp_path, kids=True, teams=("red", "blue"))
+    await kids.start()
+    kids.game._control, kids.game._scores = "red", {"red": 0, "blue": 0}
+    kids.buzzes, kids.answer = ["red"], "Atlántico"
+    await kids.square(kids.clue(600, "bomb"))
+    assert kids.game._scores["red"] == 0 and ("bomb_kids",) in kids.said and ("bomb_boom",) in kids.said
+
+
+@pytest.mark.asyncio
+async def test_a_moment_not_recorded_yet_is_said_live_in_the_host_voice(tmp_path: Path) -> None:
+    """New lines work before their clips are made: a take goes to the host voice, its tags shaping it, unshown."""
+    game = BigBrain(BigBrainSetup(data_dir=tmp_path, elevenlabs_key="key", port=0), rng=random.Random(1))
+    asked: list[str] = []
+    played: list[str] = []
+
+    async def speech(text: str, language: str) -> Any:
+        asked.append(text)
+        return np.zeros(240, dtype=np.int16)
+
+    async def play(samples: Any, text: str = "", *, listen: bool = False) -> None:
+        played.append(text)
+
+    game._speech.say = speech  # type: ignore[method-assign]
+    game._play = play  # type: ignore[method-assign]
+    await game._say("buzz_red", "freeze_blue")
+    assert asked[0] in LINES["buzz_red"]["es"] and asked[1] in LINES["freeze_blue"]["es"]
+    assert played == [f"{shown(asked[0])} {shown(asked[1])}"] and "[" not in played[0]

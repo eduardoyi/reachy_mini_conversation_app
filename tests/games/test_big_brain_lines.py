@@ -32,7 +32,10 @@ def test_shown_text_has_no_tags() -> None:
 
 
 def test_each_team_has_a_buzz_and_a_win() -> None:
-    """A buzz calls out the team and a win crowns it, in both languages."""
-    for team, (_, spanish) in TEAMS.items():
+    """A buzz calls out the team and a win crowns it, in both languages; a Freeze or a Hijack names its target."""
+    for team, (english, spanish) in TEAMS.items():
         assert any(spanish in line for line in LINES[f"buzz_{team}"]["es"])
         assert any(spanish.upper() in line for line in LINES[f"winner_{team}"]["es"])
+        for card in ("freeze", "hijack"):
+            assert all(spanish in line.lower() for line in LINES[f"{card}_{team}"]["es"])
+            assert all(english in line.lower() for line in LINES[f"{card}_{team}"]["en"])

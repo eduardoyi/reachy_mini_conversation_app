@@ -1,4 +1,4 @@
-"""Big Brain's board: five columns of four clues from the clue bank, three hidden squares and a final clue.
+"""Big Brain's board: five columns of four clues from the clue bank, four hidden squares and a final clue.
 
 The bank (``scripts/trivia_bank.py``, then ``scripts/trivia_topics.py``) holds bilingual statement clues, each
 with a broad category, a merged topic (``column``), a hardness from Jev (0 everyone knows it, 4 only buffs) and
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 POINTS: Final[tuple[int, ...]] = (200, 400, 600, 800)
 COLUMNS: Final[int] = 5
-HIDDEN: Final[tuple[str, ...]] = ("double", "steal", "everyone")
+HIDDEN: Final[tuple[str, ...]] = ("double", "steal", "everyone", "bomb")
 RECENT_DAYS: Final[float] = 30.0
 # The final clue is among the hardest quarter, and one people enjoy.
 FINAL_MIN_APPEAL: Final[float] = 2.3

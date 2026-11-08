@@ -56,6 +56,7 @@ _TEXT: Final[dict[str, dict[str, str]]] = {
     "double": {"es": "DOBLE O NADA", "en": "DOUBLE OR NOTHING"},
     "steal": {"es": "¡ROBO!", "en": "STEAL!"},
     "everyone": {"es": "¡TODOS RESPONDEN!", "en": "EVERYONE ANSWERS!"},
+    "bomb": {"es": "¡BOMBA!", "en": "BOMB!"},
 }
 
 # Each team's shape and fill, told apart by both from across the room.

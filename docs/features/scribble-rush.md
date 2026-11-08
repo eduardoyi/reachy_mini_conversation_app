@@ -2,7 +2,7 @@
 
 - Status: `in-progress` (first version built and tested with fakes on 2026-11-01; not deployed or played; the
   vision guesses not yet measured on real drawings)
-- Last updated: 2026-11-02 (the category shown big on the TRMNL and the phones)
+- Last updated: 2026-11-08 (sabotage cards)
 - Plan: [party-games.md](../plans/party-games.md) ("Scribble Rush", "Vision guesser")
 - Part of: [games.md](games.md) (the shared game host); phones as in [big-brain.md](big-brain.md)
 
@@ -11,7 +11,8 @@
 Teams take turns drawing a secret word on paper in a rush, and Richie is the only one who guesses. Players join
 on their phones by QR code, as for Big Brain; the drawer's phone shows the word, the TRMNL is a race track with a
 lane per team, and one camera frame of the drawing goes to a Gemini Flash vision model that gives up to three
-guesses. Richie says them aloud one by one; the earlier he gets it, the more squares the team moves. Bilingual
+guesses. Richie says them aloud one by one; the earlier he gets it, the more squares the team moves. Each team holds one or
+two secret sabotage cards to throw at another team's turn (other hand, eyes closed, one line, half time). Bilingual
 (Spanish or English, a guess counts in either), adults by default with a kids mode and its own word list.
 
 ## User-facing behavior
@@ -22,32 +23,46 @@ guesses. Richie says them aloud one by one; the earlier he gets it, the more squ
 2. **Join:** the TRMNL shows "SCRIBBLE RUSH", a QR code, the six-letter code and the three teams (red, blue,
    green) with their players. Each phone types a name and picks a team; "¡Empezar!" (or "¡empezamos!" in the room)
    starts, and a "Modo niños" switch sits next to it.
-3. **A turn:** teams go in turn from a random first team, each team's players drawing in the order they joined.
+3. **Sabotage cards:** on "¡Empezar!" each team (with two teams or more) is dealt one or two different cards at
+   random from four: **Mano contraria / Other hand**, **Ojos cerrados / Eyes closed**, **Una sola línea / One line**
+   (don't lift the pen) and **Medio tiempo / Half time**. Richie explains them after "¡Empezamos!" while the phones
+   show "¡Cartas de sabotaje!" and the team's cards. From then on, any phone of a team can tap a card, then a rival
+   team ("¿A qué equipo se la lanzas?"); the card is spent for the whole team and hits that team's next turn. A
+   throw is secret: only the thrower's phones list it ("Ojos cerrados → Azul, en su próximo turno") until the
+   target's turn starts. A card thrown at a team while it is drawing waits for its following turn. Several cards
+   can land on one turn; Half time halves the drawing time once however many are thrown (never below 8 s). The
+   game never curses anyone by itself.
+4. **A turn:** teams go in turn from a random first team, each team's players drawing in the order they joined.
    The TRMNL shows "ROJO DIBUJA" and, under it, a black "CATEGORÍA: ANIMAL" label beside the drawer and the round,
    over the track. Richie calls the drawer
    ("¡Ana, del equipo Rojo, te toca dibujar! Mira tu teléfono… ¡ya!"); only the drawer's phone shows the word,
    with an "Otra palabra" button (once a turn; the clock keeps running) and "¡Listo! Enseñárselo a Richie". The
    drawer's card has the category as a big black label above the word ("Categoría / animal"), and the other
    phones show who is drawing, the same label and the countdown. A tick-tock speeds up for 20 s (30 s in kids
-   mode).
-4. **Showing:** on "Listo" or when time runs out, Richie says "¡Muéstramelo!", waits 2.5 s for the drawing to be
+   mode). A cursed turn starts with Richie revealing each card before the call ("¡Ojo! El equipo Azul le lanza a
+   Rojo… ¡ojos cerrados! Nada de espiar."); every phone shows the curses as red stamps ("¡Sabotaje! Ojos cerrados ·
+   de Azul"), above the word on the drawer's, and the TRMNL caption reads "Ana · ¡Ojos cerrados + Medio tiempo!".
+5. **Showing:** on "Listo" or when time runs out, Richie says "¡Muéstramelo!", waits 2.5 s for the drawing to be
    held up, takes one camera frame and shows it on the TRMNL ("¿Qué será?") while he says "Mmm… déjame ver…".
-5. **Guessing:** the model's short remark on the drawing, then each guess from least to most confident: "¿Es un
+6. **Guessing:** the model's short remark on the drawing, then each guess from least to most confident: "¿Es un
    perro?", "¿No? Mmm… ¿un zorro?", "¡Ya sé! ¿Un gato?". The phones list each guess as it is said and mark the
    hit. A hit on the first, second or third guess moves the team 6, 4 or 2 squares ("¡Sí! ¡Era gato! ¡El equipo
    Rojo avanza 4 casillas!", a happy move); a miss says the word ("¡Me rindo! Era gato.", a sad move) and moves 1
-   square in kids mode ("¡Qué buen intento!"). The TRMNL then shows "ERA: GATO" and the track.
-6. **The end:** the first team to reach square 24 wins at once; otherwise, after six rounds, the furthest team
+   square in kids mode ("¡Qué buen intento!"). The TRMNL then shows "ERA: GATO" and the track. A hit while cursed
+   moves one more square per curse ("¡Y con sabotaje y todo! Les doy una casilla más de premio."); the vision
+   model is told how the drawing was sabotaged, so it reads it more generously.
+7. **The end:** the first team to reach square 24 wins at once; otherwise, after six rounds, the furthest team
    (or a tie). The winner screen, an excited move, "¡Ganó el equipo Rojo!" and thanks. The phones keep the final
    track for 30 s.
-7. **Pause and quit** as every game; the phones show the pause with a "Seguir jugando" button.
+8. **Pause and quit** as every game; the phones show the pause with a "Seguir jugando" button.
 
 ## Current architecture
 
 ```
 "juguemos Scribble Rush" -> GameHost -> ScribbleRush.play
   Phones (big_brain_phones.py, page=static/scribble/index.html) <-> on_message / snapshot
-  turn: word -> drawer's phone; render_track -> TRMNL; tick-tock -> play_audio
+  start: deal() -> each team's cards; phones send "sabotage" -> _thrown[target] (secret)
+  turn: _thrown.pop(team) -> curses announced; word -> drawer's phone; render_track -> TRMNL; tick-tock -> play_audio
   services.camera() -> one JPEG -> GeminiGuesser (one generate_content call) -> Guesses
   judge_guesses: code (guessed) then one Jev call for the rest -> say each guess -> squares -> render_track
 ```
@@ -61,18 +76,25 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 ## Canonical files and contracts
 
 - `games/scribble_rush.py`: the game, `ScribbleSetup(port, guess, public_url)`, `GeminiGuesser`, `read_guesses`,
-  `guessed` and `judge_guesses`. Timings and scoring are module constants: `DRAW_S` 20, `KIDS_DRAW_S` 30, `HOLD_S`
-  2.5, `VISION_TIMEOUT_S` 15, `GOAL` 24, `ROUNDS` 6, `SQUARES` (6, 4, 2), `KIDS_MISS` 1, `JEV_HIT_P` 0.6.
+  `guessed`, `judge_guesses` and `deal(teams, rng)` (one or two distinct cards a team). Timings and scoring are
+  module constants: `DRAW_S` 20, `KIDS_DRAW_S` 30, `MIN_DRAW_S` 8 (Half time's floor), `HOLD_S` 2.5,
+  `VISION_TIMEOUT_S` 15, `GOAL` 24, `ROUNDS` 6, `SQUARES` (6, 4, 2), `KIDS_MISS` 1, `JEV_HIT_P` 0.6; `CARDS`
+  ("hand", "eyes", "line", "half"). Richie's lines are plain text in `_LINES` (no audio tags; said in his own
+  voice, the fixed ones cached): the sabotage moments are `cards_rules`, `sabotage_<card>` and `bonus`.
 - `games/scribble_words.py`: `KIDS_WORDS` (139: animals, food, things, vehicles, nature, body and clothes) and
-  `ADULT_WORDS` (238: actions, movies, Venezuelan sayings, harder things and Venezuelan food, places, characters
-  and jobs, sports and games). Each entry is `"Spanish forms / English forms"`, forms separated by `;`, the first
+  `ADULT_WORDS` (512: actions, movies, Venezuelan sayings, harder things and Venezuelan food, places, characters
+  and jobs, sports and games, and since 2026-11-08 absurd scenes, everyday disasters, mythical creatures and
+  monsters, wacky inventions, internet and pop culture, and Venezuelan life). A scene's forms always name both
+  things ("pulpo en una patineta"), so one noun alone is not a hit by code; Jev may still accept a near guess. Each entry is `"Spanish forms / English forms"`, forms separated by `;`, the first
   of each side the word the drawer sees; every form counts as guessed.
 - `games/scribble_screens.py`: `render_track(title, caption, lanes, goal, turn=, tag=)` (`tag`: the category label).
-- `static/scribble/index.html`: the phone page.
+- `static/scribble/index.html`: the phone page. `?demo=<join|lobby|closed|cards|pick|draw|cursed|watch|cursedwatch|
+  show|guess|hit|miss|paused|over|all>&lang=en` shows sample states with no game running.
 - `games/catalog.py`: `SCRIBBLE_RUSH` (key `scribble`). `main._build_games` enables it when the camera is
   enabled and `GEMINI_API_KEY` is set.
-- Vision call: `GeminiGuesser(api_key, model)(jpeg, word, language, kids) -> Guesses(remark, guesses)`. The
-  prompt gives the word's category (never the word), the language and whether a child drew it, and asks for JSON
+- Vision call: `GeminiGuesser(api_key, model)(jpeg, word, language, kids, curses) -> Guesses(remark, guesses)`.
+  The prompt gives the word's category (never the word), the language, whether a child drew it and, for a
+  sabotaged turn, how ("drawn with eyes closed and with the wrong hand… read it generously"), and asks for JSON
   `{"remark", "guesses": [{"guess", "confidence"}]}`, one guess when clear and up to three when unsure. Code sorts
   by confidence and keeps three. Usage is recorded in the ledger as feature `scribble_guess`.
 - Judging: code first (`guessed`: any form in either language, once case, accents, articles and lead-ins are set
@@ -80,10 +102,14 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
   in one call, one `noul` question per guess (synonyms, translations, a more or less precise name for the same
   thing, a film's or saying's main picture count; something merely related or a category does not).
 - Phone protocol (`/ws?code=ABCDEF`, JSON): phones send `join` {name, team | player}, `start`, `kids` {on},
-  `done`, `skip`, `resume`; the server sends `welcome`, `forget`, `error` and `state` (phase: lobby, drawing,
-  showing, guessing, result, over or paused; language, kids, you, teams {key, name, squares, players}, goal,
-  round, rounds, turn, drawer {name, team}, drawing (this phone draws), category, word (the drawer's phone while
-  drawing, everyone's once revealed), guesses [{text, hit}], deadline (epoch ms), can, message).
+  `done`, `skip`, `sabotage` {card, target}, `resume`; the server sends `welcome`, `forget`, `error` and `state`
+  (phase: lobby, cards, drawing, showing, guessing, result, over or paused; language, kids, you, teams {key, name,
+  squares, players}, goal, round, rounds, turn, drawer {name, team}, drawing (this phone draws), category, word
+  (the drawer's phone while drawing, everyone's once revealed), guesses [{text, hit}], seconds (this turn's
+  drawing time), cards (this team's cards left), thrown [{card, target}] (this team's throws still waiting),
+  curses [{card, by}] (the turn being played), deadline (epoch ms), can (`sabotage` while the team holds a card),
+  message). A `sabotage` with a card the team doesn't hold (or spent), its own team, a team not playing or no
+  team, or after the game, is ignored (logged).
 - Settings: `SCRIBBLE_VISION_MODEL` (default `gemini-3.8-flash`), `GEMINI_API_KEY`, and Big Brain's
   `BIG_BRAIN_PORT` and `BIG_BRAIN_PUBLIC_URL` for the phones.
 
@@ -91,8 +117,10 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 
 - More words: add entries to `scribble_words.py`; the tests check both languages, unique words and that no form
   belongs to two words of the same list.
-- Scoring or length: the constants above. The plan's square types (eyes closed, wrong hand, one line, everyone
-  draws, Richie draws, telephone), the no-phone fallback (the word on the TRMNL while Richie turns away) and saving
+- Scoring or length: the constants above.
+- A new sabotage card: add its key to `CARDS`, a `sabotage_<key>` moment, its `_CARD_NAMES` and `_CURSED` (the
+  vision hint) entries, and its name, hint and icon on the phone page (`T.*.cards`, `T.*.how`, `ICONS`).
+- The plan's other square types (everyone draws, Richie draws, telephone), the no-phone fallback (the word on the TRMNL while Richie turns away) and saving
   the best drawings are not built.
 
 ## Constraints, privacy, and failure modes
@@ -109,10 +137,14 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
 - The guesser is told the category, which is a hint everyone sees too; a 4-year-old's scribble will often be
   missed, hence the square for trying in kids mode.
 - The drawer's phone is the only one with the word; a phone that never joined sees no word.
+- Sabotage throws are kept only in memory and shown only to the thrower's phones until the turn; the curses
+  themselves are honour-system (nobody checks the drawer's eyes are closed). With one team there are no cards.
+  The drawer sees the word while Richie announces the curses (as before, during the call), and the clock starts
+  after the call.
 
 ## Testing
 
-- `uv run pytest tests/games/test_scribble_rush.py` (19, all passing on 2026-11-02): the category label on the
+- `uv run pytest tests/games/test_scribble_rush.py` (21, all passing on 2026-11-08): the category label on the
   track; word lists (sizes, both
   languages, no shared forms, no adult categories for kids); code judging in both languages with articles,
   plurals and extra words, and a lion not counting for "El Rey León"; one Jev call for unmatched guesses and a
@@ -120,15 +152,33 @@ token, a checkered finish, the lane on turn outlined); the drawing is shown with
   Gemini call with a fake client (category but not the word in the prompt, the usage recorded); the phone server
   serving this page and the start phrases; a whole two-team game on a pretend Reachy with a fake camera and a
   fake vision call (a first-guess hit, a miss, a vision error, a second-guess hit; only the drawer's phone sees the
-  word; the winner announced); kids mode (kids' words, a square for a miss, no camera frame means no squares).
+  word; the winner announced; blue throws a card at red, which red's phones never see before its turn, is
+  announced right before red's call, reaches the guesser and adds a square on a hit); kids mode (kids' words, a
+  square for a miss, no camera frame means no squares); the deal (one or two distinct cards, both counts seen);
+  sabotage plays (refused at the own team, an unknown or missing team, a card not held or already spent; secret
+  until the turn, then on every phone; four stacked curses announced before the call and told to the guesser;
+  two Half times halve the time once, floored at `MIN_DRAW_S`; +1 square per curse on a hit; a throw during the
+  target's turn waits for its next one); the vision prompt naming each curse once and never the word.
 - `tests/tools/test_play_game.py` lists the `scribble` key.
 - Full gate on 2026-11-01: `uv run ruff check . --fix && uv run ruff format . && uv run mypy --pretty
   --show-error-codes && uv run pytest tests/ -q` → 2,973 passed, 4 skipped (after checking out the LFS images
   in the worktree; as bare pointers they fail the display tests).
-- Not yet done: the phone page in a real browser or on a phone, the real Gemini model on real drawings (hit
+- 2026-11-08: `uv run pytest -q tests/games tests/tools/test_play_game.py` → 339 passed; `uv run ruff check` and
+  `uv run ruff format` on the touched files clean; `uv run mypy --pretty --show-error-codes` → no issues in 181
+  source files. The phone page's `?demo=cards|pick|cursed|cursedwatch` (and `&lang=en`) were looked at in a
+  desktop browser at phone width.
+- Not yet done: the phone page on a real phone or in a real game, the real Gemini model on real drawings (hit
   rate and latency), the tick-tock and timings in a real room, and the TRMNL screens on the device.
 
 ## Changelog
+
+- 2026-11-08: The adult list grew from 238 to 512 words with six new categories (absurd scenes, everyday
+  disasters, mythical creatures, wacky inventions, internet and pop culture, Venezuelan life); the kids' list is
+  unchanged.
+
+- 2026-11-08: Sabotage cards: each team is dealt one or two (other hand, eyes closed, one line, half time) and
+  throws them secretly at rivals' next turns; Richie reveals them, the guesser is told, and a hit while cursed
+  pays a square more per card.
 
 - 2026-11-02: The category is a big black label on the TRMNL and both phone views (players didn't notice it as a
   word in the caption and a small tag; only Richie seemed to know it).

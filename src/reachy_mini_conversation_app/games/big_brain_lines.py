@@ -515,6 +515,162 @@ _MOMENTS: Final[dict[str, _Lines]] = {
             "[warmly] Esta vez no hay pulsador. [playful] Cada cerebro responde en su teléfono.",
         ),
     },
+    "bomb": {
+        "en": (
+            "[gasps] [dramatic] It's a BOMB! [pause] Only your team can answer. Get it right, and it's double "
+            "points... [whispers] get it wrong, or say nothing... [shouts] BOOM! You lose the points.",
+            "[hushed] Nobody move... [dramatic] there's a bomb on this square! [playful] Only you can answer: right "
+            "is double, wrong goes boom.",
+            "[gasps] Uh-oh. [booming] BOMB SQUARE! [pause] It's all yours: defuse it for double points, or lose them "
+            "in the blast.",
+            "[dramatic] Tick, tock, tick, tock... [booming] a BOMB! [playful] Only your team answers. Right doubles "
+            "the points. Wrong, or silence... [whispers] kaboom.",
+            "[whispers] Careful, careful... [dramatic] you found the bomb. [pause] Only you may answer. Double if "
+            "you're right... [chuckles] and a little explosion if you're not.",
+        ),
+        "es": (
+            "[gasps] [dramatic] ¡Es una BOMBA! [pause] Solo su equipo puede responder. Si aciertan, puntos "
+            "dobles... [whispers] si fallan, o se quedan callados... [shouts] ¡BUM! Pierden los puntos.",
+            "[hushed] Que nadie se mueva... [dramatic] ¡aquí hay una bomba! [playful] Solo ustedes responden: si "
+            "aciertan, doble; si fallan, explota.",
+            "[gasps] Ay, ay, ay. [booming] ¡CASILLA BOMBA! [pause] Es toda suya: desactívenla y ganan el doble, o "
+            "pierden los puntos en la explosión.",
+            "[dramatic] Tic, tac, tic, tac... [booming] ¡una BOMBA! [playful] Solo responde su equipo. Si aciertan, "
+            "doble. Si fallan o se quedan callados... [whispers] cabum.",
+            "[whispers] Cuidadito, cuidadito... [dramatic] encontraron la bomba. [pause] Solo ustedes pueden "
+            "responder. Doble si aciertan... [chuckles] y una explosioncita si no.",
+        ),
+    },
+    "bomb_kids": {
+        "en": (
+            "[gasps] [dramatic] It's a BOMB! [playful] Only your team can answer. Get it right to defuse it, and "
+            "the points count double!",
+            "[hushed] Shh... [dramatic] a bomb is ticking on this square! [playful] Only you can answer. Defuse it "
+            "for double points!",
+            "[dramatic] Tick, tock... [booming] a BOMB! [warmly] It's just for your team. Get it right, and you win "
+            "double!",
+        ),
+        "es": (
+            "[gasps] [dramatic] ¡Es una BOMBA! [playful] Solo su equipo puede responder. ¡Si aciertan, la "
+            "desactivan y los puntos valen el doble!",
+            "[hushed] Shh... [dramatic] ¡en esta casilla hay una bomba haciendo tic tac! [playful] Solo ustedes "
+            "responden. ¡Desactívenla y ganan el doble!",
+            "[dramatic] Tic, tac... [booming] ¡una BOMBA! [warmly] Es solo para su equipo. ¡Si aciertan, ganan el "
+            "doble!",
+        ),
+    },
+    "bomb_defused": {
+        "en": (
+            "[excited] Bomb defused! [booming] Double points!",
+            "[sighs] Phew! [excited] You cut the right wire! Double points!",
+            "[booming] BOMB DEFUSED! [playful] Nerves of steel, folks.",
+            "[amazed] They did it! [excited] The bomb is defused, and the points are doubled!",
+            "[laughs] Not today, bomb! [booming] Double points!",
+        ),
+        "es": (
+            "[excited] ¡Bomba desactivada! [booming] ¡Puntos dobles!",
+            "[sighs] ¡Uf! [excited] ¡Cortaron el cable correcto! ¡Puntos dobles!",
+            "[booming] ¡BOMBA DESACTIVADA! [playful] Nervios de acero, señores.",
+            "[amazed] ¡Lo lograron! [excited] ¡La bomba está desactivada y los puntos se duplican!",
+            "[laughs] ¡Hoy no, bomba! [booming] ¡Puntos dobles!",
+        ),
+    },
+    "bomb_boom": {
+        "en": (
+            "[shouts] BOOM! [laughs] That one blew up in your hands!",
+            "[dramatic] Three, two, one... [shouts] BOOM!",
+            "[shouts] KABOOM! [mock disappointment] Wrong wire, my friends.",
+            "[gasps] Oh no... [shouts] BOOM! [chuckles] Somebody open a window.",
+            "[shouts] BOOM! [playful] I'm going to need new antennas after that one.",
+        ),
+        "es": (
+            "[shouts] ¡BUM! [laughs] ¡Esa les explotó en las manos!",
+            "[dramatic] Tres, dos, uno... [shouts] ¡BUM!",
+            "[shouts] ¡CABUM! [mock disappointment] Cable equivocado, mis amigos.",
+            "[gasps] Ay, no... [shouts] ¡BUM! [chuckles] Que alguien abra una ventana.",
+            "[shouts] ¡BUM! [playful] Después de esa voy a necesitar antenas nuevas.",
+        ),
+    },
+    "cards_rules": {
+        "en": (
+            "[playful] And every team gets two secret cards, to play once each on the phone. [pause] Freeze: "
+            "another team can't buzz on the next clue. Shield: a wrong answer costs you nothing. Hint: a peek at "
+            "the answer's first letter. And Hijack: steal another team's pick! [excited] Use them wisely!",
+            "[curious] One more thing... [playful] look at your phones. Each team has two cards out of four. "
+            "Freeze, Shield, Hint and Hijack. [pause] Freeze stops a team from buzzing, Shield saves your points, "
+            "Hint gives you a first letter, and Hijack steals the pick. [excited] Let the chaos begin!",
+        ),
+        "es": (
+            "[playful] Y cada equipo tiene dos cartas secretas, que se juegan una vez cada una en el teléfono. "
+            "[pause] Congelar: otro equipo no puede pulsar en la próxima pista. Escudo: si fallan, no pierden "
+            "nada. Pista: un vistazo a la primera letra de la respuesta. Y Secuestro: ¡le roban el turno de escoger "
+            "a otro equipo! [excited] ¡Úsenlas bien!",
+            "[curious] Una cosa más... [playful] miren el teléfono. Cada equipo tiene dos cartas de cuatro. "
+            "Congelar, Escudo, Pista y Secuestro. [pause] Congelar deja a un equipo sin pulsar, Escudo salva sus "
+            "puntos, Pista les da la primera letra, y Secuestro les roba el turno. [excited] ¡Que empiece el caos!",
+        ),
+    },
+    "cards_rules_kids": {
+        "en": (
+            "[playful] And every team gets two secret cards, to play once each on the phone. [pause] Freeze: "
+            "another team can't buzz on the next clue. Hint: a peek at the answer's first letter. And Hijack: "
+            "steal another team's pick! [excited] Use them wisely!",
+            "[curious] One more thing... [playful] look at your phones. Each team has two magic cards. [pause] "
+            "Freeze stops a team from buzzing, Hint gives you a first letter, and Hijack steals the pick. "
+            "[excited] Have fun!",
+        ),
+        "es": (
+            "[playful] Y cada equipo tiene dos cartas secretas, que se juegan una vez cada una en el teléfono. "
+            "[pause] Congelar: otro equipo no puede pulsar en la próxima pista. Pista: un vistazo a la primera "
+            "letra de la respuesta. Y Secuestro: ¡le roban el turno de escoger a otro equipo! [excited] ¡Úsenlas "
+            "bien!",
+            "[curious] Una cosa más... [playful] miren el teléfono. Cada equipo tiene dos cartas mágicas. [pause] "
+            "Congelar deja a un equipo sin pulsar, Pista les da la primera letra, y Secuestro les roba el turno. "
+            "[excited] ¡A divertirse!",
+        ),
+    },
+    "shield": {
+        "en": (
+            "[booming] Shields up! [playful] If they miss this one, it costs them nothing.",
+            "[dramatic] They raise the shield! [pause] A wrong answer won't hurt them.",
+            "[playful] Playing it safe, I see. [booming] Shield activated!",
+            "[excited] Shield! [chuckles] No risk, all reward.",
+        ),
+        "es": (
+            "[booming] ¡Escudo arriba! [playful] Si fallan esta, no les cuesta nada.",
+            "[dramatic] ¡Levantan el escudo! [pause] Una respuesta mala no les hace daño.",
+            "[playful] Jugando a lo seguro, ya veo. [booming] ¡Escudo activado!",
+            "[excited] ¡Escudo! [chuckles] Cero riesgo, puro premio.",
+        ),
+    },
+    "shield_saved": {
+        "en": (
+            "[playful] But the shield held! [pause] Not a single point lost.",
+            "[sighs] Lucky for them... [booming] the shield saved the day!",
+            "[chuckles] Good thing they brought a shield. [warmly] No points lost.",
+            "[excited] The shield blocks it! [playful] Their score doesn't move.",
+        ),
+        "es": (
+            "[playful] ¡Pero el escudo aguantó! [pause] No pierden ni un punto.",
+            "[sighs] Menos mal... [booming] ¡el escudo los salvó!",
+            "[chuckles] Qué bueno que trajeron escudo. [warmly] No pierden puntos.",
+            "[excited] ¡El escudo lo para! [playful] Su marcador ni se mueve.",
+        ),
+    },
+    "hint": {
+        "en": (
+            "[whispers] They asked for a hint... [playful] and no, I'm not telling.",
+            "[curious] Ooh, somebody needed a little help. [whispers] It's on their phones.",
+            "[playful] A hint! [chuckles] Their secret is safe with me.",
+            "[hushed] A little birdie just whispered something to their phones...",
+        ),
+        "es": (
+            "[whispers] Pidieron una pista... [playful] y no, no les voy a decir cuál.",
+            "[curious] Uy, alguien necesitaba una ayudita. [whispers] Está en su teléfono.",
+            "[playful] ¡Una pista! [chuckles] Su secreto está a salvo conmigo.",
+            "[hushed] Un pajarito les acaba de soplar algo al teléfono...",
+        ),
+    },
     "lead_change": {
         "en": (
             "[gasps] We have a new leader!",
@@ -913,7 +1069,10 @@ _MOMENTS: Final[dict[str, _Lines]] = {
 
 
 def _team_lines() -> dict[str, _Lines]:
-    """Return the lines that name a team: a buzz calls it out, its pick is announced, a win crowns it."""
+    """Return the lines that name a team: a buzz calls it out, its pick is announced, a win crowns it.
+
+    A card played on a team names it (``freeze_<team>``, ``hijack_<team>``), after the player's ``buzz_<team>``.
+    """
     lines: dict[str, _Lines] = {}
     for key, (en, es) in TEAMS.items():
         lines[f"buzz_{key}"] = {
@@ -935,6 +1094,30 @@ def _team_lines() -> dict[str, _Lines]:
         lines[f"winner_{key}"] = {
             "en": (f"[booming] The {en.upper()} TEAM!", f"[excited] Team {en}! [booming] Champions!"),
             "es": (f"[booming] ¡El EQUIPO {es.upper()}!", f"[excited] ¡Equipo {es}! [booming] ¡Campeones!"),
+        }
+        lines[f"freeze_{key}"] = {
+            "en": (
+                f"[dramatic] Freezes the {en} team! [playful] No buzzing for you on this one.",
+                f"[gasps] The {en} team is frozen solid! [chuckles] Somebody get them a blanket.",
+                f"[booming] FREEZE! [playful] {en.capitalize()} team, hands off the buzzer for this clue.",
+            ),
+            "es": (
+                f"[dramatic] ¡Congela al equipo {es}! [playful] En esta no pulsan.",
+                f"[gasps] ¡El equipo {es} quedó congelado! [chuckles] Que alguien les traiga una cobija.",
+                f"[booming] ¡CONGELADOS! [playful] Equipo {es}, las manos lejos del pulsador en esta pista.",
+            ),
+        }
+        lines[f"hijack_{key}"] = {
+            "en": (
+                f"[dramatic] Hijacks the {en} team's pick! [playful] The board changes hands.",
+                f"[gasps] A hijack! [booming] Sorry, {en} team, the pick is theirs now.",
+                f"[playful] Excuse me, {en} team... [snappy] this pick has been hijacked!",
+            ),
+            "es": (
+                f"[dramatic] ¡Le secuestra el turno al equipo {es}! [playful] El tablero cambia de manos.",
+                f"[gasps] ¡Un secuestro! [booming] Lo siento, equipo {es}, ahora escogen ellos.",
+                f"[playful] Permiso, equipo {es}... [snappy] ¡este turno fue secuestrado!",
+            ),
         }
     return lines
 

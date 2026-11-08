@@ -4,9 +4,11 @@ Players join by scanning the QR code on the TRMNL; their phones are buzzers and 
 the shared board. Twenty squares (200 to 800 points) in five themed columns: the team in control picks one on a
 phone, Richie reads the clue in his host voice, the first buzz wins the right to answer aloud, and only that
 player is listened to. Right wins the points and the next pick; wrong loses them (not in kids mode) and the
-others may buzz. Three hidden squares: double or nothing, a steal, and one everybody answers on the phone. A
-final round with secret bets and typed answers ends it. The game runs on the shared game host, so pause, quit
-and "¿lo terminamos?" work as in every game.
+others may buzz. Four hidden squares: double or nothing, a steal, one everybody answers on the phone, and a bomb
+only the picking team may answer (right doubles the points, a miss or silence costs them). Each team holds two
+of four once-a-game cards on its phones: Freeze, Shield, Hint and Hijack. A final round with secret bets and
+typed answers ends it. The game runs on the shared game host, so pause, quit and "¿lo terminamos?" work as in
+every game.
 """
 
 import time
@@ -49,7 +51,7 @@ from reachy_mini_conversation_app.games.big_brain_board import (
     read_history,
 )
 from reachy_mini_conversation_app.games.big_brain_judge import Judge, Ruling
-from reachy_mini_conversation_app.games.big_brain_lines import TEAMS
+from reachy_mini_conversation_app.games.big_brain_lines import LINES, TEAMS, shown
 from reachy_mini_conversation_app.games.big_brain_phones import Phones, Player
 from reachy_mini_conversation_app.games.big_brain_screens import (
     render_clue,
@@ -83,6 +85,10 @@ STREAK: Final[int] = 3
 MISS_STREAK: Final[int] = 3
 COMEBACK_POINTS: Final[int] = 1500
 RUNAWAY_POINTS: Final[int] = 3000
+# Each team is dealt HAND of these at the start, each played once from any of its phones (2026-11-08).
+CARDS: Final[tuple[str, ...]] = ("freeze", "shield", "hint", "hijack")
+HAND: Final[int] = 2
+CARD_SOUNDS: Final[dict[str, str]] = {"freeze": "steal", "shield": "hidden", "hint": "pick", "hijack": "steal"}
 START_WORDS: Final[frozenset[str]] = frozenset(
     {"empezamos", "empecemos", "empieza", "arranca", "arrancamos", "listo", "listos", "ya estamos", "a jugar",
      "start", "lets start", "start the game", "were ready", "ready", "go"}
@@ -127,6 +133,21 @@ class BigBrainSetup:
         """Return the clue bank this show plays from."""
         folder = self.data_dir / "trivia-bank"
         return folder / "editions" / self.edition.folder / "bank.jsonl" if self.edition else folder / "bank.jsonl"
+
+
+def answer_hint(answer: str) -> dict[str, str | int]:
+    """Return what a Hint card shows of ``answer``: its first letter, how many letters and words, and "P_____ ____"."""
+    text = " ".join(answer.split())
+    first = next((char.upper() for char in text if char.isalnum()), "")
+    blanks = "".join("_" if char.isalnum() else char for char in text)
+    at = next((index for index, char in enumerate(text) if char.isalnum()), 0)
+    pattern = blanks[:at] + first + blanks[at + 1 :] if first else blanks
+    return {
+        "first": first,
+        "letters": sum(char.isalnum() for char in text),
+        "words": len(text.split()),
+        "pattern": pattern,
+    }
 
 
 def team_name(team: str, language: str) -> str:
@@ -186,6 +207,12 @@ class BigBrain(Game):
         self._vote: _Vote | None = None
         self._overruled = False
         self._counted: Clue | None = None  # the square the room just counted, while it is still being played
+        self._cards: dict[str, list[str]] = {}  # team -> the cards still in its hand
+        self._frozen: dict[str, Clue | None] = {}  # team -> the clue it cannot buzz on (None: the next one)
+        self._shields: dict[str, Clue | None] = {}  # team -> the clue a miss costs it nothing (None: the next)
+        self._hinted: set[str] = set()  # teams whose phones show the current clue's hint
+        self._calls: list[tuple[str, str, str | None]] = []  # cards played for Richie to announce: card, team, target
+        self._opened = False  # the buzzers unlocked on this clue, so a Freeze now waits for the next one
         self._message: str | None = None
         self._deadline: float | None = None  # in playing seconds
         self._event = asyncio.Event()
@@ -299,6 +326,11 @@ class BigBrain(Game):
             "vote": vote,
             "message": self._message,
             "final": final,
+            "cards": self._cards.get(player.team, []) if player else [],
+            "playable": self._playable(player.team) if player and not paused else [],
+            "frozen": [team for team in TEAMS if team in self._frozen],
+            "shielded": [team for team in TEAMS if team in self._shields],
+            "hint": answer_hint(self._clue.answer) if player and player.team in self._hinted and self._clue else None,
         }
 
     def _changed(self) -> None:
@@ -341,11 +373,59 @@ class BigBrain(Game):
         elif kind == "bet" and self._phase == "final_bet":
             limit = max(self._scores.get(player.team, 0), POINTS[-1])
             self._bets[player.team] = max(0, min(int(message.get("points") or 0), limit))
+        elif kind == "card":
+            target = message.get("team")
+            self._play_card(player, str(message.get("card") or ""), target if isinstance(target, str) else None)
         elif kind == "vote" and self._vote is not None and player.id != self._vote.player.id:
             self._vote.voters.add(player.id)
             if len(self._vote.voters) >= self._votes_needed():
                 self._overrule()
         self._changed()
+
+    def _costly(self, clue: Clue) -> bool:
+        """Whether a miss on ``clue`` costs points (never in kids mode, on a double or when everyone answers)."""
+        return not self._kids and clue.hidden not in ("double", "everyone")
+
+    def _playable(self, team: str) -> list[str]:
+        """Return the cards ``team`` may play right now."""
+        phase, clue, board = self._phase, self._clue, self._board
+        others = [other for other in self._teams_playing() if other != team]
+        picking = phase == "board" and board is not None and board.left > 0 and self._pick is None
+        live = clue is not None and phase in ("reading", "buzzing", "everyone") and not self._answer_shown
+        buzzable = live and clue is not None and clue.hidden != "everyone"
+        allowed = {
+            # Before the buzzers unlock; it then holds for that clue.
+            "freeze": (picking or (buzzable and phase == "reading" and not self._opened))
+            and any(other not in self._frozen for other in others),
+            "shield": team not in self._shields and (picking or (buzzable and team not in self._locked)),
+            "hint": live and self._clue_shown and team not in self._hinted,
+            "hijack": picking and self._control in others,
+        }
+        return [card for card in self._cards.get(team, []) if allowed[card]]
+
+    def _play_card(self, player: Player, card: str, target: str | None) -> None:
+        """Play one of ``player``'s team's cards, when it may be played now; otherwise nothing happens."""
+        team = player.team
+        if card not in self._playable(team):
+            logger.info("Big Brain: %s cannot play %s now", team, card or "a card")
+            return
+        clue = self._clue if self._phase != "board" else None
+        if card == "freeze":
+            if target is None or target == team or target in self._frozen or target not in self._teams_playing():
+                logger.info("Big Brain: %s cannot freeze %s", team, target)
+                return
+            self._frozen[target] = clue
+        elif card == "shield":
+            self._shields[team] = clue if clue is not None and self._costly(clue) else None
+        elif card == "hint":
+            self._hinted.add(team)
+        else:
+            target, self._control = self._control, team
+        self._cards[team].remove(card)
+        self._calls.append((card, team, target if card in ("freeze", "hijack") else None))
+        logger.info("Big Brain: %s played %s", team, card)
+        if self._phase == "board":
+            self._event.set()  # Richie announces it, and a hijack hands the pick over
 
     def _votes_needed(self) -> int:
         others = len(self._phones.players) - 1 if self._phones is not None else 0
@@ -433,13 +513,13 @@ class BigBrain(Game):
 
     async def _say(self, *moments: str, sounds: tuple[str, ...] = (), after: Audio | None = None) -> None:
         """Play ``sounds`` then a take of each moment (and ``after``) as one piece."""
-        pieces, texts = self._pieces(sounds, moments)
+        pieces, texts = await self._pieces(sounds, moments)
         if after is not None:
             pieces.append(after)
         if pieces:
             await self._play(join(*pieces), " ".join(texts))
 
-    def _pieces(self, sounds: tuple[str, ...], moments: tuple[str, ...]) -> tuple[list[Audio], list[str]]:
+    async def _pieces(self, sounds: tuple[str, ...], moments: tuple[str, ...]) -> tuple[list[Audio], list[str]]:
         pieces: list[Audio] = []
         texts: list[str] = []
         for name in sounds:
@@ -448,6 +528,12 @@ class BigBrain(Game):
                 pieces.append(sound)
         for moment in moments:
             line = self._line(moment)
+            takes = LINES.get(moment, {}).get(self._language, ())
+            if line is None and takes and self._setup.elevenlabs_key:
+                # Not recorded yet: a take is said live in the host voice.
+                take = self._rng.choice(takes)
+                samples = await self._speech.say(take, self._language)
+                line = (shown(take), samples) if samples is not None else None
             if line is not None:
                 texts.append(line[0])
                 pieces.append(line[1])
@@ -619,10 +705,13 @@ class BigBrain(Game):
             if not came and not self._started:
                 await self._say("waiting")
         self._control = self._rng.choice(self._teams_playing())
+        # Kids mode costs no points, so it has no use for a Shield.
+        deck = [card for card in CARDS if not (self._kids and card == "shield")]
         for team in self._teams_playing():
             self._scores.setdefault(team, 0)
+            self._cards[team] = sorted(self._rng.sample(deck, HAND), key=CARDS.index)
         logger.info("Big Brain started: %d players, %d teams", len(self._phones.players), len(self._teams_playing()))
-        await self._say("begin")
+        await self._say("begin", "cards_rules_kids" if self._kids else "cards_rules")
         return True
 
     def _show_board(self) -> None:
@@ -651,10 +740,8 @@ class BigBrain(Game):
                 await self._say("overruled", sounds=("correct",))
                 self._message = None
                 self._changed()
-            # The team is named, so the room knows whose phone the board is on.
-            team_pick = f"pick_{self._control}"
-            await self._say(team_pick if self._clips.has(team_pick, self._language) else "pick")
-            if not await self._wait(PICK_S) or self._pick is None:
+            await self._picking()
+            if self._pick is None:
                 free = [
                     (c, r) for c, column in enumerate(board.clues) for r, clue in enumerate(column) if not clue.used
                 ]
@@ -663,6 +750,12 @@ class BigBrain(Game):
             column, row = self._pick
             clue = board.clues[column][row]
             await self._square(clue)
+            # Cards held for this clue end with it; a hint not yet teased stays secret.
+            self._frozen = {team: on for team, on in self._frozen.items() if on is not clue}
+            self._shields = {team: on for team, on in self._shields.items() if on is not clue}
+            self._hinted = set()
+            self._calls = [call for call in self._calls if call[0] != "hint"]
+            await self._call_cards()
             new_leader = self._leader()
             if board.left:
                 await self._standings(leader, new_leader)
@@ -671,6 +764,31 @@ class BigBrain(Game):
         self._show_board()
         self._changed()
         await self._say("board_done")
+
+    async def _picking(self) -> None:
+        """Ask the team in control to pick, until it does or PICK_S passes; a hijack asks the new team afresh."""
+        context = self._context
+        assert context is not None
+        asked: str | None = None
+        end = 0.0
+        # Cards played or a pick made while Richie talks are seen on the next turn of the loop.
+        while self._pick is None:
+            if self._calls:
+                await self._call_cards()
+            elif self._control != asked:
+                asked = self._control
+                # The team is named, so the room knows whose phone the board is on.
+                team_pick = f"pick_{asked}"
+                await self._say(team_pick if self._clips.has(team_pick, self._language) else "pick")
+                end = context.played_s + PICK_S
+            elif not await self._wait(end - context.played_s):
+                return
+
+    async def _call_cards(self) -> None:
+        """Announce the cards played since the last call: the team, then the card (never a Hint's content)."""
+        while self._calls:
+            card, team, target = self._calls.pop(0)
+            await self._say(f"buzz_{team}", f"{card}_{target}" if target else card, sounds=(CARD_SOUNDS[card],))
 
     def _either(self, moment: str, fallback: str) -> str:
         """Return ``moment`` when it was recorded, else ``fallback`` (new moments play once their clips are made)."""
@@ -705,9 +823,16 @@ class BigBrain(Game):
         """Play one square: the clue, the buzzes, the answers, and what Richie says about them."""
         language = self._language
         clue.used = True
+        picker = self._control
         self._clue, self._phase, self._message, self._answer_shown = clue, "reading", None, False
+        self._opened = False
+        # Cards played for "the next clue" hold for this one (a Shield waits for a clue that can cost points).
+        self._frozen = {team: clue if on is None and clue.hidden != "everyone" else on for team, on in self._frozen.items()}  # fmt: skip
+        self._shields = {team: clue if on is None and self._costly(clue) else on for team, on in self._shields.items()}  # fmt: skip
         self._changed()
-        if clue.hidden:
+        if clue.hidden == "bomb":
+            await self._say("bomb_kids" if self._kids else "bomb", sounds=("pick", "drumroll"))
+        elif clue.hidden:
             await self._say(clue.hidden, sounds=("pick", "steal" if clue.hidden == "steal" else "hidden"))
         else:
             sound = self._sounds.get("pick")
@@ -725,12 +850,19 @@ class BigBrain(Game):
         if clue.hidden == "everyone":
             await self._everyone(clue)
             return
-        asked_specific = False
+        await self._call_cards()
+        self._opened = True
+        self._locked |= {team for team, on in self._frozen.items() if on is clue}
+        if clue.hidden == "bomb":  # only the team that picked it may answer
+            self._locked |= {team for team in self._teams_playing() if team != picker}
+        asked_specific = missed = False
         seconds = BUZZ_S
         while True:
             if self._counted is clue:  # counted while Richie was still talking
                 await self._counted_now(clue)
                 return
+            if all(team in self._locked for team in self._teams_playing()):
+                break  # everyone is frozen or locked out
             self._phase, self._buzz = "buzzing", None
             came = await self._wait(seconds)
             if self._counted is clue:
@@ -741,7 +873,7 @@ class BigBrain(Game):
             player = self._buzz
             self._phase = "answering"
             self._changed()
-            pieces, texts = self._pieces((f"buzz_{player.team}",), (f"buzz_{player.team}", "answer"))
+            pieces, texts = await self._pieces((f"buzz_{player.team}",), (f"buzz_{player.team}", "answer"))
             # With no clip made, a moment of silence still opens the listening.
             spoken = join(*pieces) if pieces else silence(0.1)
             said = await self._play(spoken, " ".join(texts), listen=True) or ""
@@ -763,13 +895,21 @@ class BigBrain(Game):
                 await self._right(player, clue)
                 return
             await self._wrong(player, clue, said)
+            missed = True
             if self._counted is clue:
                 await self._counted_now(clue)
                 return
             seconds = REBUZZ_S
             if all(team in self._locked for team in self._teams_playing()):
                 break
+            await self._call_cards()
             await self._say("anyone_else")
+        if clue.hidden == "bomb" and not missed and picker is not None:
+            # Silence on a bomb blows it up too.
+            _, saved = self._lose(picker, clue)
+            self._phase = "reading"
+            self._changed()
+            await self._say("bomb_boom", *(("shield_saved",) if saved else ()), sounds=("wrong",))
         self._phase = "reading"
         self._buzz = None
         self._answer_shown = True
@@ -788,7 +928,17 @@ class BigBrain(Game):
         await self._say("overruled", sounds=("correct",))
 
     def _points(self, clue: Clue) -> int:
-        return clue.points * (2 if clue.hidden == "double" else 1)
+        return clue.points * (2 if clue.hidden in ("double", "bomb") else 1)
+
+    def _lose(self, team: str, clue: Clue) -> tuple[int, bool]:
+        """Take a miss's points from ``team``; return them, and whether its Shield saved them (and is spent)."""
+        if not self._costly(clue):
+            return 0, False
+        if team in self._shields and self._shields[team] is clue:
+            del self._shields[team]
+            return 0, True
+        self._scores[team] = self._scores.get(team, 0) - clue.points
+        return clue.points, False
 
     async def _right(self, player: Player, clue: Clue) -> None:
         team, language = player.team, self._language
@@ -809,14 +959,13 @@ class BigBrain(Game):
         self._changed()
         if self._context is not None:
             self._context.services.emotion("happy")
-        moment = "correct_hard" if clue.points == POINTS[-1] else "correct_streak" if self._streak[team] >= STREAK else "correct"  # fmt: skip
+        moment = "bomb_defused" if clue.hidden == "bomb" else "correct_hard" if clue.points == POINTS[-1] else "correct_streak" if self._streak[team] >= STREAK else "correct"  # fmt: skip
         await self._say(moment, sounds=("correct",))
 
     async def _wrong(self, player: Player, clue: Clue, said: str) -> None:
         team, language = player.team, self._language
-        lost = 0 if self._kids or clue.hidden == "double" else clue.points
         before = self._scores.get(team, 0)
-        self._scores[team] = before - lost
+        lost, saved = self._lose(team, clue)
         self._streak[team] = 0
         self._wrong_row[team] = self._wrong_row.get(team, 0) + 1
         self._locked.add(team)
@@ -826,13 +975,16 @@ class BigBrain(Game):
         self._message = (f"{player.name}: «{said}» — no" if language == "es" else f"{player.name}: “{said}” — no") if said else None  # fmt: skip
         self._phase = "reading"
         self._changed()
-        if self._wrong_row[team] >= MISS_STREAK:
+        shield = ("shield_saved",) if saved else ()
+        if clue.hidden == "bomb":
+            await self._say("bomb_boom", *shield, sounds=("wrong",))
+        elif self._wrong_row[team] >= MISS_STREAK:
             self._wrong_row[team] = 0
-            await self._say(self._either("wrong_streak", "wrong"), sounds=("wrong",))
+            await self._say(self._either("wrong_streak", "wrong"), *shield, sounds=("wrong",))
         elif before >= 0 > self._scores[team]:
             await self._say("wrong", "below_zero", sounds=("wrong",))
         else:
-            await self._say("wrong", sounds=("wrong",))
+            await self._say("wrong", *shield, sounds=("wrong",))
 
     async def _everyone(self, clue: Clue) -> None:
         """Everybody types an answer; every right one scores for its team."""
