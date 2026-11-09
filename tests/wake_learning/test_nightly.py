@@ -12,6 +12,7 @@ from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
 from reachy_mini_conversation_app.wake_learning import nightly
 from reachy_mini_conversation_app.wake_learning.store import HeadRecord, WakeLearningStore
 from reachy_mini_conversation_app.wake_learning.nightly import (
+    QUEUE_SIZE,
     DayScores,
     DayMoments,
     NightSettings,
@@ -112,9 +113,9 @@ def test_fires_count_once_per_cooldown_and_never_around_a_call() -> None:
     assert caught(ends, scores, 0.5, [50.2, 30.0, 500.0]) == (1, 2)
 
 
-def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_ten() -> None:
+def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_thirty() -> None:
     """Missed calls lead, then antenna touches, then rejected fires with a name; answered clips never return."""
-    events = [_event("wake", DAY + n, heard=False, outcome="rejected") for n in range(20)]
+    events = [_event("wake", DAY + n, heard=False, outcome="rejected") for n in range(40)]
     events.append(_event("missed", DAY + 100, event_at=60.0))
     events.append(_event("antenna", DAY + 200, event_at=15.0))
     names = {event["id"]: [8.0] for event in events}
@@ -122,27 +123,27 @@ def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_ten() -
 
     items = review_items(events, names, answers, random.Random(1))
 
-    assert len(items) == 10
+    assert len(items) == QUEUE_SIZE == 30
     assert items[0].question == "Is this the call he missed?" and items[1].question == "Did someone say his name here?"
     assert not items[0].follow_up and items[1].follow_up  # only a name question asks "to him or about him?"
     assert all(item.id != f"{events[0]['id']}@8.00" for item in items)
     assert (items[0].start, items[0].end) == (5.0, 9.5)
 
 
-def test_transcript_wakes_the_trial_check_doubted_are_asked_about_four_a_day() -> None:
+def test_transcript_wakes_the_trial_check_doubted_are_asked_about_fifteen_a_day() -> None:
     """Whether they were calls is what switching the check on would cost; the whole sentence is played.
 
     One the trial heard the name in is not asked about; one told "not to you" is asked as before, after them.
     """
     doubted = [_event("name_heard", DAY + n, outcome="woke", transcript_check=False, speech_seconds=3.0)
-               for n in range(6)]  # fmt: skip
+               for n in range(20)]  # fmt: skip
     confirmed = _event("name_heard", DAY + 50, outcome="woke", transcript_check=True, speech_seconds=3.0)
     told_off = _event("name_heard", DAY + 60, outcome="woke", transcript_check=False, said="not_called")
     events = [*doubted, confirmed, told_off]
 
     items = review_items(events, {}, {}, random.Random(1))
 
-    asked, rest = items[:4], items[4:]
+    asked, rest = items[:15], items[15:]
     assert {item.id.split("@")[0] for item in asked} <= {event["id"] for event in doubted}
     assert all((item.start, item.end, item.id.split("@")[1]) == (6.0, 11.5, "10.00") for item in asked)
     assert all(item.question == "Did someone say his name?" and item.follow_up for item in asked)

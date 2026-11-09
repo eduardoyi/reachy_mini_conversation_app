@@ -1004,7 +1004,7 @@ name in the same audio uncut for most of the 318 such wakes, while keeping every
 room-transcript wake now has the accurate model listen (`_start_transcript_check`, in the background) to the last
 moments of the wake-clip buffer: the sentence and a second before it, then the whole clip (the sentence and 3 s
 before) if that missed. The verdict is only recorded (`transcript_check` in the wake record, and
-`Transcript wake check (trial) heard=…` in the log); the wake goes on as before. Up to four a day of the wakes it
+`Transcript wake check (trial) heard=…` in the log); the wake goes on as before. Up to 15 a day of the wakes it
 doubted go into the clip check, so the household's answers show what switching it on would cost. Test:
 `test_a_transcript_wake_has_the_accurate_model_check_its_audio_on_trial`.
 

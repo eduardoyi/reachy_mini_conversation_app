@@ -57,6 +57,12 @@ def _idle(status: dict[str, Any]) -> bool:
     return str(status.get("mode", "")).lower() == "local_ambient" and not status.get("in_call")
 
 
+def check_time(clips: int) -> str:
+    """Return how long checking ``clips`` takes, at about 10 s a clip ("about a minute", "about 5 minutes")."""
+    minutes = max(1, round(clips * 10 / 60))
+    return "about a minute" if minutes == 1 else f"about {minutes} minutes"
+
+
 class WakeWord:
     """What the Wake word card shows and does, over the wake-learning ``store``."""
 
@@ -242,7 +248,7 @@ class WakeReminder:
             actions = [{"action": "switch", "title": "Switch"}, {"action": "later", "title": "Not now"}]
         clips = len(self._store.queue())
         if clips:
-            lines.append(f"{clips} clip{'' if clips == 1 else 's'} to check, about a minute.")
+            lines.append(f"{clips} clip{'' if clips == 1 else 's'} to check, {check_time(clips)}.")
             actions = actions or [{"action": "check", "title": "Check now"}]
         month_ago = now - timedelta(days=REFRESH_DAYS)
         cutoff = month_ago.astimezone(timezone.utc).isoformat(timespec="seconds")

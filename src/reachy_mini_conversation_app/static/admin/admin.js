@@ -755,7 +755,10 @@ function wakeMain(data) {
   if (data.to_check) {
     const go = el("button", { className: "pill sun small", type: "button" }, "Check now");
     go.addEventListener("click", () => startCheck(go));
-    parts.push(todoCard("ear", `${plural(data.to_check, "clip")} to check`, "About a minute: did someone say his name, and to him or about him?", [go]));
+    // About 10 s a clip; they can be checked a few at a time through the day.
+    const minutes = Math.max(1, Math.round((data.to_check * 10) / 60));
+    const time = minutes === 1 ? "About a minute" : `About ${minutes} minutes, a few at a time is fine`;
+    parts.push(todoCard("ear", `${plural(data.to_check, "clip")} to check`, `${time}: did someone say his name, and to him or about him?`, [go]));
   }
   if (data.proposal) {
     const s = data.proposal.summary || {};

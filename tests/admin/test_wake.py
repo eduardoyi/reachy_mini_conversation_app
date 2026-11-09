@@ -735,3 +735,15 @@ async def test_an_undelivered_reminder_leaves_the_proposal_to_tell(tmp_path: Pat
     await reminder.check()
     assert "A better wake model is ready" in notifier.sent[1]["body"]
     assert (store.proposal() or {})["notified"] is True
+
+
+def test_the_check_time_grows_with_the_clips() -> None:
+    """About 10 s a clip: a few clips take about a minute, thirty about five."""
+    from reachy_mini_conversation_app.admin.wake import check_time
+
+    assert [check_time(clips) for clips in (1, 6, 12, 30)] == [
+        "about a minute",
+        "about a minute",
+        "about 2 minutes",
+        "about 5 minutes",
+    ]

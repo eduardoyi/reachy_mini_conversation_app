@@ -72,10 +72,11 @@ SWITCH_MARGIN_CALLS: Final[int] = 2
 SWITCH_FIRES_SHARE: Final[float] = 0.8
 # A challenger becomes the shadow head when it catches more without firing more, or as many with this share.
 SHADOW_FIRES_SHARE: Final[float] = 0.9
-QUEUE_SIZE: Final[int] = 10
+# Clips to check a day; Eduardo offered 30 on 2026-11-09, checked through the day, to settle the trial below sooner.
+QUEUE_SIZE: Final[int] = 30
 # Transcript wakes the accurate check would have dropped (on trial since 2026-11-09) asked about each day: whether
 # they were calls is what switching the check on would cost.
-TRANSCRIPT_CHECK_QUESTIONS: Final[int] = 4
+TRANSCRIPT_CHECK_QUESTIONS: Final[int] = 15
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
 # Room for a week of the house next to a base set (the Richie head's set and 250,000 ACAV100M windows): about
@@ -584,7 +585,7 @@ def _stream_windows(
 # ---- the clips to check tomorrow ------------------------------------------------------------------------------
 def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], answers: dict[str, str],
                  rng: random.Random) -> list[ReviewItem]:  # fmt: skip
-    """Pick at most ten clips for the household to check, where the automatic signals are least sure."""
+    """Pick at most ``QUEUE_SIZE`` clips for the household to check, where the automatic signals are least sure."""
     ranked: list[tuple[int, ReviewItem]] = []
 
     def offer(rank: int, event: dict[str, Any], at: float, question: str = NAME_QUESTION,
