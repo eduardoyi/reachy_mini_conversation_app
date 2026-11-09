@@ -370,7 +370,8 @@ setInterval(() => {
 
 // Games -----------------------------------------------------------------------------------------
 
-// The cards: a name, a shelf and what each game needs. Their art is static/admin/games/<key>.webp.
+// The cards: a name, a shelf and what each game needs. Their art is static/admin/games/<key>.webp, or <art>.webp
+// when the key is too long for the Windows wheel path budget (tests/test_profile_paths.py).
 const GAME_CARDS = {
   bigbrain: { name: "Big Brain", shelf: "party", facts: ["2–4 teams", "Phones"] },
   sheeple: { name: "Sheeple", shelf: "party", facts: ["2–4 teams", "Phones"] },
@@ -391,7 +392,7 @@ const GAME_CARDS = {
   musicos_de_bremen: { name: "The Town Musicians", shelf: "stories", facts: ["About 6 minutes", "Kids bray, bark, meow and crow"] },
   la_gran_carrera: { name: "The Big Race", shelf: "stories", facts: ["About 6 minutes", "Kids rev, honk, steer and cheer"] },
   donde_esta_bigotes: { name: "Where's Bigotes?", shelf: "stories", facts: ["About 7 minutes", "Kids call, meow, guess and count kittens"] },
-  la_monedita_de_plata: { name: "The Little Silver Coin", shelf: "stories", facts: ["About 7 minutes", "Kids clink, caw, knead and say the magic word"] },
+  la_monedita_de_plata: { name: "The Little Silver Coin", shelf: "stories", art: "monedita", facts: ["About 7 minutes", "Kids clink, caw, knead and say the magic word"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
@@ -434,7 +435,7 @@ function gameName(key, titles) {
 }
 
 function gameArt(key, className = "game-art-img") {
-  const image = el("img", { className, src: `/static/admin/games/${key}.webp`, alt: "", loading: "lazy", decoding: "async" });
+  const image = el("img", { className, src: `/static/admin/games/${GAME_CARDS[key]?.art || key}.webp`, alt: "", loading: "lazy", decoding: "async" });
   image.onerror = () => image.remove();
   return image;
 }
