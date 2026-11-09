@@ -1,6 +1,6 @@
 # Plan: La carrera de números (a number race for the kids)
 
-- Status: `in-progress` (designed 2026-11-09 with Eduardo; built and tested on the MacBook; not recorded, deployed or played yet)
+- Status: `in-progress` (designed 2026-11-09 with Eduardo; recorded and deployed to the Mac mini 2026-11-09; not played with the kids yet)
 - Owner: Eduardo
 - Created: 2026-11-09
 - Last updated: 2026-11-09
@@ -118,3 +118,7 @@ and one 10 s jingle of two takes (music credits). The card art was one image cal
   shelf and card, tests. Not yet recorded or deployed.
 - 2026-11-09: The cars on the screen are now Tito and Flecha as drawn in the story (Eduardo asked): their
   character sheets shrunk to the four greys by `scripts/race_cars.py`, in place of the shapes first drawn.
+- 2026-11-09: Recorded and deployed. 98 lines in the kids' voice on the mini (4,112 characters, none failed; the
+  check's 16 race flags are digits for number words and "Flecha" heard as "Fletcher", no tag read aloud);
+  `spin`, `putt`, `zoom` and the `intro_race` jingle made on the laptop (two takes each, take 1 chosen) and
+  copied to the mini; the app restarted with `numbers` among the games.
