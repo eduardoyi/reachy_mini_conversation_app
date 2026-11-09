@@ -30,7 +30,7 @@ SOUND_DB: Final[float] = -24.0
 JINGLE_DB: Final[float] = -22.0
 MUSIC_DB: Final[float] = -33.0
 JINGLES: Final[frozenset[str]] = frozenset(
-    {"intro_colors", "intro_treasure", "intro_simon", "intro_gallina", "celebrate"}
+    {"intro_colors", "intro_treasure", "intro_simon", "intro_gallina", "intro_race", "celebrate"}
 )
 # No sample louder than this (dB below full scale) after levelling.
 PEAK_DB: Final[float] = -1.0
@@ -65,7 +65,7 @@ def loopable(samples: Audio) -> Audio:
 
 
 class KidsAudio:
-    """Recorded lines, sounds and music for the color hunt, the treasure hunt and Simón dice."""
+    """Recorded lines, sounds and music for the kids' games (the color hunt, Simón dice, the number race…)."""
 
     def __init__(
         self, folder: Path, lines: Mapping[str, Mapping[str, Sequence[str]]], rng: random.Random | None = None

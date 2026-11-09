@@ -203,6 +203,50 @@ GALLINA_LOCA: Final[GameInfo] = GameInfo(
     ),
 )
 
+NUMBER_RACE: Final[GameInfo] = GameInfo(
+    key="numbers",
+    names=frozenset(
+        {
+            "la carrera de numeros",
+            "carrera de numeros",
+            "la carrera de los numeros",
+            "carrera de los numeros",
+            "los numeros",
+            "numeros",
+            "el juego de los numeros",
+            "juego de los numeros",
+            "juego de numeros",
+            "a contar",
+            "contar",
+            "los numero",
+            "carrera de numero",
+            "number race",
+            "the number race",
+            "numbers race",
+            "number racing",
+            "numbers",
+            "number game",
+            "the number game",
+            "the numbers game",
+            "counting game",
+            "the counting game",
+        }
+    ),  # fmt: skip
+    title={"es": "a la carrera de números", "en": "number race"},
+    pitch={
+        "es": "Tito y Flecha echan una carrera: tú giras la rueda y cuentas las casillas.",
+        "en": "Tito and Flecha have a race: you spin the wheel and count the squares.",
+    },
+    rules=(
+        "A counting race on a straight track of squares 1 to 10, shown on the e-ink screen, with the cars from the "
+        "story La gran carrera: the children drive Tito, Reachy drives Flecha. On the children's turn a pat on his "
+        "head (or '¡gira!') spins a wheel of 1 or 2 and they count the squares out loud from Tito's square; he "
+        "cheers the number they reach or counts with them. On his turn he counts Flecha's squares. The first car to "
+        "10 wins; nobody is told they lost. No camera. A learning game for children of 2 to 6. 'Pausa' pauses, "
+        "'se acabó el juego' ends it."
+    ),
+)
+
 BIG_BRAIN: Final[GameInfo] = GameInfo(
     key="bigbrain",
     names=frozenset(
@@ -568,6 +612,7 @@ GAMES: Final[dict[str, GameInfo]] = {
         TREASURE_HUNT,
         SIMON_SAYS,
         GALLINA_LOCA,
+        NUMBER_RACE,
         BIG_BRAIN,
         BIG_BRAIN_HP,
         BIG_BRAIN_LOTR,
@@ -669,7 +714,7 @@ def words(text: str) -> str:
 
 
 # The kids' games: "¿Otra vez?" at the end of one can go on to another by name ("no, ¡el tesoro!").
-KIDS_GAMES: Final[tuple[str, ...]] = ("colors", "treasure", "simon", "gallina")
+KIDS_GAMES: Final[tuple[str, ...]] = ("colors", "treasure", "simon", "gallina", "numbers")
 # again_answer's other answers: stop playing, or another game without saying which.
 STOP: Final[str] = "stop"
 ANOTHER_GAME: Final[str] = "another game"

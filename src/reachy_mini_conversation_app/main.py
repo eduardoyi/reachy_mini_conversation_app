@@ -165,6 +165,7 @@ def _build_games(
     from reachy_mini_conversation_app.games.kids_audio import KIDS_VOICE_ID, KidsAudio
     from reachy_mini_conversation_app.games.kids_lines import LINES as KIDS_LINES
     from reachy_mini_conversation_app.games.simon_says import SimonSays
+    from reachy_mini_conversation_app.games.number_race import NumberRace
     from reachy_mini_conversation_app.games.gallina_loca import GallinaLoca
     from reachy_mini_conversation_app.tools.play_emotion import queue_intent_move
     from reachy_mini_conversation_app.games.scribble_rush import ScribbleRush, GeminiGuesser, ScribbleSetup
@@ -323,6 +324,7 @@ def _build_games(
     # No camera: the children say their names (matched to the family's) and pat his head or say "¡listo!".
     kids_speech = Speech(game_data / "kids" / "speech", config.ELEVENLABS_API_KEY, voice=KIDS_VOICE_ID)
     games["gallina"] = lambda: GallinaLoca(kids_audio, speech=kids_speech, known_names=known_names)
+    games["numbers"] = lambda: NumberRace(kids_audio)  # a learning game: pats and counting out loud, no camera
     if (game_data / "trivia-bank" / "bank.jsonl").is_file():
         setup = BigBrainSetup(
             data_dir=game_data,

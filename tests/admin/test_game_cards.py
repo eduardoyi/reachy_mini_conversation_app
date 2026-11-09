@@ -29,7 +29,8 @@ def test_every_game_has_a_card_and_its_art(key: str) -> None:
     assert (ADMIN / "games" / f"{art}.webp").is_file(), f"make static/admin/games/{art}.webp"
 
 
-def test_the_kids_games_sit_on_the_little_ones_shelf() -> None:
-    """The kids' games (the ones "¿Otra vez?" switches between) are all on the "For little ones" shelf."""
+def test_the_kids_games_sit_on_the_little_ones_or_learning_shelf() -> None:
+    """The kids' games (the ones "¿Otra vez?" switches between) are on "For little ones" or "Learning games"."""
     cards = _cards()
-    assert all(cards.get(key) == "little" for key in KIDS_GAMES)
+    assert all(cards.get(key) in ("little", "learning") for key in KIDS_GAMES)
+    assert cards["numbers"] == "learning"  # learning games are their own category (Eduardo, 2026-11-09)

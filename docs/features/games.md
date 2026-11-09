@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-03 (six treasures and ten Simón dice poses the kids asked for; the book's drawing)
+- Last updated: 2026-11-09 (the number race, the first learning game, on its own Learning games shelf)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -29,6 +29,13 @@ And **la gallina loca** ("juguemos a la gallina loca", "let's play crazy hen"; p
 [la-gallina-loca.md](../plans/la-gallina-loca.md)): a hot-potato game with no camera. Richie, a crazy hen with a
 secret timer, calls each child in turn with something silly to do; a pat or "¡listo!" passes the hen to the
 next child, and when he crows "¡COCOROCÓ!", whoever has it lays an egg.
+
+And **la carrera de números** ("juguemos a la carrera de números", "let's play the number race"; plan:
+[number-race.md](../plans/number-race.md)), the first **learning game**: a counting race on straight tracks of
+squares 1 to 10, after Siegler and Ramani's number board games. The kids drive Tito, Richie drives Flecha (the
+cars from the story *La gran carrera*); a pat spins a wheel of 1 or 2 and the kids count Tito's squares out loud.
+Learning games are a category of their own in the admin app ("Learning games"), and kids' games all the same:
+"¿Otra vez?" switches between them.
 
 Out of scope for now: flashing the room lights in the game's color (the light systems do not report a lamp's
 current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
@@ -196,6 +203,27 @@ for them.
 - In the admin app it is "Crazy Hen" on the "For little ones" shelf, with its own card art
   (`static/admin/games/gallina.webp`).
 
+### La carrera de números (a learning game)
+
+- **The screen:** two straight roads of squares 1 to 10, Tito's (a little light-grey pickup) over Flecha's (a
+  low black sports car), lined up so the car farther along is on the bigger number; each car stands over its
+  square, with a checkered finish after 10. The cars are drawn as shapes, so no drawing is made.
+- **The kids' turn:** "¡Te toca!" (the first time, how to spin), then a pat on his head, or "¡gira!", "¡ya!",
+  "spin" heard without his name, spins the wheel (pats in the first 0.8 s are the last turn's). After 12 s he
+  reminds them once; after 30 s he spins for them. A spinning sound, the squares to count turn grey, and "¡Dos! A
+  contar las casillas…". The answer (heard by Scribe, the number words as hints) counts as right when the number
+  Tito reaches is in it, in Spanish, English or digits ("cinco, seis", "seis", "five six", "5 6"): "¡Muy bien!"
+  and the number again ("¡Seis!"), so the last word is the total. Anything else, or nothing: "¡Contemos juntos!"
+  and he counts the squares ("cinco… seis"); never a correction. Tito moves on the screen with a putt-putt.
+- **Flecha's turn:** he spins, says what came out and counts Flecha's squares himself, counting on from where
+  Flecha is ("¡Turno de Flecha! Salió dos… cuatro… cinco"), with a zoom.
+- **The end:** the first car to 10 (a spin past 10 stops there). Tito: "¡Tito llegó al diez! ¡Ganaron!" and a
+  celebration; Flecha: "¡Flecha llegó primero al diez! Pero Tito contó muy bien… ¡la próxima le ganamos!". Then
+  "¿Otra vez?". About 6–8 kids' turns, 3–4 minutes.
+- The head is held still the whole game (`Game.holds_head`), so pats count. No camera.
+- Spanish and English (the kids' voice's languages). In the admin app it is "Number Race" on the "Learning
+  games" shelf (`static/admin/games/numbers.webp`).
+
 ### Recorded voice, sounds and music (the three kids' games)
 
 Built 2026-11-02 so the games stop sounding flat after a few rounds, while staying easy on adults nearby.
@@ -298,6 +326,7 @@ flowchart LR
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line), `ask_again(context, audio) -> next game or None` (all three kids' games; asked twice at most, `AGAIN_LISTEN_S` 12 s to start answering), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
 | La gallina loca | `games/gallina_loca.py` | `GallinaLoca(audio, speech=, known_names=)`, `CHALLENGES`, `FORFEITS`, `heard_names(text, known) -> (names, done)`; names said live in the kids' voice (`Speech`, `game-data/kids/speech`); registered without the camera |
+| Number race | `games/number_race.py`, `games/number_race_screens.py`, `static/eink/race_*.png` (from `scripts/race_cars.py`) | `NumberRace(audio, rng=)`, `heard_numbers(text) -> set[int]`, `NUMBER_WORDS` (es, en; the `num_N` lines and the answer hints), `SPINS`; `render_number_race(tito, flecha, caption, counting)`; registered without the camera |
 | Simón dice | `games/simon_says.py` | `SimonSays`, `POSES` (words, Jev question, drawing, whole body, head gesture), `pose_drawings()`, `simon_says_phrases()` |
 | Kids' audio | `games/kids_audio.py`, `games/kids_lines.py` | `KidsAudio(folder, LINES)`: `say(context, *moments, sounds, after)` (one recorded line with sounds, or Richie's voice), `ask(context, moment, seconds, listen_s=)` (the answer's text), `play_music(context, pick, until)`, `leveled`, `loopable`; `LINES[moment][language]` takes with tags, `TAGS`. Data in `game-data/kids/voice/<moment>/<lang>-NN.wav` and `game-data/kids/sounds/` (`chosen.json`). Made by `scripts/big_brain_voice.py --set kids --voice ID` and `scripts/big_brain_sounds.py --set kids` (convert the mp3s with ffmpeg on the laptop: the mini has none) |
 | Treasure hunt | `games/treasure_hunt.py` | `TreasureHunt`, `TREASURES` (names, what Jev is asked, drawing subject), `treasure_drawings()`, `treasure_hunt_phrases()` |
@@ -342,12 +371,18 @@ Jev and drawings; "¿Otra vez?" read loosely, asked again when unclear, and swit
 the color hunt and Simón dice; `test_gallina_loca.py` for names heard, a whole game with pats and "¡listo!",
 no names, the head held still, and switching to and from it; `test_kids_audio.py` for recorded lines, the fallback voice, levelling, the music bed, a
 recorded color hunt, and that every moment the games use is written in both languages),
+`test_number_race.py` for numbers heard, a whole race with pats and right counts, nobody spinning or counting,
+a wrong count counted together, "¡gira!", the names and switching, the screen and every count's line),
 `tests/tools/test_play_game.py`, the runtime hooks in `tests/test_hybrid_runtime.py`, quick-command routing in
 `tests/test_quick_commands.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
 `tests/admin/test_server.py`. Jev thresholds come from the 2026-10-31 spike on 258 frames from Reachy's camera
 (see the plan).
 
 ## Changelog
+
+- 2026-11-09: La carrera de números, the first learning game (a 1–10 counting race with Tito and Flecha, pats to
+  spin, counts heard by Scribe, the cars as drawn in the story), on a new "Learning games" shelf in the admin app. Kids' games may sit on the
+  "For little ones" or the "Learning games" shelf.
 
 - 2026-11-03: Game answers are heard by ElevenLabs Scribe v2, biased toward the words each game expects, with the
   local model as the fallback (the room kept overruling Qwen on short answers).

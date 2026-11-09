@@ -879,15 +879,22 @@ dialog { color: var(--ink); }
 .game-tile-foot { padding: 10px 12px 12px; display: grid; gap: 10px; }
 .game-tile-foot .pill { width: 100%; }
 
-.game-card.little { display: grid; grid-template-columns: 42% 1fr; }
-.game-card.little .game-art { aspect-ratio: auto; min-height: 150px; }
-.game-card.little .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
-.game-card.little .game-body { padding: 12px 14px 14px; gap: 8px; }
-.game-card.little .game-pitch { font-size: 14px; }
+.game-card.little,
+.game-card.learning { display: grid; grid-template-columns: 42% 1fr; }
+.game-card.little .game-art,
+.game-card.learning .game-art { aspect-ratio: auto; min-height: 150px; }
+.game-card.little .game-art h4,
+.game-card.learning .game-art h4 { left: 12px; right: 12px; font-size: 17px; }
+.game-card.little .game-body,
+.game-card.learning .game-body { padding: 12px 14px 14px; gap: 8px; }
+.game-card.little .game-pitch,
+.game-card.learning .game-pitch { font-size: 14px; }
 /* Story pictures are 3:2 and shown whole, full width. */
 .game-card.stories .game-art { aspect-ratio: 3 / 2; }
-.game-card.little .game-say { display: none; }
-.game-card.little .game-foot { justify-content: flex-end; }
+.game-card.little .game-say,
+.game-card.learning .game-say { display: none; }
+.game-card.little .game-foot,
+.game-card.learning .game-foot { justify-content: flex-end; }
 
 @media (max-width: 380px) {
   .now-card { flex-wrap: wrap; }

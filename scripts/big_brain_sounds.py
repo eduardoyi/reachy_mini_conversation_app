@@ -5,7 +5,7 @@ takes of Eleven Music (900 credits a minute), all our own: the prompts ask for o
 never for a show's theme. Every take is kept as ``<out>/<name>/take-N.mp3`` and as the 24 kHz mono WAV the
 game plays (converted with ffmpeg); ``chosen.json`` names the take the game uses, the first until Eduardo picks
 another. A rerun makes only missing takes. ``--set kids`` makes the kids' games' set instead (the color hunt,
-the treasure hunt, Simón dice and la gallina loca: games/kids_audio.py), two takes each.
+the treasure hunt, Simón dice, la gallina loca and the number race: games/kids_audio.py), two takes each.
 
 Usage: uv run python scripts/big_brain_sounds.py --out ~/.local/share/reachy/game-data/big-brain/sounds
        uv run python scripts/big_brain_sounds.py --set kids --out ~/.local/share/reachy/game-data/kids/sounds
@@ -107,6 +107,13 @@ KIDS_SOUNDS: dict[str, tuple[float, str]] = {
     "squawk": (2.5, "A silly cartoon hen squawking in a frantic flappy panic with a rooster crow at the end, funny "
                "not scary, for a toddler game."),
     "egg_pop": (1.0, "A cute cartoon pop of a hen laying an egg, a soft plop and a tiny sparkle, for a toddler game."),
+    # The number race
+    "spin": (1.5, "A cartoon prize wheel spinning with quick plastic clicks that slow down and stop, playful, for a "
+             "toddler board game."),
+    "putt": (1.2, "A cute little old cartoon truck puttering forward a few hops, putt putt putt with a tiny honk, "
+             "playful, for a toddler game."),
+    "zoom": (1.2, "A cartoon sports car zooming past with a quick vroom and a whoosh, playful not loud, for a "
+             "toddler game."),
 }  # fmt: skip
 KIDS_MUSIC: dict[str, tuple[float, str]] = {
     "intro_colors": (10.0, "Short bright playful jingle for a toddler color game: ukulele, glockenspiel and "
@@ -133,6 +140,8 @@ KIDS_MUSIC: dict[str, tuple[float, str]] = {
     "gallina_hurry": (20.0, "Faster, more frantic silly barnyard music for a kids' hot-potato game, about 160 bpm: "
                       "banjo, fast woodblocks and a ticking clock, a fun hurry-up feeling, not stressful, steady, "
                       "loops smoothly, background level. Instrumental."),
+    "intro_race": (10.0, "Short bright racing jingle for a kids' counting race with two cartoon cars: bouncy "
+                   "ukulele, a toy horn and a revving motor rhythm, ends with a cute final note. Instrumental."),
     "celebrate": (10.0, "Short joyful celebration for young kids finishing a game: glockenspiel and ukulele "
                   "fanfare with handclaps and a little ta-da ending. Instrumental."),
 }  # fmt: skip

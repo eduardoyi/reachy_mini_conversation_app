@@ -115,7 +115,9 @@ async def test_another_game_without_a_name_asks_which(monkeypatch: pytest.Monkey
     await _until(lambda: bool(reachy.asked))
     await reachy.asked[-1][1]("otro juego")
     await _until(lambda: len(reachy.asked) == 2)
-    assert reachy.asked[-1][0] == "¿A cuál? ¿A los colores, a buscar tesoros, a Simón dice o a la gallina loca?"
+    assert reachy.asked[-1][0] == (
+        "¿A cuál? ¿A los colores, a buscar tesoros, a Simón dice, a la gallina loca o a la carrera de números?"
+    )
     await reachy.asked[-1][1]("buscar tesoros")
     await _until(lambda: host.status()["game"] == "treasure")
     host.end("test over", say=False)

@@ -1,4 +1,4 @@
-"""What Richie says in the kids' games (the color hunt, the treasure hunt, Simón dice and la gallina loca), recorded once.
+"""What Richie says in the kids' games (the color hunt, the treasure hunt, Simón dice, la gallina loca and the number race), recorded once.
 
 Each moment has two or more takes so the games don't sound the same every round, written for children of 2 to
 6 with adults in the room: warm and playful, short, never shouting. Lines carry ElevenLabs audio tags in square
@@ -13,6 +13,7 @@ from typing import Final
 
 from reachy_mini_conversation_app.games.color_hunt import TARGETS
 from reachy_mini_conversation_app.games.simon_says import POSES
+from reachy_mini_conversation_app.games.number_race import NUMBER_WORDS
 from reachy_mini_conversation_app.games.gallina_loca import FORFEITS, CHALLENGES
 from reachy_mini_conversation_app.games.treasure_hunt import TREASURES
 
@@ -354,4 +355,67 @@ for _key, _forfeit in FORFEITS.items():
         "en": (f"[playful] {_en[:1].upper() + _en[1:]}!",),
     }
 
-LINES: Final[dict[str, Takes]] = {**_SHARED, **_COLORS, **_TREASURE, **_SIMON, **_GALLINA}
+# La carrera de números: Tito (the kids' car) and Flecha (Richie's), from the story La gran carrera.
+_RACE: Final[dict[str, Takes]] = {
+    "race_start": {
+        "es": (
+            "[excited] ¡La carrera de números! [playful] Ustedes manejan a Tito, y yo manejo a Flecha. Me tocan la cabeza para girar la rueda... [cheerful] y cuentan las casillas en voz alta. [excited] ¡El primero que llegue al diez gana!",
+            "[cheerful] ¡Tito y Flecha van a echar una carrera! [playful] Tito es de ustedes, Flecha es mío. Para girar la rueda, me tocan la cabeza... [excited] ¡y cuentan las casillas que avanza Tito! [cheerful] ¡A ver quién llega primero al diez!",
+        ),
+        "en": (
+            "[excited] The number race! [playful] You drive Tito, and I drive Flecha. Pat my head to spin the wheel... [cheerful] and count the squares out loud. [excited] The first one to ten wins!",
+            "[cheerful] Tito and Flecha are having a race! [playful] Tito is yours, Flecha is mine. To spin the wheel, pat my head... [excited] and count the squares Tito goes! [cheerful] Let's see who gets to ten first!",
+        ),
+    },
+    "race_turn_first": {
+        "es": ("[excited] ¡Arranca Tito! [playful] Tócame la cabeza para girar la rueda.", "[cheerful] ¡Empieza Tito! [playful] Tócame la cabeza... ¡y gira la rueda!"),
+        "en": ("[excited] Tito goes first! [playful] Pat my head to spin the wheel.", "[cheerful] Tito starts! [playful] Pat my head... and spin the wheel!"),
+    },
+    "race_turn": {
+        "es": ("[cheerful] ¡Le toca a Tito!", "[playful] ¡Tito! ¡Gira la rueda!", "[excited] ¡Te toca!", "[cheerful] ¡Turno de Tito!"),
+        "en": ("[cheerful] Tito's turn!", "[playful] Tito! Spin the wheel!", "[excited] Your turn!", "[cheerful] Over to Tito!"),
+    },
+    "race_spin_nudge": {
+        "es": ("[playful] Tócame la cabeza para girar la rueda.", "[whispers] Psst... [playful] ¡tócame la cabeza y la rueda gira!"),
+        "en": ("[playful] Pat my head to spin the wheel.", "[whispers] Psst... [playful] pat my head and the wheel spins!"),
+    },
+    "race_count_1": {
+        "es": ("[excited] ¡Uno! [cheerful] ¿A dónde llega Tito? ¡Cuenta!", "[cheerful] ¡Salió uno! [playful] Cuenta la casilla..."),
+        "en": ("[excited] One! [cheerful] Where does Tito get to? Count!", "[cheerful] It's a one! [playful] Count the square..."),
+    },
+    "race_count_2": {
+        "es": ("[excited] ¡Dos! [cheerful] A contar las casillas...", "[cheerful] ¡Salió dos! [playful] Cuenta las casillas de Tito..."),
+        "en": ("[excited] Two! [cheerful] Count the squares...", "[cheerful] It's a two! [playful] Count Tito's squares..."),
+    },
+    "race_right": {
+        "es": ("[excited] ¡Muy bien!", "[proud] ¡Eso! ¡Contaste muy bien!", "[cheerful] ¡Chévere!", "[excited] ¡Así se cuenta!"),
+        "en": ("[excited] Well done!", "[proud] Yes! Great counting!", "[cheerful] Awesome!", "[excited] That's how you count!"),
+    },
+    "race_together": {
+        "es": ("[warm] ¡Contemos juntos!", "[cheerful] ¡Vamos a contar juntos!", "[playful] Cuenta conmigo..."),
+        "en": ("[warm] Let's count together!", "[cheerful] Let's count it together!", "[playful] Count with me..."),
+    },
+    "race_flecha_1": {
+        "es": ("[playful] Ahora Flecha... [excited] ¡uno!", "[cheerful] ¡Turno de Flecha! [playful] Salió uno..."),
+        "en": ("[playful] Now Flecha... [excited] one!", "[cheerful] Flecha's turn! [playful] It's a one..."),
+    },
+    "race_flecha_2": {
+        "es": ("[playful] Ahora Flecha... [excited] ¡dos!", "[cheerful] ¡Turno de Flecha! [playful] Salió dos..."),
+        "en": ("[playful] Now Flecha... [excited] two!", "[cheerful] Flecha's turn! [playful] It's a two..."),
+    },
+    "race_tito_wins": {
+        "es": ("[excited] ¡Tito llegó al diez! [cheerful] ¡Ganaron! [giggles] Poquito a poquito se llega lejos.", "[gasps] ¡Diez! [excited] ¡Tito ganó la carrera! [proud] ¡Qué bien contaron!"),
+        "en": ("[excited] Tito made it to ten! [cheerful] You won! [giggles] Little by little, you go a long way.", "[gasps] Ten! [excited] Tito won the race! [proud] What great counting!"),
+    },
+    "race_flecha_wins": {
+        "es": ("[gasps] ¡Flecha llegó primero al diez! [playful] Pero Tito contó muy bien... [cheerful] ¡la próxima le ganamos!", "[giggles] ¡Flecha llegó al diez! [warm] Uy, por poquito. [cheerful] ¡La próxima gana Tito!"),
+        "en": ("[gasps] Flecha got to ten first! [playful] But Tito counted so well... [cheerful] next time we'll beat him!", "[giggles] Flecha made it to ten! [warm] Ooh, so close. [cheerful] Next time Tito wins!"),
+    },
+}  # fmt: skip
+for _n, (_es, _en) in enumerate(zip(NUMBER_WORDS["es"], NUMBER_WORDS["en"]), start=1):
+    _RACE[f"num_{_n}"] = {  # said one after another while counting ("cinco... seis"), so each is its own clip
+        "es": (f"[cheerful] ¡{_es.capitalize()}!", f"[playful] {_es.capitalize()}..."),
+        "en": (f"[cheerful] {_en.capitalize()}!", f"[playful] {_en.capitalize()}..."),
+    }
+
+LINES: Final[dict[str, Takes]] = {**_SHARED, **_COLORS, **_TREASURE, **_SIMON, **_GALLINA, **_RACE}

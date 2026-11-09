@@ -386,6 +386,7 @@ const GAME_CARDS = {
   treasure: { name: "Treasure Hunt", shelf: "little", facts: ["Camera"] },
   simon: { name: "Simon Says", shelf: "little", facts: ["Camera"] },
   gallina: { name: "Crazy Hen", shelf: "little", facts: ["Any number of kids", "No camera"] },
+  numbers: { name: "Number Race", shelf: "learning", facts: ["Ages 2–6", "Counting 1 to 10", "No camera"] },
   tres_cerditos: { name: "Three Little Pigs", shelf: "stories", facts: ["About 6 minutes", "Kids knock, blow and pick"] },
   nabo_gigante: { name: "The Enormous Turnip", shelf: "stories", facts: ["About 5 minutes", "Kids pull, call and make animal noises"] },
   ricitos_de_oro: { name: "Goldilocks", shelf: "stories", facts: ["About 6 minutes", "Kids blow, snore and wake her up"] },
@@ -398,6 +399,7 @@ const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],
   ["editions", "Big Brain editions", "The same show with a whole board about one world."],
   ["little", "For little ones", "No phones: kids play with Reachy out loud, and he watches or listens."],
+  ["learning", "Learning games", "Short games built on early-learning research: numbers first, sounds and thinking next."],
 ];
 const SAY = { es: (title) => `Juguemos ${title}`, en: (title) => `Let's play ${title}` };
 // Stories are told in Spanish or Italian, picked on the Stories tab.
