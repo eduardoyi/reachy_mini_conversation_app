@@ -998,6 +998,16 @@ Tests: `test_a_wake_whose_name_a_second_look_does_not_hear_again_is_dropped_afte
 `test_the_cue_does_not_wait_for_the_second_look`, `test_a_name_heard_with_the_rest_of_it_needs_no_second_look`,
 `test_a_failed_second_look_drops_the_wake_without_waiting_for_the_speaker_to_stop`.
 
+**Room-transcript wake check, on trial (2026-11-09).** A room-transcript wake comes from the fast model on the
+room's speech frames spliced together, pauses cut out. Replaying 2026-10-31 to 11-08, the accurate model found no
+name in the same audio uncut for most of the 318 such wakes, while keeping every call a person confirmed. Each
+room-transcript wake now has the accurate model listen (`_start_transcript_check`, in the background) to the last
+moments of the wake-clip buffer: the sentence and a second before it, then the whole clip (the sentence and 3 s
+before) if that missed. The verdict is only recorded (`transcript_check` in the wake record, and
+`Transcript wake check (trial) heard=…` in the log); the wake goes on as before. Up to four a day of the wakes it
+doubted go into the clip check, so the household's answers show what switching it on would cost. Test:
+`test_a_transcript_wake_has_the_accurate_model_check_its_audio_on_trial`.
+
 The same wake audio also leads the request clip, for local transcription only
 (`_transcribe_request_clip(lead_in=...)`). The wake fires a moment after the name, so a request said in
 one breath can lose its first word to the clip: on 2026-10-28 "Richie, lights out" fired after

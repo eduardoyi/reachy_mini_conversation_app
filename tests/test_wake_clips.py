@@ -123,6 +123,19 @@ def test_a_name_heard_clip_keeps_the_utterance_and_the_stt_delay_up_to_ten_secon
     assert [event["speech_seconds"] for event in _events(tmp_path)] == [1.5, 30.0]
 
 
+def test_the_last_seconds_of_the_buffer_can_be_read_without_saving_them(tmp_path: Path) -> None:
+    """The transcript wake check listens to the room's last seconds; nothing is written for it."""
+    recorder = _recorder(tmp_path)
+    assert recorder.recent(2.0) is None
+    recorder.feed(_ramp(3.0), RATE)
+
+    rate, audio = recorder.recent(2.0) or (0, b"")
+    assert (rate, len(audio)) == (RATE, 2 * RATE * 2)
+    assert audio == _ramp(3.0)[-2 * RATE * 2 :]
+    assert len((recorder.recent(10.0) or (0, b""))[1]) == 3 * RATE * 2
+    assert _clips(tmp_path) == []
+
+
 def test_a_missed_call_keeps_the_minute_before_the_moment_it_names(tmp_path: Path) -> None:
     """Saying "you didn't hear me" after the wake keeps the minute that ended at the wake."""
     recorder = _recorder(tmp_path)

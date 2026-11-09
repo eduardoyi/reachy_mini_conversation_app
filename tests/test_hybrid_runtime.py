@@ -1,5 +1,6 @@
 """Tests for the local/cloud hybrid runtime lifecycle."""
 
+import json
 import time
 import wave
 import asyncio
@@ -2650,6 +2651,46 @@ async def test_a_name_heard_only_by_local_stt_is_saved_as_a_clip(tmp_path) -> No
 
     [clip] = tmp_path.glob("*/*.wav")
     assert clip.name.endswith("-name_heard.wav")
+    await runtime.close()
+
+
+@pytest.mark.parametrize(("accurate", "verdict"), [("Reachy, what time is it?", True), ("what time is it", False)])
+@pytest.mark.asyncio
+async def test_a_transcript_wake_has_the_accurate_model_check_its_audio_on_trial(
+    tmp_path: Path, accurate: str, verdict: bool
+) -> None:
+    """On trial: the accurate model listens to the uncut audio and its verdict is recorded; he wakes either way.
+
+    The fast model hears the room with its pauses cut out, which made most room-transcript wakes of 2026-11-01 to
+    11-08 (2026-11-09 replay).
+    """
+    clips = WakeClipRecorder(tmp_path, keep_days=14)
+    heard: list[int] = []
+
+    async def request_model(audio: AudioFrame) -> str:
+        heard.append(audio[1].size)
+        return accurate
+
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        wake_clips=clips,
+        request_transcriber=request_model,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    for sequence in range(1, 101):  # 8 s of room audio
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=sequence)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, what time is it?", 3, 4, 2))
+    await handler.started.wait()
+    await wait_until(lambda: not runtime._local_event_tasks, attempts=500)
+
+    # The sentence and a second before it, then the clip (the sentence and 3 s before it) if that missed.
+    assert heard[:2] == ([32_000] if verdict else [32_000, 64_000])
+    events = [json.loads(line) for line in next(tmp_path.glob("*/events.jsonl")).read_text().splitlines()]
+    assert [event["transcript_check"] for event in events if "transcript_check" in event] == [verdict]
     await runtime.close()
 
 

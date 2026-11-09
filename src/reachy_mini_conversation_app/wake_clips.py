@@ -181,6 +181,15 @@ class WakeClipRecorder:
         """Add what came of an event (a name check, a request's length) under its id; flags and counts only."""
         self._append(event_id.split("/", 1)[0], {"id": event_id, "t": round(self._clock(), 3), **details})
 
+    def recent(self, seconds: float) -> tuple[int, bytes] | None:
+        """Return the sample rate and the last ``seconds`` of the buffer (less when it holds less), or None."""
+        with self._lock:
+            rate = self._sample_rate
+            if rate is None or not self._buffered_bytes:
+                return None
+            audio = b"".join(self._chunks)
+        return rate, audio[-_bytes(seconds, rate) :]
+
     def save_name_heard(self, speech_seconds: float) -> str:
         """Log an utterance in which local STT heard the name but the wake model did not wake, with its clip."""
         return self.record(

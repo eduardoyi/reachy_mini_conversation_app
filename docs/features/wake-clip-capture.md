@@ -39,6 +39,8 @@ the day's `events.jsonl` and saves a clip:
   - the request's length (`request_chars`, 0 when nothing was said), and who marked a missed call;
   - `said: "not_called"` with `by` (`voice`, `conversation` or `app`) when someone said the wake wasn't for him,
     and `slept_after_s` when he was sent to sleep within a minute of it.
+  - for a `name_heard` wake, `transcript_check` (on trial since 2026-11-09): whether the accurate model heard the
+    name in the uncut audio of its sentence or clip (`WakeClipRecorder.recent(seconds)` reads it from the buffer).
 
   Never any words.
 - **Conversations.** Nothing is buffered or saved during a cloud conversation. A clip still waiting for its

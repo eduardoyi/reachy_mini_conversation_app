@@ -73,6 +73,9 @@ SWITCH_FIRES_SHARE: Final[float] = 0.8
 # A challenger becomes the shadow head when it catches more without firing more, or as many with this share.
 SHADOW_FIRES_SHARE: Final[float] = 0.9
 QUEUE_SIZE: Final[int] = 10
+# Transcript wakes the accurate check would have dropped (on trial since 2026-11-09) asked about each day: whether
+# they were calls is what switching the check on would cost.
+TRANSCRIPT_CHECK_QUESTIONS: Final[int] = 4
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
 # Room for a week of the house next to a base set (the Richie head's set and 250,000 ACAV100M windows): about
@@ -584,13 +587,16 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
     """Pick at most ten clips for the household to check, where the automatic signals are least sure."""
     ranked: list[tuple[int, ReviewItem]] = []
 
-    def offer(rank: int, event: dict[str, Any], at: float, question: str = NAME_QUESTION) -> None:
+    def offer(rank: int, event: dict[str, Any], at: float, question: str = NAME_QUESTION,
+              start: float | None = None) -> None:  # fmt: skip
         item_id = f"{event['id']}@{at:.2f}"
         if item_id in answers or event["id"] in answers:
             return
-        clip = ReviewItem(item_id, event["clip"], max(0.0, at - 3.0), at + 1.5, question,
+        clip = ReviewItem(item_id, event["clip"], max(0.0, at - 3.0 if start is None else start), at + 1.5, question,
                           follow_up=question != MISSED_QUESTION)  # fmt: skip
         ranked.append((rank, clip))
+
+    doubted = []  # transcript wakes the trial check heard no name in, nobody told off
 
     for event in events:
         if not event.get("clip"):
@@ -607,8 +613,15 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
             offer(2, event, located[-1])
         elif _woke(event) and _told_off_unnamed(event, located):
             offer(3, event, fired_at)  # the live check heard a name, the night none
+        elif kind == "name_heard" and _woke(event) and event.get("transcript_check") is False:
+            if not _not_called(event):
+                doubted.append(event)
         elif kind == "shadow" and located:
             offer(4, event, located[-1])
+    for event in rng.sample(doubted, min(TRANSCRIPT_CHECK_QUESTIONS, len(doubted))):
+        # The whole sentence, which ends where the transcript wake was logged (the end of its clip).
+        logged = float(event.get("event_at") or 0.0)
+        offer(1, event, logged, start=logged - float(event.get("speech_seconds") or 0.0) - 1.0)
     rejected = [event for event in events if event["kind"] == "wake" and event.get("outcome") == "rejected"]
     for event in rng.sample(rejected, min(2, len(rejected))):  # a check on the "no name" verdicts
         if event.get("clip") and not names.get(event["id"]):

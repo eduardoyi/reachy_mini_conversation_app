@@ -129,6 +129,26 @@ def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_ten() -
     assert (items[0].start, items[0].end) == (5.0, 9.5)
 
 
+def test_transcript_wakes_the_trial_check_doubted_are_asked_about_four_a_day() -> None:
+    """Whether they were calls is what switching the check on would cost; the whole sentence is played.
+
+    One the trial heard the name in is not asked about; one told "not to you" is asked as before, after them.
+    """
+    doubted = [_event("name_heard", DAY + n, outcome="woke", transcript_check=False, speech_seconds=3.0)
+               for n in range(6)]  # fmt: skip
+    confirmed = _event("name_heard", DAY + 50, outcome="woke", transcript_check=True, speech_seconds=3.0)
+    told_off = _event("name_heard", DAY + 60, outcome="woke", transcript_check=False, said="not_called")
+    events = [*doubted, confirmed, told_off]
+
+    items = review_items(events, {}, {}, random.Random(1))
+
+    asked, rest = items[:4], items[4:]
+    assert {item.id.split("@")[0] for item in asked} <= {event["id"] for event in doubted}
+    assert all((item.start, item.end, item.id.split("@")[1]) == (6.0, 11.5, "10.00") for item in asked)
+    assert all(item.question == "Did someone say his name?" and item.follow_up for item in asked)
+    assert [item.id.split("@")[0] for item in rest] == [told_off["id"]]
+
+
 def test_the_score_counts_episodes_answered_at_once_and_false_wakes() -> None:
     """A wake that came first answers its episode; a missed mark or an earlier name means it did not.
 

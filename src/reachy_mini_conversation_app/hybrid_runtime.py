@@ -27,7 +27,7 @@ from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
-from reachy_mini_conversation_app.wake_clips import WakeClipRecorder
+from reachy_mini_conversation_app.wake_clips import NAME_HEARD_MARGIN_S, NAME_HEARD_MAX_SECONDS, WakeClipRecorder
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE as SPEECH_SAMPLE_RATE
 from reachy_mini_conversation_app.local_speech import beep
 from reachy_mini_conversation_app.local_actions import LocalActionStatus, LocalActionExecutor
@@ -496,6 +496,11 @@ class HybridRuntime:
     _WAKE_LEAD_S = 4.0
     # The audio after the fire normally arrives at once; without it within this much more, the wake stands.
     _SECOND_LOOK_WAIT_S = 1.0
+    # A room-transcript wake comes from the fast model on speech frames spliced together, pauses cut out; on
+    # 2026-10-31 to 11-08 most of the 318 such wakes had no name the accurate model could hear in the same audio
+    # unspliced. On trial: the accurate model listens to the sentence (with a second before it), then the whole
+    # clip, and the verdict is only recorded (`transcript_check` in the wake record), never acted on yet.
+    _TRANSCRIPT_CHECK_LEAD_S = 1.0
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
     # Whisper can mishear a real call ("Reggie.", "Preciso.", "What did she do?" for three "Richie, lights
@@ -1339,6 +1344,7 @@ class HybridRuntime:
             self._note_wake(name_event, outcome="ignored", why="asleep_mid_sentence")
             return
         self._note_wake(name_event, outcome="woke")
+        self._start_transcript_check(name_event, segment.ended_at - segment.started_at)
         with self._lifecycle_lock:
             self._name_event = name_event
         followup_waiter: asyncio.Future[TranscriptSegment] | None = None
@@ -2156,6 +2162,46 @@ class HybridRuntime:
             if not self._quick_generation_current(generation) or loop.time() > deadline:
                 return None
             await asyncio.sleep(0.05)
+
+    def _start_transcript_check(self, event: str | None, speech_seconds: float) -> None:
+        """Ask the accurate model, in the background, whether a room-transcript wake's audio holds the name (trial)."""
+        clips = self._wake_clips
+        if event is None or clips is None or self._request_transcriber is None:
+            return
+        kept = clips.recent(min(NAME_HEARD_MAX_SECONDS, speech_seconds + NAME_HEARD_MARGIN_S))
+        if kept is None:
+            return
+        rate, pcm = kept
+        clip = np.frombuffer(pcm, dtype="<i2").copy()
+        sentence = clip[-int(rate * (speech_seconds + self._TRANSCRIPT_CHECK_LEAD_S)) :]
+
+        async def check() -> bool:
+            heard = await self._hear_name_accurately([(rate, sentence), (rate, clip)])
+            if heard is not None:
+                logger.info("Transcript wake check (trial) heard=%s", heard)
+                self._note_wake(event, transcript_check=heard)
+            return bool(heard)
+
+        task = asyncio.create_task(check(), name="hybrid-transcript-check")
+        self._local_event_tasks.add(task)
+        task.add_done_callback(self._local_event_tasks.discard)
+
+    async def _hear_name_accurately(self, pieces: list[tuple[int, NDArray[np.int16]]]) -> bool | None:
+        """Whether the request model hears the name in any of ``pieces``, in order; None when it could not run."""
+        transcriber = self._request_transcriber
+        if transcriber is None:
+            return None
+        for piece in pieces:
+            try:
+                text = await asyncio.wait_for(transcriber(piece), self._WAKE_NAME_CHECK_TIMEOUT_S)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Transcript wake check failed: %s", type(error).__name__)
+                return None
+            if isinstance(text, str) and _WAKE_WORD_TRANSCRIPT_PATTERN.search(text) is not None:
+                return True
+        return False
 
     def _wake_audio_with_rest_of_name(
         self, wake_audio: tuple[int, NDArray[np.int16]]
