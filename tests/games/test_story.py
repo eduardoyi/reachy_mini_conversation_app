@@ -178,7 +178,15 @@ async def _answer_clips(reachy: FakeReachy, answers: dict[str, str]) -> None:
 # Story files ---------------------------------------------------------------------------------------
 
 
-SHIPPED = ("tres_cerditos", "nabo_gigante", "ricitos_de_oro", "musicos_de_bremen", "la_gran_carrera")
+SHIPPED = (
+    "tres_cerditos",
+    "nabo_gigante",
+    "ricitos_de_oro",
+    "musicos_de_bremen",
+    "la_gran_carrera",
+    "donde_esta_bigotes",
+    "la_monedita_de_plata",
+)
 
 
 @pytest.mark.parametrize("key", SHIPPED)
@@ -253,6 +261,11 @@ def test_a_clip_is_named_by_its_voice_language_and_text() -> None:
         ("cuéntanos la gran carrera", "la_gran_carrera", "es", False),
         ("cuéntanos el cuento de los carros", "la_gran_carrera", "es", False),
         ("raccontaci la grande corsa", "la_gran_carrera", "it", False),
+        ("cuéntanos dónde está bigotes", "donde_esta_bigotes", "es", False),
+        ("cuéntanos el cuento del gato perdido", "donde_esta_bigotes", "es", False),
+        ("raccontaci dov'è baffo", "donde_esta_bigotes", "it", False),
+        ("cuéntanos la monedita de plata", "la_monedita_de_plata", "es", False),
+        ("raccontaci la monetina d'argento", "la_monedita_de_plata", "it", False),
     ],
 )
 def test_asking_for_a_story(said: str, key: str | None, language: str, which: bool) -> None:

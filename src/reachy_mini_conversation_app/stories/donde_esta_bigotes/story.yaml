@@ -1,0 +1,452 @@
+# ¿Dónde está Bigotes? / Dov'è Baffo? (docs/plans/story-mode.md).
+# Our own story for a 2- and a 4-year-old, on an idea Eduardo remembered from a Venezuelan book he read as a child
+# (Gato encerrado, by Mireya Tabuas): a child looks for a lost cat and the neighbours each describe a cat of their
+# own, so different you never guess it is the same one. Nothing here comes from that book: the characters, names,
+# events and ending are ours. Lola (the turnip story's granddaughter) asks four neighbours; each sees in the cat what
+# they love themselves (the painter an artist, the musician a singer, the baker a gourmet, the gardener a dreamer).
+# The same folded ear and white tail tip give it away, and Bigotes turns out to be a she, hiding with four kittens:
+# one for each neighbour. About 7 minutes with 13 moments where the children join in. Spanish is Venezuelan
+# (ustedes, chévere, puntica, cachitos, cuatro), Italian is standard.
+
+key: donde_esta_bigotes
+title:
+  es: ¿Dónde está Bigotes?
+  it: Dov'è Baffo?
+names:
+  es: [dónde está bigotes, donde esta bigotes, bigotes, el gato bigotes, el cuento del gato, el cuento de bigotes,
+       el gato perdido, el gato de todos, el gato de lola, lola y el gato, gato encerrado, el gato encerrado]
+  it: [dov'è baffo, dove è baffo, baffo, il gatto baffo, la storia del gatto, la storia di baffo, il gatto perduto,
+       il gatto di tutti, il gatto di lola, lola e il gatto]
+pitch:
+  es: "Lola perdió a su gato Bigotes y les pregunta a los vecinos. ¡Pero cada vecino tiene un gato muy especial!"
+  it: "Lola ha perso il suo gatto Baffo e chiede ai vicini. Ma ogni vicino ha un gatto davvero speciale!"
+rules: >-
+  Reachy tells ¿Dónde está Bigotes? (Lola looks for her lost cat Bigotes and asks four neighbours: a painter, a
+  musician, a baker and a gardener; each has a cat of their own, an artist, a singer, a gourmet and a dreamer, but all
+  have one folded ear and a white tail tip: it is the same cat, and at the end Bigotes turns out to be a she, hiding
+  in Lola's closet with four kittens, one for each neighbour), about 7 minutes, in Spanish or Italian, with character
+  voices, sounds and music. The children join in: they call the cat, ring doorbells by patting his head, knock, paint
+  with their paws, sing a meow, catch butterflies, ask Lola's question about the ear and the tail, guess whether it
+  is the same cat, count the kittens and pick small things (a sun or a fish, cheese or milk). The story never waits
+  for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the little girl holding the black cat in her arms in a sunny little street of colourful houses, four doors behind them, each with a different neighbour peeking out
+  with: [girl, bigotes]
+
+steps:
+  # Lola and Bigotes ----------------------------------------------------------------------------------------
+  - scene:
+      id: lola_and_bigotes
+      picture: the little girl laughing on her bedroom floor, rolling a ball of yarn to the black cat who leaps after it, toys around them, evening light from the window
+      with: [girl, bigotes]
+      move: happy
+  - say: narrator
+    es: "[warm] Había una vez una niña que se llamaba Lola. Y Lola tenía un gato negro que se llamaba Bigotes."
+    it: "[warm] C'era una volta una bambina che si chiamava Lola. E Lola aveva un gatto nero che si chiamava Baffo."
+  - say: girl
+    es: "[proud, excited] ¡Bigotes es el gato más juguetón del mundo! Persigue pelotas, salta, corre... ¡es un aventurero!"
+    it: "[proud, excited] Baffo è il gatto più giocherellone del mondo! Rincorre le palline, salta, corre... è un avventuriero!"
+  - say: narrator
+    es: "[warm] Bigotes salía a pasear todos los días. Y todas las noches volvía a dormir en la cama de Lola."
+    it: "[warm] Baffo usciva a passeggio tutti i giorni. E tutte le sere tornava a dormire nel letto di Lola."
+  - scene:
+      id: missing
+      picture: the little girl looking worried at the cat's empty basket by her bed at night, holding a paper with a drawing of the black cat on it
+      with: [girl]
+      move: thinking
+  - say: narrator
+    es: "[concerned, softly] Pero una noche... Bigotes no volvió. Ni esa noche, ni la siguiente."
+    it: "[concerned, softly] Ma una sera... Baffo non tornò. Né quella sera, né quella dopo."
+  - say: girl
+    es: "[worried] ¿Dónde estará Bigotes? ¡Ayúdenme a llamarlo!"
+    it: "[worried] Dove sarà Baffo? Aiutatemi a chiamarlo!"
+  - noise:
+      ask:
+        es: "[excited] Llámenlo con Lola: ¡Bigotes! ¡Bigotes! Psss, psss, psss..."
+        it: "[excited] Chiamatelo con Lola: Baffo! Baffo! Micio, micio, micio..."
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Bigoteeees!"
+        it: "[playful] Più forte! Baffooo!"
+      done:
+        es: "[thoughtful] Mmm... nada. Bigotes no vino."
+        it: "[thoughtful] Mmm... niente. Baffo non è venuto."
+      without:
+        who: girl
+        es: "[calling] ¡Bigotes! ¡Bigotes! Psss, psss... Nada."
+        it: "[calling] Baffo! Baffo! Micio, micio... Niente."
+  - say: girl
+    es: "[determined] ¡Ya sé! Voy a preguntarles a los vecinos. ¡Alguien tiene que haberlo visto!"
+    it: "[determined] Lo so! Chiederò ai vicini. Qualcuno l'avrà pur visto!"
+
+  # The painter ---------------------------------------------------------------------------------------------
+  - say: narrator
+    es: "[playful] Primero fue a la casa amarilla, donde vivía la señora Carmela, la pintora."
+    it: "[playful] Prima andò alla casa gialla, dove viveva la signora Carmela, la pittrice."
+  - pat:
+      ask:
+        es: "[excited] ¡Toquemos el timbre! Denle un golpecito a mi cabeza."
+        it: "[excited] Suoniamo il campanello! Datemi un colpetto sulla testa."
+      done:
+        es: "[playful] ¡Ding, dong! Alguien viene..."
+        it: "[playful] Din, don! Arriva qualcuno..."
+      without:
+        es: "[playful] Ding, dong, sonó el timbre."
+        it: "[playful] Din, don, suonò il campanello."
+      sound: doorbell
+  - scene:
+      id: painter
+      picture: the painter lady in her sunny studio full of canvases and paint pots, painting a portrait of the black cat who sits very still and proud on a stool, little paw prints of paint on the floor
+      with: [painter, bigotes, girl]
+      move: welcoming
+  - say: painter
+    es: "[warm, dreamy] ¿Un gato? ¡Ay, mi amor! Yo tengo un gato. Se llama Pincel, y viene todos los lunes."
+    it: "[warm, dreamy] Un gatto? Ah, tesoro! Io ho un gatto. Si chiama Pennello, e viene tutti i lunedì."
+  - say: painter
+    es: "[enthusiastic] ¡Pincel es un artista! Se queda quietecito para que lo pinte... ¡y luego pinta él, con sus patitas!"
+    it: "[enthusiastic] Pennello è un artista! Sta fermo fermo mentre lo dipingo... e poi dipinge lui, con le zampette!"
+  - copy:
+      ask:
+        es: "[playful] ¡Pinten como Pincel! Mojen la patita en la pintura... y pinten en el aire, para arriba, para abajo..."
+        it: "[playful] Dipingete come Pennello! Intingete la zampetta nel colore... e dipingete nell'aria, su e giù..."
+      done:
+        es: "[delighted] ¡Qué artistas tan buenos!"
+        it: "[delighted] Che bravi artisti!"
+      move: happy
+      music: story_move
+      seconds: 6
+  - choice:
+      id: painting
+      ask:
+        es: "[curious] ¿Y qué pintó Pincel la última vez? ¿Un sol... o un pescado?"
+        it: "[curious] E che cosa ha dipinto Pennello l'ultima volta? Un sole... o un pesce?"
+      options:
+        sun:
+          words: {es: [sol, un sol, el sol, solecito], it: [sole, un sole, il sole, solicino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que un sol!"
+            it: "[thoughtful] Mmm... secondo me, un sole!"
+          then:
+            who: painter
+            es: "[proud] ¡Un sol enorme, con puras huellitas de gato! ¡Una obra de arte!"
+            it: "[proud] Un sole enorme, tutto di impronte di gatto! Un capolavoro!"
+        fish:
+          words: {es: [pescado, un pescado, pez, pececito, pescadito], it: [pesce, un pesce, pesciolino, il pesce]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que un pescado!"
+            it: "[thoughtful] Mmm... secondo me, un pesce!"
+          then:
+            who: painter
+            es: "[laughs] ¡Un pescado gordo! Claro, ¡es lo que más le gusta! ¡Una obra de arte!"
+            it: "[laughs] Un pesce bello grosso! Certo, è la cosa che preferisce! Un capolavoro!"
+  - scene:
+      id: canvas
+      about: painting
+      with: [painter, girl]
+      options:
+        sun: the painter lady and the little girl admiring a big canvas on an easel showing a huge smiling sun painted entirely with little cat paw prints
+        fish: the painter lady and the little girl admiring a big canvas on an easel showing a big fat fish painted entirely with little cat paw prints
+      move: amazed
+  - say: girl
+    es: "[thoughtful] Mmm... señora Carmela, una pregunta..."
+    it: "[thoughtful] Mmm... signora Carmela, una domanda..."
+  - chorus:
+      ask:
+        es: "[curious] Pregunten con Lola: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
+        it: "[curious] Chiedete con Lola: ha un orecchio piegato... e la punta della coda bianca?"
+      done:
+        who: painter
+        es: "[surprised] ¡Sí! Una orejita doblada y la colita blanca. ¿Cómo lo sabes?"
+        it: "[surprised] Sì! Un orecchio piegato e la codina bianca. Come lo sai?"
+      without:
+        who: painter
+        es: "[surprised] ¿Que si tiene una orejita doblada y la colita blanca? ¡Sí! ¿Cómo lo sabes?"
+        it: "[surprised] Se ha un orecchio piegato e la codina bianca? Sì! Come lo sai?"
+  - say: girl
+    es: "[puzzled] Qué raro... ¡Bigotes también!"
+    it: "[puzzled] Che strano... anche Baffo!"
+
+  # The musician --------------------------------------------------------------------------------------------
+  - sound: cuatro_strum
+  - say: narrator
+    es: "[playful] Después fue a la casa azul, donde vivía don Ramón, el músico. Se oía su cuatro desde la calle."
+    it: "[playful] Poi andò alla casa blu, dove viveva il signor Ramone, il musicista. Si sentiva la sua chitarrina dalla strada."
+  - noise:
+      ask:
+        es: "[playful] ¡Toquen la puerta! Toc, toc, toc."
+        it: "[playful] Bussate alla porta! Toc, toc, toc."
+      louder:
+        es: "[playful] ¡Más fuerte, que con la música no oye! ¡Toc, toc, toc!"
+        it: "[playful] Più forte, con la musica non sente! Toc, toc, toc!"
+      done:
+        es: "[happy] ¡Ahí viene!"
+        it: "[happy] Eccolo che arriva!"
+      without:
+        es: "[playful] Toc, toc, toc, tocó Lola la puerta."
+        it: "[playful] Toc, toc, toc, bussò Lola alla porta."
+      sound: door_knock
+  - scene:
+      id: musician
+      picture: the musician on his porch rocking chair strumming a small four-string guitar, the black cat on the rail beside him with its head up and mouth open, singing, little music notes floating around them, the little girl listening
+      with: [musician, bigotes, girl]
+      move: happy
+  - say: musician
+    es: "[relaxed, cheerful] ¡Epa, Lola! ¿Un gato? ¡Claro! Yo tengo a Maestro. Viene todos los martes a cantar conmigo."
+    it: "[relaxed, cheerful] Ehi, Lola! Un gatto? Certo! Io ho Maestro. Viene tutti i martedì a cantare con me."
+  - say: musician
+    es: "[proud, laughing] ¡Maestro es un cantante! Yo toco el cuatro, y él canta... ¡afinadito!"
+    it: "[proud, laughing] Maestro è un cantante! Io suono, e lui canta... intonatissimo!"
+  - noise:
+      ask:
+        es: "[playful] ¡Canten como Maestro! Todos juntos: ¡miaaaaau!"
+        it: "[playful] Cantate come Maestro! Tutti insieme: miaaaaao!"
+      louder:
+        es: "[playful] ¡Más alto, como un cantante de verdad! ¡Miaaaaaau!"
+        it: "[playful] Più forte, come un vero cantante! Miaaaaao!"
+      done:
+        who: musician
+        es: "[delighted] ¡Bravo! ¡Qué coro tan chévere!"
+        it: "[delighted] Bravi! Che coro meraviglioso!"
+      without:
+        who: musician
+        es: "[singing, laughing] Miaaaau... ¡así canta Maestro!"
+        it: "[singing, laughing] Miaaaao... così canta Maestro!"
+      sound: singing_meow
+  - chorus:
+      ask:
+        es: "[curious] Y Lola preguntó otra vez: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
+        it: "[curious] E Lola chiese di nuovo: ha un orecchio piegato... e la punta della coda bianca?"
+      done:
+        who: musician
+        es: "[surprised] ¡Epa! ¡Sí! ¿Y tú cómo sabes?"
+        it: "[surprised] Ehi! Sì! E tu come lo sai?"
+      without:
+        who: musician
+        es: "[surprised] ¿Orejita doblada y colita blanca? ¡Sí! ¿Y tú cómo sabes?"
+        it: "[surprised] Orecchio piegato e codina bianca? Sì! E tu come lo sai?"
+
+  # The baker -----------------------------------------------------------------------------------------------
+  - scene:
+      id: baker
+      picture: the jolly baker behind the counter of his little bakery full of bread rolls and cakes, the black cat sitting very elegantly on a stool with a tiny napkin tied around its neck, sniffing a little plate, the little girl at the counter
+      with: [baker, bigotes, girl]
+      move: welcoming
+  - say: narrator
+    es: "[playful] Después fue a la panadería de don Pepe. ¡Qué olor tan rico a pan calientico!"
+    it: "[playful] Poi andò al forno del signor Peppe. Che profumino di pane caldo!"
+  - say: baker
+    es: "[booming, jolly] ¿Un gato? ¡Ja, ja! Yo tengo a Bizcocho. Viene todos los miércoles, a la hora de los cachitos."
+    it: "[booming, jolly] Un gatto? Ah, ah! Io ho Biscotto. Viene tutti i mercoledì, all'ora dei cornetti."
+  - say: baker
+    es: "[proud] ¡Bizcocho es un gran cocinero! Lo prueba todo, se limpia los bigotes... ¡muy elegante!"
+    it: "[proud] Biscotto è un grande cuoco! Assaggia tutto, si pulisce i baffi... elegantissimo!"
+  - choice:
+      id: treat
+      ask:
+        es: "[curious] ¿Y qué es lo que más le gusta a Bizcocho? ¿El queso... o la leche?"
+        it: "[curious] E che cosa piace di più a Biscotto? Il formaggio... o il latte?"
+      options:
+        cheese:
+          words: {es: [queso, el queso, quesito, queso blanco], it: [formaggio, il formaggio, formaggino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que el queso!"
+            it: "[thoughtful] Mmm... secondo me, il formaggio!"
+          then:
+            who: baker
+            es: "[laughing] ¡El queso! Se come su pedacito y dice: ¡miau, qué sabroso!"
+            it: "[laughing] Il formaggio! Si mangia il suo pezzettino e dice: miao, che buono!"
+        milk:
+          words: {es: [leche, la leche, lechita], it: [latte, il latte, lattino]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que la leche!"
+            it: "[thoughtful] Mmm... secondo me, il latte!"
+          then:
+            who: baker
+            es: "[laughing] ¡La leche! Se toma su platico enterito y dice: ¡miau, qué sabroso!"
+            it: "[laughing] Il latte! Si beve tutta la sua ciotolina e dice: miao, che buono!"
+  - scene:
+      id: tasting
+      about: treat
+      with: [bigotes, baker]
+      options:
+        cheese: the black cat with a tiny napkin around its neck nibbling a little piece of cheese on a small plate on the bakery counter, eyes closed in delight, the jolly baker laughing behind it
+        milk: the black cat with a tiny napkin around its neck lapping milk from a little saucer on the bakery counter, eyes closed in delight, the jolly baker laughing behind it
+      move: happy
+  - chorus:
+      ask:
+        es: "[curious] ¿Y qué preguntó Lola? ¡Díganlo con ella!: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
+        it: "[curious] E che cosa chiese Lola? Ditelo con lei!: ha un orecchio piegato... e la punta della coda bianca?"
+      done:
+        who: baker
+        es: "[booming, surprised] ¡Pues sí! ¿Cómo lo adivinaste?"
+        it: "[booming, surprised] Ma sì! Come hai fatto a indovinare?"
+      without:
+        who: baker
+        es: "[booming, surprised] ¿La orejita doblada y la colita blanca? ¡Pues sí! ¿Cómo lo adivinaste?"
+        it: "[booming, surprised] L'orecchio piegato e la codina bianca? Ma sì! Come hai fatto a indovinare?"
+
+  # The gardener --------------------------------------------------------------------------------------------
+  - scene:
+      id: gardener
+      picture: the old gardener kneeling among tall sunflowers in his garden with a watering can, the black cat asleep in a patch of sun between the flowers with a butterfly resting on its nose, the little girl tiptoeing in
+      with: [gardener, bigotes, girl]
+      move: calming
+  - say: narrator
+    es: "[softly] Por último fue al jardín del señor Julián, que estaba lleno de flores."
+    it: "[softly] Per ultimo andò nel giardino del signor Giuliano, tutto pieno di fiori."
+  - say: gardener
+    es: "[calm, slow, kind] Shhh... ¿Un gato? Sí, niña. Yo tengo a Girasol. Viene todos los jueves, a dormir entre las flores."
+    it: "[calm, slow, kind] Shhh... Un gatto? Sì, piccola. Io ho Girasole. Viene tutti i giovedì, a dormire tra i fiori."
+  - say: gardener
+    es: "[softly, smiling] Girasol es un soñador. Mira las mariposas, huele las flores... y se queda dormidito al sol."
+    it: "[softly, smiling] Girasole è un sognatore. Guarda le farfalle, annusa i fiori... e si addormenta al sole."
+  - copy:
+      ask:
+        es: "[whispers] Hagan como Girasol: muy despacito, atrapen una mariposa con sus patitas... shhh..."
+        it: "[whispers] Fate come Girasole: piano piano, prendete una farfalla con le zampette... shhh..."
+      done:
+        es: "[whispers, delighted] ¡Qué suavecito! Ni la mariposa se asustó."
+        it: "[whispers, delighted] Che delicatezza! Neanche la farfalla si è spaventata."
+      move: attentive
+      music: story_tiptoe
+      seconds: 6
+  - chorus:
+      ask:
+        es: "[whispers] Y Lola preguntó bajito: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
+        it: "[whispers] E Lola chiese piano: ha un orecchio piegato... e la punta della coda bianca?"
+      done:
+        who: gardener
+        es: "[calm, surprised] Pues sí, niña. Así mismito es."
+        it: "[calm, surprised] Proprio così, piccola. È proprio così."
+      without:
+        who: gardener
+        es: "[calm, surprised] ¿La orejita doblada y la colita blanca? Pues sí, niña. Así mismito es."
+        it: "[calm, surprised] L'orecchio piegato e la codina bianca? Proprio così, piccola."
+
+  # Is it the same cat? -------------------------------------------------------------------------------------
+  - scene:
+      id: thinking
+      picture: the little girl sitting on her front step with her chin in her hands, thinking hard, four little thought bubbles above her head showing the black cat painting with its paw, singing, eating with a napkin and sleeping among sunflowers
+      with: [girl, bigotes]
+      move: thinking
+  - say: narrator
+    es: "[thoughtful] Lola se sentó a pensar. Un artista, un cantante, un cocinero, un soñador... Todos negros. Todos con una orejita doblada. Todos con la colita blanca..."
+    it: "[thoughtful] Lola si sedette a pensare. Un artista, un cantante, un cuoco, un sognatore... Tutti neri. Tutti con un orecchio piegato. Tutti con la codina bianca..."
+  - choice:
+      id: same_cat
+      ask:
+        es: "[curious] ¿Ustedes qué creen? ¿Será el mismo gato? ¿Sí... o no?"
+        it: "[curious] Voi che cosa ne dite? Sarà lo stesso gatto? Sì... o no?"
+      options:
+        "yes":
+          words: {es: [sí, si, claro, es el mismo, el mismo, sí es], it: [sì, si, certo, è lo stesso, lo stesso]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo creo que sí!"
+            it: "[thoughtful] Mmm... secondo me, sì!"
+          then:
+            who: girl
+            es: "[excited] ¡Yo también lo creo! ¡Es Bigotes! ¡Bigotes tiene cinco casas!"
+            it: "[excited] Lo penso anch'io! È Baffo! Baffo ha cinque case!"
+        "no":
+          words: {es: [no, nop, no es, otro, son distintos], it: [no, non è, un altro, sono diversi]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo creo que no!"
+            it: "[thoughtful] Mmm... secondo me, no!"
+          then:
+            who: girl
+            es: "[thinking, then excited] Mmm... son tan distintos... ¡pero la orejita y la colita son iguales! ¡Es Bigotes! ¡Bigotes tiene cinco casas!"
+            it: "[thinking, then excited] Mmm... sono così diversi... ma l'orecchio e la codina sono uguali! È Baffo! Baffo ha cinque case!"
+  - say: narrator
+    es: "[playful] ¡Pues claro! Bigotes visitaba a todos. Y cada vecino veía en él lo que más le gustaba a sí mismo."
+    it: "[playful] Ma certo! Baffo andava da tutti. E ogni vicino vedeva in lui quello che piaceva di più a sé stesso."
+
+  # The search ----------------------------------------------------------------------------------------------
+  - scene:
+      id: search
+      picture: the little girl leading the painter lady, the musician, the jolly baker and the old gardener down the little street of colourful houses, all of them calling out with their hands around their mouths
+      with: [girl, painter, musician, baker, gardener]
+      move: excited
+  - say: narrator
+    es: "[excited] Lola les contó todo a los vecinos. ¡Y todos salieron a buscar a su gato!"
+    it: "[excited] Lola raccontò tutto ai vicini. E tutti uscirono a cercare il loro gatto!"
+  - noise:
+      ask:
+        es: "[excited] ¡Llamemos todos juntos! ¡Bigotes! ¡Pincel! ¡Maestro! ¡Bizcocho! ¡Girasol!"
+        it: "[excited] Chiamiamolo tutti insieme! Baffo! Pennello! Maestro! Biscotto! Girasole!"
+      louder:
+        es: "[playful] ¡Más fuerte, que nos oiga! ¡Gatitoooo!"
+        it: "[playful] Più forte, che ci senta! Miciooo!"
+      done:
+        es: "[whispers, surprised] Esperen... ¿oyeron eso?"
+        it: "[whispers, surprised] Aspettate... avete sentito?"
+      without:
+        es: "[excited] ¡Bigotes! ¡Pincel! ¡Maestro! ¡Bizcocho! ¡Girasol!, gritaban todos. Y de pronto..."
+        it: "[excited] Baffo! Pennello! Maestro! Biscotto! Girasole!, gridavano tutti. E all'improvviso..."
+  - sound: kittens_mew
+  - say: girl
+    es: "[whispers, amazed] ¡Viene de mi casa! ¡De mi cuarto!"
+    it: "[whispers, amazed] Viene da casa mia! Dalla mia cameretta!"
+
+  # The kittens ---------------------------------------------------------------------------------------------
+  - scene:
+      id: kittens
+      picture: close up of an open cardboard box of old sweaters on a closet floor, the black cat lying in it proudly with four tiny fluffy kittens clearly visible snuggled in a row against her tummy, the little girl kneeling beside the box with her hands on her cheeks in delight, the four neighbours peeking in happily behind her
+      with: [girl, bigotes, painter, musician, baker, gardener]
+      move: surprised
+  - say: narrator
+    es: "[amazed, softly] Y ahí, dentro del clóset, en una caja de suéteres viejos... ¡estaba Bigotes! Con... ¡gatitos!"
+    it: "[amazed, softly] E lì, dentro l'armadio, in una scatola di maglioni vecchi... c'era Baffo! Con... dei gattini!"
+  - say: girl
+    es: "[laughing, amazed] ¡Bigotes! ¡Tú no eres un gato... eres una gata! ¡Y eres mamá!"
+    it: "[laughing, amazed] Baffo! Tu non sei un gatto... sei una gatta! E sei diventata mamma!"
+  - sound: cat_purr
+  - chorus:
+      ask:
+        es: "[excited, softly] ¿Cuántos gatitos hay? ¡Contemos con Lola: uno, dos, tres, cuatro!"
+        it: "[excited, softly] Quanti gattini ci sono? Contiamo con Lola: uno, due, tre, quattro!"
+      done:
+        who: girl
+        es: "[delighted] ¡Cuatro gatitos!"
+        it: "[delighted] Quattro gattini!"
+      without:
+        who: girl
+        es: "[delighted] Uno, dos, tres, cuatro... ¡cuatro gatitos!"
+        it: "[delighted] Uno, due, tre, quattro... quattro gattini!"
+  - say: narrator
+    es: "[warm] Cuatro gatitos. Uno para cada vecino."
+    it: "[warm] Quattro gattini. Uno per ogni vicino."
+
+  # One for each --------------------------------------------------------------------------------------------
+  - scene:
+      id: one_each
+      picture: the four neighbours each gently holding a tiny kitten, the painter lady's kitten with a dab of paint on its nose, the musician's kitten with its mouth open in a tiny meow, the baker's kitten round and chubby, the gardener's kitten asleep with a little flower, the little girl in the middle holding the black cat
+      with: [painter, musician, baker, gardener, girl, bigotes]
+      move: loving
+  - say: painter
+    es: "[delighted] ¡Este tiene una manchita de pintura! ¡Va a ser artista!"
+    it: "[delighted] Questo ha una macchiolina di colore! Sarà un artista!"
+  - say: musician
+    es: "[laughing] ¡Y este maúlla afinadito! ¡Va a ser cantante!"
+    it: "[laughing] E questo miagola intonato! Sarà un cantante!"
+  - say: baker
+    es: "[booming, warm] ¡Este está gordito como un bizcocho! ¡Va a ser cocinero!"
+    it: "[booming, warm] Questo è tondo come un biscotto! Sarà un cuoco!"
+  - say: gardener
+    es: "[calm, smiling] Y este ya se quedó dormidito... Va a ser soñador."
+    it: "[calm, smiling] E questo si è già addormentato... Sarà un sognatore."
+  - say: narrator
+    es: "[excited] ¡Y esa tarde la calle entera hizo una fiesta para los gatitos! ¡Bailen con Lola y los vecinos!"
+    it: "[excited] E quel pomeriggio tutta la via fece una festa per i gattini! Ballate con Lola e i vicini!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - scene:
+      id: the_end
+      picture: the black cat walking proudly along a garden wall above the little street of colourful houses at sunset, four little kittens following in a line behind her, the little girl and the four neighbours waving from their doors
+      with: [bigotes, girl, painter, musician, baker, gardener]
+  - say: narrator
+    es: "[warm, slowing down] Y Bigotes siguió visitando a todos sus vecinos. Porque una gata puede ser artista, cantante, cocinera y soñadora... y la más juguetona de todas."
+    it: "[warm, slowing down] E Baffo continuò ad andare a trovare tutti i suoi vicini. Perché una gatta può essere artista, cantante, cuoca e sognatrice... e la più giocherellona di tutte."
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

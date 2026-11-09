@@ -1,0 +1,358 @@
+# La monedita de plata / La monetina d'argento (docs/plans/story-mode.md).
+# Our own telling for a 2- and a 4-year-old of Hans Christian Andersen's The Silver Shilling (1862, public domain):
+# a new silver coin sets off to see the world, and far from home it can't buy anything, so the people who find it use
+# it in all sorts of other ways. Eduardo loved that part as a child, the people and what they did with the coin, so
+# the story is about them, and Andersen's sad parts (the coin called false, cheating, the lottery) are left out.
+# Monedita goes from a boy who tosses it (heads or tails) to a magician, a crow's nest, a tailor who sews it on as a
+# button, a baker's cake dough, and back to the boy as his birthday surprise. About 7 minutes with 12 moments where
+# the children join in. Spanish is Venezuelan (cara o sello, ustedes, chévere), Italian is standard.
+
+key: la_monedita_de_plata
+title:
+  es: La monedita de plata
+  it: La monetina d'argento
+names:
+  es: [la monedita de plata, monedita de plata, la monedita, monedita, la moneda de plata, moneda de plata,
+       la moneda, el cuento de la moneda, el cuento de la monedita]
+  it: [la monetina d'argento, monetina d'argento, la monetina, monetina, la moneta d'argento, moneta d'argento,
+       la moneta, la storia della moneta, la storia della monetina]
+pitch:
+  es: "Una monedita de plata se va a ver el mundo. ¡Y cada persona que la encuentra la usa para algo distinto!"
+  it: "Una monetina d'argento parte per vedere il mondo. E ognuno che la trova la usa per qualcosa di diverso!"
+rules: >-
+  Reachy tells La monedita de plata (after Andersen's The Silver Shilling: a shiny new coin goes to see the world, and
+  far from home it can't buy anything, so everyone who finds it uses it for something else: a boy tosses it, heads or
+  tails; a magician makes it vanish; a crow takes it to his nest; a tailor sews it on as a button; it pops into a
+  baker's cake dough and comes back to the boy as his birthday surprise), about 7 minutes, in Spanish or Italian,
+  with character voices, sounds and music. The children join in: they clink like a coin, call heads or tails, say the
+  magic word by patting his head, flap like the crow, caw, knead the dough, blow out the candles, say the coin's
+  saying ("una monedita sirve para muchas cosas") and pick small things (a jacket or a hat). The story never waits
+  for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the shiny little silver coin with a happy face rolling along a winding road that leads over hills towards a faraway town, a little boy, a magician's top hat, a crow, a spool of thread and a birthday cake along the way
+  with: [monedita]
+
+steps:
+  # A new coin ----------------------------------------------------------------------------------------------
+  - scene:
+      id: mint
+      picture: the shiny little silver coin with a happy face hopping out of a big old coin press onto a pile of other coins, sparkles all around her, very proud
+      with: [monedita]
+      move: excited
+  - say: narrator
+    es: "[warm] Había una vez una monedita de plata, nuevecita y brillante. ¡Acababa de nacer en la fábrica de monedas!"
+    it: "[warm] C'era una volta una monetina d'argento, nuova nuova e luccicante. Era appena nata nella fabbrica delle monete!"
+  - say: monedita
+    es: "[giggly, proud] ¡Miren cómo brillo! ¡Y miren cómo sueno! Clin, clin, clin..."
+    it: "[giggly, proud] Guardate come brillo! E sentite come suono! Clin, clin, clin..."
+  - noise:
+      ask:
+        es: "[playful] ¿Saben sonar como una monedita? Todos juntos: ¡clin, clin, clin!"
+        it: "[playful] Sapete suonare come una monetina? Tutti insieme: clin, clin, clin!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Clin, clin, cliiin!"
+        it: "[playful] Più forte! Clin, clin, cliiin!"
+      done:
+        who: monedita
+        es: "[delighted] ¡Así mismo! ¡Suenan igualitico a mí!"
+        it: "[delighted] Proprio così! Suonate proprio come me!"
+      without:
+        who: monedita
+        es: "[giggly] Clin, clin, clin... ¡así suena una monedita de plata!"
+        it: "[giggly] Clin, clin, clin... così suona una monetina d'argento!"
+      sound: coin_clink
+  - say: monedita
+    es: "[dreamy, excited] ¡Yo no me quiero quedar aquí guardada! ¡Yo quiero ver el mundo!"
+    it: "[dreamy, excited] Io non voglio restare qui chiusa! Io voglio vedere il mondo!"
+
+  # Far from home -------------------------------------------------------------------------------------------
+  - scene:
+      id: travels
+      picture: the shiny little silver coin peeking happily out of a traveller's coat pocket on the deck of a big ship sailing over the sea, seagulls flying, a faraway town with towers on the horizon
+      with: [monedita]
+      move: happy
+  - say: narrator
+    es: "[playful] Y así fue. La monedita pasó de mano en mano, de bolsillo en bolsillo... ¡y cruzó el mar en el bolsillo de un viajero!"
+    it: "[playful] E così fu. La monetina passò di mano in mano, di tasca in tasca... e attraversò il mare nella tasca di un viaggiatore!"
+  - say: narrator
+    es: "[softly] Pero en ese país tan lejano, nadie conocía a la monedita. Cuando la quisieron usar para comprar caramelos, el tendero dijo: aquí no sirve."
+    it: "[softly] Ma in quel paese così lontano nessuno conosceva la monetina. Quando la vollero usare per comprare le caramelle, il negoziante disse: qui non vale."
+  - say: monedita
+    es: "[sad, small] ¿No sirvo? ¿Entonces... ya no sirvo para nada?"
+    it: "[sad, small] Non valgo? Allora... non servo più a niente?"
+  - say: narrator
+    es: "[warm, mysterious] Eso pensaba ella. Pero se equivocaba. ¡Porque una monedita de plata sirve para muchísimas cosas!"
+    it: "[warm, mysterious] Così pensava lei. Ma si sbagliava. Perché una monetina d'argento serve a tantissime cose!"
+
+  # The boy: heads or tails ---------------------------------------------------------------------------------
+  - scene:
+      id: toss
+      picture: a little boy in a park flicking the shiny little silver coin high up into the air with his thumb, the coin spinning and sparkling above him, his friend waiting beside him with a ball under her arm
+      with: [boy, monedita]
+      move: excited
+  - say: narrator
+    es: "[playful] Un día, un niño que se llamaba Pedrito se la encontró en el parque."
+    it: "[playful] Un giorno, un bambino che si chiamava Pietro la trovò al parco."
+  - say: boy
+    es: "[excited, fast] ¡Una monedita brillante! ¡Ya sé para qué sirve! Para lanzarla y decidir: ¿jugamos pelota o a la ere?"
+    it: "[excited, fast] Una monetina luccicante! So io a cosa serve! Per lanciarla e decidere: giochiamo a palla o ad acchiapparella?"
+  - choice:
+      id: toss
+      ask:
+        es: "[excited] ¡La monedita sube, sube, da vueltas! ¿Qué va a caer? ¿Cara... o sello?"
+        it: "[excited] La monetina sale, sale, gira! Che cosa uscirà? Testa... o croce?"
+      options:
+        heads:
+          words: {es: [cara, la cara, es cara], it: [testa, la testa, è testa]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que cara!"
+            it: "[thoughtful] Mmm... secondo me, testa!"
+          then:
+            who: boy
+            es: "[cheering] ¡Cara! ¡Jugamos pelota! ¡Gracias, monedita!"
+            it: "[cheering] Testa! Giochiamo a palla! Grazie, monetina!"
+        tails:
+          words: {es: [sello, el sello, es sello], it: [croce, la croce, è croce]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que sello!"
+            it: "[thoughtful] Mmm... secondo me, croce!"
+          then:
+            who: boy
+            es: "[cheering] ¡Sello! ¡Jugamos a la ere! ¡Gracias, monedita!"
+            it: "[cheering] Croce! Giochiamo ad acchiapparella! Grazie, monetina!"
+  - say: monedita
+    es: "[surprised, happy] ¡Ay! ¡No compré nada... pero ayudé a decidir!"
+    it: "[surprised, happy] Oh! Non ho comprato niente... ma ho aiutato a decidere!"
+  - chorus:
+      ask:
+        es: "[warm] La monedita aprendió algo. Díganlo conmigo: ¡una monedita sirve para muchas cosas!"
+        it: "[warm] La monetina imparò una cosa. Ditelo con me: una monetina serve a tante cose!"
+      done:
+        who: monedita
+        es: "[giggly] ¡Eso es! ¡Para muchas cosas!"
+        it: "[giggly] Proprio così! A tante cose!"
+      without:
+        who: monedita
+        es: "[giggly] ¡Una monedita sirve para muchas cosas!"
+        it: "[giggly] Una monetina serve a tante cose!"
+
+  # The magician --------------------------------------------------------------------------------------------
+  - scene:
+      id: magician
+      picture: a grand theatrical magician with a top hat and a swirling cape on a little stage in the park, pulling the shiny little silver coin out from behind the little boy's ear, children in the audience gasping
+      with: [magician, boy, monedita]
+      move: surprised
+  - say: narrator
+    es: "[playful] En el parque había un mago. Y el mago le pidió prestada la monedita a Pedrito."
+    it: "[playful] Al parco c'era un mago. E il mago chiese in prestito la monetina a Pietro."
+  - say: magician
+    es: "[grand, theatrical] ¡Damas y caballeros! ¡Con esta monedita haré un truco increíble! ¡Miren: desapareció!"
+    it: "[grand, theatrical] Signore e signori! Con questa monetina farò un trucco incredibile! Guardate: è sparita!"
+  - pat:
+      ask:
+        es: "[excited] ¡Ayuden al mago! Denle un golpecito a mi cabeza y digan: ¡abracadabra!"
+        it: "[excited] Aiutate il mago! Datemi un colpetto sulla testa e dite: abracadabra!"
+      done:
+        who: magician
+        es: "[grand] ¡Abracadabra! ¡Y apareció detrás de tu oreja!"
+        it: "[grand] Abracadabra! Ed eccola dietro il tuo orecchio!"
+      without:
+        who: magician
+        es: "[grand] ¡Abracadabra! ¡Y apareció detrás de tu oreja!"
+        it: "[grand] Abracadabra! Ed eccola dietro il tuo orecchio!"
+      sound: sparkle
+  - say: monedita
+    es: "[delighted] ¡Ahora soy una monedita mágica!"
+    it: "[delighted] Adesso sono una monetina magica!"
+
+  # The crow ------------------------------------------------------------------------------------------------
+  - sound: crow_caw
+  - scene:
+      id: crow
+      picture: a cheeky crow swooping down and snatching the shiny little silver coin from the magician's top hat with his beak, the magician and the little boy looking up open-mouthed
+      with: [crow, magician, boy, monedita]
+      move: surprised
+  - say: narrator
+    es: "[surprised] Pero de pronto... ¡fuuush! Bajó volando un cuervo, ¡y se llevó la monedita en el pico!"
+    it: "[surprised] Ma all'improvviso... fiuuu! Scese in volo un corvo, e si portò via la monetina nel becco!"
+  - say: crow
+    es: "[squawky, excited] ¡Cra, cra! ¡Qué brillante! ¡Es perfecta para mi nido!"
+    it: "[squawky, excited] Cra, cra! Che luccicante! È perfetta per il mio nido!"
+  - copy:
+      ask:
+        es: "[playful] ¡Vuelen con el cuervo! Abran las alas... y aleteen, aleteen, ¡alto, alto, hasta el árbol!"
+        it: "[playful] Volate con il corvo! Aprite le ali... e sbattetele, sbattetele, in alto, fino all'albero!"
+      done:
+        es: "[delighted] ¡Qué pájaros tan buenos!"
+        it: "[delighted] Che bravi uccellini!"
+      move: excited
+      music: story_move
+      seconds: 6
+  - scene:
+      id: nest
+      picture: the cheeky crow proudly sitting in his big messy nest high in a tree, decorated with shiny treasures, a spoon, a key, a button, bottle caps, and the shiny little silver coin in the middle like a mirror
+      with: [crow, monedita]
+      move: happy
+  - say: crow
+    es: "[squawky, proud] ¡Miren mi tesoro! Una cuchara, una llave, un botón... ¡y una monedita para mirarme como en un espejo!"
+    it: "[squawky, proud] Guardate il mio tesoro! Un cucchiaio, una chiave, un bottone... e una monetina per specchiarmi!"
+  - noise:
+      ask:
+        es: "[playful] ¡Hablen como el cuervo! ¡Cra, cra, cra!"
+        it: "[playful] Parlate come il corvo! Cra, cra, cra!"
+      louder:
+        es: "[playful] ¡Más fuerte! ¡Cra, cra, craaa!"
+        it: "[playful] Più forte! Cra, cra, craaa!"
+      done:
+        who: crow
+        es: "[squawky, laughing] ¡Cra! ¡Hablan cuervo igualitico que yo!"
+        it: "[squawky, laughing] Cra! Parlate corvese proprio come me!"
+      without:
+        who: crow
+        es: "[squawky] ¡Cra, cra, cra! ¡Qué tesoro tan brillante!"
+        it: "[squawky] Cra, cra, cra! Che tesoro luccicante!"
+      sound: crow_caw
+  - say: narrator
+    es: "[playful] Pero con tanto cra, cra... el nido se meneó, ¡y la monedita se cayó! Plin, plin, plin... justo en la cesta de una costurera."
+    it: "[playful] Ma con tutto quel cra, cra... il nido traballò, e la monetina cadde! Plin, plin, plin... proprio nel cestino di una sarta."
+  - say: monedita
+    es: "[giggly] ¡Fui tesoro de un cuervo! ¡Una monedita sirve para muchas cosas!"
+    it: "[giggly] Sono stata il tesoro di un corvo! Una monetina serve a tante cose!"
+
+  # The tailor ----------------------------------------------------------------------------------------------
+  - say: tailor
+    es: "[kind, gentle, delighted] ¡Ay, qué bonita! Justo me faltaba un botón brillante."
+    it: "[kind, gentle, delighted] Oh, che bella! Mi mancava proprio un bottone luccicante."
+  - choice:
+      id: button
+      ask:
+        es: "[curious] La costurera le hizo dos huequitos y la cosió como botón. ¿Dónde la cosió? ¿En una chaqueta... o en un sombrero?"
+        it: "[curious] La sarta le fece due forellini e la cucì come bottone. Dove la cucì? Su una giacca... o su un cappello?"
+      options:
+        jacket:
+          words: {es: [chaqueta, una chaqueta, la chaqueta, chamarra], it: [giacca, una giacca, la giacca, giacchetta]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que en una chaqueta!"
+            it: "[thoughtful] Mmm... secondo me, su una giacca!"
+          then:
+            who: tailor
+            es: "[pleased] ¡En una chaqueta blanca de panadero! ¡Qué elegante quedó!"
+            it: "[pleased] Su una giacca bianca da fornaio! Che eleganza!"
+        hat:
+          words: {es: [sombrero, un sombrero, el sombrero, gorro], it: [cappello, un cappello, il cappello, berretto]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que en un sombrero!"
+            it: "[thoughtful] Mmm... secondo me, su un cappello!"
+          then:
+            who: tailor
+            es: "[pleased] ¡En un gorro alto de panadero! ¡Qué elegante quedó!"
+            it: "[pleased] Su un alto cappello da fornaio! Che eleganza!"
+  - scene:
+      id: sewing
+      about: button
+      with: [tailor, monedita]
+      options:
+        jacket: the kind tailor lady at her sewing table with a pincushion on her wrist, sewing the shiny little silver coin as a button onto a white baker's jacket, spools of thread and scissors around her
+        hat: the kind tailor lady at her sewing table with a pincushion on her wrist, sewing the shiny little silver coin as a button onto a tall white baker's hat, spools of thread and scissors around her
+      move: happy
+  - say: monedita
+    es: "[proud] ¡Ahora soy un botón! Clin, clin... ¡el botón más brillante del país!"
+    it: "[proud] Adesso sono un bottone! Clin, clin... il bottone più luccicante del paese!"
+
+  # The baker -----------------------------------------------------------------------------------------------
+  - scene:
+      id: dough
+      picture: the jolly baker in his bakery kneading a huge soft ball of cake dough on a floury table, the shiny little silver coin popping off his white baker's clothes with a little spark and flying towards the dough
+      with: [baker, monedita]
+      move: surprised
+  - say: narrator
+    es: "[playful] La ropa era para don Pepe, el panadero. Y don Pepe se puso a amasar una torta de cumpleaños."
+    it: "[playful] Il vestito era per il signor Peppe, il fornaio. E il signor Peppe si mise a impastare una torta di compleanno."
+  - copy:
+      ask:
+        es: "[playful] ¡Amasen con don Pepe! Aprieten la masa, estírenla... ¡y aplasten, aplasten!"
+        it: "[playful] Impastate con il signor Peppe! Schiacciate l'impasto, tiratelo... e premete, premete!"
+      done:
+        es: "[delighted] ¡Qué panaderos tan buenos!"
+        it: "[delighted] Che bravi fornai!"
+      move: happy
+      music: story_build
+      seconds: 6
+  - sound: boing
+  - say: narrator
+    es: "[surprised, laughing] Pero amasaba con tanta fuerza que... ¡pop! ¡El botón saltó y se cayó dentro de la masa!"
+    it: "[surprised, laughing] Ma impastava con tanta forza che... pop! Il bottone saltò e cadde dentro l'impasto!"
+  - say: baker
+    es: "[booming, laughing] ¡Ja, ja! ¡Pues que se quede ahí! ¡El que encuentre la monedita en su pedazo de torta tendrá un año de suerte!"
+    it: "[booming, laughing] Ah, ah! E allora che resti lì! Chi troverà la monetina nella sua fetta di torta avrà un anno fortunato!"
+
+  # The birthday --------------------------------------------------------------------------------------------
+  - scene:
+      id: birthday
+      picture: the little boy at his birthday party in a paper party hat, about to blow out the candles on a big round cake, friends around the table, balloons and streamers above them
+      with: [boy]
+      move: excited
+  - say: narrator
+    es: "[excited] ¿Y para quién era la torta? ¡Para el cumpleaños de Pedrito!"
+    it: "[excited] E per chi era la torta? Per il compleanno di Pietro!"
+  - noise:
+      ask:
+        es: "[excited] ¡Ayuden a Pedrito a soplar las velas! Uno, dos, tres... ¡fuuuu!"
+        it: "[excited] Aiutate Pietro a spegnere le candeline! Uno, due, tre... fuuu!"
+      louder:
+        es: "[playful] ¡Más fuerte, que queda una! ¡Fuuuuu!"
+        it: "[playful] Più forte, ne resta una! Fuuuuu!"
+      done:
+        es: "[cheering] ¡Se apagaron todas! ¡Feliz cumpleaños, Pedrito!"
+        it: "[cheering] Spente tutte! Buon compleanno, Pietro!"
+      without:
+        who: boy
+        es: "[blowing, cheering] ¡Fuuuu! ¡Las apagué todas!"
+        it: "[blowing, cheering] Fuuu! Le ho spente tutte!"
+      sound: party_blowout
+  - say: boy
+    es: "[mouth full, then amazed] Ñam, ñam... ¿y esto? ¡Una monedita! ¡Es mi monedita del parque!"
+    it: "[mouth full, then amazed] Gnam, gnam... e questo? Una monetina! È la mia monetina del parco!"
+  - scene:
+      id: found
+      picture: the little boy in his party hat holding up the shiny little silver coin with two little holes in it, both of them beaming at each other, a slice of cake on the plate in front of him, friends cheering
+      with: [boy, monedita]
+      move: success
+  - say: monedita
+    es: "[overjoyed] ¡Pedrito! ¡Volví!"
+    it: "[overjoyed] Pietro! Sono tornata!"
+
+  # Everything a coin can be --------------------------------------------------------------------------------
+  - say: narrator
+    es: "[warm] Pedrito le pasó una cinta por los huequitos del botón, y se la colgó del cuello para la buena suerte."
+    it: "[warm] Pietro infilò un nastrino nei forellini del bottone, e se la appese al collo come portafortuna."
+  - scene:
+      id: the_end
+      picture: the little boy proudly wearing the shiny little silver coin on a ribbon around his neck, walking home at sunset past the park, the magician waving, the crow on a branch, the tailor and the baker at their shop doors
+      with: [boy, monedita, magician, crow, tailor, baker]
+      move: loving
+  - say: monedita
+    es: "[happy, thoughtful] Nunca compré nada en este país. Pero fui juego, fui magia, fui tesoro, fui botón, fui sorpresa... ¡y ahora soy la buena suerte de Pedrito!"
+    it: "[happy, thoughtful] Non ho mai comprato niente in questo paese. Ma sono stata un gioco, una magia, un tesoro, un bottone, una sorpresa... e adesso sono il portafortuna di Pietro!"
+  - chorus:
+      ask:
+        es: "[warm] ¿Y qué aprendió la monedita? ¡Díganlo todos juntos: una monedita sirve para muchas cosas!"
+        it: "[warm] E che cosa imparò la monetina? Ditelo tutti insieme: una monetina serve a tante cose!"
+      done:
+        who: monedita
+        es: "[giggly] ¡Para muchísimas cosas! ¡Clin, clin!"
+        it: "[giggly] A tantissime cose! Clin, clin!"
+      without:
+        who: monedita
+        es: "[giggly] Una monedita sirve para muchas cosas. ¡Clin, clin!"
+        it: "[giggly] Una monetina serve a tante cose. Clin, clin!"
+  - say: narrator
+    es: "[excited] ¡Y la fiesta siguió hasta la noche! ¡Bailen con Pedrito y la monedita!"
+    it: "[excited] E la festa continuò fino a sera! Ballate con Pietro e la monetina!"
+  - move: dance
+  - music: {name: story_dance, seconds: 12}
+  - say: narrator
+    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

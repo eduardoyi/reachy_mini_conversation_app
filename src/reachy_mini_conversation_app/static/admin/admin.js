@@ -390,6 +390,8 @@ const GAME_CARDS = {
   ricitos_de_oro: { name: "Goldilocks", shelf: "stories", facts: ["About 6 minutes", "Kids blow, snore and wake her up"] },
   musicos_de_bremen: { name: "The Town Musicians", shelf: "stories", facts: ["About 6 minutes", "Kids bray, bark, meow and crow"] },
   la_gran_carrera: { name: "The Big Race", shelf: "stories", facts: ["About 6 minutes", "Kids rev, honk, steer and cheer"] },
+  donde_esta_bigotes: { name: "Where's Bigotes?", shelf: "stories", facts: ["About 7 minutes", "Kids call, meow, guess and count kittens"] },
+  la_monedita_de_plata: { name: "The Little Silver Coin", shelf: "stories", facts: ["About 7 minutes", "Kids clink, caw, knead and say the magic word"] },
 };
 const SHELVES = [
   ["party", "Party games", "Everyone plays on their phone; the e-ink screen shows the QR code."],

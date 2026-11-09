@@ -212,3 +212,98 @@ don_bus:
     a big, boxy, jolly old town bus with a row of round windows along his side, a megaphone on his roof and a
     checkered race flag on a pole fixed to his roof; his two headlights are his big happy eyes with a bushy mustache
     under them, above a broad smiling grille; a bus only, with four wheels, no arms, no hands and no legs
+
+# ¿Dónde está Bigotes? (2026-11-09). Lola is the girl above. The neighbours are drawn as plain, kind people, told apart
+# by shape and outfit.
+
+bigotes:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Misifú the cat" (also the turnip story's cat; never in the same
+    story). Bigotes only meows.
+  voice: "Xg2awBCZFaLbcri3rvNP"
+  look: >-
+    a slim, sleek black cat with big round bright eyes, long whiskers, one ear folded down at the tip and the other
+    standing up, and a long tail that is black all the way except for a white tip; no collar; a real cat's body on
+    exactly four legs, no hands
+
+painter:
+  description: >-
+    Reuses "Detectives · The Last Toast · Rosa, the housekeeper": warm, chatty and expressive. Señora Carmela, a
+    dreamy, enthusiastic painter.
+  voice: "54EN6WFsqQUTL9ULPowR"
+  look: >-
+    Señora Carmela, a tall, slender woman of about fifty with a big messy bun of curly hair held up by two
+    paintbrushes, round glasses, big hoop earrings and a long paint-splattered smock over a long skirt
+
+musician:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Samuel, the bartender": relaxed, funny, an easygoing, smiling voice.
+    Don Ramón, a cheerful musician who plays the cuatro.
+  voice: "ELKUz2Dml0Jmy3lgo9pY"
+  look: >-
+    Don Ramón, a round, cheerful man of about sixty with a short grey beard, a straw hat with a band, a loose
+    light shirt with the top buttons open, sandals, and a small four-string guitar
+
+baker:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Uncle Pancho": big, jolly, loud and booming, a deep, hearty voice.
+    Don Pepe, the neighbourhood baker.
+  voice: "RmaSlHASRRFcAl1uxzhA"
+  look: >-
+    Don Pepe, a big, round, jolly baker with rosy cheeks, a thick black mustache curled at the ends, flour on his
+    nose, a white double-breasted baker's jacket and a white apron
+
+gardener:
+  description: >-
+    Reuses "Detectives · The Last Toast · Doctor Julián Ferrer": a calm, kind man in his sixties, a deep, warm,
+    slow voice (also the turnip story's grandpa; never in the same story). Señor Julián, a gentle old gardener.
+  voice: "EarNa3mBc7Rrt6ArOQi1"
+  look: >-
+    Señor Julián, a tall, thin, slightly stooped old man with a long white beard, a wide floppy sun hat, round
+    spectacles, a dark waistcoat over a collarless shirt, gardening gloves and baggy trousers tucked into boots
+
+# La monedita de plata (2026-11-09). The baker is Don Pepe above.
+
+monedita:
+  description: >-
+    Reuses the little straw pig's voice (an adult voice actor doing a high, squeaky, giggly cartoon voice).
+    Monedita, a cheerful, curious little silver coin who wants to see the world.
+  voice: "iVT2VOVHkBNE0J6nTdL5"
+  look: >-
+    a small, round, shiny silver coin with a raised rim and a little embossed star above her face; her face is on the
+    front of the coin: two big round sparkling eyes and a wide happy smile; tiny sparkles around her; a coin only,
+    no arms, no hands and no legs
+
+boy:
+  description: >-
+    Reuses the middle pig's voice (an adult voice actor doing a bright, bouncy, fast-talking cartoon voice).
+    Pedrito, a lively little boy.
+  voice: "QBjpKqr4CpQoOnbn40dM"
+  look: >-
+    Pedrito, a little boy about six years old with a messy mop of straight dark hair sticking up at the back, big
+    ears, a striped polo shirt, shorts with patched knees, and one sock always fallen down
+
+magician:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Marco Bellini": theatrical, grand and showy. A grand park magician.
+  voice: "hjcB1XpogPinAIk1gMPk"
+  look: >-
+    a tall, thin, grand magician with a pointed waxed mustache and a little pointed beard, a very tall top hat, a
+    long swirling cape with stars on its lining, white gloves and a short magic wand
+
+crow:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Pepe the parrot": a high-pitched, squawky, fast and silly voice.
+    A cheeky crow who collects shiny things.
+  voice: "jm73dj1U3A9MZpX2WFpP"
+  look: >-
+    a cheeky, scruffy black crow with a big shiny beak, bright curious eyes, a tuft of feathers sticking up on his
+    head and slightly ruffled wing feathers; a real bird's body with two wings and two legs, no arms and no hands
+
+tailor:
+  description: >-
+    Reuses "mama_pig": a kind, warm, gentle adult voice. A kind tailor.
+  voice: "Xg76FEi4dbIiAKTuqhdB"
+  look: >-
+    a small, plump, kind tailor lady with short grey curly hair, half-moon glasses on a chain, a tape measure around
+    her neck, a pincushion on her wrist and a cardigan with big pockets

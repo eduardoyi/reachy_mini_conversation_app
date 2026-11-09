@@ -185,9 +185,13 @@ The softened ending (cold water, the wolf runs away) is on purpose for the 2-yea
 
 ## Next stories
 
-Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera. Ideas for later:
-Pinocchio in short episodes (Collodi's book, drawn from his descriptions), Los tres chivitos, El hombrecito de jengibre, La gallinita roja, La liebre y la tortuga, El león
-y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
+Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera; then
+(2026-11-09) ¿Dónde está Bigotes? and La monedita de plata. Ideas for later: Pinocchio in short episodes (Collodi's book,
+drawn from his descriptions), Los tres chivitos, El hombrecito de jengibre, La gallinita roja, El león y el ratón (could
+be the fire truck story), Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan; the big wind first), Chicken
+Little, The Little Mitten, La cucarachita Martina, The Elves and the Shoemaker, The Emperor's New Clothes. A story from
+a book still in copyright (such as Mireya Tabuas's Gato encerrado) is never retold: at most its bare idea, in a story of
+our own.
 
 ## Implementation order
 
@@ -318,3 +322,14 @@ y el ratón, Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan).
   Marco Bellini (Flecha), the oldest pig (Tito) and Uncle Pancho (Don Bus). The image model kept drawing a race car
   with eyes on its windshield, the look of Pixar's Cars, so Flecha is an open-top roadster whose headlights are his
   eyes; nothing in the story comes from any film. 142 clips (about 11k credits), 7 sounds and a race music loop.
+- 2026-11-09: two stories Eduardo asked for. `donde_esta_bigotes` (¿Dónde está Bigotes? / Dov'è Baffo?) is our own
+  story on the idea of a book he read as a child (Gato encerrado, Mireya Tabuas, 1995, still in copyright, so nothing
+  of it is used but the idea): Lola looks for her black cat and four neighbours each describe a cat of their own, an
+  artist, a singer, a gourmet and a dreamer, each what its neighbour loves; the folded ear and white tail tip give it
+  away, and Bigotes is a she, hiding in Lola's closet with four kittens, one per neighbour. 13 moments (calling,
+  doorbell pat, painting, sun or fish, Lola's question four times, knocking, a sung meow, cheese or milk, butterflies,
+  same cat yes or no, calling together, counting kittens). `la_monedita_de_plata` (La monedita de plata / La monetina
+  d'argento) is Andersen's The Silver Shilling (1862) without its sad parts, about what Eduardo loved: the people and
+  their uses for a coin that can't buy anything far from home (heads or tails, a magic trick, a crow's treasure, a
+  button, a cake surprise, a lucky charm). Ten roles on voices already on the account; Lola is the turnip story's
+  girl. About 22k credits for 302 clips and 8 sounds.

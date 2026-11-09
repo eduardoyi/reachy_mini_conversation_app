@@ -165,6 +165,37 @@ sound:
       A little old cartoon truck straining up a steep hill, its engine chugging slower and slower, then a happy
       toot as it reaches the top, comic.
 
+  doorbell:
+    seconds: 1.5
+    prompt: A friendly two-tone doorbell, ding-dong, bright and clear, a house door chime.
+  cuatro_strum:
+    seconds: 2.5
+    prompt: >-
+      A cheerful strum on a small four-string Venezuelan cuatro guitar, a quick bright rhythmic joropo flourish,
+      warm and happy.
+  singing_meow:
+    seconds: 2
+    prompt: >-
+      A cute cartoon cat singing a long melodic meow that goes up and down like a little tune, with a light guitar
+      strum behind it, funny and sweet.
+  kittens_mew:
+    seconds: 2
+    prompt: Several tiny newborn kittens mewing softly and squeakily from inside a box, very cute and gentle.
+  cat_purr:
+    seconds: 2.5
+    prompt: A happy cat purring contentedly, close and soft, cosy and warm.
+  coin_clink:
+    seconds: 1.5
+    prompt: A small shiny coin clinking three times on a table, clin clin clin, bright and tinkly, cartoon-like.
+  crow_caw:
+    seconds: 1.5
+    prompt: A cheeky cartoon crow cawing twice, caw caw, comic and lively, not harsh.
+  party_blowout:
+    seconds: 2
+    prompt: >-
+      Children at a birthday party blowing out candles, a long whoosh of breath followed by a party horn toot and
+      happy little cheers and clapping.
+
 music:
   story_move:
     seconds: 15
