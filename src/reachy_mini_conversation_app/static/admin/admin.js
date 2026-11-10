@@ -199,7 +199,11 @@ function showTab() {
   else $(".gear").removeAttribute("aria-current");
   $("#back").hidden = tab !== "people";
   showTitle();
-  if (tab !== "camera") closeCamera();
+  if (tab !== "camera") {
+    closeBeReachy();
+    stopIntercom();
+    closeCamera();
+  }
   if ($("#person-sheet").open) $("#person-sheet").close();
   if ($("#viewer").open) $("#viewer").close();
   for (const sheet of document.querySelectorAll("#costs-sheet, #personality-sheet, #memory-sheet, #wake-sheet")) if (sheet.open) sheet.close();
@@ -1953,10 +1957,339 @@ $("#look-up").addEventListener("click", (event) =>
   })
 );
 
+// Intercom --------------------------------------------------------------------------------------
+// Hear the room through Reachy's mic; hold to talk through his speaker (he chimes first). One phone at a time.
+
+const INTERCOM_RATE = 16000;
+const PLAY_LEAD_S = 0.15; // a little buffer against Tailscale's jitter
+const PLAY_MAX_BEHIND_S = 0.6; // further behind than this, it skips ahead to stay live
+const TALK_CHUNK = 1600; // 100 ms of the phone's voice per message
+const TALK_TAIL_MS = 600; // the room stays muted this long after letting go, so you don't hear your own voice back
+
+const MIC_WORKLET = `
+class IntercomMic extends AudioWorkletProcessor {
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) this.port.postMessage(channel.slice(0));
+    return true;
+  }
+}
+registerProcessor("intercom-mic", IntercomMic);
+`;
+
+const intercom = { socket: null, context: null, gain: null, playAt: 0, ready: false, talking: false, heard: true, mutedUntil: 0, mic: null, pending: [] };
+
+function intercomShown() {
+  const listening = Boolean(intercom.socket);
+  const button = $("#listen");
+  button.setAttribute("aria-pressed", String(listening));
+  button.querySelector("span").textContent = !listening ? "Listen" : intercom.ready ? "Listening" : "Connecting…";
+  $("#talk").hidden = !listening;
+  for (const talk of document.querySelectorAll(".talk")) {
+    talk.disabled = !intercom.ready;
+    talk.classList.toggle("on", intercom.talking);
+    talk.querySelector("span").textContent = intercom.talking ? "Talking… let go to listen" : "Hold to talk";
+  }
+}
+
+function startIntercom() {
+  if (intercom.socket) return;
+  // Made on a tap, so the phone lets it play.
+  if (!intercom.context) {
+    intercom.context = new AudioContext({ sampleRate: INTERCOM_RATE, latencyHint: "interactive" });
+    intercom.gain = intercom.context.createGain();
+    intercom.gain.connect(intercom.context.destination);
+  }
+  intercom.context.resume();
+  const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/intercom`);
+  socket.binaryType = "arraybuffer";
+  intercom.socket = socket;
+  intercom.ready = false;
+  intercom.playAt = 0;
+  socket.onmessage = (event) => {
+    if (typeof event.data !== "string") return playHeard(event.data);
+    let message = {};
+    try {
+      message = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+    if (message.error) {
+      toast(message.error, "bad");
+      stopIntercom();
+    } else if (message.ready) {
+      intercom.ready = true;
+      intercomShown();
+    }
+  };
+  socket.onclose = () => {
+    if (intercom.socket !== socket) return;
+    if (intercom.ready) toast("The intercom closed.", "bad");
+    stopIntercom();
+  };
+  intercomShown();
+}
+
+function stopIntercom() {
+  const socket = intercom.socket;
+  intercom.socket = null;
+  intercom.ready = false;
+  intercom.talking = false;
+  if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
+  if (intercom.mic) {
+    intercom.mic.stream.getTracks().forEach((track) => track.stop());
+    intercom.mic.node.disconnect();
+    intercom.mic = null;
+  }
+  intercomShown();
+}
+
+function playHeard(buffer) {
+  const context = intercom.context;
+  if (!context || !intercom.heard || intercom.talking || performance.now() < intercom.mutedUntil) return;
+  const samples = new Int16Array(buffer);
+  if (!samples.length) return;
+  const audio = context.createBuffer(1, samples.length, INTERCOM_RATE);
+  const channel = audio.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+  const now = context.currentTime;
+  if (intercom.playAt < now || intercom.playAt > now + PLAY_MAX_BEHIND_S) intercom.playAt = now + PLAY_LEAD_S;
+  const source = context.createBufferSource();
+  source.buffer = audio;
+  source.connect(intercom.gain);
+  source.start(intercom.playAt);
+  intercom.playAt += audio.duration;
+}
+
+async function openMic() {
+  if (intercom.mic) return intercom.mic;
+  const context = intercom.context;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  if (!openMic.loaded) {
+    const url = URL.createObjectURL(new Blob([MIC_WORKLET], { type: "text/javascript" }));
+    await context.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    openMic.loaded = true;
+  }
+  const node = new AudioWorkletNode(context, "intercom-mic");
+  const silent = context.createGain();
+  silent.gain.value = 0;
+  context.createMediaStreamSource(stream).connect(node);
+  node.connect(silent).connect(context.destination); // kept in the graph so it runs
+  node.port.onmessage = (event) => sendVoice(event.data);
+  intercom.mic = { stream, node };
+  return intercom.mic;
+}
+
+function sendVoice(floats, flush = false) {
+  if (!intercom.talking) return;
+  if (floats) intercom.pending.push(floats);
+  const total = intercom.pending.reduce((sum, part) => sum + part.length, 0);
+  if (!total || (total < TALK_CHUNK && !flush)) return;
+  const pcm = new Int16Array(total);
+  let at = 0;
+  for (const part of intercom.pending) {
+    for (let i = 0; i < part.length; i++) pcm[at++] = Math.max(-32768, Math.min(32767, Math.round(part[i] * 32767)));
+  }
+  intercom.pending = [];
+  if (intercom.socket && intercom.socket.readyState === WebSocket.OPEN) intercom.socket.send(pcm.buffer);
+}
+
+async function startTalking() {
+  if (!intercom.ready || intercom.talking) return;
+  try {
+    await openMic();
+  } catch (error) {
+    toast("The phone's mic isn't allowed. Allow it for this site, then try again.", "bad");
+    return;
+  }
+  if (!intercom.ready) return;
+  intercom.talking = true;
+  intercom.pending = [];
+  intercom.socket.send(JSON.stringify({ talk: true }));
+  if (navigator.vibrate) navigator.vibrate(20);
+  intercomShown();
+}
+
+function stopTalking() {
+  if (!intercom.talking) return;
+  sendVoice(null, true); // the last words before letting go
+  intercom.talking = false;
+  intercom.pending = [];
+  intercom.mutedUntil = performance.now() + TALK_TAIL_MS;
+  if (intercom.socket && intercom.socket.readyState === WebSocket.OPEN) intercom.socket.send(JSON.stringify({ talk: false }));
+  intercomShown();
+}
+
+for (const talk of document.querySelectorAll(".talk")) {
+  talk.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    talk.setPointerCapture(event.pointerId);
+    startTalking();
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) talk.addEventListener(type, stopTalking);
+  talk.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+
+$("#listen").addEventListener("click", () => (intercom.socket ? stopIntercom() : startIntercom()));
+
+// Be Reachy --------------------------------------------------------------------------------------
+// Full screen: his head follows where the back of the phone points; drag on the picture to look around too.
+
+const LOOK_SEND_MS = 66; // about 15 a second
+const LOOK_KEEPALIVE_MS = 1000; // he stops following after 3 s without word
+const LOOK_DRAG_DEG_PER_PX = 0.25;
+
+const look = { socket: null, zero: null, phone: null, drag: { yaw: 0, pitch: 0 }, sent: null, sentAt: 0, timer: 0, startedIntercom: false, wakeLock: null, pointer: null };
+
+// Where the back of the phone points, from the sensor's angles: yaw (left positive) and elevation, in degrees.
+function phoneAim(alpha, beta, gamma) {
+  const r = Math.PI / 180;
+  const [ca, sa, cb, sb, cg, sg] = [Math.cos(alpha * r), Math.sin(alpha * r), Math.cos(beta * r), Math.sin(beta * r), Math.cos(gamma * r), Math.sin(gamma * r)];
+  // The device's -z axis in the world frame (x east, y north, z up).
+  const x = -(ca * sg + sa * sb * cg);
+  const y = -(sa * sg - ca * sb * cg);
+  const z = -(cb * cg);
+  return { yaw: Math.atan2(y, x) / r, up: Math.asin(Math.max(-1, Math.min(1, z))) / r };
+}
+
+const wrap180 = (degrees) => ((((degrees + 180) % 360) + 360) % 360) - 180;
+
+function onOrientation(event) {
+  if (event.alpha === null || event.beta === null || event.gamma === null) return;
+  look.phone = phoneAim(event.alpha, event.beta, event.gamma);
+  if (!look.zero) look.zero = look.phone;
+}
+
+function lookTarget() {
+  let yaw = look.drag.yaw;
+  let pitch = look.drag.pitch;
+  if (look.phone && look.zero) {
+    yaw += wrap180(look.phone.yaw - look.zero.yaw);
+    pitch -= look.phone.up; // Reachy's pitch is positive looking down
+  }
+  return { yaw: Math.max(-150, Math.min(150, yaw)), pitch: Math.max(-35, Math.min(35, pitch)) };
+}
+
+function sendLook() {
+  const socket = look.socket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  const target = lookTarget();
+  const now = performance.now();
+  const moved = !look.sent || Math.abs(target.yaw - look.sent.yaw) > 0.4 || Math.abs(target.pitch - look.sent.pitch) > 0.4;
+  if (!moved && now - look.sentAt < LOOK_KEEPALIVE_MS) return;
+  socket.send(JSON.stringify({ yaw: Math.round(target.yaw * 10) / 10, pitch: Math.round(target.pitch * 10) / 10 }));
+  look.sent = target;
+  look.sentAt = now;
+}
+
+function recenter() {
+  look.zero = look.phone;
+  look.drag = { yaw: 0, pitch: 0 };
+}
+
+async function openBeReachy() {
+  const status = state.status;
+  if (status && status.privacy.on) return toast("Privacy is on, so his camera is off.", "bad");
+  const overlay = $("#be-reachy");
+  overlay.hidden = false;
+  closeCamera();
+  const image = $("#be-reachy-camera");
+  image.onerror = () => {
+    toast("The camera stopped.", "bad");
+    closeBeReachy();
+  };
+  image.src = `/api/camera?fast=1&t=${Date.now()}`;
+  look.zero = null;
+  look.phone = null;
+  look.sent = null;
+  look.drag = { yaw: 0, pitch: 0 };
+  $("#be-reachy-hint").classList.remove("gone");
+  setTimeout(() => $("#be-reachy-hint").classList.add("gone"), 4000);
+  window.addEventListener("deviceorientation", onOrientation);
+  const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/look`);
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.error) toast(message.error, "bad");
+    } catch (error) {
+      // only errors come this way
+    }
+  };
+  look.socket = socket;
+  look.timer = setInterval(sendLook, LOOK_SEND_MS);
+  look.startedIntercom = !intercom.socket;
+  if (look.startedIntercom) startIntercom();
+  $("#be-reachy-sound").setAttribute("aria-pressed", String(intercom.heard));
+  try {
+    await overlay.requestFullscreen({ navigationUI: "hide" });
+    await screen.orientation.lock("landscape");
+  } catch (error) {
+    // Not every browser goes full screen or turns; the view still works.
+  }
+  try {
+    look.wakeLock = await navigator.wakeLock.request("screen");
+  } catch (error) {
+    look.wakeLock = null;
+  }
+}
+
+function closeBeReachy() {
+  const overlay = $("#be-reachy");
+  if (overlay.hidden) return;
+  overlay.hidden = true;
+  window.removeEventListener("deviceorientation", onOrientation);
+  clearInterval(look.timer);
+  if (look.socket && look.socket.readyState <= WebSocket.OPEN) look.socket.close();
+  look.socket = null;
+  const image = $("#be-reachy-camera");
+  image.onerror = null;
+  image.removeAttribute("src");
+  stopTalking();
+  if (look.startedIntercom) stopIntercom();
+  look.startedIntercom = false;
+  intercom.heard = true;
+  if (look.wakeLock) look.wakeLock.release().catch(() => {});
+  look.wakeLock = null;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (currentTab === "camera" && !document.hidden) openCamera();
+}
+
+$("#be-reachy-open").addEventListener("click", openBeReachy);
+$("#be-reachy-close").addEventListener("click", closeBeReachy);
+$("#be-reachy-center").addEventListener("click", recenter);
+$("#be-reachy-sound").addEventListener("click", (event) => {
+  intercom.heard = !intercom.heard;
+  event.currentTarget.setAttribute("aria-pressed", String(intercom.heard));
+});
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement) closeBeReachy(); // the phone's back gesture leaves full screen
+});
+
+const stage = $("#be-reachy-camera");
+stage.addEventListener("pointerdown", (event) => {
+  look.pointer = { x: event.clientX, y: event.clientY, from: { ...look.drag } };
+  stage.setPointerCapture(event.pointerId);
+});
+stage.addEventListener("pointermove", (event) => {
+  if (!look.pointer) return;
+  // Dragging the picture right shows what is to his left, as dragging a photo would.
+  look.drag = {
+    yaw: look.pointer.from.yaw + (event.clientX - look.pointer.x) * LOOK_DRAG_DEG_PER_PX,
+    pitch: look.pointer.from.pitch - (event.clientY - look.pointer.y) * LOOK_DRAG_DEG_PER_PX,
+  };
+});
+for (const type of ["pointerup", "pointercancel"]) stage.addEventListener(type, () => (look.pointer = null));
+
 document.addEventListener("visibilitychange", () => {
   if (currentTab === "camera") {
-    if (document.hidden) closeCamera();
-    else openCamera();
+    if (document.hidden) {
+      closeBeReachy();
+      stopIntercom();
+      closeCamera();
+    } else openCamera();
   }
   if (currentTab === "home" && !document.hidden) loadHome();
   if (currentTab === "gallery" && !document.hidden && !$("#viewer").open) loadGallery();

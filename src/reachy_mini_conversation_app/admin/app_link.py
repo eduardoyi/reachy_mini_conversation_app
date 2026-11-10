@@ -5,6 +5,8 @@ from typing import Any, Final
 from pathlib import Path
 
 import httpx
+from websockets.exceptions import InvalidStatus, InvalidHandshake
+from websockets.asyncio.client import ClientConnection, connect
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,16 @@ class AppLink:
             await response.aclose()
             raise AppUnavailable("control token refused")
         return response
+
+    async def connect(self, path: str) -> ClientConnection:
+        """Open a WebSocket to the app (the intercom, the head look); the caller closes it."""
+        url = "ws" + self._url.removeprefix("http") + path
+        try:
+            return await connect(url, additional_headers=self._headers(), open_timeout=STATUS_TIMEOUT_S)
+        except InvalidStatus as error:
+            raise AppUnavailable(f"refused with {error.response.status_code}") from error
+        except (OSError, TimeoutError, InvalidHandshake) as error:
+            raise AppUnavailable(type(error).__name__) from error
 
     async def aclose(self) -> None:
         """Close the HTTP client."""

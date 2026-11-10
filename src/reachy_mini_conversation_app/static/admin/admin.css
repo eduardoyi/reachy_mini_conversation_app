@@ -676,6 +676,37 @@ dialog { color: var(--ink); }
 .dpad [data-head="center"]:active { background: var(--sun); }
 .dpad button:disabled { opacity: .35; }
 
+.intercom-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.intercom-row .pill { flex: 1; max-width: 200px; }
+#listen[aria-pressed="true"] { background: var(--mint); color: #fff; }
+.talk {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; max-width: 420px;
+  min-height: 64px; margin: 14px auto 0; border: 0; border-radius: 22px; background: var(--plum); color: #fff;
+  font: 700 18px var(--body); touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; transition: background .15s, transform .1s;
+}
+.talk .icon { width: 24px; height: 24px; }
+.talk.on { background: var(--coral); transform: scale(.98); }
+.talk:disabled { opacity: .45; }
+
+.be-reachy { position: fixed; inset: 0; z-index: 50; background: #000; overflow: hidden; touch-action: none; }
+.be-reachy img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+.be-top, .be-bottom {
+  position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px max(16px, env(safe-area-inset-left));
+}
+.be-top { top: 0; padding-top: calc(12px + env(safe-area-inset-top)); }
+.be-bottom { bottom: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+.be-reachy .round { background: rgba(10, 12, 28, .55); backdrop-filter: blur(8px); }
+.be-reachy .round[aria-pressed="false"] { opacity: .5; }
+.be-hint {
+  margin: 0; padding: 6px 14px; border-radius: 999px; background: rgba(10, 12, 28, .55); color: #fff;
+  font-size: 14px; font-weight: 600; backdrop-filter: blur(8px); text-align: center; transition: opacity .6s;
+}
+.be-hint.gone { opacity: 0; }
+.be-bottom .talk { margin: 0; flex: 0 1 260px; min-height: 58px; }
+.round-spacer { width: 44px; flex: none; }
+
 /* Activity ------------------------------------------------------------------------------------- */
 
 .segmented { display: flex; background: var(--shell); border-radius: 999px; padding: 4px; }

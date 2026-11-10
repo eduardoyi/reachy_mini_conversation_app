@@ -1,7 +1,7 @@
 """The app's control API for the phone admin app (admin/): loopback only, behind a token both processes share.
 
 It turns privacy on and off, streams the camera as MJPEG, turns the head (lifting it while he sleeps, without
-waking him), puts him to sleep or wakes him, manages enrolled faces, marks a call he missed and records someone
+waking him) or follows the phone's tilt, carries the intercom, puts him to sleep or wakes him, manages enrolled faces, marks a call he missed and records someone
 calling him for the wake word to learn their voice.
 """
 
@@ -12,16 +12,19 @@ import logging
 import secrets
 import ipaddress
 import threading
-from typing import Final
+from typing import Any, Final
 from pathlib import Path
-from collections.abc import AsyncIterator
+from collections.abc import Callable, Coroutine, AsyncIterator
 
+import anyio
 import uvicorn
 from PIL import Image
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.requests import HTTPConnection
 
 from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now
+from reachy_mini_conversation_app.intercom import Talk, IntercomSession, talk_samples
 from reachy_mini_conversation_app.face_routes import register_face_routes
 from reachy_mini_conversation_app.camera_frames import capture_jpeg
 from reachy_mini_conversation_app.memory_routes import register_memory_routes
@@ -36,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 STREAM_FRAME_S: Final[float] = 0.2
 STREAM_MAX_SIDE: Final[int] = 640
+# "Be Reachy" (``?fast=1``): smaller frames, more often, so the picture keeps up with the phone's tilt.
+FAST_STREAM_FRAME_S: Final[float] = 1 / 12
+FAST_STREAM_MAX_SIDE: Final[int] = 512
 STREAM_JPEG_QUALITY: Final[int] = 70
 # How long a lifted head stays up while he sleeps, after the last turn.
 PEEK_HOLD_S: Final[float] = 120.0
@@ -62,9 +68,14 @@ def load_or_create_token(path: Path) -> str:
     return token
 
 
-def _scaled_frame(jpeg: bytes) -> bytes:
+def _angle(value: object) -> float | None:
+    """Return ``value`` as degrees when it is a plain number."""
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _scaled_frame(jpeg: bytes, max_side: int = STREAM_MAX_SIDE) -> bytes:
     with Image.open(io.BytesIO(jpeg)) as image:
-        image.thumbnail((STREAM_MAX_SIDE, STREAM_MAX_SIDE))
+        image.thumbnail((max_side, max_side))
         scaled = io.BytesIO()
         image.convert("RGB").save(scaled, "JPEG", quality=STREAM_JPEG_QUALITY)
     return scaled.getvalue()
@@ -91,7 +102,7 @@ class ControlApi:
         register_face_routes(self.app, deps.face_recognition, self._denied)
         register_memory_routes(self.app, deps.instance_path, self._denied)
 
-    def _denied(self, request: Request, *, mutation: bool = False) -> Response | None:
+    def _denied(self, request: HTTPConnection, *, mutation: bool = False) -> Response | None:
         """Refuse anything not from this computer with the shared token."""
         client_host = request.client.host if request.client is not None else ""
         try:
@@ -335,6 +346,46 @@ class ControlApi:
                 {"ok": True, "reason": None, "seconds": round(seconds, 2), "level_db": loudness}, headers=_NO_STORE
             )
 
+        @app.websocket("/intercom")
+        async def _intercom(websocket: WebSocket) -> None:
+            if self._denied(websocket) is not None:
+                await websocket.close(code=1008)
+                return
+            await websocket.accept()
+            problem = self._intercom_refusal()
+            if problem:
+                await websocket.send_json({"error": problem})
+                await websocket.close()
+                return
+            await self._carry_intercom(websocket)
+
+        @app.websocket("/look")
+        async def _look(websocket: WebSocket) -> None:
+            if self._denied(websocket) is not None:
+                await websocket.close(code=1008)
+                return
+            await websocket.accept()
+            movement = self._deps.movement_manager
+            looked = False
+            try:
+                while not PRIVACY.on:
+                    payload = await websocket.receive_json()
+                    if not isinstance(payload, dict):
+                        continue
+                    yaw, pitch = _angle(payload.get("yaw")), _angle(payload.get("pitch"))
+                    if yaw is not None and pitch is not None:
+                        movement.look_remotely(yaw, pitch)
+                        looked = True
+            except (WebSocketDisconnect, ValueError):
+                pass
+            finally:
+                if looked:
+                    movement.stop_looking_remotely()
+                try:
+                    await websocket.close()
+                except RuntimeError:
+                    pass  # already closed by the phone
+
         @app.get("/camera")
         async def _camera(request: Request) -> Response:
             denied = self._denied(request)
@@ -345,20 +396,23 @@ class ControlApi:
             if not self._deps.camera_enabled:
                 return JSONResponse({"error": "The camera is off."}, status_code=404, headers=_NO_STORE)
             return StreamingResponse(
-                self._frames(request),
+                self._frames(request, fast=request.query_params.get("fast") == "1"),
                 media_type=f"multipart/x-mixed-replace; boundary={_BOUNDARY}",
                 headers=_NO_STORE,
             )
 
-    async def _frames(self, request: Request) -> AsyncIterator[bytes]:
+    async def _frames(self, request: Request, fast: bool = False) -> AsyncIterator[bytes]:
         media = self._deps.reachy_mini.media
-        logger.info("Camera view opened")
+        interval_s, max_side = (
+            (FAST_STREAM_FRAME_S, FAST_STREAM_MAX_SIDE) if fast else (STREAM_FRAME_S, STREAM_MAX_SIDE)
+        )
+        logger.info("Camera view opened fast=%s", fast)
         try:
             while not PRIVACY.on and not await request.is_disconnected():
                 jpeg = await asyncio.to_thread(capture_jpeg, media)
                 if jpeg:
                     try:
-                        frame = await asyncio.to_thread(_scaled_frame, jpeg)
+                        frame = await asyncio.to_thread(_scaled_frame, jpeg, max_side)
                     except OSError as error:
                         logger.debug("Camera frame unreadable: %s", error)
                     else:
@@ -367,9 +421,97 @@ class ControlApi:
                             + frame
                             + b"\r\n"
                         )
-                await asyncio.sleep(STREAM_FRAME_S)
+                await asyncio.sleep(interval_s)
         finally:
             logger.info("Camera view closed")
+
+    def _intercom_refusal(self) -> str:
+        """Return why the intercom cannot open now ("" when it can)."""
+        if PRIVACY.on:
+            return "Privacy is on."
+        if self._runtime is None or self._runtime.loop is None:
+            return "The intercom isn't available."
+        games = getattr(self._deps, "games", None)
+        if games is not None and games.active:
+            return "A game is on."
+        return ""
+
+    async def _on_runtime(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
+        assert self._runtime is not None and self._runtime.loop is not None
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coroutine, self._runtime.loop))
+
+    async def _carry_intercom(self, websocket: WebSocket) -> None:
+        """Send what Reachy hears to the phone and play its voice while someone holds to talk, until it goes."""
+        runtime = self._runtime
+        assert runtime is not None and runtime.loop is not None
+        runtime_loop = runtime.loop
+        session = IntercomSession(asyncio.get_running_loop())
+        tap = session.hear
+        problem = await self._on_runtime(runtime.open_intercom(tap))
+        if problem:
+            await websocket.send_json({"error": problem})
+            await websocket.close()
+            return
+        talk: Talk | None = None
+
+        async def send_heard() -> None:
+            async for pcm in session.heard():
+                await websocket.send_bytes(pcm)
+
+        async def receive_talk() -> None:
+            nonlocal talk
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
+                data = message.get("bytes")
+                if data is not None:
+                    samples = talk_samples(data)
+                    if talk is not None and samples is not None:
+                        talk.say(samples)
+                    continue
+                try:
+                    wants = json.loads(message.get("text") or "").get("talk")
+                except (ValueError, AttributeError):
+                    continue
+                if wants is True and talk is None:
+                    talk = Talk(runtime_loop)
+                    asyncio.run_coroutine_threadsafe(runtime.play_intercom(tap, talk.pieces()), runtime_loop)
+                    logger.info("Intercom: talking through Reachy")
+                elif wants is False and talk is not None:
+                    talk.end()
+                    talk = None
+
+        async def until_private() -> None:
+            while not PRIVACY.on:
+                await asyncio.sleep(1.0)
+            logger.info("Intercom closed: privacy turned on")
+
+        try:
+            await websocket.send_json({"ready": True})
+            async with anyio.create_task_group() as group:
+
+                async def until_done(job: Callable[[], Coroutine[Any, Any, None]]) -> None:
+                    try:
+                        await job()
+                    except (WebSocketDisconnect, RuntimeError, OSError):
+                        pass  # the phone went
+                    except Exception as error:
+                        logger.warning("Intercom stopped: %s", type(error).__name__)
+                    finally:
+                        group.cancel_scope.cancel()  # one ending ends them all
+
+                for job in (send_heard, receive_talk, until_private):
+                    group.start_soon(until_done, job)
+        finally:
+            # Before any await: a cancelled connection must still give Reachy his mic back.
+            runtime_loop.call_soon_threadsafe(runtime.close_intercom, tap)
+            if talk is not None:
+                talk.end()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass  # already closed by the phone
 
 
 def start_control_server(api: ControlApi, port: int) -> uvicorn.Server:

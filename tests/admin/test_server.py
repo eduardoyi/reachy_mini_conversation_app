@@ -532,6 +532,97 @@ def test_camera_while_the_app_is_down_is_unavailable(admin: Admin) -> None:
         assert client.get("/api/camera").status_code == 503
 
 
+class _Upstream:
+    """The app's end of a relayed socket: says ``messages``, records what it is sent, stays open until closed."""
+
+    def __init__(self, messages: list[str | bytes]) -> None:
+        self.messages = messages
+        self.sent: list[str | bytes] = []
+        self.closed = False
+
+    def __aiter__(self) -> Any:
+        return self._say()
+
+    async def _say(self) -> Any:
+        import asyncio
+
+        for message in self.messages:
+            yield message
+        await asyncio.Event().wait()
+
+    async def send(self, message: str | bytes) -> None:
+        self.sent.append(message)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+# Starlette's test client sends "Host: testserver" on sockets; a browser sends the page's own host.
+SOCKET_ORIGIN = {"Origin": "https://testserver"}
+
+
+def _relay_to(monkeypatch: pytest.MonkeyPatch, upstream: _Upstream | None) -> list[str]:
+    """Make the app's sockets ``upstream`` (None: the app is down); return the paths connected to."""
+    from reachy_mini_conversation_app.admin.app_link import AppUnavailable
+
+    paths: list[str] = []
+
+    async def connect(_link: AppLink, path: str) -> _Upstream:
+        paths.append(path)
+        if upstream is None:
+            raise AppUnavailable("ConnectError")
+        return upstream
+
+    monkeypatch.setattr(AppLink, "connect", connect)
+    return paths
+
+
+def test_the_intercom_is_relayed_both_ways_and_audited(admin: Admin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The phone hears the app and the app hears the phone; listening and talking are each written down once."""
+    upstream = _Upstream(['{"ready": true}', b"\x01\x02"])
+    paths = _relay_to(monkeypatch, upstream)
+    with admin.client() as client, client.websocket_connect("/api/intercom", headers=SOCKET_ORIGIN) as socket:
+        assert socket.receive_json() == {"ready": True}
+        assert socket.receive_bytes() == b"\x01\x02"
+        for _ in range(2):
+            socket.send_text('{"talk": true}')
+            socket.send_bytes(b"\x03\x04")
+            socket.send_text('{"talk": false}')
+        socket.close()
+    assert paths == ["/intercom"]
+    assert upstream.sent[:3] == ['{"talk": true}', b"\x03\x04", '{"talk": false}'] and len(upstream.sent) == 6
+    assert upstream.closed
+    assert [(e["who"], e["action"]) for e in admin.audit()] == [
+        ("eduardo@example.com", "talked through Reachy"),
+        ("eduardo@example.com", "listened through Reachy"),
+    ]
+
+
+@pytest.mark.parametrize("headers", [{}, {"Origin": "http://evil.example"}])
+def test_sockets_from_another_page_are_refused(
+    admin: Admin, monkeypatch: pytest.MonkeyPatch, headers: dict[str, str]
+) -> None:
+    """Like a change, a socket must come from the app's own page; nothing reaches the app."""
+    from starlette.websockets import WebSocketDisconnect
+
+    paths = _relay_to(monkeypatch, _Upstream([]))
+    with admin.client() as client:
+        for path in ("/api/intercom", "/api/look"):
+            with pytest.raises(WebSocketDisconnect) as refused:
+                with client.websocket_connect(path, headers=headers) as socket:
+                    socket.receive_text()
+            assert refused.value.code == 1008
+    assert paths == [] and admin.audit() == []
+
+
+def test_a_socket_while_the_app_is_down_says_so(admin: Admin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No running app: the phone is told, and nothing is audited."""
+    _relay_to(monkeypatch, None)
+    with admin.client() as client, client.websocket_connect("/api/look", headers=SOCKET_ORIGIN) as socket:
+        assert socket.receive_json() == {"error": "Reachy is not running."}
+    assert admin.audit() == []
+
+
 # Controls ----------------------------------------------------------------------------------------------
 
 

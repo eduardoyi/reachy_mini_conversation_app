@@ -161,3 +161,34 @@ async def test_open_stream_returns_other_statuses_for_the_caller(token_file: Pat
     await response.aread()
     assert response.json() == {"error": "privacy"}
     await response.aclose()
+
+
+@pytest.mark.asyncio
+async def test_connect_opens_a_websocket_with_the_token_and_reports_a_refusal(token_file: Path) -> None:
+    """The socket carries the token; a refusal (wrong token) or nobody listening is AppUnavailable."""
+    from websockets.http11 import Response
+    from websockets.asyncio.server import ServerConnection, serve
+    from websockets.datastructures import Headers
+
+    def check(connection: ServerConnection, request: object) -> Response | None:
+        if getattr(request, "headers")["Authorization"] == "Bearer first-token":
+            return None
+        return Response(403, "Forbidden", Headers())
+
+    async def echo(connection: ServerConnection) -> None:
+        async for message in connection:
+            await connection.send(message)
+
+    async with serve(echo, "127.0.0.1", 0, process_request=check) as server:
+        port = next(iter(server.sockets)).getsockname()[1]
+        link = AppLink(f"http://127.0.0.1:{port}", token_file)
+        socket = await link.connect("/intercom")
+        await socket.send("hello")
+        assert await socket.recv() == "hello"
+        await socket.close()
+        token_file.write_text("wrong-token")
+        with pytest.raises(AppUnavailable, match="403"):
+            await link.connect("/intercom")
+        await link.aclose()
+    with pytest.raises(AppUnavailable):
+        await AppLink(f"http://127.0.0.1:{port}", token_file).connect("/intercom")

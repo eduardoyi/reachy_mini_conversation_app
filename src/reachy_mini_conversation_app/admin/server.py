@@ -25,13 +25,16 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 from collections.abc import AsyncIterator
 
+import anyio
 import httpx
 import uvicorn
 from dotenv import find_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.requests import HTTPConnection
 from starlette.background import BackgroundTask
 from starlette.staticfiles import StaticFiles
+from websockets.exceptions import ConnectionClosed
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.qr_code import qr_svg
@@ -129,12 +132,15 @@ def _error(message: str, status_code: int) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status_code, headers=_NO_STORE)
 
 
-def _who(request: Request) -> str:
+def _who(request: HTTPConnection) -> str:
     return request.headers.get(LOGIN_HEADER, "").strip().lower()
 
 
-def refusal_reason(request: Request, allowed: frozenset[str]) -> str:
-    """Return why the request is refused ("" when it may pass): only Tailscale Serve, from an allowed login."""
+def refusal_reason(request: HTTPConnection, allowed: frozenset[str]) -> str:
+    """Return why the request is refused ("" when it may pass): only Tailscale Serve, from an allowed login.
+
+    A WebSocket counts as a change: it must come from the app's own page.
+    """
     client_host = request.client.host if request.client is not None else ""
     try:
         local = ipaddress.ip_address(client_host).is_loopback
@@ -147,7 +153,7 @@ def refusal_reason(request: Request, allowed: frozenset[str]) -> str:
         return "no Tailscale login"
     if who not in allowed:
         return f"login not allowed ({who[:80]})"
-    if request.method not in {"GET", "HEAD"}:
+    if request.scope.get("method", "WEBSOCKET") not in {"GET", "HEAD"}:
         origin = urlsplit(request.headers.get("origin", "")).netloc
         hosts = {request.headers.get("host", ""), request.headers.get("x-forwarded-host", "")} - {""}
         if not origin or origin not in hosts:
@@ -561,10 +567,82 @@ def create_app(
     async def _look_up(request: Request) -> Response:
         return await control(request, "/look-up", "")
 
-    @app.get("/api/camera")
-    async def _camera(request: Request) -> Response:
+    async def relay_socket(websocket: WebSocket, path: str, action: str = "") -> None:
+        """Carry ``websocket`` to the app's ``path`` both ways until either side goes; ``action`` is audited."""
+        reason = refusal_reason(websocket, settings.allowed_logins)
+        if reason:
+            logger.warning("Admin socket refused path=%s reason=%s", websocket.url.path, reason)
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
         try:
-            upstream = await link.open_stream("/camera")
+            upstream = await link.connect(path)
+        except AppUnavailable as error:
+            logger.info("Admin socket %s: Reachy unavailable (%s)", path, error)
+            await websocket.send_json({"error": "Reachy is not running."})
+            await websocket.close()
+            return
+        who = _who(websocket)
+        if action:
+            audit.append({"who": who, "action": action})
+            logger.info("%s by %s", action.capitalize(), who)
+        talked = False
+
+        async def to_phone() -> None:
+            async for message in upstream:
+                if isinstance(message, bytes):
+                    await websocket.send_bytes(message)
+                else:
+                    await websocket.send_text(message)
+
+        async def to_app() -> None:
+            nonlocal talked
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
+                if message.get("bytes") is not None:
+                    await upstream.send(message["bytes"])
+                elif message.get("text") is not None:
+                    text = message["text"]
+                    if path == "/intercom" and not talked and '"talk":true' in text.replace(" ", ""):
+                        talked = True
+                        audit.append({"who": who, "action": "talked through Reachy"})
+                    await upstream.send(text)
+
+        try:
+            async with anyio.create_task_group() as group:
+
+                async def until_done(job: Any) -> None:
+                    try:
+                        await job()
+                    except (RuntimeError, OSError, ConnectionClosed, WebSocketDisconnect):
+                        pass  # one side went
+                    finally:
+                        group.cancel_scope.cancel()  # one side ending ends both
+
+                group.start_soon(until_done, to_phone)
+                group.start_soon(until_done, to_app)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await upstream.close()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass  # the phone already went
+
+    @app.websocket("/api/intercom")
+    async def _intercom(websocket: WebSocket) -> None:
+        await relay_socket(websocket, "/intercom", "listened through Reachy")
+
+    @app.websocket("/api/look")
+    async def _look(websocket: WebSocket) -> None:
+        await relay_socket(websocket, "/look")
+
+    @app.get("/api/camera")
+    async def _camera(request: Request, fast: bool = False) -> Response:
+        try:
+            upstream = await link.open_stream("/camera?fast=1" if fast else "/camera")
         except AppUnavailable:
             return _error("Reachy is not running.", 503)
         if upstream.status_code != 200:

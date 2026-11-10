@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.moves import (
     ATTENTIVE_HOLD_S,
     RING_FLUTTER_RAD,
     ATTENTIVE_ANTENNAS,
+    REMOTE_LOOK_IDLE_S,
     HEAD_RECORDING_MAX_S,
     PERK_MAX_SPEED_RAD_S,
     HEAD_RECORDING_COLUMNS,
@@ -25,6 +26,7 @@ from reachy_mini_conversation_app.moves import (
     GazeTurnMove,
     PhotoAimMove,
     BreathingMove,
+    RemoteLookMove,
     MovementManager,
     HeadTouchDetector,
     AntennaTouchDetector,
@@ -1129,6 +1131,95 @@ def test_going_to_sleep_during_a_peek_lowers_the_head() -> None:
     _run(manager, clock, 2.5)
     np.testing.assert_allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
     assert manager.sleeping
+
+
+def _awake(clock: dict[str, float]) -> MovementManager:
+    """Return an awake manager on the fake ``clock``, tracking faces."""
+    manager = MovementManager(_robot_facing(0.0))
+    manager._now = lambda: clock["now"]
+    manager.set_head_tracking(True)
+    _run(manager, clock, 0.5)
+    return manager
+
+
+def test_be_reachy_lifts_the_sleeping_head_where_the_phone_points_and_follows_it() -> None:
+    """Asleep, the head follows the phone (clamped like a peek), antennas folded, and he stays asleep."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.look_remotely(30.0, -10.0)
+    antennas = _run(manager, clock, 1.0)
+    assert all(pair == pytest.approx(SLEEP_ANTENNAS) for pair in antennas)
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, -10, 30), atol=1e-3)
+    following = manager.state.current_move
+    assert isinstance(following, RemoteLookMove) and manager.sleeping
+
+    manager.look_remotely(-90.0, 0.0)
+    _run(manager, clock, 1.0)
+    assert manager.state.current_move is following, "a new aim moves the target, not a new move"
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, 0, -60), atol=1e-3)
+    assert manager._last_commanded_pose[2] == pytest.approx(0.0), "asleep the body stays put"
+
+
+@pytest.mark.parametrize("leave", ["stop", "silence"])
+def test_be_reachy_asleep_lowers_the_head_when_the_phone_leaves(leave: str) -> None:
+    """Leaving the view, or going quiet for REMOTE_LOOK_IDLE_S, lowers him into the sleep pose again."""
+    clock = {"now": 100.0}
+    manager = _asleep(clock)
+    manager.look_remotely(30.0, -10.0)
+    _run(manager, clock, 1.0)
+    if leave == "stop":
+        manager.stop_looking_remotely()
+        _run(manager, clock, 2.5)
+    else:
+        _run(manager, clock, REMOTE_LOOK_IDLE_S + 2.5)
+    np.testing.assert_allclose(_commanded_head(manager), SLEEP_HEAD_POSE, atol=1e-3)
+    assert manager.sleeping
+
+
+def test_be_reachy_awake_turns_head_and_body_with_tracking_paused() -> None:
+    """Awake, the head follows at once and the body turns after it; face tracking waits meanwhile."""
+    clock = {"now": 100.0}
+    manager = _awake(clock)
+    robot = manager.current_robot
+    robot.start_head_tracking.reset_mock()
+    manager.look_remotely(120.0, 10.0)
+    _run(manager, clock, 0.3)
+    head_yaw = np.degrees(head_world_yaw(_commanded_head(manager)))
+    body_yaw = np.degrees(manager._last_commanded_pose[2])
+    assert head_yaw > 90.0 and head_yaw - body_yaw <= 50.0 + 1e-6, "the body keeps the head within reach"
+    robot.start_head_tracking.assert_called_with(weight=0.0)
+
+    for _ in range(4):  # the phone keeps saying where it points
+        manager.look_remotely(200.0, 10.0)
+        _run(manager, clock, 1.0)
+    np.testing.assert_allclose(_commanded_head(manager), create_head_pose(0, 0, 0, 0, 10, 150), atol=1e-3)
+    assert np.degrees(manager._last_commanded_pose[2]) == pytest.approx(150.0, abs=1.0)
+
+
+def test_be_reachy_awake_faces_forward_and_tracks_again_when_the_phone_leaves() -> None:
+    """Leaving the view turns him back to the front and hands the head back to face tracking."""
+    clock = {"now": 100.0}
+    manager = _awake(clock)
+    manager.look_remotely(60.0, 0.0)
+    _run(manager, clock, 2.0)
+    manager.current_robot.start_head_tracking.reset_mock()
+
+    manager.stop_looking_remotely()
+    _run(manager, clock, 0.1)
+    assert isinstance(manager.state.current_move, GazeTurnMove)
+    assert manager.state.current_move.target_yaw == pytest.approx(0.0)
+    _run(manager, clock, 3.0)
+    assert not isinstance(manager.state.current_move, RemoteLookMove)
+    manager.current_robot.start_head_tracking.assert_any_call(weight=1.0)
+
+
+def test_be_reachy_ignores_non_finite_angles() -> None:
+    """A broken sensor reading moves nothing."""
+    clock = {"now": 100.0}
+    manager = _awake(clock)
+    manager.look_remotely(float("nan"), 0.0)
+    _run(manager, clock, 0.2)
+    assert not isinstance(manager.state.current_move, RemoteLookMove)
 
 
 def test_head_tracking_is_not_started_while_privacy_is_on(privacy: PrivacySwitch) -> None:

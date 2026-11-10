@@ -5937,3 +5937,71 @@ async def test_an_answer_outside_a_game_never_goes_to_the_cloud_game_model() -> 
 
     answers, local = await _answer_a_question(False, cloud, ["Pluto"])
     assert answers == ["Pluton"] and local == [""] and called == []
+
+
+@pytest.mark.asyncio
+async def test_the_intercom_takes_the_room_and_holds_every_activation() -> None:
+    """While the intercom is open the mic goes only to the phone, and nothing (keyboard, wake) activates him."""
+    handler = FakeHandler()
+    heard: list[Any] = []
+    runtime = HybridRuntime(lambda: handler)
+    try:
+        assert await runtime.open_intercom(heard.append) == ""
+        await runtime.handle_frame((16_000, _SPEECH), capture_sequence=1)
+        assert len(heard) == 1 and heard[0][0] == 16_000
+        assert runtime._ambient_buffer.snapshot()[1].size == 0, "nothing is kept for the wake word or the transcript"
+        assert not await runtime.activate("keyboard")
+        assert await runtime.open_intercom(lambda _frame: None) == "Someone else is already connected."
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT and not handler.started.is_set()
+
+        runtime.close_intercom(heard.append)
+        await runtime.handle_frame((16_000, _SPEECH), capture_sequence=2)
+        assert len(heard) == 1
+        assert await runtime.activate("keyboard")
+        await handler.started.wait()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_opening_the_intercom_ends_the_conversation() -> None:
+    """A conversation under way closes so the phone can listen (his conversation pauses while connected)."""
+    handler = FakeHandler()
+    runtime = HybridRuntime(lambda: handler)
+    try:
+        assert await runtime.activate("keyboard")
+        await handler.started.wait()
+        assert await runtime.open_intercom(lambda _frame: None) == ""
+        assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+        assert handler.shutdown_calls == 1
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_talking_through_the_intercom_chimes_then_plays_the_voice() -> None:
+    """Each talk starts with the chime, then the phone's voice plays from Reachy at 16 kHz."""
+    from reachy_mini_conversation_app.intercom import chime
+
+    runtime = HybridRuntime(lambda: FakeHandler())
+
+    def tap(_frame: Any) -> None:
+        return None
+
+    async def voice():  # type: ignore[no-untyped-def]
+        for _ in range(2):
+            yield np.full(160, 1_000, dtype=np.int16)
+
+    try:
+        assert await runtime.open_intercom(tap) == ""
+        await runtime.play_intercom(tap, voice())
+        played = [await runtime.emit() for _ in range(3)]
+        assert all(isinstance(output, tuple) and output[0] == 16_000 for output in played)
+        assert np.array_equal(played[0][1], chime())  # type: ignore[index]
+        assert [len(output[1]) for output in played[1:]] == [160, 160]  # type: ignore[index]
+
+        runtime.close_intercom(tap)
+        await runtime.play_intercom(tap, voice())
+        assert not runtime._local_output, "a closed intercom plays nothing"
+    finally:
+        await runtime.close()

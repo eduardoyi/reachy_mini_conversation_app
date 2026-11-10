@@ -353,3 +353,126 @@ def test_games_are_refused_when_not_set_up(switch: PrivacySwitch) -> None:
     client = _client(api)
     assert client.get("/status", headers=AUTH).json()["game"] is None
     assert client.post("/game", json={"action": "pause"}, headers=AUTH).status_code == 404
+
+
+def test_be_reachy_streams_smaller_frames_more_often(switch: PrivacySwitch, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``?fast=1`` (the full-screen view) sends frames no larger than FAST_STREAM_MAX_SIDE."""
+    monkeypatch.setattr(control_api, "FAST_STREAM_FRAME_S", 0.0)
+    calls = 0
+
+    def get_frame_jpeg() -> bytes:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            switch.set(True)
+        return _jpeg()
+
+    api, _, _ = _api(media=SimpleNamespace(get_frame_jpeg=get_frame_jpeg))
+    with _client(api).stream("GET", "/camera?fast=1", headers=AUTH) as response:
+        body = response.read()
+    jpeg = body.split(b"--frame\r\n")[1].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n")
+    with Image.open(io.BytesIO(jpeg)) as image:
+        assert max(image.size) == control_api.FAST_STREAM_MAX_SIDE
+
+
+class _IntercomRuntime:
+    """The runtime's intercom side, on its own loop: the tap it was given and the voice it played."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, refusal: str = "") -> None:
+        self.loop = loop
+        self.refusal = refusal
+        self.tap: Any = None
+        self.closed: list[Any] = []
+        self.played: list[np.ndarray] = []
+        self.talks = 0
+
+    async def open_intercom(self, tap: Any) -> str:
+        if not self.refusal:
+            self.tap = tap
+        return self.refusal
+
+    def close_intercom(self, tap: Any) -> None:
+        self.closed.append(tap)
+
+    async def play_intercom(self, tap: Any, voice: Any) -> None:
+        assert tap == self.tap
+        self.talks += 1
+        async for piece in voice:
+            self.played.append(piece)
+
+
+def _intercom_api(runtime: _IntercomRuntime) -> ControlApi:
+    api, _, _ = _api()
+    api._runtime = runtime  # type: ignore[assignment]
+    return api
+
+
+def test_the_intercom_carries_the_room_to_the_phone_and_its_voice_to_reachy(
+    switch: PrivacySwitch, runtime_loop: Any
+) -> None:
+    """The phone hears 16 kHz PCM from the mic; what it sends while holding to talk is played; leaving closes it."""
+    runtime = _IntercomRuntime(runtime_loop)
+    with _client(_intercom_api(runtime)).websocket_connect("/intercom", headers=AUTH) as socket:
+        assert socket.receive_json() == {"ready": True}
+        runtime_loop.call_soon_threadsafe(runtime.tap, (48_000, np.full(4_800, 0.25, dtype=np.float32)))
+        heard = socket.receive_bytes()
+        assert len(heard) == 1_600 * 2, "100 ms of the room at 16 kHz, 16-bit"
+
+        socket.send_bytes(np.ones(160, dtype="<i2").tobytes())  # not talking: dropped
+        socket.send_json({"talk": True})
+        socket.send_bytes(np.full(160, 7, dtype="<i2").tobytes())
+        socket.send_bytes(b"\x01")  # malformed: dropped
+        socket.send_bytes(np.full(320, 9, dtype="<i2").tobytes())
+        socket.send_json({"talk": False})
+        assert _eventually(lambda: [len(piece) for piece in runtime.played] == [160, 320])
+    assert _eventually(lambda: runtime.closed == [runtime.tap])
+    assert runtime.talks == 1 and int(runtime.played[0][0]) == 7
+
+
+@pytest.mark.parametrize("why", ["token", "privacy", "busy", "game"])
+def test_the_intercom_is_refused(switch: PrivacySwitch, runtime_loop: Any, why: str) -> None:
+    """No token, privacy on, Reachy busy or a game on: the phone is told why and nothing opens."""
+    from starlette.websockets import WebSocketDisconnect
+
+    runtime = _IntercomRuntime(runtime_loop, refusal="Reachy is busy. Try again in a moment." if why == "busy" else "")
+    api = _intercom_api(runtime)
+    if why == "privacy":
+        switch.set(True)
+    if why == "game":
+        api._deps.games = SimpleNamespace(active=True)  # type: ignore[attr-defined]
+    client = _client(api)
+    if why == "token":
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect("/intercom") as socket:
+                socket.receive_json()
+        assert refused.value.code == 1008
+        return
+    with client.websocket_connect("/intercom", headers=AUTH) as socket:
+        error = socket.receive_json()["error"]
+    expected = {"privacy": "Privacy is on.", "busy": "Reachy is busy", "game": "A game is on."}[why]
+    assert error.startswith(expected)
+    assert runtime.tap is None and not runtime.closed
+
+
+def test_be_reachy_turns_the_head_where_the_phone_points_until_it_leaves(switch: PrivacySwitch) -> None:
+    """Each angle pair turns the head; anything else is ignored; closing the view lets the head go."""
+    api, movement, _ = _api()
+    with _client(api).websocket_connect("/look", headers=AUTH) as socket:
+        socket.send_json({"yaw": 12.5, "pitch": -4})
+        socket.send_json({"yaw": True, "pitch": 0})
+        socket.send_json({"yaw": "left"})
+        socket.send_json([1, 2])
+        socket.send_json({"yaw": -30, "pitch": 10})
+    assert _eventually(lambda: movement.stop_looking_remotely.called)
+    assert [c.args for c in movement.look_remotely.call_args_list] == [(12.5, -4.0), (-30.0, 10.0)]
+
+
+def _eventually(check: Any, timeout: float = 2.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        time.sleep(0.01)
+    return False

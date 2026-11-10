@@ -24,6 +24,7 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.ambient import AmbientAudioBuffer
+from reachy_mini_conversation_app.intercom import INTERCOM_SAMPLE_RATE, chime
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_mono_int16
 from reachy_mini_conversation_app.wake_word import AcousticWakeWordDetector, TranscriptWakeWordDetector
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER
@@ -689,6 +690,8 @@ class HybridRuntime:
         self._recording_message = False
         # During a WhatsApp call, every captured frame goes here instead of the post-activation queue.
         self._call_tap: Callable[[AudioFrame], None] | None = None
+        # While the admin app's intercom is open, every captured frame goes here and nothing activates him.
+        self._intercom_tap: Callable[[AudioFrame], None] | None = None
         # A request to run locally once the conversation has closed (Gemini handing a call to the call command).
         self._after_close_request: str | None = None
         # Told True when Reachy starts listening to a request (e.g. lower the music) and False when he is done
@@ -1257,6 +1260,9 @@ class HybridRuntime:
             activation_task = self._activation_task
         if closed or mode in (RuntimeMode.CLOUD_CONVERSATION, RuntimeMode.STOPPING):
             return mode is RuntimeMode.CLOUD_CONVERSATION and not closed
+        if self._intercom_tap is not None:
+            logger.info("Activation reason=%s held: the intercom is open", reason)
+            return False
 
         if activation_task is None or activation_task.done():
             activation_task = asyncio.create_task(
@@ -2517,6 +2523,61 @@ class HybridRuntime:
                 self._call_tap = None
         return True
 
+    async def open_intercom(self, tap: Callable[[AudioFrame], None]) -> str:
+        """Send what Reachy hears only to ``tap`` until ``close_intercom``; returns why not ("" when open).
+
+        An open conversation closes first; a command, call or activation under way refuses it. Meanwhile
+        nothing activates him: no wake word, antenna, announcement or room transcript.
+        """
+        self._assert_owner_loop()
+        if self._intercom_tap is not None:
+            return "Someone else is already connected."
+        with self._lifecycle_lock:
+            mode = self._mode
+            closed = self._closed
+            activating = self._activation_task is not None and not self._activation_task.done()
+        if closed or mode is RuntimeMode.STOPPING:
+            return "Reachy is stopping."
+        if mode is RuntimeMode.CLOUD_CONVERSATION:
+            await self._deactivate_cloud("intercom")
+        elif mode is RuntimeMode.LOCAL_COMMAND or activating:
+            return "Reachy is busy. Try again in a moment."
+        with self._lifecycle_lock:
+            free = self._mode is RuntimeMode.LOCAL_AMBIENT and not self._closed
+        if not free:
+            return "Reachy is busy. Try again in a moment."
+        if self._intercom_tap is not None:
+            return "Someone else is already connected."
+        self._intercom_tap = tap
+        logger.info("Intercom opened")
+        return ""
+
+    def close_intercom(self, tap: Callable[[AudioFrame], None]) -> None:
+        """Close the intercom ``tap`` opened; Reachy listens for his name again."""
+        self._assert_owner_loop()
+        if self._intercom_tap == tap:
+            self._intercom_tap = None
+            logger.info("Intercom closed")
+
+    async def play_intercom(self, tap: Callable[[AudioFrame], None], voice: AsyncIterator[NDArray[np.int16]]) -> None:
+        """Chime, then play ``voice`` (16 kHz, from the phone) while ``tap``'s intercom stays open."""
+        self._assert_owner_loop()
+
+        def still_open() -> bool:
+            return self._intercom_tap == tap and not self._closed
+
+        if not still_open():
+            return
+
+        async def chime_then_voice() -> AsyncIterator[tuple[int, NDArray[np.int16]]]:
+            yield INTERCOM_SAMPLE_RATE, chime()
+            async for piece in voice:
+                yield INTERCOM_SAMPLE_RATE, piece
+
+        with self._lifecycle_lock:
+            generation = self._generation
+        await self._queue_reply_audio(chime_then_voice(), generation, self._clock(), still_open)
+
     async def record_message(self, touches: Callable[[], int] | None = None) -> tuple[int, NDArray[np.int16]] | None:
         """During a quick command's follow-up: beep, then record until the speaker stops; None if nobody spoke.
 
@@ -2720,8 +2781,10 @@ class HybridRuntime:
                 continue
             with self._lifecycle_lock:
                 closed = self._closed
-                busy = self._mode is not RuntimeMode.LOCAL_AMBIENT or (
-                    self._activation_task is not None and not self._activation_task.done()
+                busy = (
+                    self._mode is not RuntimeMode.LOCAL_AMBIENT
+                    or (self._activation_task is not None and not self._activation_task.done())
+                    or self._intercom_tap is not None
                 )
             if closed:
                 self._pending_turns.clear()
@@ -3253,6 +3316,10 @@ class HybridRuntime:
         """Route one captured frame locally or to the active cloud generation."""
         self._assert_owner_loop()
         copied_frame = self._copy_frame(frame)
+        intercom = self._intercom_tap
+        if intercom is not None:
+            intercom(copied_frame)  # the intercom: the room goes only to the phone, not to wake or the cloud
+            return
         local_frame = False
         postactivation_frame = False
         observe_postactivation_locally = False

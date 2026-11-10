@@ -457,6 +457,65 @@ class PoseTransitionMove(Move):  # type: ignore
         return head, antennas, start_body_yaw * (1.0 - eased)
 
 
+# "Be Reachy" in the admin app: the head follows where the phone points, many times a second.
+# Awake he may turn his body too (as far as he turns to a speaker); asleep only the head lifts, as in a peek.
+REMOTE_LOOK_MAX_YAW_DEG = 150.0
+REMOTE_LOOK_MAX_PITCH_DEG = 35.0
+# The head reaches about two thirds of the way to a new target in this long; the body follows more slowly.
+REMOTE_LOOK_HEAD_TAU_S = 0.12
+REMOTE_LOOK_BODY_TAU_S = 0.5
+# The head turns at most this far from the body.
+REMOTE_LOOK_HEAD_FROM_BODY_DEG = 50.0
+# With no word from the phone for this long, he stops following it (awake: faces forward; asleep: lowers).
+REMOTE_LOOK_IDLE_S = 3.0
+
+
+class RemoteLookMove(Move):  # type: ignore
+    """Follow a target (world yaw and pitch) that the phone moves many times a second, until cleared."""
+
+    def __init__(self, yaw_deg: float, pitch_deg: float, *, turn_body: bool) -> None:
+        """Start toward ``yaw_deg``/``pitch_deg``; ``turn_body`` lets the body follow the head."""
+        self._turn_body = turn_body
+        self._target = (math.radians(yaw_deg), math.radians(pitch_deg))
+        self._yaw = self._pitch = self._body_yaw = 0.0
+        self._antennas = np.asarray(SLEEP_ANTENNAS, dtype=np.float64)
+        self._last_t: float | None = None
+
+    @property
+    def duration(self) -> float:
+        """It follows until cleared."""
+        return float("inf")
+
+    def aim(self, yaw_deg: float, pitch_deg: float) -> None:
+        """Move the target (worker thread only)."""
+        self._target = (math.radians(yaw_deg), math.radians(pitch_deg))
+
+    def begin(self, start_pose: FullBodyPose) -> None:
+        """Start from the pose the robot holds now."""
+        start_head, antennas, body_yaw = clone_full_body_pose(start_pose)
+        head = np.asarray(start_head, dtype=np.float64)
+        self._yaw = head_world_yaw(head)
+        self._pitch = float(np.arcsin(np.clip(-head[2, 0], -1.0, 1.0)))
+        self._body_yaw = body_yaw if self._turn_body else 0.0
+        self._antennas = np.asarray(antennas, dtype=np.float64)
+        self._last_t = None
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+        """Ease the head (and the body, more slowly) toward the target since the last tick."""
+        dt = 0.0 if self._last_t is None else max(0.0, t - self._last_t)
+        self._last_t = t
+        target_yaw, target_pitch = self._target
+        head_step = 1.0 - math.exp(-dt / REMOTE_LOOK_HEAD_TAU_S)
+        self._yaw += (target_yaw - self._yaw) * head_step
+        self._pitch += (target_pitch - self._pitch) * head_step
+        if self._turn_body:
+            self._body_yaw += (self._yaw - self._body_yaw) * (1.0 - math.exp(-dt / REMOTE_LOOK_BODY_TAU_S))
+            reach = math.radians(REMOTE_LOOK_HEAD_FROM_BODY_DEG)
+            self._body_yaw = float(np.clip(self._body_yaw, self._yaw - reach, self._yaw + reach))
+        head = np.asarray(create_head_pose(0, 0, 0, 0, self._pitch, self._yaw, degrees=False), dtype=np.float64)
+        return head, self._antennas.copy(), self._body_yaw
+
+
 def sleep_move() -> PoseTransitionMove:
     """Lower into the SDK's sleep pose and stay there until woken."""
     return PoseTransitionMove(SLEEP_HEAD_POSE, SLEEP_ANTENNAS, transition_s=SLEEP_TRANSITION_S, hold=True)
@@ -572,9 +631,12 @@ class MovementManager:
         self._turn_paused_tracking = False
         # Asleep in standby: the sleep pose holds until a wake (activation or a new conversation).
         self._sleeping = False
-        self._sleep_hold: PoseTransitionMove | None = None
+        self._sleep_hold: PoseTransitionMove | RemoteLookMove | None = None
         # Peeking while asleep: the head looks up until then, then lowers into the sleep pose again.
         self._peek_until: float | None = None
+        # Following the phone ("Be Reachy") while awake until then; tracking paused meanwhile, to resume after.
+        self._remote_look_until: float | None = None
+        self._look_paused_tracking = False
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -664,6 +726,21 @@ class MovementManager:
         yaw = float(np.clip(yaw_deg, -PEEK_MAX_YAW_DEG, PEEK_MAX_YAW_DEG))
         pitch = float(np.clip(pitch_deg, -PEEK_MAX_PITCH_DEG, PEEK_MAX_PITCH_DEG))
         self._command_queue.put(("peek", (yaw, pitch, float(hold_s))))
+
+    def look_remotely(self, yaw_deg: float, pitch_deg: float) -> None:
+        """Turn toward where the phone points (degrees; +yaw left, -pitch up), following each call; thread-safe.
+
+        Awake the body turns with the head; asleep only the head lifts, and lowers again once the calls stop
+        (``REMOTE_LOOK_IDLE_S``) or ``stop_looking_remotely``.
+        """
+        if not all(math.isfinite(value) for value in (yaw_deg, pitch_deg)):
+            logger.warning("Ignored a remote look with a non-finite value")
+            return
+        self._command_queue.put(("remote_look", (yaw_deg, pitch_deg)))
+
+    def stop_looking_remotely(self) -> None:
+        """Stop following the phone: awake he faces forward again, asleep he lowers his head; thread-safe."""
+        self._command_queue.put(("remote_look", None))
 
     @property
     def sleeping(self) -> bool:
@@ -904,6 +981,11 @@ class MovementManager:
             pass  # already awake
         elif command == "peek":
             logger.debug("Awake; ignoring peek")
+        elif command == "remote_look":
+            if payload is None:
+                self._end_remote_look()
+            else:
+                self._remote_look(*payload)
         elif command == "set_speaking":
             if payload:
                 self._attentive_until = None  # answering: drop the alert antennas
@@ -956,6 +1038,19 @@ class MovementManager:
             self._peek_until = self._now() + hold_s
             logger.debug("Peeking at %.0f deg yaw, %.0f deg pitch", yaw_deg, pitch_deg)
             return True
+        if command == "remote_look":
+            if payload is None:
+                if isinstance(self._sleep_hold, RemoteLookMove) and self._peek_until is not None:
+                    self._peek_until = self._now()  # the next tick lowers the head
+                return True
+            yaw_deg = float(np.clip(payload[0], -PEEK_MAX_YAW_DEG, PEEK_MAX_YAW_DEG))
+            pitch_deg = float(np.clip(payload[1], -PEEK_MAX_PITCH_DEG, PEEK_MAX_PITCH_DEG))
+            if isinstance(self._sleep_hold, RemoteLookMove):
+                self._sleep_hold.aim(yaw_deg, pitch_deg)
+            else:
+                self._hold_sleeping_pose(RemoteLookMove(yaw_deg, pitch_deg, turn_body=False))
+            self._peek_until = self._now() + REMOTE_LOOK_IDLE_S
+            return True
         if command == "go_to_sleep" and self._peek_until is not None:
             self._peek_until = self._now()  # the next tick lowers the head
             return True
@@ -979,11 +1074,13 @@ class MovementManager:
         self._is_listening = False
         self._attentive_until = None
         self._gaze_yaw = 0.0
+        self._remote_look_until = None
+        self._look_paused_tracking = False
         self._sleeping = True
         self._hold_sleeping_pose(sleep_move())
         logger.info("Going to sleep until someone says my name")
 
-    def _hold_sleeping_pose(self, move: PoseTransitionMove) -> None:
+    def _hold_sleeping_pose(self, move: PoseTransitionMove | RemoteLookMove) -> None:
         """Replace the current and queued moves with ``move``, held while asleep (worker thread only)."""
         self._sleep_hold = move
         self.move_queue.clear()
@@ -1017,6 +1114,7 @@ class MovementManager:
         self._track_anchor = None
         self._turn_paused_tracking = False
         self._aim_paused_tracking = False
+        self._look_paused_tracking = False
         # set_speaking is gated off while disabled, so its state would go stale across a toggle.
         self._is_speaking = False
         try:
@@ -1063,6 +1161,50 @@ class MovementManager:
         self.move_queue = deque(move for move in self.move_queue if not isinstance(move, GazeTurnMove))
         self.move_queue.append(GazeTurnMove(yaw))
         self.state.update_activity()
+
+    def _remote_look(self, yaw_deg: float, pitch_deg: float) -> None:
+        """Follow the phone: pause tracking, drop other moves and chase the target (worker thread only)."""
+        yaw_deg = float(np.clip(yaw_deg, -REMOTE_LOOK_MAX_YAW_DEG, REMOTE_LOOK_MAX_YAW_DEG))
+        pitch_deg = float(np.clip(pitch_deg, -REMOTE_LOOK_MAX_PITCH_DEG, REMOTE_LOOK_MAX_PITCH_DEG))
+        self._remote_look_until = self._now() + REMOTE_LOOK_IDLE_S
+        self.state.update_activity()
+        current = self.state.current_move
+        if isinstance(current, RemoteLookMove):
+            current.aim(yaw_deg, pitch_deg)
+            return
+        if self._head_tracking and not self._look_paused_tracking:
+            try:
+                self.current_robot.start_head_tracking(weight=0.0)
+                self._look_paused_tracking = True
+            except Exception as e:
+                logger.warning("Head-tracking pause for Be Reachy failed: %s", e)
+        self._track_anchor = None
+        self.move_queue.clear()
+        self._end_move(current)
+        self.state.current_move = None
+        self.state.move_start_time = None
+        self._breathing_active = False
+        self.move_queue.append(RemoteLookMove(yaw_deg, pitch_deg, turn_body=True))
+        logger.info("Following the phone (Be Reachy)")
+
+    def _end_remote_look(self) -> None:
+        """Stop following the phone and face forward again, tracking resumed (worker thread only)."""
+        if self._remote_look_until is None:
+            return
+        self._remote_look_until = None
+        self.move_queue = deque(move for move in self.move_queue if not isinstance(move, RemoteLookMove))
+        if isinstance(self.state.current_move, RemoteLookMove):
+            self.state.current_move = None
+            self.state.move_start_time = None
+        if self._look_paused_tracking:
+            self._look_paused_tracking = False
+            if self._head_tracking:
+                try:
+                    self.current_robot.start_head_tracking(weight=1.0)
+                except Exception as e:
+                    logger.warning("Head-tracking resume after Be Reachy failed: %s", e)
+        self._queue_gaze_turn(0.0)
+        logger.info("Stopped following the phone")
 
     def _aim_photo(self, head_pose: NDArray[np.float64]) -> None:
         """Pause tracking and turn to ``head_pose`` at once, replacing an earlier aim (worker thread only)."""
@@ -1135,6 +1277,8 @@ class MovementManager:
             # Sleeping and waking start from wherever the head is and end facing forward.
             move.begin(self._present_pose())
             self._gaze_yaw = 0.0
+        elif isinstance(move, RemoteLookMove):
+            move.begin(self._present_pose())
 
     def _end_move(self, move: Move | None) -> None:
         """Clean up after a move finishes or is cleared."""
@@ -1273,6 +1417,8 @@ class MovementManager:
 
     def _update_primary_motion(self, current_time: float) -> None:
         """Advance queue state and idle behaviours for this tick."""
+        if self._remote_look_until is not None and current_time >= self._remote_look_until:
+            self._end_remote_look()
         if self._peek_until is not None and current_time >= self._peek_until:
             self._peek_until = None
             self._hold_sleeping_pose(sleep_move())
