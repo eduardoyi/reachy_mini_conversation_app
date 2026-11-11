@@ -13,6 +13,10 @@ names:
        la carrera de carros, flecha y tito, el carro y el camioncito, el cuento de carros]
   it: [la grande corsa, grande corsa, la corsa, corsa, la storia della corsa, la storia delle macchine,
        la corsa delle macchine, freccia e tito]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [carro, carros, carrito, carritos, coche, coches, carrera, carreras, camion, camioncito, flecha, tito, auto, autos]
+  it: [macchina, macchine, macchinina, macchinine, auto, corsa, corse, camion, camioncino, freccia, tito]
 pitch:
   es: "Flecha es el carro más rápido del pueblo, y Tito el más lento. ¿Quién ganará la carrera?"
   it: "Freccia è il bolide più veloce del paese, e Tito il più lento. Chi vincerà la corsa?"

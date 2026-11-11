@@ -12,6 +12,10 @@ names:
        tres cochinitos, los tres cochinitos, tres puerquitos, el lobo y los cerditos]
   it: [tre porcellini, i tre porcellini, porcellini, i porcellini, tre maialini, i tre maialini, maialini,
        il lupo e i porcellini]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [cerdito, cerditos, cochinito, cochinitos, chanchito, chanchitos, puerquito, puerquitos, cerdos, lobo, lobito]
+  it: [porcellino, porcellini, maialino, maialini, maiali, lupo, lupetto]
 pitch:
   es: "El lobo sopla y sopla, y ustedes me ayudan a contarlo."
   it: "Il lupo soffia e soffia, e voi mi aiutate a raccontarla."

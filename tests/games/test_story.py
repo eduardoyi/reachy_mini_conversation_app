@@ -1,6 +1,7 @@
 """Tests for story mode: story files, asking for a story, and telling one with the children joining in."""
 
 import io
+import random
 import asyncio
 from pathlib import Path
 from collections.abc import Callable
@@ -11,7 +12,14 @@ import pytest
 from .fakes import FakeReachy
 from reachy_mini_conversation_app.games import story as story_mode
 from reachy_mini_conversation_app.games.host import GameHost, host_phrases
-from reachy_mini_conversation_app.games.story import StoryGame, StoryVoice, picked, again_answer
+from reachy_mini_conversation_app.games.story import (
+    OFFER,
+    StoryGame,
+    StoryVoice,
+    picked,
+    again_answer,
+    offer_answer,
+)
 from reachy_mini_conversation_app.games.catalog import STORIES, GameInfo, parse_game_request
 from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 from reachy_mini_conversation_app.games.story_file import (
@@ -40,6 +48,11 @@ music:
 COMMON = """
 again: {es: "¿Otro cuento?", it: "Un'altra?"}
 goodbye: {es: "¡Chao!", it: "Ciao!"}
+screen_nap: {es: "¡Se durmió la pantalla!", it: "Lo schermo dorme!"}
+offer_story_a: {es: "¿El cuento A...", it: "La storia A..."}
+or_story_a: {es: "...¿o el cuento A?", it: "...o la storia A?"}
+offer_story_b: {es: "¿El cuento B...", it: "La storia B..."}
+or_story_b: {es: "...¿o el cuento B?", it: "...o la storia B?"}
 """
 STORY = """
 key: test_story
@@ -185,6 +198,8 @@ SHIPPED = (
     "musicos_de_bremen",
     "la_gran_carrera",
     "donde_esta_bigotes",
+    "la_befana",
+    "el_cascanueces",
     "la_monedita_de_plata",
 )
 
@@ -266,6 +281,16 @@ def test_a_clip_is_named_by_its_voice_language_and_text() -> None:
         ("raccontaci dov'è baffo", "donde_esta_bigotes", "it", False),
         ("cuéntanos la monedita de plata", "la_monedita_de_plata", "es", False),
         ("raccontaci la monetina d'argento", "la_monedita_de_plata", "it", False),
+        ("cuéntanos la befana", "la_befana", "es", False),
+        ("raccontaci la storia della befana", "la_befana", "it", False),
+        ("cuéntanos el cascanueces", "el_cascanueces", "es", False),
+        ("raccontaci lo schiaccianoci", "el_cascanueces", "it", False),
+        # By what it is about, the way Enzo asks (2026-11-08/09).
+        ("la historia de los carros", "la_gran_carrera", "es", False),
+        ("El de los carros, por favor. El de los carros", "la_gran_carrera", "es", False),
+        ("puedes contar la historia de los carros", "la_gran_carrera", "es", False),
+        ("cuéntanos el de los ratones", "el_cascanueces", "es", False),
+        ("raccontaci la storia delle macchinine", "la_gran_carrera", "it", False),
     ],
 )
 def test_asking_for_a_story(said: str, key: str | None, language: str, which: bool) -> None:
@@ -283,12 +308,49 @@ def test_other_requests_are_not_stories(said: str) -> None:
 
 
 def test_the_answer_to_another_story() -> None:
-    """A yes tells it again, a story's name tells that one, anything else stops."""
-    assert again_answer("¡sí, otro!", "tres_cerditos") == "tres_cerditos"
+    """A yes offers two others, "otra vez" tells it again, a story's name or keyword tells that one, else stop."""
+    assert again_answer("¡sí, otro!", "tres_cerditos") == OFFER
+    assert again_answer("¡sí, otra vez!", "tres_cerditos") == "tres_cerditos"
     assert again_answer("ancora!", "tres_cerditos") == "tres_cerditos"
     assert again_answer("los tres cerditos", "other") == "tres_cerditos"
+    # 2026-11-10: this told Los tres cerditos again.
+    assert again_answer("Sí, otro cuento, el de carros", "tres_cerditos") == "la_gran_carrera"
     assert again_answer("no, ya no", "tres_cerditos") is None
     assert again_answer("", "tres_cerditos") is None
+
+
+def test_the_answer_to_the_two_offered() -> None:
+    """A name, the first or second, "otra vez" or a no; anything else takes the first."""
+    offered = ["ricitos_de_oro", "la_gran_carrera"]
+    assert offer_answer("¡el de los carros!", offered, "tres_cerditos") == "la_gran_carrera"
+    assert offer_answer("el segundo", offered, "tres_cerditos") == "la_gran_carrera"
+    assert offer_answer("il primo", offered, "tres_cerditos") == "ricitos_de_oro"
+    assert offer_answer("¡sí!", offered, "tres_cerditos") == "ricitos_de_oro"
+    assert offer_answer("", offered, "tres_cerditos") == "ricitos_de_oro"
+    assert offer_answer("no, otra vez el mismo", offered, "tres_cerditos") == "tres_cerditos"
+    assert offer_answer("no, ya no", offered, "tres_cerditos") is None
+
+
+def test_the_stories_offered_are_the_ones_heard_least_lately(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never the one just told; untold ones before those told today."""
+    monkeypatch.setattr(story_mode, "_TOLD", {"a": 1.0, "b": 2.0, "c": 3.0})
+    assert story_mode.stories_to_offer("c", random.Random(0), ("a", "b", "c", "d")) == ["d", "a"]
+
+
+def test_every_story_can_be_offered() -> None:
+    """Each shipped story has its two offer lines in common.yaml."""
+    lines = load_common().lines
+    assert all(f"offer_{key}" in lines and f"or_{key}" in lines for key in load_stories())
+
+
+def test_story_keywords_point_to_one_story_each() -> None:
+    """A keyword shared by two stories would pick neither."""
+    stories = load_stories().values()
+    for story in stories:
+        assert story.keywords, f"{story.key} has no keywords"
+        for other in stories:
+            if other.key != story.key:
+                assert not story.keywords & other.keywords, (story.key, other.key, story.keywords & other.keywords)
 
 
 def test_a_choice_needs_one_option_named(tmp_path: Path) -> None:
@@ -391,8 +453,58 @@ async def test_a_story_without_recordings_is_said_in_richies_voice(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_yes_to_another_story_offers_two_and_tells_the_one_picked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain yes offers two other stories by name; "el segundo" tells the second."""
+    monkeypatch.setattr(story_mode, "STORIES", ("test_story", "story_a", "story_b"))
+    monkeypatch.setattr(story_mode, "_TOLD", {"story_a": 1.0})  # A was told lately, so B is offered first
+    reachy = FakeReachy(real_clock=True, recorded=True)
+    factory = _game(_folder(tmp_path), tmp_path / "data", record=True)
+    host = GameHost(reachy.services, {"test_story": factory, "story_a": factory, "story_b": factory})
+    answering = asyncio.create_task(
+        _answer_clips(reachy, {"¿Otro cuento?": "¡sí!", "...¿o el cuento A?": "el segundo, ese"})
+    )
+    assert host.start("test_story", "es") is None
+    await _until(lambda: [text for text, _ in reachy.clips].count("Había una vez.") == 2, 8.0)
+    host.end("test", say=False)
+    answering.cancel()
+    played = [text for text, _ in reachy.clips]
+    assert played.index("¿El cuento B...") < played.index("...¿o el cuento A?")
+
+
+@pytest.mark.asyncio
+async def test_a_napping_screen_gets_one_request_for_its_button(tmp_path: Path) -> None:
+    """The screen was awake, then stopped checking in: Richie asks once for its back button, not every step."""
+    reachy = FakeReachy(real_clock=True, recorded=True)
+    asleep = iter([0.0, 0.0])
+    reachy.services.screen_asleep_s = lambda: next(asleep, 120.0)
+    factory = _game(_folder(tmp_path), tmp_path / "data", record=True)
+    host = GameHost(reachy.services, {"test_story": factory})
+    answering = asyncio.create_task(_answer_clips(reachy, {"¿Otro cuento?": "no"}))
+    assert host.start("test_story", "es") is None
+    await _until(lambda: host.state.value == "idle", 8.0)
+    answering.cancel()
+    assert [text for text, _ in reachy.clips].count("¡Se durmió la pantalla!") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_screen_that_never_woke_is_not_asked_about(tmp_path: Path) -> None:
+    """No screen in use (never checked in during the story): nothing is said about it."""
+    reachy = FakeReachy(real_clock=True, recorded=True)
+    reachy.services.screen_asleep_s = lambda: float("inf")
+    factory = _game(_folder(tmp_path), tmp_path / "data", record=True)
+    host = GameHost(reachy.services, {"test_story": factory})
+    answering = asyncio.create_task(_answer_clips(reachy, {"¿Otro cuento?": "no"}))
+    assert host.start("test_story", "es") is None
+    await _until(lambda: host.state.value == "idle", 8.0)
+    answering.cancel()
+    assert "¡Se durmió la pantalla!" not in [text for text, _ in reachy.clips]
+
+
+@pytest.mark.asyncio
 async def test_yes_to_another_story_tells_it_again(tmp_path: Path) -> None:
-    """Start the same story again when "¿Otro cuento?" is answered yes."""
+    """Start the same story again when "¿Otro cuento?" is answered "otra vez"."""
     reachy = FakeReachy(real_clock=True, recorded=True)
     factory = _game(_folder(tmp_path), tmp_path / "data", record=True)
     host = GameHost(reachy.services, {"test_story": factory})

@@ -37,6 +37,10 @@ POLL_S = 0.2
 # After the firmware reports a failure it can sit on its error screen while being sent the file name it
 # already has, which it never redraws; the screen then goes out under a fresh name (``home~1``).
 ALIAS_MARK = "~"
+# A screen just replaced can still be fetched this long: the TRMNL asks which screen to show, then downloads it,
+# and on weak Wi-Fi a story's next picture can arrive in between. A refused download is a failed check-in, and the
+# firmware then sleeps 5 minutes with the old picture up (Eduardo, 2026-11-09: stories stuck on one picture).
+RECENT_S = 90.0
 BIND_TIMEOUT_S = 5.0
 DEFAULT_SPOOL = Path.home() / ".cache" / "reachy-mini-conversation-app" / "display" / "screen"
 CURRENT, DEVICE, SERVER = "current.json", "device.json", "server.json"
@@ -74,6 +78,21 @@ def current_filename(spool: Path, now: float) -> str | None:
             return screen
     home = current.get("home")
     return home if isinstance(home, str) else None
+
+
+def recent_screens(current: dict[str, Any], now: float) -> list[str]:
+    """Return the screens replaced less than RECENT_S ago that may still be fetched (never camera photos)."""
+    recent = current.get("recent")
+    if not isinstance(recent, list):
+        return []
+    return [
+        entry["screen"]
+        for entry in recent
+        if isinstance(entry, dict)
+        and isinstance(entry.get("screen"), str)
+        and isinstance(entry.get("until"), (int, float))
+        and now < entry["until"]
+    ]
 
 
 def is_awake(spool: Path, now: float, refresh_s: int) -> bool:
@@ -160,10 +179,11 @@ class DeviceServer(ThreadingHTTPServer):
             return filename
 
     def screen_png(self, filename: str) -> bytes | None:
-        """Return the PNG of the current or resting screen with this file name (or its alias), else None."""
+        """Return the PNG of the current, resting or just-replaced screen with this file name (or its alias)."""
         filename = filename.split(ALIAS_MARK, 1)[0]
         current = read_json(self.spool / CURRENT)
-        if filename not in (current_filename(self.spool, self._clock()), current.get("home")):
+        now = self._clock()
+        if filename not in (current_filename(self.spool, now), current.get("home"), *recent_screens(current, now)):
             return None
         try:
             return (self.spool / f"{filename}.png").read_bytes()

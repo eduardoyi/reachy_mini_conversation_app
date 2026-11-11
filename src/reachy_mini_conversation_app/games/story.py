@@ -19,6 +19,7 @@ picture waits until MIN_SCENE_GAP_S of story has passed since the last one, and 
 while the children are doing something; a picture still waiting when the next one comes is skipped.
 """
 
+import time
 import random
 import asyncio
 import logging
@@ -28,7 +29,7 @@ from collections.abc import Mapping, Sequence
 
 from reachy_mini_conversation_app.games.base import Game, GameContext
 from reachy_mini_conversation_app.eink_display import render_game_prompt
-from reachy_mini_conversation_app.games.catalog import GAMES, STORIES, GameInfo
+from reachy_mini_conversation_app.games.catalog import GAMES, STORIES, GameInfo, story_by_keyword
 from reachy_mini_conversation_app.quick_commands import normalize
 from reachy_mini_conversation_app.games.kids_audio import KidsAudio
 from reachy_mini_conversation_app.games.story_file import Line, Step, Story, Common, Option, Picture, clip_id
@@ -53,14 +54,33 @@ AGAIN_LISTEN_S: Final[float] = 8.0
 # was 20 s, and pictures then came half a minute after the lines they show (Eduardo, 2026-11-07); the TRMNL itself
 # takes about 5 s to fetch and draw one.
 MIN_SCENE_GAP_S: Final[float] = 5.0
+# The screen gone this long without checking in has napped (a normal gap is under a minute): Richie asks for its
+# back button, at most NAP_ASKS times a story and once per nap, and only if it was awake during the story.
+NAP_ASK_S: Final[float] = 75.0
+NAP_ASKS: Final[int] = 2
 # Text that goes to the transcript for sounds played without a line.
 SOUND_TEXT: Final[str] = "♪"
 
 # "¿Otro cuento?": cues anywhere in the answer, the first of a yes and a no wins (like the kids' games).
+# A plain yes means another story, offered by name; the same story needs "otra vez" (2026-11-10: "sí, otro
+# cuento, el de carros" told Los tres cerditos again).
 _AGAIN_YES: Final[tuple[str, ...]] = (
-    "si", "sii", "dale", "vamos", "claro", "vale", "bueno", "listo", "quiero", "otro", "otra", "otra vez",
-    "dai", "certo", "ancora", "un altra", "unaltra", "un altro", "va bene", "voglio",
+    "si", "sii", "dale", "vamos", "claro", "vale", "bueno", "listo", "quiero", "otro", "otra", "ese", "esa",
+    "dai", "certo", "un altra", "unaltra", "un altro", "va bene", "voglio", "questa", "questo",
 )  # fmt: skip
+_AGAIN_SAME: Final[tuple[str, ...]] = (
+    "otra vez", "de nuevo", "el mismo", "la misma", "ese mismo", "ese otra vez", "repite", "repitelo", "otra vez ese",
+    "ancora", "di nuovo", "la stessa", "lo stesso", "ancora una volta", "rifallo",
+)  # fmt: skip
+# Picking one of the two offered: "el primero", "el segundo" (else by name).
+_FIRST: Final[tuple[str, ...]] = ("el primero", "la primera", "primero", "primera", "il primo", "la prima", "primo")
+_SECOND: Final[tuple[str, ...]] = (
+    "el segundo", "la segunda", "segundo", "segunda", "el otro", "il secondo", "la seconda", "secondo", "laltro",
+)  # fmt: skip
+# Another story without saying which: Reachy offers two by name.
+OFFER: Final[str] = "offer"
+# When each story was last told here (monotonic time), so the two offered are the ones heard least lately.
+_TOLD: dict[str, float] = {}
 _AGAIN_NO: Final[tuple[str, ...]] = (
     "no", "ya no", "basta", "se acabo", "chao", "adios", "luego", "despues", "otro dia",
     "ciao", "dopo", "basta cosi", "abbiamo finito", "non voglio",
@@ -73,18 +93,59 @@ def _first_at(said: str, phrases: Sequence[str]) -> int | None:
     return min((at for at in found if at >= 0), default=None)
 
 
-def again_answer(text: str, playing: str, stories: Sequence[str] = STORIES) -> str | None:
-    """Read the answer to "¿Otro cuento?": a story to tell next (``playing`` again on a yes), or None to stop."""
-    said = normalize(text)
+def named_story(said: str, stories: Sequence[str] = STORIES) -> str | None:
+    """Return the story ``said`` (normalized) names, by one of its names or else by its one keyword ("carros")."""
     named = [
         (at, key) for key in stories if key in GAMES and (at := _first_at(said, tuple(GAMES[key].names))) is not None
     ]
     if named:
         return min(named)[1]
+    game = story_by_keyword(said, stories)
+    return game.key if game is not None else None
+
+
+def again_answer(text: str, playing: str, stories: Sequence[str] = STORIES) -> str | None:
+    """Read the answer to "¿Otro cuento?": a story named, ``playing`` on "otra vez", OFFER on a plain yes, else None."""
+    said = normalize(text)
+    named = named_story(said, stories)
+    if named is not None:
+        return named
     yes, no = _first_at(said, _AGAIN_YES), _first_at(said, _AGAIN_NO)
-    if yes is not None and (no is None or yes < no):
+    if _first_at(said, _AGAIN_SAME) is not None:  # "no, ¡otra vez!"
         return playing
+    if yes is not None and (no is None or yes < no):
+        return OFFER
     return None
+
+
+def offer_answer(text: str, offered: Sequence[str], playing: str, stories: Sequence[str] = STORIES) -> str | None:
+    """Read the answer to "¿A o B?": a story named, the first or second, ``playing`` on "otra vez", None on a no.
+
+    Anything else (silence, a yes, words that name neither) takes the first offered.
+    """
+    said = normalize(text)
+    named = named_story(said, stories)
+    if named is not None:
+        return named
+    no = _first_at(said, _AGAIN_NO)
+    if _first_at(said, _AGAIN_SAME) is not None:  # "no, ¡otra vez el mismo!"
+        return playing
+    second, first = _first_at(said, _SECOND), _first_at(said, _FIRST)
+    if second is not None and (first is None or second < first):
+        return offered[1]
+    if first is not None:
+        return offered[0]
+    if no is not None and _first_at(said, _AGAIN_YES) is None:
+        return None
+    return offered[0]
+
+
+def stories_to_offer(playing: str, rng: random.Random, stories: Sequence[str] = STORIES) -> list[str]:
+    """Return two stories other than ``playing``: the ones told least lately here (never told first)."""
+    others = [key for key in stories if key != playing]
+    rng.shuffle(others)
+    others.sort(key=lambda key: _TOLD.get(key, float("-inf")))
+    return others[:2]
 
 
 def picked(text: str | None, options: Sequence[Option], language: str) -> Option | None:
@@ -170,11 +231,15 @@ class StoryGame(Game):
         self._shown_at: float | None = None  # story time of the last picture
         self._next: Step | None = None  # the step after the one playing
         self._early: Step | None = None  # a choice's scene already shown before its line
+        self._screen_seen = False  # the screen checked in during this story
+        self._nap_asked = False  # asked for the button during this nap
+        self._nap_asks = 0
 
     # Playing -------------------------------------------------------------------------------------
 
     async def play(self, context: GameContext) -> None:
         """Tell the story from the start, then ask whether to tell another."""
+        _TOLD[self._story.key] = time.monotonic()
         language = context.language
         self._title = self._story.title.get(language, "")
         self._scene(context, self._story.cover)
@@ -186,6 +251,7 @@ class StoryGame(Game):
             context.progress = f"{number}/{len(steps)}"
             context.played()
             self._scene(context, None)  # a picture that waited for the gap
+            await self._wake_screen(context)
             await self._step(context, step)
         await self._flush(context)
         await self._again(context)
@@ -301,19 +367,54 @@ class StoryGame(Game):
         if ask is None:
             return
         context.services.hint_answers(
-            [name for key in STORIES for name in GAMES[key].spoken.get(context.language, ())]
+            [name for key in STORIES if key in GAMES for name in GAMES[key].spoken.get(context.language, ())]
         )
         try:
             heard = await self._ask(context, ask, AGAIN_LISTEN_S, cloud=True, common=True)
         finally:
             context.services.hint_answers([])
         following = again_answer(heard or "", self._story.key)
+        if following == OFFER:
+            following = await self._offer(context)
         if following is not None:
             context.next_game = following
             return
         goodbye = self._common.lines.get("goodbye")
         if goodbye is not None:
             await self._say(context, goodbye, common=True, after=("story_end",))
+
+    async def _wake_screen(self, context: GameContext) -> None:
+        """Ask the children to press the screen's back button when it has napped mid-story (2026-11-09)."""
+        asleep_s = context.services.screen_asleep_s()
+        if asleep_s <= 0:
+            self._screen_seen, self._nap_asked = True, False
+            return
+        line = self._common.lines.get("screen_nap")
+        if line is None or not self._screen_seen or self._nap_asked or self._nap_asks >= NAP_ASKS:
+            return
+        if asleep_s >= NAP_ASK_S:
+            logger.info("Story screen asleep for %.0f s; asking for its button", asleep_s)
+            self._nap_asked = True
+            self._nap_asks += 1
+            await self._say(context, line, common=True)
+
+    async def _offer(self, context: GameContext) -> str | None:
+        """Offer two other stories by name ("¿La gran carrera... o Bigotes?") and return the one picked."""
+        offered = stories_to_offer(self._story.key, self._rng, STORIES)
+        lines = self._common.lines
+        first = lines.get(f"offer_{offered[0]}") if offered else None
+        second = lines.get(f"or_{offered[1]}") if len(offered) > 1 else None
+        if first is None or second is None:  # no offer recorded for them: the first story not told lately
+            return offered[0] if offered else self._story.key
+        await self._say(context, first, common=True)
+        context.services.hint_answers(
+            [name for key in STORIES if key in GAMES for name in GAMES[key].spoken.get(context.language, ())]
+        )
+        try:
+            heard = await self._ask(context, second, AGAIN_LISTEN_S, cloud=True, common=True)
+        finally:
+            context.services.hint_answers([])
+        return offer_answer(heard or "", offered, self._story.key, STORIES)
 
     # Audio ---------------------------------------------------------------------------------------
 

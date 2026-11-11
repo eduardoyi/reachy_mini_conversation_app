@@ -323,6 +323,11 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 - The TRMNL sleeps 5 minutes after one failed check-in (`SHORT_TERM_SLOW_RETRY_INTERVAL`; API retries
   are fixed at that value in current firmware). `EInkDisplay.awake()` reports it from check-in times,
   and the log says "TRMNL checking in again after N s" when it returns.
+- A screen just replaced stays fetchable for 90 s (`RECENT_S`, `recent` in `current.json`; never a camera photo):
+  the TRMNL asks which screen to show, then downloads it, and on weak Wi-Fi a story's next picture could arrive in
+  between; the refused download was a failed check-in, and the screen napped 5 minutes on the old picture
+  (2026-11-09). `EInkDisplay.asleep_s()` says how long it has gone without checking in; a story asks the children
+  to press its back button after 75 s (games `screen_asleep_s`).
 - Pillow's built-in font lacks accents and ¡¿ñ, hence the bundled font.
 
 ## Dependencies

@@ -300,6 +300,7 @@ def _build_games(
         gesture=gesture,
         say_audio=say_audio,
         hint_answers=runtime.set_answer_hints,
+        screen_asleep_s=display.asleep_s if display is not None else (lambda: 0.0),
     )
     game_data = Path(config.GAME_DATA_DIR)
     # The kids' games' recorded lines, sounds and music (games/kids_audio.py); without them, Richie's own voice.

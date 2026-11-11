@@ -13,6 +13,10 @@ names:
        el rabano gigante, el nabo enorme]
   it: [rapa gigante, la rapa gigante, la rapa, rapa, la grande rapa, la rapa enorme, il nonno e la rapa,
        la storia della rapa]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [nabo, nabos, rabano, abuelo, abuelito, jalar]
+  it: [rapa, rape, nonno, nonnino, tirare]
 pitch:
   es: "Un nabo tan grande que hace falta todo el mundo para sacarlo, ¡y ustedes también!"
   it: "Una rapa così grande che serve l'aiuto di tutti per tirarla fuori, anche il vostro!"

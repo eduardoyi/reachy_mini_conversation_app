@@ -16,6 +16,10 @@ names:
        la moneda, el cuento de la moneda, el cuento de la monedita]
   it: [la monetina d'argento, monetina d'argento, la monetina, monetina, la moneta d'argento, moneta d'argento,
        la moneta, la storia della moneta, la storia della monetina]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [moneda, monedas, monedita, moneditas, plata, mago, cuervo, pedrito]
+  it: [moneta, monete, monetina, monetine, argento, mago, corvo, pietro]
 pitch:
   es: "Una monedita de plata se va a ver el mundo. ¡Y cada persona que la encuentra la usa para algo distinto!"
   it: "Una monetina d'argento parte per vedere il mondo. E ognuno che la trova la usa per qualcosa di diverso!"

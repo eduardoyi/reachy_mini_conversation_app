@@ -40,6 +40,8 @@ class GameInfo:
     languages: tuple[str, ...] = ("es", "en")
     # Its names by language, when they tell the language apart (a story asked for in Italian is told in Italian).
     spoken: dict[str, frozenset[str]] = field(default_factory=dict)
+    # A story's single words that point to it alone ("carros"), for requests that miss its names.
+    keywords: frozenset[str] = frozenset()
 
 
 COLOR_HUNT: Final[GameInfo] = GameInfo(
@@ -600,6 +602,7 @@ def _story_infos() -> list[GameInfo]:
                 kind="story",
                 languages=LANGUAGES,
                 spoken=spoken,
+                keywords=story.keywords,
             )
         )
     return infos
@@ -655,7 +658,7 @@ _FRAMES: Final[dict[str, re.Pattern[str]]] = {
 _STORY_FRAMES: Final[dict[str, re.Pattern[str]]] = {
     "es": re.compile(
         r"^(?:cuentame|cuentanos|cuentenos|cuentanme|me cuentas|nos cuentas|leeme|leenos|puedes contarme|"
-        r"puedes contarnos|quiero|queremos|ponme|ponnos)"
+        r"puedes contarnos|puedes contar|cuenta|quiero|queremos|ponme|ponnos)"
         r"(?: (?:un|una|el|la|los|las|otro|otra))?(?P<noun> cuento| cuentico| historia)?(?: de| del)?"
         r"(?P<name>(?: .*)?)$"
     ),
@@ -771,6 +774,34 @@ def find_game(name: str) -> GameInfo | None:
     return candidates[close[0]] if close else None
 
 
+# Words around a story asked for by what it is about rather than its name: "la historia de los carros",
+# "el de los carros, por favor" (Enzo, 2026-11-08/09). A keyword counts only with one of these.
+_STORY_CUES: Final[tuple[str, ...]] = (
+    "cuento", "cuentos", "cuentico", "historia", "historias", "el de", "la de", "el del", "la del",
+    "storia", "storie", "storiella", "favola", "fiaba", "quella di", "quella del", "quella della", "quello di",
+)  # fmt: skip
+
+
+def story_by_keyword(said: str, stories: Iterable[str] | None = None) -> GameInfo | None:
+    """Return the one story whose keyword ``said`` (normalized) has as a word, else None (none or several)."""
+    heard = set(said.split())
+    keys = STORIES if stories is None else stories
+    found = {key for key in keys if key in GAMES and GAMES[key].keywords & heard}
+    return GAMES[found.pop()] if len(found) == 1 else None
+
+
+def _story_by_cue(said: str) -> GameRequest | None:
+    """Return a story asked for by a keyword next to a story word, with or without a request verb."""
+    padded = f" {said} "
+    if not any(f" {cue} " in padded for cue in _STORY_CUES):
+        return None
+    game = story_by_keyword(said)
+    if game is None:
+        return None
+    italian = any(f" {cue} " in padded for cue in _STORY_CUES[_STORY_CUES.index("storia") :])
+    return GameRequest(game, "it" if italian else "es")
+
+
 def parse_game_request(text: str) -> GameRequest | None:
     """Return the request to play in ``text``, or None when it is not one.
 
@@ -797,7 +828,7 @@ def parse_game_request(text: str) -> GameRequest | None:
     # Just the name, of two words or more: "el juego de los colores", "color hunt" (not "colores" alone).
     game = find_game(said) if len(said.split()) >= 2 else None
     if game is None:
-        return None
+        return _story_by_cue(said)
     return GameRequest(game, spoken_language(game, said) or guess_language(said))
 
 
@@ -811,6 +842,9 @@ def _story_request(said: str) -> GameRequest | None:
         game = find_game(name) if name else None
         if game is not None and game.kind == "story":
             return GameRequest(game, spoken_language(game, name) or language)
+        game = story_by_keyword(name) if name else None
+        if game is not None:
+            return GameRequest(game, language)
         # "Cuéntanos un cuento" asks which; "quiero agua" or "cuéntame un chiste" is not about stories.
         if match.group("noun") and (not name or name in _NO_NAME):
             return GameRequest(None, language, story=True)
@@ -818,10 +852,16 @@ def _story_request(said: str) -> GameRequest | None:
 
 
 def spoken_language(game: GameInfo, name: str) -> str | None:
-    """Return the language whose names for ``game`` hold ``name`` (normalized), or None when none tells."""
+    """Return the language whose names for ``game`` hold ``name`` (normalized), or None when none or several tell.
+
+    "Befana" is a name in Spanish and in Italian, so the words around it decide.
+    """
     name = _NAME_EDGES.sub("", name.strip()).strip()
+    exact = [language for language, names in game.spoken.items() if name in names]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
     for language, names in game.spoken.items():
-        if name in names or difflib.get_close_matches(name, list(names), n=1, cutoff=0.82):
+        if difflib.get_close_matches(name, list(names), n=1, cutoff=0.82):
             return language
     return None
 

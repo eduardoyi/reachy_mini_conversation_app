@@ -124,6 +124,8 @@ class Story:
     rules: str
     cover: Picture | None
     steps: tuple[Step, ...]
+    # Single words that point to this story alone ("carros"): "la historia de los carros" (Enzo, 2026-11-09).
+    keywords: frozenset[str] = frozenset()
 
     def lines(self) -> Iterator[Line]:
         """Every line the story can say, every choice's branches included."""
@@ -328,12 +330,22 @@ def load_cast(folder: Path = STORIES_DIR) -> dict[str, dict[str, str]]:
 
 
 def load_sounds(folder: Path = STORIES_DIR) -> dict[str, dict[str, Any]]:
-    """Return the sounds and music: name to ``{"kind": "sound" | "music", "seconds": ..., "prompt": ...}``."""
+    """Return the sounds and music: name to ``{"kind": "sound" | "music", "seconds": ..., "prompt": ...}``.
+
+    Music cut from a real recording also has ``source`` (its URL), ``start``, ``loudness`` (LUFS) and ``license``.
+    """
     raw = _yaml(folder / "sounds.yaml") or {}
     sounds: dict[str, dict[str, Any]] = {}
     for kind in ("sound", "music"):
         for name, info in (raw.get(kind) or {}).items():
             sounds[str(name)] = {"kind": kind, "seconds": float(info["seconds"]), "prompt": str(info["prompt"])}
+            if info.get("source"):  # a real recording, cut from ``start`` (seconds), instead of a generated one
+                sounds[str(name)].update(
+                    source=str(info["source"]),
+                    start=float(info.get("start", 0.0)),
+                    loudness=float(info.get("loudness", -17.0)),
+                    license=str(info.get("license", "")),
+                )
     return sounds
 
 
@@ -375,6 +387,11 @@ def load_story(path: Path, folder: Path = STORIES_DIR) -> Story:
         rules=str(raw.get("rules", "")),
         cover=cover,
         steps=steps,
+        keywords=frozenset(
+            normalize(str(word))
+            for language in LANGUAGES
+            for word in ((raw.get("keywords") or {}).get(language) or ())
+        ),
     )
 
 

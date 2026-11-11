@@ -38,13 +38,16 @@ from google.genai import errors as genai_errors
 from PIL.PngImagePlugin import PngInfo
 
 from reachy_mini_conversation_app.eink_server import (
+    DEVICE,
     SERVER,
     CURRENT,
+    RECENT_S,
     is_awake,
     read_json,
     write_json,
     fingerprint,
     running_pid,
+    recent_screens,
     current_filename,
 )
 from reachy_mini_conversation_app.usage_costs import get_ledger
@@ -946,6 +949,14 @@ class EInkDisplay:
         """Whether the TRMNL is checking in, so a new screen reaches it within seconds."""
         return is_awake(self.spool, self._clock(), self.refresh_s)
 
+    def asleep_s(self) -> float:
+        """How long the TRMNL has gone without checking in: 0 while awake, infinity when it never has."""
+        now = self._clock()
+        if is_awake(self.spool, now, self.refresh_s):
+            return 0.0
+        ended = read_json(self.spool / DEVICE).get("ended")
+        return now - ended if isinstance(ended, (int, float)) else float("inf")
+
     def _read(self, filename: str) -> bytes | None:
         try:
             return (self.spool / f"{filename}.png").read_bytes()
@@ -953,10 +964,24 @@ class EInkDisplay:
             return None
 
     def _update(self, **changes: object) -> None:
-        """Change ``current.json`` and delete screens it no longer names."""
-        current = {**read_json(self.spool / CURRENT), **changes}
+        """Change ``current.json`` and delete screens it no longer names.
+
+        A screen being replaced stays fetchable for RECENT_S (``recent``), unless it is a camera photo.
+        """
+        before = read_json(self.spool / CURRENT)
+        current = {**before, **changes}
+        now = self._clock()
+        still = recent_screens(before, now)
+        recent = [
+            entry for entry in before.get("recent") or [] if isinstance(entry, dict) and entry.get("screen") in still
+        ]
+        old = before.get("screen")
+        if isinstance(old, str) and old != current.get("screen") and not before.get("private"):
+            recent.append({"screen": old, "until": now + RECENT_S})
+        current["recent"] = recent
         write_json(self.spool / CURRENT, current)
         keep = {f"{current.get('screen')}.png", f"{current.get('home')}.png"}
+        keep |= {f"{name}.png" for name in recent_screens(current, now)}
         for old in self.spool.glob("reachy-*.png"):
             if old.name not in keep:
                 old.unlink(missing_ok=True)

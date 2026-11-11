@@ -50,8 +50,20 @@ audio is made once, ahead of time, so telling a story spends almost nothing.
    don't pause a story: the head is held still the whole time so a pat can knock on a door, and pats outside a
    knock are ignored.
 5. **The end:** "Colorín colorado, este cuento se ha acabado" / "E vissero felici e contenti", a short celebration,
-   then "¿Otro cuento?". This is read loosely like the kids' games' "¿Otra vez?": yes plays it again, a story's
-   name starts that one, no or silence ends.
+   then "¿Otro cuento?". This is read loosely like the kids' games' "¿Otra vez?": a story's name or one of its
+   keywords ("el de carros") starts that one; "otra vez" / "el mismo" / "ancora" plays it again; a plain yes offers
+   two others by name, the two told least lately ("¿Les cuento La gran carrera... o El Cascanueces?", lines
+   `offer_<key>` and `or_<key>` in common.yaml), and the pick (a name, "el primero", "el segundo"; anything else the
+   first) starts; no or silence ends. A plain yes used to play the same story again, and the kids looped on it
+   (2026-11-10: "Sí, otro cuento, el de carros" told Los tres cerditos again).
+   Asked for by what it is about, a story is found by its `keywords` (single words, one story each): "la historia
+   de los carros", "el de los carros, por favor" (Enzo, 2026-11-08/09) start La gran carrera, with or without a
+   request verb, as long as a story word ("cuento", "historia", "el de"...) is in the request.
+6. **The screen naps:** the TRMNL sleeps 5 minutes after one failed check-in and keeps the old picture up. The mini
+   keeps serving a replaced picture for 90 s, so a picture that changes between the check-in and its download is
+   no longer a failure (2026-11-09: two naps came from that). When the screen has still gone 75 s without checking
+   in, Richie asks the children to press its back button (`screen_nap` in common.yaml), once per nap, at most twice
+   a story, and only if it was awake earlier in the story.
 
 ## Interactions
 
@@ -186,7 +198,10 @@ The softened ending (cold water, the wolf runs away) is on purpose for the 2-yea
 ## Next stories
 
 Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera; then
-(2026-11-09) ¿Dónde está Bigotes? and La monedita de plata. Ideas for later: Pinocchio in short episodes (Collodi's book,
+(2026-11-09) ¿Dónde está Bigotes? and La monedita de plata; (2026-11-11) La Befana and El Cascanueces. Ideas for later: an
+own Christmas reindeer story (Rudolph is still in copyright and trademarked, so only the bare idea of a teased
+reindeer whose difference saves Christmas, with a different gift), a Venezuelan Christmas (patinatas, hallacas, the
+Niño Jesús), La araña de Navidad, La flor de Nochebuena, Pinocchio in short episodes (Collodi's book,
 drawn from his descriptions), Los tres chivitos, El hombrecito de jengibre, La gallinita roja, El león y el ratón (could
 be the fire truck story), Caperucita Roja (softened), Tío Tigre y Tío Conejo (Venezuelan; the big wind first), Chicken
 Little, The Little Mitten, La cucarachita Martina, The Elves and the Shoemaker, The Emperor's New Clothes. A story from
@@ -333,3 +348,16 @@ our own.
   their uses for a coin that can't buy anything far from home (heads or tails, a magic trick, a crow's treasure, a
   button, a cake surprise, a lucky charm). Ten roles on voices already on the account; Lola is the turnip story's
   girl. About 22k credits for 302 clips and 8 sounds.
+- 2026-11-11: two Christmas stories. `la_befana` (La Befana) is the Italian folk tale: the three kings call, she is
+  too busy sweeping, changes her mind and flies off on her broom with a basket of sweets, leaving a treat in every
+  stocking; the coal is sugar coal, and the last house is Misifú the cat's (the Bremen cat). 12 moments (sweeping,
+  knocking, sweets or cookies, flying, the "vien di notte" rhyme twice, shivering, tiptoeing, a sneeze, a sweet or
+  coal for the cat, the dance). `el_cascanueces` (El Cascanueces / Lo Schiaccianoci) is Hoffmann's tale as the ballet
+  tells it, with Tchaikovsky's own music: the March, the Russian dance, the Sugar Plum Fairy and the Waltz of the
+  Flowers, cut by `story_build.py` from recordings anyone may use (sounds.yaml `source` and `license`: US Air Force
+  and Marine bands, public domain; a 1939 Dresden recording marked public domain; Kevin MacLeod, CC BY 3.0). 12
+  moments (cracking nuts, striking midnight with pats, squeaking mice, marching, slipper or pillow, cheering, blowing
+  snow, the fairy's tiptoe, chocolate or candyfloss, the Russian dance, the waltz). Seven new roles on voices already
+  on the account. About 25k credits. Whisper changed the Italian sweep "fsc, fsc" into "Reachy, Reachy", so it is
+  "fru, fru". The same day: the two-story offer after "¿Otro cuento?", story keywords, recently replaced screens
+  kept fetchable for 90 s, and the request to press the screen's button.

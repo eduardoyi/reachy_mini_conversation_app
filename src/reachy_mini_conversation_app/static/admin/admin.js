@@ -397,6 +397,8 @@ const GAME_CARDS = {
   musicos_de_bremen: { name: "The Town Musicians", shelf: "stories", facts: ["About 6 minutes", "Kids bray, bark, meow and crow"] },
   la_gran_carrera: { name: "The Big Race", shelf: "stories", facts: ["About 6 minutes", "Kids rev, honk, steer and cheer"] },
   donde_esta_bigotes: { name: "Where's Bigotes?", shelf: "stories", facts: ["About 7 minutes", "Kids call, meow, guess and count kittens"] },
+  la_befana: { name: "La Befana", shelf: "stories", facts: ["About 7 minutes", "Kids sweep, fly the broom, sneeze and say her rhyme"] },
+  el_cascanueces: { name: "The Nutcracker", shelf: "stories", facts: ["About 7 minutes", "Tchaikovsky's music; kids march, squeak and dance"] },
   la_monedita_de_plata: { name: "The Little Silver Coin", shelf: "stories", art: "monedita", facts: ["About 7 minutes", "Kids clink, caw, knead and say the magic word"] },
 };
 const SHELVES = [

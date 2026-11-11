@@ -73,6 +73,8 @@ async def test_unknown_games_and_no_host() -> None:
         "ballpark",
         "detectives",
         "donde_esta_bigotes",
+        "el_cascanueces",
+        "la_befana",
         "la_gran_carrera",
         "la_monedita_de_plata",
         "musicos_de_bremen",

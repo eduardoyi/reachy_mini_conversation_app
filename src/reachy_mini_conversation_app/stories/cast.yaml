@@ -307,3 +307,72 @@ tailor:
   look: >-
     a small, plump, kind tailor lady with short grey curly hair, half-moon glasses on a chain, a tape measure around
     her neck, a pincushion on her wrist and a cardigan with big pockets
+
+# La Befana (2026-11-11). Misifú (Micio) is the cat above.
+
+befana:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Grandma" (also the turnip story's grandma; never in the same story):
+    a sweet grandmother, warm, funny and a bit cheeky. The Befana, a busy, kind old woman who flies on a broom.
+  voice: "FTUoMlBeU7pi34pUd8vh"
+  look: >-
+    the Befana, a small, kind, bony old woman with a big hooked nose, a wide gap-toothed smile and rosy wrinkled
+    cheeks, a dark knotted headscarf over wispy white hair, a big patched shawl, a long skirt covered in square
+    patches, worn-out boots with holes in them and a long straw broom
+
+king:
+  description: >-
+    Reuses "Samuel" (also the Bigotes musician; never in the same story): a deep, kind, grand voice. The eldest of the
+    three kings who visit the Befana.
+  voice: "ELKUz2Dml0Jmy3lgo9pY"
+  look: >-
+    a tall, kind old king with a long white beard, a tall pointed crown, a long heavy robe with a wide embroidered
+    border and a fur collar, holding a small carved treasure chest
+
+# El Cascanueces (2026-11-11).
+
+clara:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Lucía Herrera" (also Lola's voice; never in the same story): bright,
+    eager and friendly. Clara, a brave little girl.
+  voice: "0QLnKAGnepQitThaQFxG"
+  look: >-
+    Clara, a little girl about seven years old with long wavy hair tied back with a big bow, a party dress with a
+    wide sash and puffed sleeves, white stockings and soft ballet slippers
+
+nutcracker:
+  description: >-
+    Reuses the oldest pig's voice (also Tito; never in the same story): calm, patient, brave and confident. The
+    Nutcracker, a brave wooden soldier who turns into a prince.
+  voice: "bK8pCj0hy6BYv8VxrfSx"
+  look: >-
+    the Nutcracker, a wooden toy soldier with a tall soldier's hat with a plume, a big square jaw and a wide
+    painted smile showing big square teeth, a painted mustache, a short jacket with two rows of buttons and a sash,
+    stiff wooden legs in tall boots and a little wooden sword at his belt
+
+mouse_king:
+  description: >-
+    Reuses the wolf's voice (silly, goofy, over-dramatic, a clumsy villain who always fails). The Mouse King.
+  voice: "W7E3KNQawoiz0OiRXuF3"
+  look: >-
+    the Mouse King, a plump, silly cartoon mouse as tall as a toy soldier, with a crooked little crown far too small
+    for his head, a long royal cape dragging behind him, a big round tummy, huge round ears, a long thin tail and a
+    toothpick held up like a sword; comic and clumsy, never scary
+
+godfather:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Marco Bellini" (also Flecha and the magician; never in the same
+    story): theatrical and grand. Godfather Drosselmeyer, a mysterious, kind toymaker.
+  voice: "hjcB1XpogPinAIk1gMPk"
+  look: >-
+    Godfather Drosselmeyer, a tall, thin, mysterious old toymaker with a black patch over one eye, wild white hair,
+    a long dark cape, a tall hat and a big pocket watch on a chain
+
+sugar_fairy:
+  description: >-
+    Reuses "mama_pig" (also the tailor; never in the same story): a kind, warm, gentle adult voice. The Sugar Plum
+    Fairy, queen of the Land of Sweets.
+  voice: "Xg76FEi4dbIiAKTuqhdB"
+  look: >-
+    the Sugar Plum Fairy, a graceful fairy with a sparkling tiara, a wide puffy tutu dotted with sugar sparkles, small
+    shimmering wings, her hair in a high bun and a wand topped with a little round sweet

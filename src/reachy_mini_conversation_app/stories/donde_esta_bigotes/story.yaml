@@ -17,6 +17,10 @@ names:
        el gato perdido, el gato de todos, el gato de lola, lola y el gato, gato encerrado, el gato encerrado]
   it: [dov'è baffo, dove è baffo, baffo, il gatto baffo, la storia del gatto, la storia di baffo, il gatto perduto,
        il gatto di tutti, il gatto di lola, lola e il gatto]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [gato, gatos, gatico, gaticos, gatito, gatitos, gata, gatita, gatica, michi, minino, lola]
+  it: [gatto, gatti, gattino, gattini, gattina, micio, micino, lola]
 pitch:
   es: "Lola perdió a su gato Bigotes y les pregunta a los vecinos. ¡Pero cada vecino tiene un gato muy especial!"
   it: "Lola ha perso il suo gatto Baffo e chiede ai vicini. Ma ogni vicino ha un gatto davvero speciale!"

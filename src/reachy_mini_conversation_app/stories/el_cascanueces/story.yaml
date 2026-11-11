@@ -1,0 +1,370 @@
+# El Cascanueces / Lo Schiaccianoci (docs/plans/story-mode.md).
+# Our own telling for a 2- and a 4-year-old of E. T. A. Hoffmann's The Nutcracker and the Mouse King (1816) as the
+# ballet tells it (1892), both public domain: on Christmas Eve Clara's godfather gives her a wooden nutcracker; at
+# midnight the tree grows huge, the mice come with their king, the nutcracker leads the toy soldiers, Clara saves him
+# by throwing her slipper, and he turns into a prince who takes her through the snow to the Land of Sweets. The music
+# is Tchaikovsky's own (the March, the Russian dance, the Sugar Plum Fairy, the Waltz of the Flowers), cut from
+# recordings anyone may use (sounds.yaml says which). The Mouse King is silly and nobody gets hurt. About 7 minutes
+# with 12 moments where the children join in. Spanish is Venezuelan (ustedes, chévere), Italian is standard.
+
+key: el_cascanueces
+title:
+  es: El Cascanueces
+  it: Lo Schiaccianoci
+names:
+  es: [el cascanueces, cascanueces, el cuento del cascanueces, el soldadito cascanueces, el rey de los ratones,
+       clara y el cascanueces, el cascanueces y el rey de los ratones, el soldadito de madera]
+  it: [lo schiaccianoci, schiaccianoci, la storia dello schiaccianoci, il re dei topi, clara e lo schiaccianoci,
+       lo schiaccianoci e il re dei topi, il soldatino di legno]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [cascanueces, nueces, nuez, ratones, raton, soldadito, soldaditos, soldado, soldados, clara, hada, dulces]
+  it: [schiaccianoci, noci, noce, topi, topo, soldatino, soldatini, soldato, soldati, clara, fata, confetto]
+pitch:
+  es: "Un soldadito de madera, un rey de los ratones muy tonto y un viaje al Reino de los Dulces. ¡Con la música de Chaikovski!"
+  it: "Un soldatino di legno, uno sciocco Re dei Topi e un viaggio nel Regno dei Dolci. Con la musica di Čajkovskij!"
+rules: >-
+  Reachy tells El Cascanueces (Hoffmann's Nutcracker as the ballet tells it: on Christmas Eve Clara's godfather gives
+  her a wooden nutcracker; at midnight the tree grows huge, a silly Mouse King comes with his mice, the nutcracker
+  leads the toy soldiers, Clara saves him by throwing something at the Mouse King, and he turns into a prince who
+  takes her through the snow to the Land of Sweets, where the Sugar Plum Fairy and the sweets dance for them; then
+  she wakes up under the tree), about 7 minutes, in Spanish or Italian, with character voices, sounds and
+  Tchaikovsky's own music. The children join in: they crack nuts, strike midnight by patting his head, squeak like
+  mice, march with the soldiers, cheer the nutcracker, blow the snowflakes, tiptoe like the fairy, jump in the
+  Russian dance, waltz at the end and pick small things (a slipper or a pillow to throw, chocolate or candyfloss to
+  taste). The story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the wooden Nutcracker soldier standing proudly under a huge glowing Christmas tree with presents piled around it, a little girl in a party dress smiling at him, snow falling past the big window behind them
+  with: [nutcracker, clara]
+
+steps:
+  # Christmas Eve ---------------------------------------------------------------------------------------------
+  - scene:
+      id: party
+      picture: a cosy Christmas Eve party in a big old living room, a tall Christmas tree covered in candles and ornaments, the little girl in her party dress spinning happily in the middle while a few other children, boys in short trousers and small girls with short hair, dance around her and grown-ups laugh; she is the only girl with long wavy hair and a big bow
+      with: [clara]
+      move: happy
+  - say: narrator
+    es: "[warm] Había una vez, en una noche de Navidad, una niña que se llamaba Clara."
+    it: "[warm] C'era una volta, in una notte di Natale, una bambina che si chiamava Clara."
+  - say: narrator
+    es: "[excited] ¡En su casa había una fiesta, con un árbol gigante lleno de lucecitas!"
+    it: "[excited] A casa sua c'era una festa, con un albero gigante pieno di lucine!"
+  - say: narrator
+    es: "[excited] Y la música sonaba así..."
+    it: "[excited] E la musica suonava così..."
+  - music: {name: nut_march, seconds: 10}
+  - say: clara
+    es: "[excited, giggly] ¡Me encanta la Navidad! ¿A qué hora llega mi padrino? ¡Siempre trae las sorpresas más bonitas!"
+    it: "[excited, giggly] Adoro il Natale! A che ora arriva il mio padrino? Porta sempre le sorprese più belle!"
+
+  # The godfather's present -----------------------------------------------------------------------------------
+  - scene:
+      id: gift
+      picture: Godfather Drosselmeyer bending down to give the little girl a wooden nutcracker soldier from a big box with a bow, the girl hugging it with delight, a bowl of walnuts on the table beside them
+      with: [godfather, clara, nutcracker]
+      move: amazed
+  - say: narrator
+    es: "[mysterious] Entonces llegó el padrino Drosselmeyer, un viejito misterioso con un parche en el ojo, que hacía los juguetes más mágicos del mundo."
+    it: "[mysterious] Allora arrivò il padrino Drosselmeyer, un vecchietto misterioso con una benda sull'occhio, che costruiva i giocattoli più magici del mondo."
+  - say: godfather
+    es: "[grand, kind] Para ti, Clarita: ¡un cascanueces! Un soldadito de madera que parte las nueces con los dientes. Cuídalo mucho... es muy especial."
+    it: "[grand, kind] Per te, Clara: uno schiaccianoci! Un soldatino di legno che rompe le noci con i denti. Abbine cura... è molto speciale."
+  - noise:
+      ask:
+        es: "[playful] ¡Vamos a partir nueces con el cascanueces! Abre la boca, cierra la boca... todos juntos: ¡crac!"
+        it: "[playful] Rompiamo le noci con lo schiaccianoci! Apri la bocca, chiudi la bocca... tutti insieme: crac!"
+      louder:
+        es: "[playful] ¡Esta nuez está durita! ¡Más fuerte! ¡CRAC!"
+        it: "[playful] Questa noce è dura! Più forte! CRAC!"
+      done:
+        who: clara
+        es: "[delighted] ¡Crac! ¡Una nuez para ti, y una para mí! ¡Qué cascanueces tan bueno!"
+        it: "[delighted] Crac! Una noce per te, e una per me! Che bravo schiaccianoci!"
+      without:
+        who: clara
+        es: "[delighted] ¡Crac, crac! ¡Mira, partió la nuez! ¡Qué cascanueces tan bueno!"
+        it: "[delighted] Crac, crac! Guarda, ha rotto la noce! Che bravo schiaccianoci!"
+      sound: nut_crack
+
+  # Midnight --------------------------------------------------------------------------------------------------
+  - scene:
+      id: midnight
+      picture: the little girl in her nightgown tiptoeing into the dark living room at night holding a candle, the wooden nutcracker soldier sitting under the Christmas tree, a big grandfather clock with its hands at twelve
+      with: [clara, nutcracker]
+      move: thinking
+  - say: narrator
+    es: "[whispers] Esa noche, cuando todos dormían, Clara bajó despacito a darle las buenas noches a su cascanueces. Y justo entonces, el reloj grande empezó a sonar..."
+    it: "[whispers] Quella notte, quando tutti dormivano, Clara scese piano piano per dare la buonanotte al suo schiaccianoci. E proprio allora, il grande orologio cominciò a suonare..."
+  - pat:
+      ask:
+        es: "[whispers] ¡Son las doce! Hagan sonar el reloj: denle golpecitos a mi cabeza... ¡dong, dong, dong!"
+        it: "[whispers] È mezzanotte! Fate suonare l'orologio: datemi dei colpetti sulla testa... dong, dong, dong!"
+      done:
+        es: "[mysterious] Dong... dong... dong... ¡Medianoche! Y entonces pasó algo mágico..."
+        it: "[mysterious] Dong... dong... dong... Mezzanotte! E allora successe una cosa magica..."
+      without:
+        es: "[mysterious] Dong... dong... dong... ¡Medianoche! Y entonces pasó algo mágico..."
+        it: "[mysterious] Dong... dong... dong... Mezzanotte! E allora successe una cosa magica..."
+      sound: clock_midnight
+  - sound: growing
+  - scene:
+      id: big_tree
+      picture: indoors in the living room at night, the Christmas tree grown enormous, towering up like a giant forest, its ornaments as big as houses, the little girl now tiny as a toy, standing amazed beside the nutcracker who is now as tall as she is
+      with: [clara, nutcracker]
+      move: amazed
+  - say: narrator
+    es: "[amazed] ¡El árbol empezó a crecer, y crecer, y crecer! ¿O era Clara que se había vuelto chiquitica? ¡Ahora era del mismo tamaño que los juguetes!"
+    it: "[amazed] L'albero cominciò a crescere, e crescere, e crescere! O era Clara che era diventata piccina? Adesso era grande come i giocattoli!"
+
+  # The Mouse King --------------------------------------------------------------------------------------------
+  - scene:
+      id: mice
+      picture: indoors on the floor of the dark living room at night, under the huge Christmas tree, among giant presents and toys; a silly army of little cartoon mice marching out from a mouse hole in the skirting board, wearing walnut-shell helmets and holding forks and spoons, led by the plump Mouse King with his tiny crooked crown, the little girl peeking out from behind a present
+      with: [mouse_king, clara]
+      move: surprised
+  - say: narrator
+    es: "[playful, dramatic] Y de un huequito de la pared salieron... ¡los ratones! Cientos de ratoncitos con cascos de cáscara de nuez."
+    it: "[playful, dramatic] E da un buchino nel muro uscirono... i topi! Centinaia di topolini con elmetti di guscio di noce."
+  - noise:
+      ask:
+        es: "[playful] ¿Cómo hacen los ratoncitos? Todos juntos: ¡iii, iii, iii!"
+        it: "[playful] Come fanno i topolini? Tutti insieme: squit, squit, squit!"
+      louder:
+        es: "[playful] ¡Son muchísimos ratones! ¡Más fuerte! ¡Iii, iii, iiiii!"
+        it: "[playful] Sono tantissimi topi! Più forte! Squit, squit, squiiit!"
+      done:
+        who: mouse_king
+        es: "[pompous, silly] ¡Silencio, ratones! ¡Que hable su rey! Ejem, ejem..."
+        it: "[pompous, silly] Silenzio, topi! Parla il vostro re! Ehm, ehm..."
+      without:
+        who: mouse_king
+        es: "[pompous, silly] ¡Iii, iii! ¡Silencio, ratones! ¡Que hable su rey! Ejem, ejem..."
+        it: "[pompous, silly] Squit, squit! Silenzio, topi! Parla il vostro re! Ehm, ehm..."
+      sound: mouse_squeak
+  - say: mouse_king
+    es: "[pompous, greedy] ¡Yo soy el Rey de los Ratones! ¡Y vengo por todas las galletas, todo el queso y todos los dulces de esta casa! ¡Ja, ja, ja!"
+    it: "[pompous, greedy] Io sono il Re dei Topi! E sono venuto a prendermi tutti i biscotti, tutto il formaggio e tutti i dolci di questa casa! Ah, ah, ah!"
+
+  # The toy soldiers ------------------------------------------------------------------------------------------
+  - scene:
+      id: soldiers
+      picture: indoors on the floor of the dark living room at night, under the huge Christmas tree, among giant presents and toys; the wooden nutcracker soldier come to life, raising his little wooden sword and leading a proud row of toy soldiers marching out of the toy box, a toy drummer at the front, the little girl cheering behind them
+      with: [nutcracker, clara]
+      move: excited
+  - say: narrator
+    es: "[excited] ¡Pero entonces el cascanueces abrió los ojos, se puso de pie y levantó su espadita!"
+    it: "[excited] Ma allora lo schiaccianoci aprì gli occhi, si alzò in piedi e sollevò la sua spadina!"
+  - say: nutcracker
+    es: "[brave, calm] ¡Soldaditos de juguete! ¡A formarse! ¡Vamos a proteger la casa de Clara!"
+    it: "[brave, calm] Soldatini di giocattolo! In fila! Proteggiamo la casa di Clara!"
+  - copy:
+      ask:
+        es: "[playful] ¡Marchen con los soldaditos! Rodillas arriba, brazos derechitos... un, dos, un, dos..."
+        it: "[playful] Marciate con i soldatini! Ginocchia in alto, braccia dritte... un, due, un, due..."
+      done:
+        es: "[delighted] ¡Qué soldaditos tan valientes!"
+        it: "[delighted] Che soldatini coraggiosi!"
+      move: excited
+      music: nut_march
+      seconds: 8
+  - sound: toy_battle
+  - say: narrator
+    es: "[playful, dramatic] ¡Y empezó la batalla! Los ratones tiraban migajas de queso, los soldaditos tiraban caramelos... ¡pim, pam, pum!"
+    it: "[playful, dramatic] E cominciò la battaglia! I topi lanciavano briciole di formaggio, i soldatini lanciavano caramelle... pim, pum, pam!"
+  - say: narrator
+    es: "[worried] Pero el Rey de los Ratones era muy, muy gordito... ¡y se le sentó encima al cascanueces! ¡Plaf!"
+    it: "[worried] Ma il Re dei Topi era molto, molto grassottello... e si sedette sopra lo schiaccianoci! Plaf!"
+  - say: nutcracker
+    es: "[squashed, muffled] ¡Uf! ¡Ayúdame, Clara!"
+    it: "[squashed, muffled] Uff! Aiutami, Clara!"
+  - choice:
+      id: throw
+      ask:
+        es: "[excited] ¡Rápido! ¿Qué le tira Clara al Rey de los Ratones: su zapatilla... o su almohada?"
+        it: "[excited] Presto! Che cosa lancia Clara al Re dei Topi: la sua pantofola... o il suo cuscino?"
+      options:
+        slipper:
+          words: {es: [zapatilla, la zapatilla, zapato, zapatico, pantufla], it: [pantofola, la pantofola, scarpa, scarpetta, ciabatta]}
+          picked:
+            es: "[excited] Mmm... ¡yo digo que la zapatilla!"
+            it: "[excited] Mmm... secondo me, la pantofola!"
+          then:
+            who: clara
+            es: "[brave, shouting] ¡Toma, Rey de los Ratones! ¡Zapatillazo!"
+            it: "[brave, shouting] Prendi questa, Re dei Topi! Pantofolata!"
+        pillow:
+          words: {es: [almohada, la almohada, almohadita, cojin], it: [cuscino, il cuscino, cuscinetto]}
+          picked:
+            es: "[excited] Mmm... ¡yo digo que la almohada!"
+            it: "[excited] Mmm... secondo me, il cuscino!"
+          then:
+            who: clara
+            es: "[brave, shouting] ¡Toma, Rey de los Ratones! ¡Almohadazo!"
+            it: "[brave, shouting] Prendi questo, Re dei Topi! Cuscinata!"
+  - scene:
+      id: throw
+      about: throw
+      with: [clara, mouse_king, nutcracker]
+      options:
+        slipper: indoors on the floor of the dark living room at night, under the huge Christmas tree, among giant presents and toys; the little girl throwing her soft ballet slipper, which bonks the Mouse King on the head so his tiny crown flies off, the Mouse King with dizzy eyes and stars around his head, the nutcracker getting back up
+        pillow: indoors on the floor of the dark living room at night, under the huge Christmas tree, among giant presents and toys; the little girl throwing a big fluffy pillow, which knocks the Mouse King over in a puff of feathers so his tiny crown flies off, the Mouse King sitting dizzy in the feathers, the nutcracker getting back up
+      move: surprised
+  - sound: boing
+  - say: mouse_king
+    es: "[whiny, silly] ¡Ay, ay, ay! ¡Mi coronita! ¡Retirada, ratones, retirada! ¡Yo me voy a mi casa!"
+    it: "[whiny, silly] Ahi, ahi, ahi! La mia coroncina! Ritirata, topi, ritirata! Io torno a casa mia!"
+  - chorus:
+      ask:
+        es: "[excited] ¡Los ratones se fueron corriendo! Todos juntos: ¡viva el Cascanueces!"
+        it: "[excited] I topi scapparono via! E adesso gridiamo tutti insieme: evviva lo Schiaccianoci!"
+      done:
+        who: nutcracker
+        es: "[warm, proud] ¡Gracias, amigos! ¡Y gracias a ti, Clara! ¡Me salvaste!"
+        it: "[warm, proud] Grazie, amici! E grazie a te, Clara! Mi hai salvato!"
+      without:
+        who: nutcracker
+        es: "[warm, proud] ¡Lo logramos! ¡Gracias, Clara! ¡Me salvaste!"
+        it: "[warm, proud] Ce l'abbiamo fatta! Grazie, Clara! Mi hai salvato!"
+
+  # The prince and the snow -----------------------------------------------------------------------------------
+  - sound: sparkle
+  - scene:
+      id: prince
+      picture: indoors on the floor of the dark living room at night, under the huge Christmas tree, among giant presents and toys; in a swirl of sparkles the wooden nutcracker turning into a young prince who still wears the same soldier's hat with the plume and the same jacket with two rows of buttons, bowing to the little girl and holding out his hand
+      with: [clara]
+      move: loving
+  - say: narrator
+    es: "[amazed, softly] Y de pronto, entre chispitas de magia... ¡el cascanueces se convirtió en un príncipe de verdad!"
+    it: "[amazed, softly] E all'improvviso, tra scintille di magia... lo schiaccianoci si trasformò in un principe vero!"
+  - say: nutcracker
+    es: "[warm, kind] Clara, por ser tan valiente, te voy a llevar a mi reino. ¡El Reino de los Dulces! ¿Vienes?"
+    it: "[warm, kind] Clara, perché sei stata così coraggiosa, ti porterò nel mio regno. Il Regno dei Dolci! Vieni?"
+  - scene:
+      id: snow
+      picture: the little girl and the young prince in the plumed soldier's hat walking hand in hand through a magical snowy pine forest at night, big sparkling snowflakes dancing around them like little ballerinas
+      with: [clara]
+      move: calming
+  - say: narrator
+    es: "[softly, dreamy] Caminaron por un bosque lleno de nieve, donde los copos de nieve bailaban como bailarinas chiquiticas."
+    it: "[softly, dreamy] Camminarono in un bosco pieno di neve, dove i fiocchi di neve ballavano come piccole ballerine."
+  - noise:
+      ask:
+        es: "[playful, softly] Ayúdenlos a hacer bailar la nieve. Soplen suavecito: ¡fuuuuu!"
+        it: "[playful, softly] Aiutateli a far ballare la neve. Soffiate piano piano: fuuuuu!"
+      louder:
+        es: "[playful] ¡Un poquito más! ¡Fuuuuuuu!"
+        it: "[playful] Ancora un pochino! Fuuuuuuu!"
+      done:
+        who: clara
+        es: "[delighted] ¡Miren cómo dan vueltas los copitos! ¡Qué bonito!"
+        it: "[delighted] Guardate come girano i fiocchi! Che bello!"
+      without:
+        who: clara
+        es: "[delighted] Fuuuu... ¡miren cómo dan vueltas los copitos! ¡Qué bonito!"
+        it: "[delighted] Fuuuu... guardate come girano i fiocchi! Che bello!"
+      sound: snow_wind
+
+  # The Land of Sweets ----------------------------------------------------------------------------------------
+  - scene:
+      id: sweets
+      picture: the Land of Sweets, a candy palace with towers of stacked macarons and gingerbread walls, a river of chocolate, lollipop trees and candy-cane lamp posts, the Sugar Plum Fairy welcoming the little girl and the prince at the gate
+      with: [sugar_fairy, clara]
+      move: amazed
+  - say: narrator
+    es: "[amazed] ¡Y llegaron al Reino de los Dulces! Un palacio de galletas, árboles de chupetas y un río... ¡de chocolate!"
+    it: "[amazed] E arrivarono nel Regno dei Dolci! Un palazzo di biscotti, alberi di lecca-lecca e un fiume... di cioccolata!"
+  - say: sugar_fairy
+    es: "[gentle, sparkly] Bienvenida, Clara. Yo soy el Hada de Azúcar. ¡Esta noche todo el reino va a bailar para ustedes!"
+    it: "[gentle, sparkly] Benvenuta, Clara. Io sono la Fata Confetto. Stanotte tutto il regno ballerà per voi!"
+  - copy:
+      ask:
+        es: "[softly] Bailen como el Hada de Azúcar: en puntitas de pie, con los brazos arriba, despacito... dando vueltecitas."
+        it: "[softly] Ballate come la Fata Confetto: in punta di piedi, con le braccia in alto, piano piano... facendo giravolte."
+      done:
+        es: "[whispers, delighted] ¡Qué hadas tan bonitas!"
+        it: "[whispers, delighted] Che belle fatine!"
+      move: calming
+      music: nut_sugarplum
+      seconds: 10
+  - choice:
+      id: taste
+      ask:
+        es: "[curious] El hada le dio a Clara algo para probar. ¿Qué escogió: chocolate... o algodón de azúcar?"
+        it: "[curious] La fata diede a Clara qualcosa da assaggiare. Che cosa scelse: cioccolata... o zucchero filato?"
+      options:
+        chocolate:
+          words: {es: [chocolate, el chocolate, chocolatico], it: [cioccolata, cioccolato, la cioccolata, il cioccolato]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que chocolate!"
+            it: "[thoughtful] Mmm... secondo me, cioccolata!"
+          then:
+            who: clara
+            es: "[delighted] ¡Chocolate caliente del río de chocolate! ¡Mmm, qué sabroso!"
+            it: "[delighted] Cioccolata calda dal fiume di cioccolata! Mmm, che buona!"
+        candyfloss:
+          words: {es: [algodon, algodon de azucar, el algodon], it: [zucchero filato, lo zucchero filato, zucchero]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que algodón de azúcar!"
+            it: "[thoughtful] Mmm... secondo me, zucchero filato!"
+          then:
+            who: clara
+            es: "[delighted] ¡Una nube de algodón de azúcar! ¡Se derrite en la boca! ¡Mmm!"
+            it: "[delighted] Una nuvola di zucchero filato! Si scioglie in bocca! Mmm!"
+  - scene:
+      id: taste
+      about: taste
+      with: [clara, sugar_fairy]
+      options:
+        chocolate: the little girl sipping a big cup of hot chocolate by the chocolate river with a chocolate mustache on her lip, the Sugar Plum Fairy laughing beside her
+        candyfloss: the little girl holding a huge fluffy cloud of candyfloss on a stick, bigger than her head, a bit of it on her nose, the Sugar Plum Fairy laughing beside her
+      move: happy
+  - say: sugar_fairy
+    es: "[gentle, laughing] ¿Te gustó, Clara? ¡Aquí puedes comer dulces todo el día... y nunca te duele la barriga!"
+    it: "[gentle, laughing] Ti è piaciuto, Clara? Qui puoi mangiare dolci tutto il giorno... e non ti viene mai il mal di pancia!"
+  - scene:
+      id: russian
+      picture: a row of dancing candy canes doing a lively Russian dance, squatting low and kicking their legs out, one leaping high in the air, the little girl and the prince clapping along
+      with: [clara]
+      move: excited
+  - say: narrator
+    es: "[excited] ¡Y entonces salieron los bastoncitos de caramelo a bailar un baile ruso, saltando muy alto!"
+    it: "[excited] E allora uscirono i bastoncini di zucchero a ballare un ballo russo, saltando altissimo!"
+  - copy:
+      ask:
+        es: "[playful] ¡Bailen el baile ruso! Agáchense... ¡y salten! ¡Pateen! ¡Hey!"
+        it: "[playful] Ballate il ballo russo! Abbassatevi... e saltate! Calciate! Hey!"
+      done:
+        es: "[delighted, out of breath] ¡Uf! ¡Qué saltos tan altos!"
+        it: "[delighted, out of breath] Uff! Che salti altissimi!"
+      move: excited
+      music: nut_trepak
+      seconds: 9
+
+  # The waltz and waking up -----------------------------------------------------------------------------------
+  - scene:
+      id: waltz
+      picture: a grand ball in the candy palace, giant sugar flowers waltzing in wide circles, the little girl dancing with the prince in the plumed soldier's hat in the middle, the Sugar Plum Fairy waving her wand, sparkles everywhere
+      with: [clara, sugar_fairy]
+      move: dance
+  - say: narrator
+    es: "[warm, grand] Y para terminar, todas las flores de azúcar bailaron un vals... ¡y Clara bailó con su príncipe! Bailen ustedes también: un, dos, tres... un, dos, tres..."
+    it: "[warm, grand] E per finire, tutti i fiori di zucchero ballarono un valzer... e Clara ballò con il suo principe! Ballate anche voi: un, due, tre... un, due, tre..."
+  - move: dance
+  - music: {name: nut_waltz, seconds: 16}
+  - scene:
+      id: morning
+      picture: Christmas morning, the little girl waking up in an armchair under the normal-sized Christmas tree, sunlight coming through the window, hugging the wooden nutcracker soldier, who seems to be winking at her
+      with: [clara, nutcracker]
+      move: loving
+  - say: narrator
+    es: "[softly, warm] Y a la mañana siguiente... Clara se despertó en el sillón, debajo del árbol, abrazando a su cascanueces."
+    it: "[softly, warm] E la mattina dopo... Clara si svegliò sulla poltrona, sotto l'albero, abbracciata al suo schiaccianoci."
+  - say: clara
+    es: "[sleepy, wondering] ¿Habrá sido un sueño?"
+    it: "[sleepy, wondering] Sarà stato un sogno?"
+  - say: narrator
+    es: "[whispers, playful] Quién sabe... pero yo creo que el cascanueces... ¡le guiñó un ojo! Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[whispers, playful] Chissà... ma io credo che lo schiaccianoci... le abbia fatto l'occhiolino! E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

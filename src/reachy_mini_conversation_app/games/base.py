@@ -84,6 +84,9 @@ class GameServices:
     hint_answers: Callable[[list[str]], None] = lambda words: None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
+    # How long the e-ink screen has gone without checking in (0 while it is awake); it naps 5 minutes after a
+    # failed check-in, and its back button wakes it.
+    screen_asleep_s: Callable[[], float] = lambda: 0.0
     clock: Callable[[], float] = time.monotonic
 
 

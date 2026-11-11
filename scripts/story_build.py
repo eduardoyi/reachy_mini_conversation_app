@@ -23,6 +23,7 @@ them all as the TRMNL will. A picture is drawn again only when its prompt or a s
 
 import io
 import os
+import re
 import json
 import base64
 import asyncio
@@ -179,6 +180,7 @@ def cost(story: Story, out: Path) -> None:
     credits = sum(
         SOUND_CREDITS if info["kind"] == "sound" else MUSIC_CREDITS_PER_S * float(info["seconds"])  # type: ignore[arg-type]
         for _, info in sounds
+        if not info.get("source")  # real recordings are downloaded, not made
     )
     print(f"{len(jobs)} clips to record, {characters} characters (about {characters} credits)")
     print(f"{len(sounds)} sounds and music to make (about {credits:.0f} credits)")
@@ -209,6 +211,8 @@ async def _record(
 async def _sound(
     client: httpx.AsyncClient, gate: asyncio.Semaphore, name: str, info: dict[str, object], out: Path
 ) -> str | None:  # noqa: E501
+    if info.get("source"):
+        return await _cut_recording(name, info, out)
     seconds, prompt = float(info["seconds"]), f"{info['prompt']} {NOT_A_COPY}"  # type: ignore[arg-type]
     async with gate:
         for attempt in range(8):  # ElevenLabs is busy, or the plan's two requests at a time are in use
@@ -236,6 +240,48 @@ async def _sound(
         ["ffmpeg", "-v", "error", "-y", "-i", str(mp3), "-ar", str(RATE), "-ac", "1", str(mp3.with_suffix(".wav"))],
         check=True,
     )
+    return None
+
+
+async def _cut_recording(name: str, info: dict[str, object], out: Path) -> str | None:
+    """Download a real recording (public domain or Creative Commons) and cut ``seconds`` of it from ``start``.
+
+    The cut fades in and out and is evened to ``loudness`` (LUFS) like the generated music.
+    """
+    seconds, start = float(info["seconds"]), float(info.get("start", 0.0))  # type: ignore[arg-type]
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "ReachyStoryBuilder/1.0 (private home robot)"}, timeout=300, follow_redirects=True
+    ) as client:
+        response = await client.get(str(info["source"]))
+    if response.status_code != 200:
+        return f"{name}: {response.status_code} from {info['source']}"
+    folder = out / "sounds" / name
+    folder.mkdir(parents=True, exist_ok=True)
+    original = folder / f"original{Path(str(info['source'])).suffix or '.audio'}"
+    original.write_bytes(response.content)
+    fade_out = min(2.0, seconds / 4)
+    cut = folder / "cut.wav"
+    filters = (
+        f"atrim=start={start}:duration={seconds},asetpts=PTS-STARTPTS,afade=t=in:d=0.5,"
+        f"afade=t=out:st={seconds - fade_out}:d={fade_out}"
+    )
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(original), "-af", filters, "-ar", str(RATE), "-ac", "1", str(cut)],
+        check=True,
+    )
+    # loudnorm leaves a short cut several dB quiet, so measure it and turn it up (a limiter catches the peaks).
+    measured = subprocess.run(
+        ["ffmpeg", "-i", str(cut), "-af", "ebur128", "-f", "null", "-"], capture_output=True, text=True, check=True
+    ).stderr
+    loudness = float(re.findall(r"I:\s+(-?[\d.]+) LUFS", measured)[-1])
+    gain = float(info.get("loudness", -17.0)) - loudness  # type: ignore[arg-type]
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(cut), "-af", f"volume={gain:.1f}dB,alimiter=limit=0.89",
+         str(folder / "take-1.wav")],
+        check=True,
+    )  # fmt: skip
+    cut.unlink()
+    original.unlink()
     return None
 
 

@@ -7,3 +7,65 @@ again:
 goodbye:
   es: "[warm] ¡Gracias por escuchar! [whispers] Chao, chao."
   it: "[warm] Grazie per avere ascoltato! [whispers] Ciao, ciao."
+
+# The screen stopped checking in during a story: it naps 5 minutes after a failed check-in, and its back button
+# wakes it (2026-11-09).
+screen_nap:
+  es: "[whispers] Uy... se me durmió la pantalla. [playful] ¿Alguien le aprieta el botoncito de atrás para despertarla?"
+  it: "[whispers] Oh... lo schermo si è addormentato. [playful] Qualcuno preme il bottoncino dietro per svegliarlo?"
+
+# After a plain yes to "¿otro cuento?", two other stories by name: offer_<first> then or_<second> (2026-11-10).
+offer_tres_cerditos:
+  es: "[excited] ¡Dale! ¿Les cuento Los tres cerditos..."
+  it: "[excited] Va bene! Vi racconto I tre porcellini..."
+or_tres_cerditos:
+  es: "[curious] ...¿o Los tres cerditos?"
+  it: "[curious] ...o I tre porcellini?"
+offer_ricitos_de_oro:
+  es: "[excited] ¡Dale! ¿Les cuento Ricitos de Oro..."
+  it: "[excited] Va bene! Vi racconto Riccioli d'oro..."
+or_ricitos_de_oro:
+  es: "[curious] ...¿o Ricitos de Oro?"
+  it: "[curious] ...o Riccioli d'oro?"
+offer_nabo_gigante:
+  es: "[excited] ¡Dale! ¿Les cuento El nabo gigante..."
+  it: "[excited] Va bene! Vi racconto La rapa gigante..."
+or_nabo_gigante:
+  es: "[curious] ...¿o El nabo gigante?"
+  it: "[curious] ...o La rapa gigante?"
+offer_musicos_de_bremen:
+  es: "[excited] ¡Dale! ¿Les cuento Los músicos de Bremen..."
+  it: "[excited] Va bene! Vi racconto I musicanti di Brema..."
+or_musicos_de_bremen:
+  es: "[curious] ...¿o Los músicos de Bremen?"
+  it: "[curious] ...o I musicanti di Brema?"
+offer_la_gran_carrera:
+  es: "[excited] ¡Dale! ¿Les cuento La gran carrera, la de los carros..."
+  it: "[excited] Va bene! Vi racconto La grande corsa, quella delle macchine..."
+or_la_gran_carrera:
+  es: "[curious] ...¿o La gran carrera, la de los carros?"
+  it: "[curious] ...o La grande corsa, quella delle macchine?"
+offer_donde_esta_bigotes:
+  es: "[excited] ¡Dale! ¿Les cuento el de Bigotes, el gato perdido..."
+  it: "[excited] Va bene! Vi racconto quella di Baffo, il gatto perduto..."
+or_donde_esta_bigotes:
+  es: "[curious] ...¿o el de Bigotes, el gato perdido?"
+  it: "[curious] ...o quella di Baffo, il gatto perduto?"
+offer_la_monedita_de_plata:
+  es: "[excited] ¡Dale! ¿Les cuento La monedita de plata..."
+  it: "[excited] Va bene! Vi racconto La monetina d'argento..."
+or_la_monedita_de_plata:
+  es: "[curious] ...¿o La monedita de plata?"
+  it: "[curious] ...o La monetina d'argento?"
+offer_la_befana:
+  es: "[excited] ¡Dale! ¿Les cuento La Befana, la viejita de los dulces..."
+  it: "[excited] Va bene! Vi racconto La Befana..."
+or_la_befana:
+  es: "[curious] ...¿o La Befana, la viejita de los dulces?"
+  it: "[curious] ...o La Befana?"
+offer_el_cascanueces:
+  es: "[excited] ¡Dale! ¿Les cuento El Cascanueces..."
+  it: "[excited] Va bene! Vi racconto Lo Schiaccianoci..."
+or_el_cascanueces:
+  es: "[curious] ...¿o El Cascanueces?"
+  it: "[curious] ...o Lo Schiaccianoci?"

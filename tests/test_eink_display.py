@@ -21,7 +21,15 @@ import pytest
 from PIL import Image, ImageDraw
 
 from reachy_mini_conversation_app import eink_server, eink_display
-from reachy_mini_conversation_app.eink_server import SERVER, AWAKE_GAP_S, IDLE_AFTER_S, DeviceServer, read_json
+from reachy_mini_conversation_app.eink_server import (
+    SERVER,
+    RECENT_S,
+    AWAKE_GAP_S,
+    IDLE_AFTER_S,
+    DeviceServer,
+    read_json,
+    write_json,
+)
 from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.eink_display import (
     WIDTH,
@@ -339,7 +347,10 @@ def test_a_restarted_app_keeps_the_screen_and_the_resting_card_name(tmp_path: Pa
     assert again.current() == shown
     again.show_home()
     assert again.current().filename == home
-    assert sorted(path.name for path in again.spool.glob("reachy-*.png")) == [f"{home}.png"]
+    # The screen just replaced is kept for a late download, then deleted with the next change.
+    assert sorted(path.name for path in again.spool.glob("reachy-*.png")) == sorted(
+        [f"{home}.png", f"{shown.filename}.png"]
+    )
 
 
 def test_oversized_screens_are_refused(tmp_path: Path) -> None:
@@ -433,6 +444,9 @@ def test_the_server_serves_nothing_but_the_current_screens(served_display: EInkD
     served_display.show(render_text(["hola"]))
     replaced = served_display.current().filename
     served_display.show(render_text(["adiós"]))
+    assert _get(served_display, f"/screens/{replaced}.png")[0] == 200  # just replaced: a late download still works
+    current = read_json(served_display.spool / "current.json")
+    write_json(served_display.spool / "current.json", {**current, "recent": []})
 
     for path in (f"/screens/{replaced}.png", "/screens/nope.png", "/api/other"):
         with pytest.raises(urllib.error.HTTPError) as raised:
@@ -623,6 +637,37 @@ def test_a_camera_photo_leaves_the_screen_and_the_disk_after_its_time(tmp_path: 
     assert display.current() == home
     assert server.screen_png(photo.filename) is None
     server.screen_for_check_in(0.0)
+    assert not (display.spool / f"{photo.filename}.png").exists()
+    server.server_close()
+
+
+def test_a_screen_just_replaced_can_still_be_fetched(tmp_path: Path) -> None:
+    """A story's next picture can arrive between the TRMNL's check-in and its download (2026-11-09)."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    server = _server(display, clock)
+    display.show(render_text(["uno"]))
+    first = display.current()
+    clock.now += 5
+    display.show(render_text(["dos"]))
+    assert server.screen_png(first.filename) == first.png
+
+    clock.now += RECENT_S
+    display.show(render_text(["tres"]))
+    assert server.screen_png(first.filename) is None
+    assert not (display.spool / f"{first.filename}.png").exists()
+    server.server_close()
+
+
+def test_a_replaced_camera_photo_is_never_fetched_again(tmp_path: Path) -> None:
+    """Camera photos are not kept for a late download."""
+    clock = _Clock()
+    display = _display(tmp_path, clock=clock)
+    server = _server(display, clock)
+    display.show(render_text(["foto"]), expires_after_s=600)
+    photo = display.current()
+    display.show(render_text(["hola"]))
+    assert server.screen_png(photo.filename) is None
     assert not (display.spool / f"{photo.filename}.png").exists()
     server.server_close()
 

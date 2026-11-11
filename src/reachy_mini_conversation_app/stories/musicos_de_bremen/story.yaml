@@ -14,6 +14,10 @@ names:
        los animales musicos, la banda de animales]
   it: [musicanti di brema, i musicanti di brema, i musicanti, musicanti, brema, l asino musicista,
        la storia dell asino, gli animali musicisti, la banda degli animali]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [burro, burrito, perro, perrito, gallo, gallito, musica, musicos, banda, ladrones, animales]
+  it: [asino, asinello, cane, gallo, musica, musicanti, banda, ladri, animali]
 pitch:
   es: "Un burro, un perro, un gato y un gallo arman una banda. ¡Ustedes hacen la música!"
   it: "Un asino, un cane, un gatto e un gallo formano una banda. La musica la fate voi!"

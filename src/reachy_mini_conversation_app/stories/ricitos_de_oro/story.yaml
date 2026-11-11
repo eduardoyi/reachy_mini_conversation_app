@@ -13,6 +13,10 @@ names:
        los osos, la niña y los tres osos, rizos de oro]
   it: [riccioli d'oro, riccioli d oro, riccioli doro, i tre orsi, tre orsi, riccioli d'oro e i tre orsi,
        gli orsi, la storia degli orsi, riccioli]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [osos, oso, osito, ositos, ricitos, rizos, sopa, avena]
+  it: [orsi, orso, orsetto, orsetti, riccioli, pappa, minestra]
 pitch:
   es: "Una niña curiosa entra en la casita de tres osos. ¡Ustedes la ayudan a soplar, roncar y despertar!"
   it: "Una bambina curiosa entra nella casetta di tre orsi. Voi la aiutate a soffiare, russare e svegliarsi!"
