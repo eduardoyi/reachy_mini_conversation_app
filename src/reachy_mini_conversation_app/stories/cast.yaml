@@ -312,9 +312,10 @@ tailor:
 
 befana:
   description: >-
-    Reuses "Detectives · Who Ate the Cookies? · Grandma" (also the turnip story's grandma; never in the same story):
-    a sweet grandmother, warm, funny and a bit cheeky. The Befana, a busy, kind old woman who flies on a broom.
-  voice: "FTUoMlBeU7pi34pUd8vh"
+    "Angelina" from the ElevenLabs voice library, a native Italian speaker (2026-11-11), so her Spanish carries a
+    real Italian accent; designed voices came out Latin American. The Befana, a busy, kind old woman who flies on a
+    broom.
+  voice: "MLpDWJvrjFIdb63xbJp8"
   look: >-
     the Befana, a small, kind, bony old woman with a big hooked nose, a wide gap-toothed smile and rosy wrinkled
     cheeks, a dark knotted headscarf over wispy white hair, a big patched shawl, a long skirt covered in square
