@@ -126,6 +126,8 @@ class Story:
     steps: tuple[Step, ...]
     # Single words that point to this story alone ("carros"): "la historia de los carros" (Enzo, 2026-11-09).
     keywords: frozenset[str] = frozenset()
+    # Its pictures are drawn from the characters' turnaround sheets with free poses (2026-11-11), not one pose each.
+    turnaround: bool = False
 
     def lines(self) -> Iterator[Line]:
         """Every line the story can say, every choice's branches included."""
@@ -387,6 +389,7 @@ def load_story(path: Path, folder: Path = STORIES_DIR) -> Story:
         rules=str(raw.get("rules", "")),
         cover=cover,
         steps=steps,
+        turnaround=bool(raw.get("turnaround", False)),
         keywords=frozenset(
             normalize(str(word))
             for language in LANGUAGES

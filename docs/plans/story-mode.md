@@ -361,3 +361,10 @@ our own.
   on the account. About 25k credits. Whisper changed the Italian sweep "fsc, fsc" into "Reachy, Reachy", so it is
   "fru, fru". The same day: the two-story offer after "¿Otro cuento?", story keywords, recently replaced screens
   kept fetchable for 90 s, and the request to press the screen's button.
+- 2026-11-11: the characters kept one pose. Every scene was drawn from a single sheet (standing, three-quarter view,
+  smiling) "exactly as on the sheet", so faces copied its head angle, gaze and smile (Eduardo). A story with
+  `turnaround: true` is now drawn from turnaround sheets (`stories/cast-turnaround/<role>.png`: front, three-quarter,
+  side and back, five expressions, drawn with `story_build.py --sheets ROLE --turnaround` from the single sheet) and
+  a scene prompt that keeps who the character is but never its pose, so the characters act each moment out.
+  `--pictures --turnaround` on another story draws into `pictures-turnaround/` to compare first. El Cascanueces is
+  the first story drawn this way; the others still use one pose.

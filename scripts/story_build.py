@@ -61,6 +61,7 @@ from reachy_mini_conversation_app.games.story_pictures import (
     screen_png,
     scene_prompt,
     sheet_prompt,
+    turnaround_prompt,
 )
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, join, silence, read_wav, write_wav
 from reachy_mini_conversation_app.games.big_brain_lines import shown
@@ -421,10 +422,14 @@ def _contact(images: list[tuple[str, Image.Image]], path: Path, columns: int = 3
     print(path)
 
 
-async def sheets(roles: list[str], redo: set[str], style: str = DEFAULT_STYLE) -> None:
-    """Draw the missing character sheets (``stories/cast/<role>.png``) and a contact sheet of them all."""
+async def sheets(roles: list[str], redo: set[str], style: str = DEFAULT_STYLE, turnaround: bool = False) -> None:
+    """Draw the missing character sheets (``stories/cast/<role>.png``) and a contact sheet of them all.
+
+    ``turnaround``: draw each role's turnaround (``stories/cast-turnaround/``) from its single sheet instead.
+    """
     cast = load_cast()
-    folder = STORIES_DIR / styled("cast", style)
+    single = STORIES_DIR / styled("cast", style)
+    folder = STORIES_DIR / styled("cast-turnaround" if turnaround else "cast", style)
     drawn = [role for role, info in cast.items() if info["look"]]
     wanted = [role for role in (roles or drawn) if role in drawn]
     ai = AsyncOpenAI()
@@ -433,7 +438,15 @@ async def sheets(roles: list[str], redo: set[str], style: str = DEFAULT_STYLE) -
         path = folder / f"{role}.png"
         if path.exists() and role not in redo:
             return
-        data, model = await _image(ai, sheet_prompt(role, cast[role]["look"], style), SHEET_SIZE, [], "high")
+        if turnaround:
+            if not (single / f"{role}.png").exists():
+                print(f"{role}: no single sheet yet, draw it first")
+                return
+            data, model = await _image(
+                ai, turnaround_prompt(role, cast[role]["look"], style), DRAWING_SIZE, [single / f"{role}.png"], "high"
+            )
+        else:
+            data, model = await _image(ai, sheet_prompt(role, cast[role]["look"], style), SHEET_SIZE, [], "high")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(_png(data))
         print(f"{role}: drawn with {model}")
@@ -441,7 +454,7 @@ async def sheets(roles: list[str], redo: set[str], style: str = DEFAULT_STYLE) -
     await asyncio.gather(*(one(role) for role in wanted))
     _contact(
         [(role, Image.open(folder / f"{role}.png")) for role in drawn if (folder / f"{role}.png").exists()],
-        DEFAULT_OUT.expanduser() / f"{styled('cast-contact', style)}.png",
+        DEFAULT_OUT.expanduser() / f"{styled('cast-turnaround-contact' if turnaround else 'cast-contact', style)}.png",
         columns=3,
     )
 
@@ -453,12 +466,22 @@ def _picture_key(prompt: str, references: list[Path]) -> str:
     return digest.hexdigest()[:16]
 
 
-async def pictures(story: Story, out: Path, redo: set[str], style: str = DEFAULT_STYLE) -> None:
-    """Draw the story's missing scenes from the character sheets, make their screens and a contact sheet."""
+async def pictures(
+    story: Story, out: Path, redo: set[str], style: str = DEFAULT_STYLE, turnaround: bool = False
+) -> None:
+    """Draw the story's missing scenes from the character sheets, make their screens and a contact sheet.
+
+    ``turnaround``: draw from the turnaround sheets with free poses, into ``pictures-turnaround/`` and
+    ``screens-turnaround/`` beside the ones in use, to compare (the story plays ``screens/``). A story whose file
+    says ``turnaround: true`` is always drawn that way, into the folders it plays.
+    """
     looks = {role: info["look"] for role, info in load_cast().items()}
     folder = out / story.key
-    sheets_dir = STORIES_DIR / styled("cast", style)
-    drawings, screens = styled("pictures", style), styled("screens", style)
+    # A story with ``turnaround: true`` keeps its turnaround pictures in the folders it plays.
+    variant = "-turnaround" if turnaround and not story.turnaround else ""
+    turnaround = turnaround or story.turnaround
+    sheets_dir = STORIES_DIR / styled(f"cast{variant}", style)
+    drawings, screens = styled(f"pictures{variant}", style), styled(f"screens{variant}", style)
     manifest_path = folder / drawings / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     missing_sheets = sorted(
@@ -474,7 +497,7 @@ async def pictures(story: Story, out: Path, redo: set[str], style: str = DEFAULT
 
         assert isinstance(picture, Picture)
         references = [sheets_dir / f"{role}.png" for role in picture.cast]
-        prompt = scene_prompt(picture.prompt, picture.cast, looks, style)
+        prompt = scene_prompt(picture.prompt, picture.cast, looks, style, turnaround=turnaround)
         key = _picture_key(prompt, references)
         drawing = folder / drawings / f"{picture.id}.png"
         if drawing.exists() and manifest.get(picture.id) == key and picture.id not in redo:
@@ -505,7 +528,7 @@ async def pictures(story: Story, out: Path, redo: set[str], style: str = DEFAULT
         (folder / screens).mkdir(parents=True, exist_ok=True)
         (folder / screens / f"{picture.id}.png").write_bytes(screen)
         shown_screens.append((picture.id, Image.open(io.BytesIO(screen))))
-    _contact(shown_screens, folder / f"{styled('contact', style)}.png")
+    _contact(shown_screens, folder / f"{styled(f'contact{variant}', style)}.png")
 
 
 def main() -> None:
@@ -520,6 +543,9 @@ def main() -> None:
     parser.add_argument("--sheets", nargs="*", metavar="ROLE", help="draw the character sheets (all, or these)")
     parser.add_argument("--pictures", action="store_true", help="draw the story's scenes from the sheets")
     parser.add_argument("--style", default=DEFAULT_STYLE, choices=sorted(STYLES), help="the drawing style")
+    parser.add_argument(
+        "--turnaround", action="store_true", help="sheets: turnarounds from the single sheets; pictures: free poses"
+    )
     parser.add_argument("--redo", nargs="*", default=[], metavar="ID", help="draw these sheets or scenes again")
     args = parser.parse_args()
     load_dotenv(find_dotenv(usecwd=True))
@@ -529,7 +555,7 @@ def main() -> None:
     if args.save:
         return save(args.save[0], int(args.save[1]))
     if args.sheets is not None:
-        return asyncio.run(sheets(args.sheets, set(args.redo), args.style))
+        return asyncio.run(sheets(args.sheets, set(args.redo), args.style, args.turnaround))
     if not args.story:
         parser.error("name a story, or use --design / --save")
     story = _story(args.story)
@@ -538,7 +564,7 @@ def main() -> None:
     if args.play:
         return play(story, out, args.play)
     if args.pictures:
-        return asyncio.run(pictures(story, out, set(args.redo), args.style))
+        return asyncio.run(pictures(story, out, set(args.redo), args.style, args.turnaround))
     asyncio.run(build(story, out))
 
 

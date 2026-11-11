@@ -567,3 +567,15 @@ def test_scene_prompts_restate_each_look_and_the_screen_is_full() -> None:
     png = screen_png(Image.new("RGB", (1536, 1024), (200, 100, 50)))
     with Image.open(io.BytesIO(png)) as screen:
         assert screen.size == (800, 480)
+
+
+def test_turnaround_scenes_keep_who_a_character_is_but_not_its_pose() -> None:
+    """From a turnaround sheet a scene acts the moment out instead of copying one pose (2026-11-11)."""
+    from reachy_mini_conversation_app.games.story_pictures import scene_prompt
+
+    looks = {"clara": "Clara, a little girl"}
+    free = scene_prompt("Clara looks up at the tree", ["clara"], looks, turnaround=True)
+    assert "turnaround sheet" in free and "never copy a pose" in free
+    assert "exactly as on their sheets" in scene_prompt("Clara looks up", ["clara"], looks)
+    assert load_stories()["el_cascanueces"].turnaround
+    assert not load_stories()["tres_cerditos"].turnaround

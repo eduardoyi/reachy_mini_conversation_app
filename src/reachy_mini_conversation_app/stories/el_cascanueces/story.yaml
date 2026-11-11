@@ -8,6 +8,8 @@
 # with 12 moments where the children join in. Spanish is Venezuelan (ustedes, chévere), Italian is standard.
 
 key: el_cascanueces
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: El Cascanueces
   it: Lo Schiaccianoci

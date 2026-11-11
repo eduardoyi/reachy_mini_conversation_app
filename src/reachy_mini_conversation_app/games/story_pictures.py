@@ -58,9 +58,43 @@ def sheet_prompt(role: str, look: str, style: str = DEFAULT_STYLE) -> str:
     )
 
 
-def scene_prompt(scene: str, cast: Sequence[str], looks: Mapping[str, str], style: str = DEFAULT_STYLE) -> str:
+def turnaround_prompt(role: str, look: str, style: str = DEFAULT_STYLE) -> str:
+    """Return the prompt for ``role``'s turnaround sheet, drawn from its single sheet (the reference image).
+
+    One pose on the sheet made every scene copy its head angle and smile (Eduardo, 2026-11-11); the turnaround shows
+    the character from every side and with several expressions, so a scene keeps who it is but not how it stands.
+    """
+    return (
+        f"A character turnaround sheet for a children's storybook character: {look}. The reference image is this "
+        "character: keep exactly the same face, hair, proportions, outfit, colours of grey and accessories. Top row: "
+        "four full-body views side by side, front, three-quarter, side profile and back, standing neutral. Bottom row: "
+        "five head close-ups with different expressions and head angles: laughing looking up, surprised looking to the "
+        "side, worried looking down, determined in profile, sleepy with eyes closed. Pure white background (#FFFFFF) "
+        f"all the way to the edges, no text, no labels, no frames. {STYLES[style]}"
+    )
+
+
+def scene_prompt(
+    scene: str, cast: Sequence[str], looks: Mapping[str, str], style: str = DEFAULT_STYLE, *, turnaround: bool = False
+) -> str:
     """Return the prompt for a scene showing ``scene`` with the characters ``cast``, drawn from their sheets."""
-    if cast:
+    if cast and turnaround:
+        references = " ".join(
+            f"Image {number} is the turnaround sheet of {looks[role].split(':')[0].split(',')[0]}: {looks[role]}."
+            for number, role in enumerate(cast, 1)
+        )
+        keep = (
+            f"{references} Each sheet shows who the character is from every side and with several expressions: keep "
+            "the same face, proportions, hair, outfit and accessories, and the same drawing style, but never copy a "
+            "pose, head angle or expression from the sheet. Act the moment out: choose for each character the body "
+            "pose, the head turn and tilt, where the eyes look and the expression that this moment calls for. "
+            "Characters look at each other or at what they are doing, not at the viewer; they turn, lean, crouch, "
+            "reach and run; seen from the side, from behind or from above when the moment suits it; surprised, "
+            "worried, sleepy or laughing as the scene says, not the same smile every time. Do not redesign the "
+            "characters, do not add or swap clothes and do not add other characters. Keep every body as on its sheet: "
+            "the same number of arms, legs, paws, wings and hands, never an extra limb. Draw each character once."
+        )
+    elif cast:
         references = " ".join(
             f"Image {number} is the character sheet of {looks[role].split(':')[0].split(',')[0]}: {looks[role]}."
             for number, role in enumerate(cast, 1)
