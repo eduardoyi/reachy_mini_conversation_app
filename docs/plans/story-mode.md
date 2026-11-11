@@ -371,3 +371,9 @@ our own.
   roles (the coin's and the crow's came out on a dark background at first and were drawn again).
 - 2026-11-11: in Bigotes the children's lines were too long to remember (Eduardo): Lola's question is now four words,
   "¿orejita doblada? ¿Colita blanca?" / "orecchio piegato? Codina bianca?", and the big call is "¡Bigotes, ven!".
+- 2026-11-11: story choices were never heard: right after the question a short sound (an echo, a "mmm") came back as
+  no words and ended the listening, so Richie picked every time. A game answer whose words count (a choice, "¿otro
+  cuento?") now listens again for the rest of its time when it hears no words (`listen_until`, `_RELISTEN_MIN_S`);
+  noises still count as joining in. La Befana's Spanish lines are said with an Italian accent, its Venezuelan
+  diminutives are gone, and the coal is explained first (sweets for good children, coal for naughty ones) and turns
+  out to be sugar coal, so the cat eating it makes sense.

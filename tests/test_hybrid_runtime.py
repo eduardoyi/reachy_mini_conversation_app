@@ -5235,6 +5235,37 @@ async def test_a_quiz_answer_spoken_but_not_transcribed_comes_back_as_unclear() 
 
 
 @pytest.mark.asyncio
+async def test_a_game_answer_heard_as_no_words_listens_again_for_the_rest_of_its_time() -> None:
+    """A sound heard as no words early on (an echo, a "mmm") is not the answer: the story choices were lost that way."""
+    handler = FakeHandler()
+    spoken: list[str] = []
+    answers: list[str] = []
+
+    async def answer(text: str) -> _QuickReply:
+        answers.append(text)
+        return _QuickReply(None)
+
+    async def quick(_text: str) -> _QuickReply:
+        runtime.expect_answer(answer, listen_s=4.0, game=True, listen_until=runtime._clock() + 4.0)
+        return _QuickReply("¿Caramelos o galletas?")
+
+    runtime = _answering_runtime(handler, spoken, [], quick, "")
+    try:
+        assert await runtime.activate("keyboard", addressed_text="buzz")
+        await _eventually(lambda: runtime._request_clip is not None)
+        first = runtime._request_clip
+        speech = np.full(1_600, 3_000, dtype=np.int16)
+        silence = np.zeros(1_600, dtype=np.int16)
+        for sequence, audio in enumerate([speech] * 5 + [silence] * 10, start=2):
+            await runtime.handle_frame((16_000, audio), capture_sequence=sequence)
+        await _eventually(lambda: runtime._request_clip is not None and runtime._request_clip is not first)
+        assert answers == []  # still listening, not answered with nothing
+        assert not handler.started.is_set()
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_an_announcement_waits_for_the_conversation_to_end_then_awaits_the_answer() -> None:
     """A late reply from another thread is spoken only once Reachy is free; a question then listens."""
     handler = FakeHandler()

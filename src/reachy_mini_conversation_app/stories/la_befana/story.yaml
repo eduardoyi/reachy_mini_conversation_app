@@ -5,7 +5,8 @@
 # house with children on the way. That is why, every 5 January at night, she fills children's stockings. Kept merry:
 # the coal she leaves is sugar coal, a joke, and the last house is a cheeky cat's. About 7 minutes with 12 moments
 # where the children join in, the traditional rhyme ("la Befana vien di notte...") among them. Spanish is Venezuelan
-# (ustedes, chévere) and tells the children she is Italy's Christmas grandma; Italian is standard.
+# (ustedes) and tells the children she is Italy's Christmas grandma; Italian is standard. Every Spanish line is said
+# with an Italian accent ([Italian accent], Eduardo 2026-11-11): she is Italian, and so is the story.
 
 key: la_befana
 # Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
@@ -45,28 +46,28 @@ steps:
       with: [befana]
       move: happy
   - say: narrator
-    es: "[warm] Había una vez, en un pueblito de Italia, una viejita que se llamaba la Befana."
+    es: "[Italian accent] [warm] Había una vez, en un pueblito de Italia, una viejita que se llamaba la Befana."
     it: "[warm] C'era una volta, in un paesino d'Italia, una vecchina che si chiamava la Befana."
   - say: narrator
-    es: "[playful] ¡Y no había nadie en el mundo que barriera más que ella!"
+    es: "[Italian accent] [playful] ¡Y no había nadie en el mundo que barriera más que ella!"
     it: "[playful] E non c'era nessuno al mondo che spazzasse più di lei!"
   - say: befana
-    es: "[busy, cheerful] ¡Barre por aquí, barre por allá! ¡Esta casa tiene que quedar brillantica!"
+    es: "[Italian accent] [busy, cheerful] ¡Barre por aquí, barre por allá! ¡Esta casa tiene que quedar brillante, brillante!"
     it: "[busy, cheerful] Spazza di qua, spazza di là! Questa casa deve brillare come uno specchio!"
   - noise:
       ask:
-        es: "[playful] ¡Ayuden a la Befana a barrer! Hagan conmigo: ¡fuish, fuish, fuish!"
+        es: "[Italian accent] [playful] ¡Ayuden a la Befana a barrer! Hagan conmigo: ¡fuish, fuish, fuish!"
         it: "[playful] Aiutate la Befana a spazzare! Fate con me: fru, fru, fru!"
       louder:
-        es: "[playful] ¡Más fuerte, que hay mucho polvo! ¡Fuish, fuish, fuiiish!"
+        es: "[Italian accent] [playful] ¡Más fuerte, que hay mucho polvo! ¡Fuish, fuish, fuiiish!"
         it: "[playful] Più forte, c'è tanta polvere! Fru, fru, fruuu!"
       done:
         who: befana
-        es: "[delighted] ¡Ay, qué buenos barrenderos! ¡Ya no queda ni un poquito de polvo!"
+        es: "[Italian accent] [delighted] ¡Ay, qué buenos barrenderos! ¡Ya no queda ni un poquito de polvo!"
         it: "[delighted] Oh, che bravi spazzini! Non è rimasto neanche un granello di polvere!"
       without:
         who: befana
-        es: "[busy] Fuish, fuish, fuish... ¡listo! ¡Brillantica!"
+        es: "[Italian accent] [busy] Fuish, fuish, fuish... ¡listo! ¡Brillante como un espejo!"
         it: "[busy] Fru, fru, fru... ecco fatto! Brilla come uno specchio!"
       sound: broom_sweep
 
@@ -77,32 +78,32 @@ steps:
       with: [king]
       move: surprised
   - say: narrator
-    es: "[mysterious] Una noche fría, alguien tocó a su puerta."
+    es: "[Italian accent] [mysterious] Una noche fría, alguien tocó a su puerta."
     it: "[mysterious] Una notte fredda, qualcuno bussò alla sua porta."
   - pat:
       ask:
-        es: "[whispers] ¿Quién será? Toquen la puerta con los reyes: denle tres golpecitos a mi cabeza. Toc, toc, toc."
+        es: "[Italian accent] [whispers] ¿Quién será? Toquen la puerta con los reyes: denle tres golpecitos a mi cabeza. Toc, toc, toc."
         it: "[whispers] Chi sarà? Bussate alla porta con i re: datemi tre colpetti sulla testa. Toc, toc, toc."
       done:
         who: befana
-        es: "[surprised] ¿Quién toca a esta hora? ¡Ya voy, ya voy!"
+        es: "[Italian accent] [surprised] ¿Quién toca a esta hora? ¡Ya voy, ya voy!"
         it: "[surprised] Chi bussa a quest'ora? Arrivo, arrivo!"
       without:
         who: befana
-        es: "[surprised] ¡Toc, toc, toc! ¿Quién toca a esta hora? ¡Ya voy, ya voy!"
+        es: "[Italian accent] [surprised] ¡Toc, toc, toc! ¿Quién toca a esta hora? ¡Ya voy, ya voy!"
         it: "[surprised] Toc, toc, toc! Chi bussa a quest'ora? Arrivo, arrivo!"
       sound: door_knock
   - say: narrator
-    es: "[amazed] ¡Eran tres reyes! Con coronas brillantes y tres camellos que hacían: mmmmh."
+    es: "[Italian accent] [amazed] ¡Eran tres reyes! Con coronas brillantes y tres camellos que hacían: mmmmh."
     it: "[amazed] Erano tre re! Con corone luccicanti e tre cammelli che facevano: mmmmh."
   - say: king
-    es: "[kind, grand] Buenas noches, señora. Seguimos una estrella que nos lleva a ver a un niñito recién nacido. ¿Quiere venir con nosotros?"
+    es: "[Italian accent] [kind, grand] Buenas noches, señora. Seguimos una estrella que nos lleva a ver a un niñito recién nacido. ¿Quiere venir con nosotros?"
     it: "[kind, grand] Buonasera, signora. Seguiamo una stella che ci porta a vedere un bambino appena nato. Vuole venire con noi?"
   - say: befana
-    es: "[flustered] ¿Yo? ¡Ay, no, no, no! ¡Tengo muchísimo que barrer! Vayan ustedes, vayan."
+    es: "[Italian accent] [flustered] ¿Yo? ¡Mamma mia, no, no, no! ¡Tengo muchísimo que barrer! Vayan ustedes, vayan."
     it: "[flustered] Io? Oh, no, no, no! Ho tantissimo da spazzare! Andate voi, andate."
   - say: narrator
-    es: "[softly] Y los reyes se fueron, despacito, siguiendo su estrella."
+    es: "[Italian accent] [softly] Y los reyes se fueron, despacito, siguiendo su estrella."
     it: "[softly] E i re se ne andarono, piano piano, seguendo la loro stella."
 
   # She changes her mind --------------------------------------------------------------------------------------
@@ -112,31 +113,31 @@ steps:
       with: [befana]
       move: thinking
   - say: befana
-    es: "[thoughtful, then excited] Mmm... un niñito recién nacido... ¡Ay! ¡Yo también lo quiero ver! ¡Y le voy a llevar un regalo!"
+    es: "[Italian accent] [thoughtful, then excited] Mmm... un niñito recién nacido... ¡Ay! ¡Yo también lo quiero ver! ¡Y le voy a llevar un regalo!"
     it: "[thoughtful, then excited] Mmm... un bambino appena nato... Oh! Anch'io lo voglio vedere! E gli porterò un regalo!"
   - choice:
       id: basket
       ask:
-        es: "[curious] La Befana llenó una cesta para el niñito. ¿Qué le puso: caramelos... o galletas?"
+        es: "[Italian accent] [curious] La Befana llenó una cesta para el niñito. ¿Qué le puso: caramelos... o galletas?"
         it: "[curious] La Befana riempì un cesto per il bambino. Che cosa ci mise: caramelle... o biscotti?"
       options:
         candy:
           words: {es: [caramelos, caramelo, dulces, chupetas, chupeta], it: [caramelle, caramella, dolci, dolcetti]}
           picked:
-            es: "[thoughtful] Mmm... ¡yo digo que caramelos!"
+            es: "[Italian accent] [thoughtful] Mmm... ¡yo digo que caramelos!"
             it: "[thoughtful] Mmm... secondo me, caramelle!"
           then:
             who: befana
-            es: "[delighted] ¡Caramelos de todos los colores! ¡Rojos, verdes, de rayitas! ¡A los niños les encantan!"
+            es: "[Italian accent] [delighted] ¡Caramelos de todos los colores! ¡Rojos, verdes, de rayitas! ¡A los niños les encantan!"
             it: "[delighted] Caramelle di tutti i colori! Rosse, verdi, a righine! I bambini le adorano!"
         cookies:
           words: {es: [galletas, galleta, galletitas], it: [biscotti, biscotto, biscottini]}
           picked:
-            es: "[thoughtful] Mmm... ¡yo digo que galletas!"
+            es: "[Italian accent] [thoughtful] Mmm... ¡yo digo que galletas!"
             it: "[thoughtful] Mmm... secondo me, biscotti!"
           then:
             who: befana
-            es: "[delighted] ¡Galletas calienticas, recién horneadas, con azuquita por encima! ¡Mmm, qué rico huelen!"
+            es: "[Italian accent] [delighted] ¡Galletas calientes, recién horneadas, con azúcar por encima! ¡Mmm, qué rico huelen!"
             it: "[delighted] Biscotti caldi caldi, appena sfornati, con lo zucchero sopra! Mmm, che profumino!"
   - scene:
       id: basket
@@ -154,29 +155,29 @@ steps:
       with: [befana]
       move: excited
   - say: narrator
-    es: "[excited] ¿Y saben cómo se fue? ¡No en camello, no en carro... sino volando en su escoba!"
+    es: "[Italian accent] [excited] ¿Y saben cómo se fue? ¡No en camello, no en carro... sino volando en su escoba!"
     it: "[excited] E sapete come partì? Né in cammello, né in carrozza... ma volando sulla sua scopa!"
   - copy:
       ask:
-        es: "[playful] ¡Súbanse a la escoba con la Befana! Agárrense fuerte... y vuelen, vuelen, ¡por encima de los techos!"
+        es: "[Italian accent] [playful] ¡Súbanse a la escoba con la Befana! Agárrense fuerte... y vuelen, vuelen, ¡por encima de los techos!"
         it: "[playful] Salite sulla scopa con la Befana! Tenetevi forte... e volate, volate, sopra i tetti!"
       done:
-        es: "[delighted] ¡Qué bien vuelan! ¡Parecen Befanitas!"
+        es: "[Italian accent] [delighted] ¡Qué bien vuelan! ¡Parecen Befanitas!"
         it: "[delighted] Come volate bene! Sembrate tante piccole Befane!"
       move: excited
       music: story_move
       seconds: 6
   - chorus:
       ask:
-        es: "[warm] En Italia, los niños tienen una canción para ella. Repitan conmigo: ¡la Befana viene de noche, con los zapatos todos rotos!"
+        es: "[Italian accent] [warm] En Italia, los niños tienen una canción para ella. Repitan conmigo: ¡la Befana viene de noche, con los zapatos todos rotos!"
         it: "[warm] I bambini hanno una filastrocca per lei. Ditela con me: la Befana vien di notte, con le scarpe tutte rotte!"
       done:
         who: befana
-        es: "[laughing] ¡Ja, ja! ¡Es verdad! ¡Mis zapatos tienen más huecos que un queso!"
+        es: "[Italian accent] [laughing] ¡Ja, ja! ¡Es verdad! ¡Mis zapatos tienen más huecos que un queso!"
         it: "[laughing] Ah, ah! È vero! Le mie scarpe hanno più buchi di un formaggio!"
       without:
         who: befana
-        es: "[sing-song] La Befana viene de noche, con los zapatos todos rotos... ¡ja, ja!"
+        es: "[Italian accent] [sing-song] La Befana viene de noche, con los zapatos todos rotos... ¡ja, ja!"
         it: "[sing-song] La Befana vien di notte, con le scarpe tutte rotte... ah, ah!"
 
   # Snow and wind ---------------------------------------------------------------------------------------------
@@ -186,29 +187,29 @@ steps:
       with: [befana]
       move: surprised
   - say: narrator
-    es: "[dramatic] Pero allá arriba hacía un frío... ¡y empezó a nevar!"
+    es: "[Italian accent] [dramatic] Pero allá arriba hacía un frío... ¡y empezó a nevar!"
     it: "[dramatic] Ma lassù faceva un freddo... e cominciò a nevicare!"
   - noise:
       ask:
-        es: "[playful] ¿Cómo tiembla uno con frío? Todos juntos: ¡brrrrr!"
+        es: "[Italian accent] [playful] ¿Cómo tiembla uno con frío? Todos juntos: ¡brrrrr!"
         it: "[playful] Come si trema dal freddo? Tutti insieme: brrrrr!"
       louder:
-        es: "[playful] ¡Más fuerte, que hace muchísimo frío! ¡Brrrrrrr!"
+        es: "[Italian accent] [playful] ¡Más fuerte, que hace muchísimo frío! ¡Brrrrrrr!"
         it: "[playful] Più forte, fa freddissimo! Brrrrrrr!"
       done:
         who: befana
-        es: "[shivering, giggly] ¡Brrr! ¡Menos mal que tengo mi chal de lana!"
+        es: "[Italian accent] [shivering, giggly] ¡Brrr! ¡Menos mal que tengo mi chal de lana!"
         it: "[shivering, giggly] Brrr! Meno male che ho il mio scialle di lana!"
       without:
         who: befana
-        es: "[shivering] Brrrrr... ¡qué frío! ¡Menos mal que tengo mi chal de lana!"
+        es: "[Italian accent] [shivering] Brrrrr... ¡qué frío! ¡Menos mal que tengo mi chal de lana!"
         it: "[shivering] Brrrrr... che freddo! Meno male che ho il mio scialle di lana!"
       sound: snow_wind
   - say: narrator
-    es: "[softly] Voló y voló toda la noche, pero no encontró a los reyes. La estrella ya se había ido."
+    es: "[Italian accent] [softly] Voló y voló toda la noche, pero no encontró a los reyes. La estrella ya se había ido."
     it: "[softly] Volò e volò tutta la notte, ma non trovò i re. La stella se n'era già andata."
   - say: befana
-    es: "[thoughtful, then bright] Ay... ¿y ahora? Mmm... ¡ya sé! Cualquier niñito podría ser ese niñito. ¡Le dejaré un regalo a todos los niños!"
+    es: "[Italian accent] [thoughtful, then bright] Ay... ¿y ahora? Mmm... ¡ya sé! Cualquier niñito podría ser ese niñito. ¡Le dejaré un regalo a todos los niños!"
     it: "[thoughtful, then bright] Oh... e adesso? Mmm... lo so! Ogni bambino potrebbe essere quel bambino. Lascerò un regalo a tutti i bambini!"
 
   # The houses ------------------------------------------------------------------------------------------------
@@ -218,38 +219,38 @@ steps:
       with: [befana]
       move: thinking
   - say: narrator
-    es: "[whispers] Bajaba por cada chimenea, despacito, despacito, para no despertar a nadie."
+    es: "[Italian accent] [whispers] Bajaba por cada chimenea, despacito, despacito, para no despertar a nadie."
     it: "[whispers] Scendeva da ogni camino, piano piano, per non svegliare nessuno."
   - copy:
       ask:
-        es: "[whispers] Caminen en puntillas con la Befana... shhh... despacito, ¡que los niños están dormidos!"
+        es: "[Italian accent] [whispers] Caminen en puntillas con la Befana... shhh... despacito, ¡que los niños están dormidos!"
         it: "[whispers] Camminate in punta di piedi con la Befana... shhh... piano piano, i bambini dormono!"
       done:
-        es: "[whispers] ¡Shhh! Muy bien. Nadie se despertó."
+        es: "[Italian accent] [whispers] ¡Shhh! Muy bien. Nadie se despertó."
         it: "[whispers] Shhh! Bravissimi. Nessuno si è svegliato."
       move: thinking
       music: story_tiptoe
       seconds: 6
   - say: narrator
-    es: "[whispers, playful] Y en cada media que encontraba colgada, dejaba un regalito: ¡pum, un dulce! ¡Pum, una mandarina! ¡Pum, un juguetico!"
+    es: "[Italian accent] [whispers, playful] Y en cada media que encontraba colgada, dejaba un regalito: ¡pum, un dulce! ¡Pum, una mandarina! ¡Pum, un juguete!"
     it: "[whispers, playful] E in ogni calza appesa che trovava lasciava un regalino: pum, un dolcetto! Pum, un mandarino! Pum, un giocattolino!"
   - say: narrator
-    es: "[playful] Pero las chimeneas tenían mucho hollín... y a la Befana le empezó a picar la nariz..."
+    es: "[Italian accent] [playful] Pero las chimeneas tenían mucho hollín... y a la Befana le empezó a picar la nariz..."
     it: "[playful] Ma i camini erano pieni di fuliggine... e alla Befana cominciò a pizzicare il naso..."
   - noise:
       ask:
-        es: "[playful] Uy, uy, uy... ¡que viene el estornudo! Estornuden con ella: ¡aaa... aaa... achís!"
+        es: "[Italian accent] [playful] Uy, uy, uy... ¡que viene el estornudo! Estornuden con ella: ¡aaa... aaa... achís!"
         it: "[playful] Oh, oh, oh... arriva lo starnuto! Starnutite con lei: eee... eee... etciù!"
       louder:
-        es: "[playful] ¡Más fuerte! ¡Aaa... aaa... ACHÍS!"
+        es: "[Italian accent] [playful] ¡Más fuerte! ¡Aaa... aaa... ACHÍS!"
         it: "[playful] Più forte! Eee... eee... ETCIÙ!"
       done:
         who: befana
-        es: "[laughing] ¡Salud! ¡Ja, ja! ¡Qué estornudo tan grande! Shhh, ¡que nadie se despierte!"
+        es: "[Italian accent] [laughing] ¡Salud! ¡Ja, ja! ¡Qué estornudo tan grande! Shhh, ¡que nadie se despierte!"
         it: "[laughing] Salute! Ah, ah! Che starnuto enorme! Shhh, che nessuno si svegli!"
       without:
         who: befana
-        es: "[sneezing] Aaa... aaa... ¡achís! ¡Uy! Shhh, que nadie se despierte..."
+        es: "[Italian accent] [sneezing] Aaa... aaa... ¡achís! ¡Uy! Shhh, que nadie se despierte..."
         it: "[sneezing] Eee... eee... etciù! Oh! Shhh, che nessuno si svegli..."
       sound: big_sneeze
 
@@ -260,38 +261,41 @@ steps:
       with: [cat, befana]
       move: thinking
   - say: narrator
-    es: "[playful] En la última casa, la Befana encontró una media chiquitica... ¡con huellitas de gato! Era de Misifú, el gato."
+    es: "[Italian accent] [playful] En la última casa, la Befana encontró una media pequeñita... ¡con huellas de gato! Era de Misifú, el gato."
     it: "[playful] Nell'ultima casa, la Befana trovò una calza piccina piccina... con le impronte di un gatto! Era di Micio, il gatto."
   - say: cat
-    es: "[sleepy, innocent] Miau... buenas noches, señora Befana. Yo me porté muy bien todo el año... casi casi."
+    es: "[Italian accent] [sleepy, innocent] Miau... buenas noches, señora Befana. Yo me porté muy bien todo el año... casi casi."
     it: "[sleepy, innocent] Miao... buonasera, signora Befana. Io mi sono comportato benissimo tutto l'anno... quasi quasi."
   - say: befana
-    es: "[suspicious, playful] ¿Ah, sí? ¿Y esas migajas de galleta en tus bigotes? ¿Y ese vaso de leche volteado?"
+    es: "[Italian accent] [suspicious, playful] ¿Ah, sí? ¿Y esas migajas de galleta en tus bigotes? ¿Y ese vaso de leche volteado?"
     it: "[suspicious, playful] Ah, sì? E quelle briciole di biscotto sui baffi? E quel bicchiere di latte rovesciato?"
+  - say: narrator
+    es: "[Italian accent] [warm, playful] En Italia, la Befana les deja dulces a los niños que se portan bien... ¡y carbón a los traviesos!"
+    it: "[warm, playful] In Italia, la Befana lascia i dolci ai bambini buoni... e il carbone ai birichini!"
   - choice:
       id: cat_gift
       ask:
-        es: "[curious] Ustedes deciden. ¿Qué le deja la Befana a Misifú: un dulce... o carbón?"
-        it: "[curious] Decidete voi. Che cosa lascia la Befana a Micio: un dolcetto... o il carbone?"
+        es: "[Italian accent] [curious] Ustedes deciden. ¿Misifú se portó bien o fue travieso? ¿Qué le deja la Befana: un dulce... o carbón?"
+        it: "[curious] Decidete voi. Micio è stato buono o birichino? Che cosa gli lascia la Befana: un dolcetto... o il carbone?"
       options:
         sweet:
           words: {es: [dulce, un dulce, caramelo, caramelos, dulces], it: [dolcetto, dolce, dolci, caramella, caramelle]}
           picked:
-            es: "[warm] Mmm... ¡yo digo que un dulce! Todos nos equivocamos a veces."
+            es: "[Italian accent] [warm] Mmm... ¡yo digo que un dulce! Todos nos equivocamos a veces."
             it: "[warm] Mmm... secondo me, un dolcetto! Tutti sbagliamo, qualche volta."
           then:
             who: cat
-            es: "[purring, delighted] ¡Prrrr! ¡Un dulce de pescado! ¡Gracias, señora Befana! Mañana no me como las galletas... casi casi."
+            es: "[Italian accent] [purring, delighted] ¡Prrrr! ¡Un dulce de pescado! ¡Gracias, señora Befana! Mañana no me como las galletas... casi casi."
             it: "[purring, delighted] Rrrr! Un dolcetto al pesce! Grazie, signora Befana! Domani non mangio i biscotti... quasi quasi."
         coal:
           words: {es: [carbon, el carbon, carboncito], it: [carbone, il carbone, carboncino]}
           picked:
-            es: "[playful] Mmm... ¡yo digo que carbón!"
+            es: "[Italian accent] [playful] Mmm... ¡yo digo que carbón!"
             it: "[playful] Mmm... secondo me, il carbone!"
           then:
             who: befana
-            es: "[laughing] ¡Carbón! ¡Pero es carbón de azúcar! Pruébalo, Misifú. ¡Es dulce, ja, ja!"
-            it: "[laughing] Carbone! Ma è carbone di zucchero! Assaggialo, Micio. È dolce, ah, ah!"
+            es: "[Italian accent] [laughing] ¡Carbón para el gato travieso! Ay, no pongas esa cara, Misifú... ¡es carbón de azúcar! ¡Se come! Pruébalo, ¡es dulce!"
+            it: "[laughing] Carbone per il gatto birichino! Oh, non fare quella faccia, Micio... è carbone di zucchero! Si mangia! Assaggialo, è dolce!"
   - scene:
       id: cat_gift
       about: cat_gift
@@ -301,7 +305,7 @@ steps:
         coal: indoors in the dark kitchen at night, the plump fluffy tabby cat delighted, nibbling a big black lump of sugar coal that sparkles with sugar crystals, the Befana laughing beside him
       move: laugh
   - say: narrator
-    es: "[playful] Y Misifú se quedó contentísimo, lamiéndose los bigotes, mientras la Befana subía otra vez por la chimenea... ¡fuuush!"
+    es: "[Italian accent] [playful] Y Misifú se quedó contentísimo, lamiéndose los bigotes, mientras la Befana subía otra vez por la chimenea... ¡fuuush!"
     it: "[playful] E Micio rimase contentissimo, leccandosi i baffi, mentre la Befana risaliva su per il camino... fiuuu!"
 
   # Morning ---------------------------------------------------------------------------------------------------
@@ -310,29 +314,29 @@ steps:
       picture: children in pyjamas running down the stairs on a bright winter morning to stockings bulging with sweets and tangerines hanging from the mantelpiece; no grown-up in the room; through the window, far away in the sky, a tiny old woman on a broom flying away and waving
       move: excited
   - say: narrator
-    es: "[warm, excited] Y a la mañana siguiente, ¡todos los niños encontraron sus medias llenitas de regalos!"
+    es: "[Italian accent] [warm, excited] Y a la mañana siguiente, ¡todos los niños encontraron sus medias llenas de regalos!"
     it: "[warm, excited] E la mattina dopo, tutti i bambini trovarono le loro calze piene di regali!"
   - say: narrator
-    es: "[warm] Desde entonces, cada noche del cinco de enero, la Befana sigue volando en su escoba, buscando a ese niñito... y dejando dulces a todos los demás."
+    es: "[Italian accent] [warm] Desde entonces, cada noche del cinco de enero, la Befana sigue volando en su escoba, buscando a ese niñito... y dejando dulces a todos los demás."
     it: "[warm] Da allora, ogni notte del cinque gennaio, la Befana vola ancora sulla sua scopa, cercando quel bambino... e lasciando dolci a tutti gli altri."
   - say: befana
-    es: "[warm, cheeky] ¡Y si me dejan una mandarina y una galletica... a lo mejor les dejo un dulce extra!"
+    es: "[Italian accent] [warm, cheeky] ¡Y si me dejan una mandarina y una galleta... a lo mejor les dejo un dulce extra!"
     it: "[warm, cheeky] E se mi lasciate un mandarino e un biscottino... forse vi lascio un dolce in più!"
   - chorus:
       ask:
-        es: "[excited] ¡Una vez más, todos juntos! ¡La Befana viene de noche, con los zapatos todos rotos!"
+        es: "[Italian accent] [excited] ¡Una vez más, todos juntos! ¡La Befana viene de noche, con los zapatos todos rotos!"
         it: "[excited] Un'altra volta, tutti insieme! La Befana vien di notte, con le scarpe tutte rotte!"
       done:
         who: befana
-        es: "[delighted] ¡Ja, ja! ¡Así me gusta! ¡Hasta el año que viene!"
+        es: "[Italian accent] [delighted] ¡Ja, ja! ¡Así me gusta! ¡Hasta el año que viene!"
         it: "[delighted] Ah, ah! Così mi piace! Arrivederci all'anno prossimo!"
       without:
         who: befana
-        es: "[sing-song] La Befana viene de noche, con los zapatos todos rotos... ¡hasta el año que viene!"
+        es: "[Italian accent] [sing-song] La Befana viene de noche, con los zapatos todos rotos... ¡hasta el año que viene!"
         it: "[sing-song] La Befana vien di notte, con le scarpe tutte rotte... arrivederci all'anno prossimo!"
   - move: dance
   - music: {name: story_dance, seconds: 12}
   - say: narrator
-    es: "[warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
+    es: "[Italian accent] [warm, playful] Y colorín colorado... ¡este cuento se ha acabado!"
     it: "[warm, playful] E vissero tutti felici e contenti. Fine!"
   - sound: story_end

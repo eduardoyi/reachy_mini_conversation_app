@@ -426,6 +426,10 @@ class _PendingTurn:
     # A game's answer goes to the cloud game model; False keeps it on the local model (a story only needs to know
     # someone joined in, not the words).
     cloud_answer: bool = True
+    # When a game's question stops listening (clock time). A sound that comes back as no words before then (an echo
+    # of Reachy's own line, a "mmm") listens again for the rest: on 2026-11-11 every story choice was lost that way,
+    # 1.5 s of audio heard as nothing and the children's answer just after it never heard.
+    listen_until: float | None = None
 
 
 class HybridRuntime:
@@ -473,6 +477,8 @@ class HybridRuntime:
     _ANSWER_START_S = 15.0
     # An awaited answer not started within this (Reachy still speaking or busy) is dropped.
     _ANSWER_PENDING_S = 30.0
+    # A game's answer heard as no words listens again when at least this much of its question's time is left.
+    _RELISTEN_MIN_S = 1.5
     # An announcement waits at most this long for Reachy to be free (no conversation or command).
     _ANNOUNCEMENT_PENDING_S = 120.0
     _PENDING_TURN_POLL_S = 0.1
@@ -1573,7 +1579,16 @@ class HybridRuntime:
                     await self._speak_locally(turn.text, turn.language, generation, audio=turn.audio)
                     if turn.answer is not None:
                         self.expect_answer(
-                            turn.answer, turn.language, listen_s=turn.listen_s, game=turn.game and turn.cloud_answer
+                            turn.answer,
+                            turn.language,
+                            listen_s=turn.listen_s,
+                            game=turn.game and turn.cloud_answer,
+                            # Only answers whose words count: a roar heard as no words is the children joining in.
+                            listen_until=(
+                                self._clock() + turn.listen_s
+                                if turn.game and turn.cloud_answer and turn.listen_s is not None
+                                else None
+                            ),
                         )
                     if turn.on_spoken is not None:
                         turn.on_spoken()
@@ -1718,6 +1733,12 @@ class HybridRuntime:
                 # Whatever was said is the answer; silence means none, and never opens the conversation.
                 answer = turn.answer if turn is not None else None
                 logger.info("Awaited answer heard=%s", bool(quick_text))
+                left_s = (turn.listen_until - self._clock()) if turn is not None and turn.listen_until else 0.0
+                if not quick_text and answer is not None and turn is not None and left_s >= self._RELISTEN_MIN_S:
+                    logger.info("Awaited answer was no words; listening %.1f s more", left_s)
+                    self._queue_turn(replace(turn, listen_s=left_s, expires_at=self._clock() + self._ANSWER_PENDING_S))
+                    await self._return_to_ambient(generation, "no_answer")
+                    return True
                 if quick_text and answer is not None and await self._try_quick_command(quick_text, generation, answer):
                     return True
                 if not quick_text and answer is not None and turn is not None and turn.listen_s:
@@ -2672,7 +2693,13 @@ class HybridRuntime:
             return 0
 
     def expect_answer(
-        self, answer: QuickCommandHandler, language: str = "", *, listen_s: float | None = None, game: bool = False
+        self,
+        answer: QuickCommandHandler,
+        language: str = "",
+        *,
+        listen_s: float | None = None,
+        game: bool = False,
+        listen_until: float | None = None,
     ) -> None:
         """Once the current reply has played, listen once without the name and hand what is said to ``answer``.
 
@@ -2688,6 +2715,7 @@ class HybridRuntime:
                 answer=answer,
                 game=game,
                 listen_s=listen_s,
+                listen_until=listen_until,
             )
         )
 
