@@ -369,3 +369,5 @@ our own.
   `--pictures --turnaround` on another story draws into `pictures-turnaround/` to compare first. El Cascanueces is
   the first story drawn this way; the same day every other story was redrawn from turnaround sheets for all 39
   roles (the coin's and the crow's came out on a dark background at first and were drawn again).
+- 2026-11-11: in Bigotes the children's lines were too long to remember (Eduardo): Lola's question is now four words,
+  "¿orejita doblada? ¿Colita blanca?" / "orecchio piegato? Codina bianca?", and the big call is "¡Bigotes, ven!".

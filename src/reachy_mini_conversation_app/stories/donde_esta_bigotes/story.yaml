@@ -158,8 +158,8 @@ steps:
     it: "[thoughtful] Mmm... signora Carmela, una domanda..."
   - chorus:
       ask:
-        es: "[curious] Pregunten con Lola: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
-        it: "[curious] Chiedete con Lola: ha un orecchio piegato... e la punta della coda bianca?"
+        es: "[curious] Lola siempre pregunta lo mismo. Repitan conmigo: ¿orejita doblada? ¿Colita blanca?"
+        it: "[curious] Lola chiede sempre la stessa cosa. Ripetete con me: orecchio piegato? Codina bianca?"
       done:
         who: painter
         es: "[surprised] ¡Sí! Una orejita doblada y la colita blanca. ¿Cómo lo sabes?"
@@ -220,8 +220,8 @@ steps:
       sound: singing_meow
   - chorus:
       ask:
-        es: "[curious] Y Lola preguntó otra vez: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
-        it: "[curious] E Lola chiese di nuovo: ha un orecchio piegato... e la punta della coda bianca?"
+        es: "[curious] Y Lola preguntó otra vez. ¡Con ella!: ¿orejita doblada? ¿Colita blanca?"
+        it: "[curious] E Lola chiese di nuovo. Con lei!: orecchio piegato? Codina bianca?"
       done:
         who: musician
         es: "[surprised] ¡Epa! ¡Sí! ¿Y tú cómo sabes?"
@@ -280,8 +280,8 @@ steps:
       move: happy
   - chorus:
       ask:
-        es: "[curious] ¿Y qué preguntó Lola? ¡Díganlo con ella!: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
-        it: "[curious] E che cosa chiese Lola? Ditelo con lei!: ha un orecchio piegato... e la punta della coda bianca?"
+        es: "[curious] ¿Y qué preguntó Lola? ¡Todos!: ¿orejita doblada? ¿Colita blanca?"
+        it: "[curious] E che cosa chiese Lola? Tutti!: orecchio piegato? Codina bianca?"
       done:
         who: baker
         es: "[booming, surprised] ¡Pues sí! ¿Cómo lo adivinaste?"
@@ -318,8 +318,8 @@ steps:
       seconds: 6
   - chorus:
       ask:
-        es: "[whispers] Y Lola preguntó bajito: ¿tiene una orejita doblada... y la puntica de la cola blanca?"
-        it: "[whispers] E Lola chiese piano: ha un orecchio piegato... e la punta della coda bianca?"
+        es: "[whispers] Y Lola preguntó bajito. Bajito con ella: ¿orejita doblada? ¿Colita blanca?"
+        it: "[whispers] E Lola chiese piano. Piano con lei: orecchio piegato? Codina bianca?"
       done:
         who: gardener
         es: "[calm, surprised] Pues sí, niña. Así mismito es."
@@ -377,8 +377,8 @@ steps:
     it: "[excited] Lola raccontò tutto ai vicini. E tutti uscirono a cercare il loro gatto!"
   - noise:
       ask:
-        es: "[excited] ¡Llamemos todos juntos! ¡Bigotes! ¡Pincel! ¡Maestro! ¡Bizcocho! ¡Girasol!"
-        it: "[excited] Chiamiamolo tutti insieme! Baffo! Pennello! Maestro! Biscotto! Girasole!"
+        es: "[excited] ¡Llamémoslo todos juntos, bien fuerte: ¡Bigotes, ven!"
+        it: "[excited] Chiamiamolo tutti insieme, fortissimo: Baffo, vieni!"
       louder:
         es: "[playful] ¡Más fuerte, que nos oiga! ¡Gatitoooo!"
         it: "[playful] Più forte, che ci senta! Miciooo!"
