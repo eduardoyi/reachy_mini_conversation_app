@@ -577,5 +577,4 @@ def test_turnaround_scenes_keep_who_a_character_is_but_not_its_pose() -> None:
     free = scene_prompt("Clara looks up at the tree", ["clara"], looks, turnaround=True)
     assert "turnaround sheet" in free and "never copy a pose" in free
     assert "exactly as on their sheets" in scene_prompt("Clara looks up", ["clara"], looks)
-    assert load_stories()["el_cascanueces"].turnaround
-    assert not load_stories()["tres_cerditos"].turnaround
+    assert all(story.turnaround for story in load_stories().values())  # every story since 2026-11-11
