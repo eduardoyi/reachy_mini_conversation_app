@@ -74,8 +74,8 @@ SWITCH_FIRES_SHARE: Final[float] = 0.8
 SHADOW_FIRES_SHARE: Final[float] = 0.9
 # Clips to check a day; Eduardo offered 30 on 2026-11-09, checked through the day, to settle the trial below sooner.
 QUEUE_SIZE: Final[int] = 30
-# Transcript wakes the accurate check would have dropped (on trial since 2026-11-09) asked about each day: whether
-# they were calls is what switching the check on would cost.
+# Transcript wakes the accurate check doubted (dropped since 2026-11-11) asked about each day: a call among them is
+# what the check costs.
 TRANSCRIPT_CHECK_QUESTIONS: Final[int] = 15
 NEGATIVE_STRIDE: Final[int] = 8
 NEGATIVES_PER_DAY: Final[int] = 60_000
@@ -597,7 +597,7 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
                           follow_up=question != MISSED_QUESTION)  # fmt: skip
         ranked.append((rank, clip))
 
-    doubted = []  # transcript wakes the trial check heard no name in, nobody told off
+    doubted = []  # transcript wakes the accurate check heard no name in (dropped since 2026-11-11), nobody told off
 
     for event in events:
         if not event.get("clip"):
@@ -614,7 +614,11 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
             offer(2, event, located[-1])
         elif _woke(event) and _told_off_unnamed(event, located):
             offer(3, event, fired_at)  # the live check heard a name, the night none
-        elif kind == "name_heard" and _woke(event) and event.get("transcript_check") is False:
+        elif (
+            kind == "name_heard"
+            and event.get("transcript_check") is False
+            and event.get("outcome") in ("woke", "rejected")
+        ):
             if not _not_called(event):
                 doubted.append(event)
         elif kind == "shadow" and located:

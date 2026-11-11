@@ -505,8 +505,10 @@ class HybridRuntime:
     _SECOND_LOOK_WAIT_S = 1.0
     # A room-transcript wake comes from the fast model on speech frames spliced together, pauses cut out; on
     # 2026-10-31 to 11-08 most of the 318 such wakes had no name the accurate model could hear in the same audio
-    # unspliced. On trial: the accurate model listens to the sentence (with a second before it), then the whole
-    # clip, and the verdict is only recorded (`transcript_check` in the wake record), never acted on yet.
+    # unspliced. So the accurate model listens to the sentence (with a second before it), then the whole clip,
+    # and a wake it hears no name in is dropped before any command runs or the conversation opens. On trial
+    # 2026-11-09 to 11-11 it doubted 89 of 98: the 35 a person answered held 34 false wakes and one call that
+    # got through 23 s later by the wake model; none of the rest looked like a call.
     _TRANSCRIPT_CHECK_LEAD_S = 1.0
     # Bound on each name check (whisper-small takes about 0.4 s on the mini, turbo about 1.6 s).
     _WAKE_NAME_CHECK_TIMEOUT_S = 4.0
@@ -655,6 +657,8 @@ class HybridRuntime:
         self._wake_score: float | None = None  # the wake model's score for that audio
         self._wake_event: str | None = None  # that fire's id in the wake clip record
         self._name_event: str | None = None  # a room-transcript wake's id in the record
+        # The accurate model's check of that wake's audio: True/False, None when it could not check.
+        self._transcript_check: asyncio.Task[bool | None] | None = None
         # The latest wake that woke him (record id, when, generation), for "we weren't talking to you".
         self._last_wake: tuple[str, float, int] | None = None
         # When the wake model last scored a frame and the clip recorder was last fed: a short pause (a rejected
@@ -794,7 +798,7 @@ class HybridRuntime:
         self._playback_clearer: Callable[[], None] | None = None
         self._local_start_event = asyncio.Event()
         self._output_wakeup_event = asyncio.Event()
-        self._local_event_tasks: set[asyncio.Task[bool]] = set()
+        self._local_event_tasks: set[asyncio.Task[bool | None]] = set()
         self._pending_turns: deque[_PendingTurn] = deque()
         self._pending_turns_task: asyncio.Task[bool] | None = None
         self._next_turn: _PendingTurn | None = None  # handed from the pending-turn loop to its activation
@@ -1356,9 +1360,10 @@ class HybridRuntime:
             self._note_wake(name_event, outcome="ignored", why="asleep_mid_sentence")
             return
         self._note_wake(name_event, outcome="woke")
-        self._start_transcript_check(name_event, segment.ended_at - segment.started_at)
+        transcript_check = self._start_transcript_check(name_event, segment.ended_at - segment.started_at)
         with self._lifecycle_lock:
             self._name_event = name_event
+            self._transcript_check = transcript_check
         followup_waiter: asyncio.Future[TranscriptSegment] | None = None
         if not detection.remaining_text:
             try:
@@ -1452,6 +1457,8 @@ class HybridRuntime:
         generation = 0
         clip_task: asyncio.Task[str] | None = None
         second_look: asyncio.Task[bool] | None = None
+        transcript_check: asyncio.Task[bool | None] | None = None
+        name_event: str | None = None
         listening_notified = False
         # Gemini hears the request itself (the clip's audio) with the local text only as a hint.
         request_in_audio = False
@@ -1508,13 +1515,16 @@ class HybridRuntime:
                     wake_lead = self._wake_lead_audio if wake_audio is not None else None
                     wake_score = self._wake_score if wake_audio is not None else None
                     wake_event = self._wake_event if reason == "acoustic_wake" else None
-                    woken_by = wake_event or (self._name_event if reason == "wake_word" else None)
+                    if reason == "wake_word":
+                        name_event, transcript_check = self._name_event, self._transcript_check
+                    woken_by = wake_event or name_event
                     self._last_wake = (woken_by, self._activated_at or 0.0, generation) if woken_by else None
                     self._wake_name_audio = None
                     self._wake_lead_audio = None
                     self._wake_score = None
                     self._wake_event = None
                     self._name_event = None
+                    self._transcript_check = None
                     # Without that audio, asleep, an acoustic wake counts once the transcript has the name first.
                     confirm_wake = asleep and transcribe_request and wake_audio is None and reason == "acoustic_wake"
                     if asleep and not confirm_wake and wake_audio is None:
@@ -1602,7 +1612,18 @@ class HybridRuntime:
                     request_sequence = self._transcript_wake_segment_sequence
                     self._transcript_wake_segment_sequence = None
             if reason == "wake_word" and not addressed_text:
-                followup_segment, waited_wake_sequence = await self._wait_for_wake_followup()
+                followup_wait = asyncio.ensure_future(self._wait_for_wake_followup())
+                try:
+                    if transcript_check is not None:
+                        # A doubted wake is dropped as soon as the check is back, not when the follow-up times out.
+                        await asyncio.wait({followup_wait, transcript_check}, return_when=asyncio.FIRST_COMPLETED)
+                        if not followup_wait.done() and not await self._transcript_wake_heard(transcript_check):
+                            followup_wait.cancel()
+                            return await self._drop_doubted_transcript_wake(name_event, generation, asleep=asleep)
+                    followup_segment, waited_wake_sequence = await followup_wait
+                finally:
+                    if not followup_wait.done():
+                        followup_wait.cancel()
                 if waited_wake_sequence is not None:
                     wake_sequence = max(wake_sequence or 0, waited_wake_sequence)
                 request_sequence = None
@@ -1612,6 +1633,12 @@ class HybridRuntime:
                     request_is_followup = True
                 else:
                     self._record_local_command_outcome(LocalCommandOutcome.FOLLOWUP_TIMEOUT)
+            if transcript_check is not None:
+                # Before any command runs or the conversation opens (about 1.2 s after the wake, 1.9 s at most
+                # for nine in ten; the follow-up has usually outlasted it).
+                check, transcript_check = transcript_check, None
+                if not await self._transcript_wake_heard(check):
+                    return await self._drop_doubted_transcript_wake(name_event, generation, asleep=asleep)
 
             if addressed_text and await self._try_local_command(addressed_text):
                 async with self._state_lock:
@@ -1906,6 +1933,8 @@ class HybridRuntime:
                 clip_task.cancel()
             if second_look is not None and not second_look.done():
                 second_look.cancel()
+            if transcript_check is not None and not transcript_check.done():
+                transcript_check.cancel()
             with self._lifecycle_lock:
                 conversation_open = self._mode is RuntimeMode.CLOUD_CONVERSATION and self._generation == generation
             if listening_notified and not conversation_open:
@@ -2190,28 +2219,56 @@ class HybridRuntime:
                 return None
             await asyncio.sleep(0.05)
 
-    def _start_transcript_check(self, event: str | None, speech_seconds: float) -> None:
-        """Ask the accurate model, in the background, whether a room-transcript wake's audio holds the name (trial)."""
+    def _start_transcript_check(self, event: str | None, speech_seconds: float) -> asyncio.Task[bool | None] | None:
+        """Start the accurate model checking whether a room-transcript wake's audio holds the name.
+
+        Returns the check (None when it cannot run, and the wake then stands); the wake waits for it before any
+        command runs or the conversation opens.
+        """
         clips = self._wake_clips
         if event is None or clips is None or self._request_transcriber is None:
-            return
+            return None
         kept = clips.recent(min(NAME_HEARD_MAX_SECONDS, speech_seconds + NAME_HEARD_MARGIN_S))
         if kept is None:
-            return
+            return None
         rate, pcm = kept
         clip = np.frombuffer(pcm, dtype="<i2").copy()
         sentence = clip[-int(rate * (speech_seconds + self._TRANSCRIPT_CHECK_LEAD_S)) :]
 
-        async def check() -> bool:
+        async def check() -> bool | None:
             heard = await self._hear_name_accurately([(rate, sentence), (rate, clip)])
             if heard is not None:
-                logger.info("Transcript wake check (trial) heard=%s", heard)
+                logger.info("Transcript wake check heard=%s", heard)
                 self._note_wake(event, transcript_check=heard)
-            return bool(heard)
+            return heard
 
-        task = asyncio.create_task(check(), name="hybrid-transcript-check")
+        try:
+            task = asyncio.create_task(check(), name="hybrid-transcript-check")
+        except RuntimeError:
+            return None
         self._local_event_tasks.add(task)
         task.add_done_callback(self._local_event_tasks.discard)
+        return task
+
+    @staticmethod
+    async def _transcript_wake_heard(check: asyncio.Task[bool | None]) -> bool:
+        """Whether a room-transcript wake stands: the check heard the name, or could not tell."""
+        try:
+            heard = await asyncio.shield(check)
+        except asyncio.CancelledError:
+            if not check.cancelled():
+                raise  # the activation itself is being cancelled
+            return True
+        except Exception as error:
+            logger.warning("Transcript wake check failed: %s", type(error).__name__)
+            return True
+        return heard is not False
+
+    async def _drop_doubted_transcript_wake(self, event: str | None, generation: int, *, asleep: bool) -> bool:
+        """Drop a room-transcript wake whose audio the accurate model heard no name in."""
+        logger.info("Transcript wake check did not hear the name; dropping the wake")
+        self._note_wake(event, outcome="rejected")
+        return await self._drop_unconfirmed_wake(generation, asleep=asleep)
 
     async def _hear_name_accurately(self, pieces: list[tuple[int, NDArray[np.int16]]]) -> bool | None:
         """Whether the request model hears the name in any of ``pieces``, in order; None when it could not run."""

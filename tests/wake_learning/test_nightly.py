@@ -130,13 +130,14 @@ def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_thirty(
     assert (items[0].start, items[0].end) == (5.0, 9.5)
 
 
-def test_transcript_wakes_the_trial_check_doubted_are_asked_about_fifteen_a_day() -> None:
-    """Whether they were calls is what switching the check on would cost; the whole sentence is played.
+def test_transcript_wakes_the_check_doubted_are_asked_about_fifteen_a_day() -> None:
+    """A call among them is what the check costs; the whole sentence is played.
 
-    One the trial heard the name in is not asked about; one told "not to you" is asked as before, after them.
+    Dropped (since 2026-11-11) or woken (on trial before), they are asked about alike. One the check heard the name
+    in is not asked about; one told "not to you" is asked as before, after them.
     """
-    doubted = [_event("name_heard", DAY + n, outcome="woke", transcript_check=False, speech_seconds=3.0)
-               for n in range(20)]  # fmt: skip
+    doubted = [_event("name_heard", DAY + n, outcome="rejected" if n % 2 else "woke", transcript_check=False,
+                      speech_seconds=3.0) for n in range(20)]  # fmt: skip
     confirmed = _event("name_heard", DAY + 50, outcome="woke", transcript_check=True, speech_seconds=3.0)
     told_off = _event("name_heard", DAY + 60, outcome="woke", transcript_check=False, said="not_called")
     events = [*doubted, confirmed, told_off]

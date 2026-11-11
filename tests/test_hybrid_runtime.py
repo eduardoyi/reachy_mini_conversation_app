@@ -2654,43 +2654,128 @@ async def test_a_name_heard_only_by_local_stt_is_saved_as_a_clip(tmp_path) -> No
     await runtime.close()
 
 
+def _runtime_for_a_transcript_check(
+    tmp_path: Path, request_model: Callable[[AudioFrame], Awaitable[str]], **kwargs: Any
+) -> tuple[HybridRuntime, list[FakeHandler]]:
+    """Build a runtime whose room-transcript wakes the accurate model checks; return it and the handlers it opens."""
+    handlers: list[FakeHandler] = []
+
+    def factory() -> FakeHandler:
+        handlers.append(FakeHandler())
+        return handlers[-1]
+
+    runtime = HybridRuntime(
+        factory,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
+        wake_clips=WakeClipRecorder(tmp_path, keep_days=14),
+        request_transcriber=request_model,
+        **kwargs,
+    )
+    runtime.set_capture_barrier_provider(lambda: 1)
+    return runtime, handlers
+
+
+async def _room_audio(runtime: HybridRuntime) -> None:
+    for sequence in range(1, 101):  # 8 s of room audio
+        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=sequence)
+
+
+def _name_heard_outcomes(tmp_path: Path) -> list[str]:
+    events = [json.loads(line) for line in next(tmp_path.glob("*/events.jsonl")).read_text().splitlines()]
+    return [event["outcome"] for event in events if "outcome" in event and "name_heard" in event["id"]]
+
+
 @pytest.mark.parametrize(("accurate", "verdict"), [("Reachy, what time is it?", True), ("what time is it", False)])
 @pytest.mark.asyncio
-async def test_a_transcript_wake_has_the_accurate_model_check_its_audio_on_trial(
+async def test_a_transcript_wake_has_the_accurate_model_check_its_audio(
     tmp_path: Path, accurate: str, verdict: bool
 ) -> None:
-    """On trial: the accurate model listens to the uncut audio and its verdict is recorded; he wakes either way.
+    """The accurate model listens to the uncut audio and its verdict is recorded.
 
     The fast model hears the room with its pauses cut out, which made most room-transcript wakes of 2026-11-01 to
     11-08 (2026-11-09 replay).
     """
-    clips = WakeClipRecorder(tmp_path, keep_days=14)
     heard: list[int] = []
 
     async def request_model(audio: AudioFrame) -> str:
         heard.append(audio[1].size)
         return accurate
 
-    handler = FakeHandler()
-    runtime = HybridRuntime(
-        lambda: handler,
-        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
-        acoustic_wake_detector=OpenWakeWordDetector(AcousticScoreModel()),
-        wake_clips=clips,
-        request_transcriber=request_model,
-    )
-    runtime.set_capture_barrier_provider(lambda: 1)
-    for sequence in range(1, 101):  # 8 s of room audio
-        await runtime.handle_frame((16000, np.full(1280, 111, dtype=np.int16)), capture_sequence=sequence)
+    runtime, handlers = _runtime_for_a_transcript_check(tmp_path, request_model)
+    await _room_audio(runtime)
 
     runtime.observe_local_transcript(TranscriptSegment("Reachy, what time is it?", 3, 4, 2))
-    await handler.started.wait()
-    await wait_until(lambda: not runtime._local_event_tasks, attempts=500)
+    await wait_until(
+        lambda: not any(task.get_name() == "hybrid-transcript-check" for task in runtime._local_event_tasks),
+        attempts=500,
+    )
+    await wait_until(lambda: bool(handlers) is verdict, attempts=500)
 
     # The sentence and a second before it, then the clip (the sentence and 3 s before it) if that missed.
     assert heard[:2] == ([32_000] if verdict else [32_000, 64_000])
     events = [json.loads(line) for line in next(tmp_path.glob("*/events.jsonl")).read_text().splitlines()]
     assert [event["transcript_check"] for event in events if "transcript_check" in event] == [verdict]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_doubted_transcript_wake_is_dropped_before_the_request_goes_anywhere(tmp_path: Path) -> None:
+    """No name in the uncut audio: no command runs and no conversation opens.
+
+    On 2026-11-09 to 11-11 the check doubted 89 of 98 room-transcript wakes; 34 of the 35 a person answered were false.
+    """
+
+    async def request_model(audio: AudioFrame) -> str:
+        return "what time is it"
+
+    runtime, handlers = _runtime_for_a_transcript_check(tmp_path, request_model)
+    await _room_audio(runtime)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, what time is it?", 3, 4, 2))
+    await wait_until(lambda: not runtime._local_event_tasks, attempts=500)
+
+    assert handlers == []
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert _name_heard_outcomes(tmp_path) == ["woke", "rejected"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_doubted_transcript_wake_is_dropped_without_waiting_for_the_follow_up(tmp_path: Path) -> None:
+    """After "Reachy" alone he waits for the request; a doubted wake is dropped once the verdict is back."""
+
+    async def request_model(audio: AudioFrame) -> str:
+        return "ready"
+
+    runtime, handlers = _runtime_for_a_transcript_check(tmp_path, request_model, wake_followup_timeout_s=10.0)
+    await _room_audio(runtime)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy.", 3, 4, 2))
+    await wait_until(lambda: not runtime._local_event_tasks, attempts=500)  # long before the 10 s follow-up
+
+    assert handlers == []
+    assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
+    assert runtime._wake_followup_future is None
+    assert _name_heard_outcomes(tmp_path) == ["woke", "rejected"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_wake_the_check_could_not_hear_stands(tmp_path: Path) -> None:
+    """The accurate model failing is no verdict: he wakes as before."""
+
+    async def request_model(audio: AudioFrame) -> str:
+        raise httpx.ConnectError("speech server down")
+
+    runtime, handlers = _runtime_for_a_transcript_check(tmp_path, request_model)
+    await _room_audio(runtime)
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, what time is it?", 3, 4, 2))
+    await wait_until(lambda: bool(handlers), attempts=500)
+    await handlers[0].started.wait()
+
+    assert _name_heard_outcomes(tmp_path) == ["woke"]
     await runtime.close()
 
 
