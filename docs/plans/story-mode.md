@@ -367,4 +367,5 @@ our own.
   side and back, five expressions, drawn with `story_build.py --sheets ROLE --turnaround` from the single sheet) and
   a scene prompt that keeps who the character is but never its pose, so the characters act each moment out.
   `--pictures --turnaround` on another story draws into `pictures-turnaround/` to compare first. El Cascanueces is
-  the first story drawn this way; the others still use one pose.
+  the first story drawn this way; the same day every other story was redrawn from turnaround sheets for all 39
+  roles (the coin's and the crow's came out on a dark background at first and were drawn again).

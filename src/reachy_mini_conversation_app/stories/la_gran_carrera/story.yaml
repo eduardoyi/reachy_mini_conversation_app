@@ -5,6 +5,8 @@
 # nothing from any film. Spanish is Venezuelan (ustedes, carro, corneta, chévere, la barra), Italian is standard.
 
 key: la_gran_carrera
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: La gran carrera
   it: La grande corsa

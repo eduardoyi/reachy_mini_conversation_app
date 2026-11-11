@@ -4,6 +4,8 @@
 # Spanish is Venezuelan (ustedes, papagayo for a kite), Italian is standard.
 
 key: tres_cerditos
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: Los tres cerditos
   it: I tre porcellini

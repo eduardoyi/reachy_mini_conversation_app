@@ -8,6 +8,8 @@
 # the children join in. Spanish is Venezuelan (cara o sello, ustedes, chévere), Italian is standard.
 
 key: la_monedita_de_plata
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: La monedita de plata
   it: La monetina d'argento

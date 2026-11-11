@@ -5,6 +5,8 @@
 # Spanish is Venezuelan (ustedes), Italian is standard.
 
 key: nabo_gigante
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: El nabo gigante
   it: La rapa gigante

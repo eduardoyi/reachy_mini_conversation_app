@@ -6,6 +6,8 @@
 # Spanish is Venezuelan (ustedes), Italian is standard.
 
 key: musicos_de_bremen
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: Los músicos de Bremen
   it: I musicanti di Brema

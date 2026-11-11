@@ -9,6 +9,8 @@
 # (ustedes, chévere, puntica, cachitos, cuatro), Italian is standard.
 
 key: donde_esta_bigotes
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses, so faces turn and act (2026-11-11).
+turnaround: true
 title:
   es: ¿Dónde está Bigotes?
   it: Dov'è Baffo?
