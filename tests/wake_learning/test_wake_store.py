@@ -94,6 +94,19 @@ def test_a_switch_makes_the_shadow_live_and_undo_puts_the_old_head_back(tmp_path
     assert [entry.get("undo", False) for entry in store.history()] == [True, False]
 
 
+def test_a_switch_offered_at_another_threshold_makes_the_head_live_at_it(tmp_path: Path) -> None:
+    """The night can offer the shadow at a stricter threshold than its own; the switch uses that one."""
+    store = _store(tmp_path)
+    store.set_live(_head(store, "reachy-richi"))
+    store.set_shadow(_head(store, "house-20261108", 0.85))
+    store.propose({"calls": 111, "live_caught": 66, "shadow_caught": 77, "threshold": 0.9})
+
+    switched = store.switch("eduardo")
+
+    assert switched.name == "house-20261108" and switched.threshold == 0.9 and store.live() == switched
+    assert store.history()[0]["to"]["threshold"] == 0.9
+
+
 def test_not_now_stands_until_the_numbers_change(tmp_path: Path) -> None:
     """A declined proposal is not offered again with the same numbers, but new numbers ask again."""
     store = _store(tmp_path)

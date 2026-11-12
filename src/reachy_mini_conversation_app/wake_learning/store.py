@@ -16,7 +16,7 @@ import threading
 from typing import Any, Final
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, replace, dataclass
 
 from reachy_mini_conversation_app.wake_clips import EVENTS_FILE, make_private_dir, wake_clips_directory
 
@@ -367,6 +367,9 @@ class WakeLearningStore:
             proposal, shadow, live = self.proposal(), self.shadow(), self.live()
             if proposal is None or shadow is None or proposal.get("head") != shadow.name:
                 raise ValueError("Nothing to switch to")
+            threshold = (proposal.get("summary") or {}).get("threshold")
+            if isinstance(threshold, (int, float)) and not isinstance(threshold, bool):
+                shadow = replace(shadow, threshold=float(threshold))  # the threshold it was offered at
             append_line(
                 self.root / "models" / "history.jsonl",
                 {

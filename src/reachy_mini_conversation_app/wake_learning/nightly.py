@@ -471,6 +471,38 @@ def clearly_better(candidate: PairResult, current: PairResult) -> bool:
     return better(candidate, current, max(SWITCH_MARGIN_CALLS, int(0.05 * current.calls + 0.999)), SWITCH_FIRES_SHARE)
 
 
+def shadow_switch(days: list[tuple[DayScores, DayMoments]], main: str, main_threshold: float, shadow: HeadRecord,
+                  live: HeadRecord | None) -> tuple[float, PairResult, PairResult] | None:  # fmt: skip
+    """Return (threshold, shadow, live) when the shadow pair is clearly better than the live pair over ``days``.
+
+    At its own threshold first; else at the one that catches the most calls firing no more than live, provided that
+    the threshold picked on either half of the days, tested on the other, catches as many calls as live there on no
+    more fires. On 2026-11-12 `house-20261108` at its 0.85 fired more than live (450 a day against 330), so it was
+    never offered, yet at 0.9 it caught 77 of 111 calls against live's 66 on 303 fires, and 0.9 held up on split days.
+    """
+    live_name, live_threshold = (live.name, live.threshold) if live else (None, 1.0)
+    current = evaluate(days, main, main_threshold, live_name, live_threshold)
+    own = evaluate(days, main, main_threshold, shadow.name, shadow.threshold)
+    if clearly_better(own, current):
+        return shadow.threshold, own, current
+    if len(days) < 2:
+        return None
+    choice = choose_threshold(days, main, main_threshold, shadow.name, current.fires_per_day)
+    if choice is None or choice[0] == shadow.threshold or not clearly_better(choice[1], current):
+        return None
+    half = len(days) // 2
+    for tune, test in ((days[:half], days[half:]), (days[half:], days[:half])):
+        budget = evaluate(tune, main, main_threshold, live_name, live_threshold).fires_per_day
+        picked = choose_threshold(tune, main, main_threshold, shadow.name, budget)
+        if picked is None:
+            return None
+        held = evaluate(test, main, main_threshold, shadow.name, picked[0])
+        there = evaluate(test, main, main_threshold, live_name, live_threshold)
+        if held.caught < there.caught or held.fires_per_day > there.fires_per_day + 0.5:
+            return None
+    return choice[0], choice[1], current
+
+
 # ---- training data -------------------------------------------------------------------------------------------
 def day_examples(day: DayScores, runs: list[FeatureRun], moments: DayMoments, rng: random.Random
                  ) -> tuple[NDArray[np.float16], NDArray[np.float32]]:  # fmt: skip
@@ -785,15 +817,17 @@ async def run_night(settings: NightSettings, check: NameCheck) -> dict[str, Any]
     if shadow is not None and store.head_path(shadow).is_file():
         shadow_days = [(scored[day], labelled[day][2]) for day in days if day in scored and day >= shadow.created[:10]]
         shadow_result = evaluate(shadow_days, main, settings.main_threshold, shadow.name, shadow.threshold)
-        live_on_same = evaluate(shadow_days, main, settings.main_threshold, live.name if live else None,
-                                live.threshold if live else 1.0)  # fmt: skip
         summary["shadow"] = {"name": shadow.name, "threshold": shadow.threshold, **shadow_result.as_json()}
-        if shadow_days and clearly_better(shadow_result, live_on_same):
+        switch = shadow_switch(shadow_days, main, settings.main_threshold, shadow, live) if shadow_days else None
+        if switch is not None:
+            threshold, offered, live_on_same = switch
+            if threshold != shadow.threshold:
+                summary["shadow"]["switch_threshold"] = threshold
             store.propose({"calls": live_on_same.calls, "live_caught": live_on_same.caught,
-                           "shadow_caught": shadow_result.caught,
+                           "shadow_caught": offered.caught,
                            "live_fires_per_day": round(live_on_same.fires_per_day, 1),
-                           "shadow_fires_per_day": round(shadow_result.fires_per_day, 1),
-                           "days": len(shadow_days)})  # fmt: skip
+                           "shadow_fires_per_day": round(offered.fires_per_day, 1),
+                           "days": len(shadow_days), "threshold": threshold})  # fmt: skip
         elif store.proposal() is not None:
             store.withdraw_proposal()
 

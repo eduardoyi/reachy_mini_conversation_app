@@ -57,7 +57,8 @@ the second as "spoke when you were talking about him". The deciding layer is not
   `"undone"` line to `answers.jsonl` that forgets every earlier answer to that clip, so it waits again.
 - **Switching**:
   - when the shadow pair caught clearly more calls than the live pair over a full day without firing more, or as
-    many calls on a fifth fewer fires, one push offers it with the numbers;
+    many calls on a fifth fewer fires, at its own threshold or at another that held up (below), one push offers
+    it with the numbers;
   - "Switch" makes it live the next time Reachy is idle, and Undo stays for 7 days.
 - **Scoreboard**: this week's calls answered the first time, false wakes a day, by TV on or off, how often he
   spoke up when you were talking about him, and how many times the live and shadow heads heard his name.
@@ -138,7 +139,12 @@ The name check is a feature here, never the only label: in the 2026-10-29 benchm
   listening.
 - **Switch offer.** The shadow pair must catch at least 2 more calls (and 5% more) than the live pair over the days
   since the shadow started, with fires no higher than the live pair's plus 0.5 a day; or catch as many calls on at
-  most 80% of the live pair's fires (`SWITCH_FIRES_SHARE`).
+  most 80% of the live pair's fires (`SWITCH_FIRES_SHARE`). If it does not at its own threshold, the threshold
+  that catches the most calls on no more fires than live is tried (`shadow_switch`), and offered only if the
+  threshold picked on either half of those days, tested on the other half, caught as many calls as live there on
+  no more fires. The offer carries that threshold (`threshold` in the proposal) and the switch makes the head live
+  at it. On 2026-11-12 `house-20261108` fired more than live at its 0.85 and was never offered, while at 0.9 it
+  caught 77 of 111 calls against live's 66 on fewer fires; it was switched in by hand.
 - **Challenger.** It starts from the live head's weights (`scripts/wake_train.py` loads either head's shape) and
   trains on every day but the newest two (`DEV_DAYS`; with only two days, the newest one). Its
   threshold (0.4 to 0.99) is the one that catches the most calls on those two days without firing more than the
@@ -238,10 +244,10 @@ Files on the computer Reachy runs on (`~/.local/share/reachy_mini_conversation_a
 
 | Test file | Covers |
 |-----------|--------|
-| `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused, a clip asked again); clip cut and confinement; switch, undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
+| `tests/wake_learning/test_wake_store.py` | Queue and answers (latest wins, bad answers refused, a clip asked again); clip cut and confinement; switch (at the threshold it was offered at), undo and history; "not now" until the numbers change; recordings per person; events with notes merged |
 | `tests/wake_learning/test_feature_log.py` | Runs split by gaps, start times, windows and `window_at`; pruning |
 | `tests/wake_learning/test_takes.py` | When a take ends; voice span with margins; a far quiet call; level in dB |
-| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; mentions ("not for me" over his name, "About him") as his name but no call and no false wake, and unknowns asked about; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped; up to 15 transcript wakes the accurate check doubted, woken or dropped, 30 clips in all); the scoreboard's episodes; a transcript wake's name only where located, and not a missed call inside its own sentence; a whole night with a shadow head that earns a switch; the switch margin; thresholds kept out of the trusted shortcut |
+| `tests/wake_learning/test_nightly.py` | Locating names; the name check's spellings; models behind a privacy prompt; calls, non-calls and unknowns with answers winning; mentions ("not for me" over his name, "About him") as his name but no call and no false wake, and unknowns asked about; false wakes from "not for me" and a sleep at once, and no questions about them; fires and calls caught; the clips to check (order, cap, answered skipped; up to 15 transcript wakes the accurate check doubted, woken or dropped, 30 clips in all); the scoreboard's episodes; a transcript wake's name only where located, and not a missed call inside its own sentence; a whole night with a shadow head that earns a switch; a shadow offered at a stricter threshold that held up on either half, and not when it won on one half only; the switch margin; thresholds kept out of the trusted shortcut |
 | `tests/test_acoustic_wake_word.py` | Shadow fires reported, never waking; the model's float32 scores written to the records; feature frames; re-arming inside the cooldown; loading a shadow head |
 | `tests/test_hybrid_runtime.py` | A rejected wake keeps the stream (no reset) and hears a repeated call, and can't be marked false; fire records; missed marks; a false-wake mark closes its conversation and a sleep soon after is noted; recording a name holds wakes |
 | `tests/test_control_api.py` | `/wake/missed` (privacy refuses); `/wake/false`; `/wake/take` keeps only the voice, refuses quiet or long takes and when he can't record |

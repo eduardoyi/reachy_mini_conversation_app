@@ -310,6 +310,50 @@ async def test_a_night_seeds_the_live_head_scores_both_and_offers_the_shadow_tha
     assert board["shadow"]["name"] == "house-20261029"
 
 
+def _shadow_days(shadow_calls: list[int]) -> list[tuple[DayScores, DayMoments]]:
+    """Days of four calls: live catches two; the shadow ``shadow_calls[i]`` on day i, plus quiet fires only 0.85 passes."""
+    ends = np.arange(0, 600, FRAME_S)
+    calls = [100.0, 200.0, 300.0, 400.0]
+    days = []
+    for caught_by_shadow in shadow_calls:
+        live, shadow = np.zeros(len(ends), np.float32), np.zeros(len(ends), np.float32)
+        for index, at in enumerate(calls):
+            span = (ends > at - 0.3) & (ends < at + 0.3)
+            live[span] = 0.93 if index < 2 else 0.0
+            shadow[span] = 0.93 if index < caught_by_shadow else 0.0
+        for at in (50.0, 150.0, 250.0, 350.0):  # false fires both heads share
+            live[(ends > at) & (ends < at + 0.5)] = shadow[(ends > at) & (ends < at + 0.5)] = 0.965
+        for at in (450.0, 480.0, 510.0, 540.0):  # false fires only the shadow's own 0.85 lets through
+            shadow[(ends > at) & (ends < at + 0.5)] = 0.87
+        scores = {"m": np.zeros(len(ends), np.float32), "live": live, "shadow": shadow}
+        days.append((DayScores(ends, 16.0, scores), DayMoments(calls=list(calls))))
+    return days
+
+
+def test_a_shadow_that_fires_more_at_its_own_threshold_is_offered_at_a_stricter_one() -> None:
+    """At 0.85 it fires twice as often as live; at 0.9 it catches every call on live's fires, on either half."""
+    shadow = HeadRecord("shadow", 0.85, "sha", "2026-11-08T03:05:00", {})
+    live = HeadRecord("live", 0.9, "sha", "2026-10-31T17:56:15", {})
+    days = _shadow_days([4, 4, 4, 4])
+    assert not nightly.clearly_better(nightly.evaluate(days, "m", 0.3, "shadow", 0.85),
+                                      nightly.evaluate(days, "m", 0.3, "live", 0.9))  # fmt: skip
+
+    switch = nightly.shadow_switch(days, "m", 0.3, shadow, live)
+
+    assert switch is not None
+    threshold, offered, current = switch
+    assert threshold == 0.9 and (offered.caught, current.caught) == (16, 8)
+    assert offered.fires_per_day <= current.fires_per_day
+
+
+def test_a_stricter_threshold_that_wins_on_only_half_the_days_is_not_offered() -> None:
+    """Ten calls to live's eight in all, but on the last two days it caught fewer than live: not offered."""
+    shadow = HeadRecord("shadow", 0.85, "sha", "2026-11-08T03:05:00", {})
+    live = HeadRecord("live", 0.9, "sha", "2026-10-31T17:56:15", {})
+
+    assert nightly.shadow_switch(_shadow_days([4, 4, 1, 1]), "m", 0.3, shadow, live) is None
+
+
 def test_a_clear_gain_needs_more_than_noise() -> None:
     """One more call is not enough to switch; three more, with no more fires, is."""
     current = nightly.PairResult(caught=30, calls=41, fires_per_day=10.0)
