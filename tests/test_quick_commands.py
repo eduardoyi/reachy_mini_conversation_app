@@ -581,7 +581,11 @@ async def test_household_routines_run_locally_and_good_night_also_sleeps() -> No
     quick = QuickCommands(deps, lights=lights)
 
     reply = await quick.handle("Movie mode, please.")
-    assert reply is not None and reply.text is None and calls == [{"action": "scene", "scene": "movie mode"}]
+    assert (
+        reply is not None
+        and reply.text is None
+        and calls == [{"action": "scene", "scene": "movie mode", "lights_only": True}]
+    )
     reply = await quick.handle("¿Modo película?")
     assert reply is not None and reply.language == "es"
     reply = await quick.handle("Buenas noches")
@@ -607,7 +611,7 @@ async def test_good_night_also_turns_the_tv_off_and_pauses_the_music() -> None:
     reply = await runner.handle("Good night")
     await asyncio.gather(*runner._background)
     assert reply is not None and reply.text == "Good night!" and reply.sleep
-    assert lights.calls == [{"action": "scene", "scene": "good night"}]
+    assert lights.calls == [{"action": "scene", "scene": "good night", "lights_only": True}]
     assert {"action": "pause"} in spotify.calls
     assert tools["tv"].calls == [{"action": "power", "on": False}]
 

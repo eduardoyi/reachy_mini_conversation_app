@@ -48,6 +48,8 @@ STREAM_JPEG_QUALITY: Final[int] = 70
 PEEK_HOLD_S: Final[float] = 120.0
 PEEK_YAW_STEP: Final[float] = 20.0
 PEEK_PITCH_STEP: Final[float] = 15.0
+# Every routine at once: 30 routines of 8 phrases and 40 lights each fit well within this.
+ROUTINES_MAX_BYTES: Final[int] = 64 * 1024
 _BOUNDARY: Final[str] = "frame"
 _NO_STORE: Final[dict[str, str]] = {"Cache-Control": "no-store"}
 
@@ -116,11 +118,11 @@ class ControlApi:
             return Response(status_code=403, headers=_NO_STORE)
         return None
 
-    async def _json_body(self, request: Request) -> dict[str, object] | Response:
+    async def _json_body(self, request: Request, max_bytes: int = 1024) -> dict[str, object] | Response:
         if request.headers.get("content-type", "").split(";")[0] != "application/json":
             return Response(status_code=415, headers=_NO_STORE)
         body = await request.body()
-        if len(body) > 1024:
+        if len(body) > max_bytes:
             return Response(status_code=413, headers=_NO_STORE)
         try:
             payload = json.loads(body)
@@ -358,6 +360,33 @@ class ControlApi:
                     {"error": "Home controls need Reachy running."}, status_code=503, headers=_NO_STORE
                 )
             return JSONResponse(await self._on_runtime(self._home.status()), headers=_NO_STORE)
+
+        @app.get("/home/routines")
+        async def _routines(request: Request) -> Response:
+            denied = self._denied(request)
+            if denied is not None:
+                return denied
+            if self._runtime is None or self._runtime.loop is None:
+                return JSONResponse(
+                    {"error": "Home controls need Reachy running."}, status_code=503, headers=_NO_STORE
+                )
+            result = await self._on_runtime(self._home.routines())
+            return JSONResponse(result, status_code=409 if "error" in result else 200, headers=_NO_STORE)
+
+        @app.put("/home/routines")
+        async def _save_routines(request: Request) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await self._json_body(request, max_bytes=ROUTINES_MAX_BYTES)
+            if isinstance(payload, Response):
+                return payload
+            if self._runtime is None or self._runtime.loop is None:
+                return JSONResponse(
+                    {"error": "Home controls need Reachy running."}, status_code=503, headers=_NO_STORE
+                )
+            result = await self._on_runtime(self._home.save_routines(payload))
+            return JSONResponse(result, status_code=409 if "error" in result else 200, headers=_NO_STORE)
 
         @app.post("/home/{part}")
         async def _home_change(request: Request, part: str) -> Response:

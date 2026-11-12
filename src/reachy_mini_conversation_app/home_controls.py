@@ -9,11 +9,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Final
+from pathlib import Path
 from collections.abc import Callable, Awaitable
 
 from reachy_mini_conversation_app.tools.tv import TV
 from reachy_mini_conversation_app.now_playing import Playback, spotify_fetcher
-from reachy_mini_conversation_app.home_devices import HubDevice, HomeDeviceError
+from reachy_mini_conversation_app.home_devices import (
+    Routine,
+    HubDevice,
+    HomeLayout,
+    HomeDeviceError,
+    routine_json,
+    save_routines,
+    normalize_name,
+    routines_version,
+)
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.home_lights import HomeLights, find_routine, without_offline_duplicates
 from reachy_mini_conversation_app.tools.spotify_control import SpotifyDucker, SpotifyControl
@@ -29,6 +39,10 @@ MUSIC_TIMEOUT_S: Final[float] = 4.0
 TV_APPS: Final[tuple[str, ...]] = ("YouTube", "YouTube Kids", "Netflix", "Disney Plus", "Prime Video", "Spotify")
 TV_ACTIONS: Final[frozenset[str]] = frozenset({"power", "volume", "mute", "media", "navigate", "open", "youtube"})
 MUSIC_ACTIONS: Final[frozenset[str]] = frozenset({"resume", "pause", "next", "volume"})
+MAX_ROUTINES: Final[int] = 30
+MAX_PHRASES: Final[int] = 8
+MAX_PHRASE_CHARS: Final[int] = 60
+MAX_TARGETS: Final[int] = 40
 _WARMTHS: Final[frozenset[str]] = frozenset({"warm", "neutral", "cool"})
 _MAX_TEXT: Final[int] = 100
 
@@ -68,9 +82,13 @@ class HomeControls:
         tv: Tool | None = None,
         spotify: Tool | None = None,
         playback: Callable[[], Awaitable[Playback | None]] | None = None,
+        layout_file: Path | None = None,
     ) -> None:
-        """Use ``deps``' home hub and TV, and Spotify when it is set up."""
+        """Use ``deps``' home hub and TV, Spotify when it is set up, and the routines in ``layout_file``."""
+        from reachy_mini_conversation_app.config import config
+
         self._deps = deps
+        self._layout_file = layout_file or Path(config.HOME_LAYOUT_FILE)
         self._lights: Tool = lights or HomeLights()
         self._tv: Tool = tv or TV()
         self._spotify: Tool = spotify or SpotifyControl()
@@ -169,7 +187,7 @@ class HomeControls:
         if routine is not None and not routine.on and not routine.off:
             result: dict[str, Any] = {"ok": True, "routine": routine.name}
         else:
-            result = await self._lights(self._deps, action="scene", scene=wanted)
+            result = await self._lights(self._deps, action="scene", scene=wanted, lights_only=True)
         if routine is None or "error" in result:
             return result
         if routine.tv_off and self._deps.tv is not None:
@@ -210,3 +228,105 @@ class HomeControls:
         if action == "volume":
             command["volume_percent"] = _int(payload.get("volume"))
         return await self._spotify(self._deps, **command)
+
+    async def _devices_and_scenes(self, home: Any) -> tuple[list[HubDevice], list[str]]:
+        try:
+            devices, scenes = await asyncio.wait_for(asyncio.gather(home.devices(), home.scenes()), LIGHTS_TIMEOUT_S)
+        except (HomeDeviceError, TimeoutError) as error:
+            logger.warning("Home controls: lights unavailable for routines (%s)", type(error).__name__)
+            return [], []
+        return without_offline_duplicates(devices), [scene.name for scene in scenes]
+
+    async def routines(self) -> dict[str, Any]:
+        """Return the routines as the layout file holds them, what they can name, and a version to save against."""
+        home = self._deps.home_hub
+        if home is None:
+            return {"error": "No lights are set up."}
+        layout = await asyncio.to_thread(HomeLayout.load, self._layout_file)
+        devices, scenes = await self._devices_and_scenes(home)
+        return {
+            "routines": [routine_json(routine) for routine in layout.routines],
+            "version": routines_version(layout.routines),
+            "targets": {
+                "areas": list(layout.areas),
+                "rooms": sorted({device.room for device in devices if device.room}),
+                "devices": [device.name for device in devices],
+            },
+            "scenes": scenes,
+        }
+
+    async def save_routines(self, payload: dict[str, object]) -> dict[str, Any]:
+        """Replace every routine with ``payload["routines"]`` if nobody changed them since ``payload["version"]``.
+
+        The layout file is rewritten (its previous copy kept as ``.bak``) and loaded again, so the voice and the
+        phone use the new routines at once.
+        """
+        home = self._deps.home_hub
+        if home is None:
+            return {"error": "No lights are set up."}
+        current = await asyncio.to_thread(HomeLayout.load, self._layout_file)
+        if payload.get("version") != routines_version(current.routines):
+            return {"error": "The routines changed since you opened them. Close and open them again."}
+        raw = payload.get("routines")
+        if not isinstance(raw, list) or len(raw) > MAX_ROUTINES:
+            return {"error": f"Send at most {MAX_ROUTINES} routines."}
+        devices, _ = await self._devices_and_scenes(home)
+        known = {"all", *(normalize_name(area) for area in current.areas)}
+        known |= {normalize_name(name) for device in devices for name in (device.name, device.room or "") if name}
+        known |= {normalize_name(name) for routine in current.routines for name in (*routine.on, *routine.off)}
+        routines: list[Routine] = []
+        said: dict[str, str] = {}
+        for item in raw:
+            routine = _routine(item, known)
+            if isinstance(routine, str):
+                return {"error": routine}
+            for phrase in routine.say:
+                key = normalize_name(phrase)
+                if key in said:
+                    return {"error": f"“{phrase}” starts two routines ({said[key]} and {routine.name})."}
+                said[key] = routine.name
+            routines.append(routine)
+        await asyncio.to_thread(save_routines, self._layout_file, routines)
+        layout = await asyncio.to_thread(HomeLayout.load, self._layout_file)
+        home.set_layout(layout)
+        logger.info("Routines saved from the admin app: %d", len(layout.routines))
+        return {"ok": True, "version": routines_version(layout.routines), "count": len(layout.routines)}
+
+
+def _routine(item: object, known: set[str]) -> Routine | str:
+    """Return one routine from the phone, or why it cannot be saved."""
+    if not isinstance(item, dict):
+        return "A routine is not readable."
+    phrases: list[str] = []
+    raw_say = item.get("say")
+    for phrase in raw_say if isinstance(raw_say, list) else []:
+        text = " ".join(phrase.split()) if isinstance(phrase, str) else ""
+        if text and normalize_name(text) not in {normalize_name(p) for p in phrases}:
+            phrases.append(text)
+    if not phrases:
+        return "Every routine needs a name."
+    name = phrases[0]
+    if len(phrases) > MAX_PHRASES or any(len(phrase) > MAX_PHRASE_CHARS for phrase in phrases):
+        return f"{name}: at most {MAX_PHRASES} phrases of {MAX_PHRASE_CHARS} characters."
+    targets: dict[str, tuple[str, ...]] = {}
+    for side in ("on", "off"):
+        raw_side = item.get(side)
+        values = raw_side if isinstance(raw_side, list) else []
+        names = tuple(dict.fromkeys(v.strip() for v in values if isinstance(v, str) and v.strip()))
+        if len(names) > MAX_TARGETS:
+            return f"{name}: too many lights."
+        unknown = [target for target in names if normalize_name(target) not in known]
+        if unknown:
+            return f"{name}: nothing is called {unknown[0]}."
+        targets[side] = names
+    routine = Routine(
+        say=tuple(phrases),
+        on=targets["on"],
+        off=targets["off"],
+        sleep=item.get("sleep") is True,
+        tv_off=item.get("tv") == "off",
+        pause_music=item.get("music") == "pause",
+    )
+    if not (routine.on or routine.off or routine.tv_off or routine.pause_music):
+        return f"{name} doesn't do anything yet: pick lights, the TV or the music."
+    return routine

@@ -1272,7 +1272,7 @@ class QuickCommands:
         async def lights() -> dict[str, Any]:
             if not routine.on and not routine.off:
                 return {"ok": True, "changed": ["nothing"]}
-            return dict(await self._lights(self._deps, action="scene", scene=routine.name))
+            return dict(await self._lights(self._deps, action="scene", scene=routine.name, lights_only=True))
 
         async def tv_off() -> None:
             if routine.tv_off and getattr(self._deps, "tv", None) is not None:

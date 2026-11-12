@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from typing import Any
+from pathlib import Path
+from collections.abc import Callable, Awaitable
 
 from reachy_mini_conversation_app.home_devices import (
     Routine,
@@ -10,10 +12,13 @@ from reachy_mini_conversation_app.home_devices import (
     HomeDeviceError,
     normalize_name,
 )
-from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolSpec, ToolDependencies
 
 
 logger = logging.getLogger(__name__)
+
+# A routine's "TV off" runs in the background: the TV can take seconds to confirm, and the reply need not wait.
+_BACKGROUND: set[asyncio.Task[Any]] = set()
 
 _WARMTH_POSITION = {"warm": 0.0, "neutral": 0.5, "cool": 1.0}
 # (hue in degrees, saturation 0-1)
@@ -108,6 +113,38 @@ def find_routine(layout: HomeLayout, name: str) -> Routine | None:
     return None
 
 
+def routine_line(routine: Routine) -> str:
+    """Describe a routine for the model: its name, other phrases, and what it does."""
+
+    def named(target: str, other: str) -> str:
+        return other if normalize_name(target) in _EVERYTHING else target
+
+    does = []
+    if routine.on:
+        does.append("turns on " + ", ".join(named(target, "all the lights") for target in routine.on))
+    if routine.off:
+        rest = "every other light" if routine.on else "all the lights"
+        does.append("turns off " + ", ".join(named(target, rest) for target in routine.off))
+    if routine.tv_off:
+        does.append("turns the TV off")
+    if routine.pause_music:
+        does.append("pauses the music")
+    if routine.sleep:
+        does.append("then you go to sleep")
+    also = f" (also {', '.join(repr(phrase) for phrase in routine.say[1:])})" if len(routine.say) > 1 else ""
+    return f"{routine.name!r}{also}: {', '.join(does)}"
+
+
+def _log_tv_off(task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("Routine TV off failed: %s", type(error).__name__)
+    elif isinstance(task.result(), dict) and "error" in task.result():
+        logger.info("Routine TV off: the TV did not respond")
+
+
 def _describe(device: HubDevice) -> dict[str, Any]:
     state: dict[str, Any] = {"name": device.name, "on": device.is_on}
     if device.room:
@@ -182,8 +219,39 @@ class HomeLights(Tool):
         "required": ["action"],
     }
 
+    def __init__(
+        self,
+        *,
+        tv: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        spotify: Callable[..., Awaitable[Any]] | None = None,
+        layout_file: Path | None = None,
+    ) -> None:
+        """Use the ``tv`` and ``spotify`` tools for routines (the real ones unless given) and ``layout_file``."""
+        self._tv_tool = tv
+        self._spotify_tool = spotify
+        self._layout_file = layout_file
+
+    def spec(self) -> ToolSpec:
+        """Offer the model the household routines as they are now: each conversation reads them afresh."""
+        spec = super().spec()
+        from reachy_mini_conversation_app.config import config
+
+        layout = HomeLayout.load(self._layout_file or Path(config.HOME_LAYOUT_FILE))
+        if layout.routines:
+            listed = "; ".join(routine_line(routine) for routine in layout.routines)
+            spec = {
+                **spec,
+                "description": f"{spec['description']} Household routines (run one with action=scene and its name, "
+                f"when someone asks for it in any words): {listed}.",
+            }
+        return spec
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
-        """Read or change lights."""
+        """Read or change lights.
+
+        ``lights_only=True`` (not offered to the model) runs only a routine's lights: the quick commands and the
+        admin app turn the TV off, pause the music and put Reachy to sleep themselves.
+        """
         home = deps.home_hub
         if home is None:
             return {"error": "No lights are set up."}
@@ -196,7 +264,12 @@ class HomeLights(Tool):
             if action == "status":
                 return await self._status(home)
             if action == "scene":
-                return await self._scene(home, str(kwargs.get("scene") or kwargs.get("target") or ""))
+                return await self._scene(
+                    deps,
+                    home,
+                    str(kwargs.get("scene") or kwargs.get("target") or ""),
+                    lights_only=kwargs.get("lights_only") is True,
+                )
             if action == "set":
                 return await self._set(home, kwargs)
         except HomeDeviceError as error:
@@ -215,17 +288,26 @@ class HomeLights(Tool):
             "scenes": [scene.name for scene in scenes] + [routine.name for routine in _layout(home).routines],
         }
 
-    async def _scene(self, home: Any, name: str) -> dict[str, Any]:
+    async def _scene(self, deps: ToolDependencies, home: Any, name: str, *, lights_only: bool) -> dict[str, Any]:
         routine = find_routine(_layout(home), name)
         if routine is not None:
-            return await self._routine(home, routine)
+            if routine.on or routine.off:
+                result = await self._routine(home, routine)
+            else:
+                result = {"ok": True, "routine": routine.name}
+            if not lights_only and "error" not in result:
+                await self._routine_extras(deps, routine, result)
+            return result
         scenes = await home.scenes()
         wanted = normalize_name(name)
         matches = [scene for scene in scenes if normalize_name(scene.name) == wanted] or [
             scene for scene in scenes if wanted and wanted in normalize_name(scene.name)
         ]
         if len(matches) != 1:
-            return {"error": f"No single scene called {name!r}.", "scenes": [scene.name for scene in scenes]}
+            return {
+                "error": f"No single scene or routine called {name!r}.",
+                "scenes": [scene.name for scene in scenes] + [routine.name for routine in _layout(home).routines],
+            }
         await home.trigger_scene(matches[0])
         return {"ok": True, "scene": matches[0].name}
 
@@ -330,13 +412,6 @@ class HomeLights(Tool):
         ]
         response = await self._apply(home, changes, targets)
         response["routine"] = routine.name
-        also = [
-            text
-            for wanted, text in ((routine.tv_off, "turn the TV off"), (routine.pause_music, "pause the music"))
-            if wanted
-        ]
-        if also:
-            response["also"] = f"This routine should also {' and '.join(also)}; use the tv and spotify_control tools."
         logger.info(
             "Routine %r: on=%d off=%d failed=%d",
             routine.name,
@@ -345,6 +420,38 @@ class HomeLights(Tool):
             len(response.get("failed", [])),
         )
         return response
+
+    async def _routine_extras(self, deps: ToolDependencies, routine: Routine, result: dict[str, Any]) -> None:
+        """Do the rest of a routine run from a conversation: the TV off, the music paused, then sleep."""
+        if routine.tv_off and deps.tv is not None:
+            from reachy_mini_conversation_app.tools.tv import TV
+
+            tv = self._tv_tool or TV()
+
+            async def tv_off() -> dict[str, Any]:
+                return await tv(deps, action="power", on=False)
+
+            task = asyncio.create_task(tv_off(), name="routine-tv-off")
+            _BACKGROUND.add(task)
+            task.add_done_callback(_BACKGROUND.discard)
+            task.add_done_callback(_log_tv_off)
+            result["tv"] = "turning off"
+        if routine.pause_music:
+            from reachy_mini_conversation_app.tools.spotify_control import SpotifyDucker, SpotifyControl
+
+            if self._spotify_tool is not None or SpotifyDucker._configuration() is not None:
+                spotify = self._spotify_tool or SpotifyControl()
+                playing = await spotify(deps, action="status")
+                if playing.get("status") == "playing":
+                    await spotify(deps, action="pause")
+                    result["music"] = "paused"
+        if routine.sleep:
+            sleep = deps.standby or deps.go_to_sleep
+            if sleep is not None:
+                await asyncio.to_thread(sleep)
+                result["sleep"] = True
+                result["instruction"] = "This routine puts you to sleep: say a very short good night."
+        logger.info("Routine %r run from a conversation", routine.name)
 
     async def _apply(
         self, home: Any, changes: list[tuple[HubDevice, LightChange]], targets: list[HubDevice]

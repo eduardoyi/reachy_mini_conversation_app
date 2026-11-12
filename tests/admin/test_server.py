@@ -84,6 +84,12 @@ class ControlAPI:
         if path == "/privacy":
             self.privacy = {"on": body["on"], "since": "2026-10-30T10:00:00+00:00" if body["on"] else None}
             return httpx.Response(200, json=self.status())
+        if path == "/home/routines":
+            if request.method == "GET":
+                return httpx.Response(200, json={"routines": [], "version": "v1"})
+            if body and body.get("version") != "v1":
+                return httpx.Response(409, json={"error": "The routines changed since you opened them."})
+            return httpx.Response(200, json={"ok": True, "version": "v2"})
         if path == "/home":
             return httpx.Response(200, json={"lights": None, "tv": {"on": False}, "music": None})
         if path.startswith("/home/"):
@@ -561,6 +567,22 @@ def test_home_controls_are_relayed_and_routines_written_down(admin: Admin) -> No
     assert admin.control.calls("/home/light") == [{"target": "Dining", "on": True}]
     assert admin.control.calls("/home/all-off") == [{}]
     assert [e["action"] for e in admin.audit()] == ["all lights off", "TV on", "routine movie mode"]
+
+
+def test_routines_are_read_and_saved_through_the_app_and_audited(admin: Admin) -> None:
+    """The editor reads and saves every routine at once; a stale save is refused and not written down."""
+    routines = [{"say": ["movie mode"], "on": ["TV Lights"], "off": ["all"]}]
+    with admin.client() as client:
+        assert client.get("/api/home/routines").json() == {"routines": [], "version": "v1"}
+        saved = client.put("/api/home/routines", json={"version": "v1", "routines": routines}, headers=SAME_ORIGIN)
+        assert saved.json() == {"ok": True, "version": "v2"}
+        stale = client.put("/api/home/routines", json={"version": "v0", "routines": routines}, headers=SAME_ORIGIN)
+        assert stale.status_code == 409
+        refused = client.put(
+            "/api/home/routines", json={"version": "v1", "routines": []}, headers={"Origin": "http://evil.example"}
+        )
+        assert refused.status_code == 403
+    assert [(e["action"], e["target"]) for e in admin.audit()] == [("routines saved", "1 routine")]
 
 
 def test_home_controls_while_the_app_is_down(admin: Admin) -> None:

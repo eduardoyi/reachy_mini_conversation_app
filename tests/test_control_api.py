@@ -509,6 +509,12 @@ class _Home:
     async def music(self, payload: Any) -> dict[str, Any]:
         return await self._note("music", payload)
 
+    async def routines(self) -> dict[str, Any]:
+        return await self._note("routines", None)
+
+    async def save_routines(self, payload: Any) -> dict[str, Any]:
+        return await self._note("save_routines", payload)
+
 
 def test_home_controls_run_on_the_runtimes_loop(switch: PrivacySwitch, runtime_loop: Any) -> None:
     """Status and each change run where the TV and hub connections live; a refusal is a 409 with its reason."""
@@ -549,3 +555,21 @@ def test_home_controls_need_the_runtime(switch: PrivacySwitch) -> None:
     api, _, _ = _api()
     api._runtime = None
     assert _client(api).get("/home", headers=AUTH).status_code == 503
+
+
+def test_routines_are_read_and_saved_on_the_runtimes_loop(switch: PrivacySwitch, runtime_loop: Any) -> None:
+    """Every routine fits in one save (larger than other bodies); a refusal is a 409 with its reason."""
+    api, _, runtime = _api()
+    runtime.loop = runtime_loop
+    home = _Home({"routines": [], "version": "v1"})
+    api._home = home  # type: ignore[assignment]
+    client = _client(api)
+    assert client.get("/home/routines", headers=AUTH).json() == {"routines": [], "version": "v1"}
+    many = {"version": "v1", "routines": [{"say": [f"routine {n}"], "on": ["all"] * 30} for n in range(30)]}
+    home.answer = {"ok": True, "version": "v2"}
+    assert client.put("/home/routines", json=many, headers=AUTH).json() == {"ok": True, "version": "v2"}
+    assert home.calls[-1] == ("save_routines", many)
+    home.answer = {"error": "The routines changed since you opened them."}
+    assert client.put("/home/routines", json=many, headers=AUTH).status_code == 409
+    assert client.put("/home/routines", json=many).status_code == 403
+    assert set(home.loops) == {runtime_loop}

@@ -346,3 +346,89 @@ async def test_lights_left_out_are_named_even_when_others_changed() -> None:
     result = await HomeLights()(_deps(home), action="set", target="all", on=True)
     assert (result["ok"], result["changed"], result["unreachable"]) == (True, ["Lámpara de pie"], ["Kids lamp"])
     assert "which lights did not respond" in result["instruction"]
+
+
+class _Recorder:
+    def __init__(self, answers: dict[str, Any] | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.answers = answers or {}
+
+    async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        return dict(self.answers.get(kwargs.get("action"), {"ok": True}))
+
+
+def _bedtime_layout(tmp_path: Any) -> Any:
+    from reachy_mini_conversation_app.home_devices import HomeLayout
+
+    path = tmp_path / "layout.json"
+    path.write_text(
+        '{"routines": [{"say": ["good night", "buenas noches"], "off": ["all"], "sleep": true, "tv": "off", '
+        '"music": "pause"}, {"say": ["movie mode"], "on": ["TV Lights"], "off": ["all"]}]}'
+    )
+    return path, HomeLayout.load(path)
+
+
+@pytest.mark.asyncio
+async def test_a_routine_asked_for_in_a_conversation_runs_whole(tmp_path: Any) -> None:
+    """From Gemini, good night turns the lights off, the TV off, pauses the music that plays, and sleeps."""
+    import asyncio
+
+    _, layout = _bedtime_layout(tmp_path)
+    home = _FakeHome([LAMP, CEILING])
+    home.layout = layout  # type: ignore[attr-defined]
+    tv, spotify = _Recorder(), _Recorder({"status": {"status": "playing"}})
+    slept: list[bool] = []
+    deps = _deps(home)
+    deps.tv = object()
+    deps.standby = lambda: slept.append(True) or {"ok": True}
+    result = await HomeLights(tv=tv, spotify=spotify)(deps, action="scene", scene="Buenas noches")
+    await asyncio.sleep(0)  # the TV is turned off in the background
+    assert result["ok"] is True and result["sleep"] is True and result["music"] == "paused"
+    assert "good night" in result["instruction"]
+    assert tv.calls == [{"action": "power", "on": False}]
+    assert spotify.calls == [{"action": "status"}, {"action": "pause"}]
+    assert slept == [True]
+    assert sorted(home.changes) == sorted((device.id, LightChange(on=False)) for device in (LAMP, CEILING))
+
+
+@pytest.mark.asyncio
+async def test_lights_only_leaves_the_rest_to_the_caller(tmp_path: Any) -> None:
+    """The quick commands and the admin app run a routine's lights here and do the TV, music and sleep themselves."""
+    _, layout = _bedtime_layout(tmp_path)
+    home = _FakeHome([LAMP, CEILING])
+    home.layout = layout  # type: ignore[attr-defined]
+    tv, spotify = _Recorder(), _Recorder({"status": {"status": "playing"}})
+    deps = _deps(home)
+    deps.tv = object()
+    deps.standby = MagicMock()
+    result = await HomeLights(tv=tv, spotify=spotify)(deps, action="scene", scene="good night", lights_only=True)
+    assert result["ok"] is True and "sleep" not in result
+    assert tv.calls == [] and spotify.calls == []
+    deps.standby.assert_not_called()
+
+
+def test_each_conversation_is_told_the_routines_as_they_are_now(tmp_path: Any) -> None:
+    """The tool's description lists every routine, its other phrases and what it does, read when asked."""
+    path, _ = _bedtime_layout(tmp_path)
+    tool = HomeLights(layout_file=path)
+    description = tool.spec()["description"]
+    assert (
+        "'good night' (also 'buenas noches'): turns off all the lights, turns the TV off, pauses the music, then you go to sleep"
+        in description
+    )
+    assert "'movie mode': turns on TV Lights, turns off every other light" in description
+    path.write_text('{"routines": [{"say": ["party"], "on": ["all"]}]}')
+    assert "'party': turns on all the lights" in tool.spec()["description"]
+    assert "'movie mode':" not in tool.spec()["description"]
+    assert "Household routines" not in HomeLights(layout_file=tmp_path / "none.json").spec()["description"]
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_routine_lists_the_routines_too(tmp_path: Any) -> None:
+    """A name that matches nothing returns the scenes and the routines, so the model can pick the right one."""
+    _, layout = _bedtime_layout(tmp_path)
+    home = _FakeHome([LAMP])
+    home.layout = layout  # type: ignore[attr-defined]
+    result = await HomeLights()(_deps(home), action="scene", scene="disco")
+    assert "good night" in result["scenes"] and "movie mode" in result["scenes"]

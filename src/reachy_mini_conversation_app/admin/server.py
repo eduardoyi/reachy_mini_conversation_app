@@ -577,6 +577,36 @@ def create_app(
             return _error("Reachy is not running.", 503)
         return _relay(response)
 
+    @app.get("/api/home/routines")
+    async def _routines() -> Response:
+        try:
+            response = await link.request("GET", "/home/routines", timeout=HOME_STATUS_TIMEOUT_S)
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+        return _relay(response)
+
+    @app.put("/api/home/routines")
+    async def _save_routines(request: Request) -> Response:
+        payload = await _json_body(request)
+        if isinstance(payload, Response):
+            return payload
+        try:
+            response = await link.request("PUT", "/home/routines", json=payload)
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+        if response.status_code == 200:
+            routines = payload.get("routines")
+            audit.append(
+                {
+                    "who": _who(request),
+                    "action": "routines saved",
+                    "target": (f"{len(routines)} routine" + ("" if len(routines) == 1 else "s"))
+                    if isinstance(routines, list)
+                    else "",
+                }
+            )
+        return _relay(response)
+
     @app.post("/api/home/{part}")
     async def _home_change(request: Request, part: str) -> Response:
         if part not in {"light", "all-off", "routine", "tv", "music"}:

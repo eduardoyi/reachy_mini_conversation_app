@@ -179,8 +179,8 @@ function setFill(slider) {
 
 // Tabs ------------------------------------------------------------------------------------------
 
-const views = { home: loadHome, games: loadGames, stories: loadGames, people: loadPeople, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
-const titles = { games: "Games", stories: "Stories", people: "People", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
+const views = { home: loadHome, games: loadGames, stories: loadGames, people: loadPeople, devices: openDevices, camera: openCamera, gallery: loadGallery, activity: loadActivity, settings: loadSettings };
+const titles = { games: "Games", stories: "Stories", people: "People", devices: "Devices", camera: "Camera", gallery: "Gallery", activity: "Activity", settings: "Settings" };
 let currentTab = "";
 
 function showTab() {
@@ -190,14 +190,21 @@ function showTab() {
   const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : "home";
   currentTab = tab;
   for (const view of document.querySelectorAll(".view")) view.hidden = view.id !== `view-${tab}`;
+  // The camera opens from Devices: that tab stays lit and a back arrow returns there.
+  const lit = tab === "camera" ? "devices" : tab;
   for (const link of document.querySelectorAll(".tabs a")) {
-    if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
+    if (link.dataset.tab === lit) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
   // People lives in Settings: the gear stays lit and a back arrow returns there.
   if (tab === "settings" || tab === "people") $(".gear").setAttribute("aria-current", "page");
   else $(".gear").removeAttribute("aria-current");
-  $("#back").hidden = tab !== "people";
+  const back = { people: ["#settings", "Back to Settings"], camera: ["#devices", "Back to Devices"] }[tab];
+  $("#back").hidden = !back;
+  if (back) {
+    $("#back").setAttribute("href", back[0]);
+    $("#back").setAttribute("aria-label", back[1]);
+  }
   showTitle();
   if (tab !== "camera") {
     closeBeReachy();
@@ -341,11 +348,7 @@ async function showHome() {
   if (!status) return;
   state.status = status;
   showPrivacy(status.privacy.on);
-  if (currentTab === "home") {
-    renderHome(status);
-    if (status.app.running) loadDevices();
-    else $("#home-devices").hidden = true;
-  }
+  if (currentTab === "home") renderHome(status);
   showPushState();
 }
 
@@ -374,57 +377,62 @@ setInterval(() => {
   if (document.hidden) return;
   if (currentTab === "home") loadHome();
   if (isGamesTab()) loadGames();
+  if (currentTab === "devices") loadDevices();
 }, 8000);
 
-// Home devices ----------------------------------------------------------------------------------
-// Lights and plugs (tap to switch, hold for brightness and color), routines, the TV and Spotify. Every change
-// goes through the tools Reachy uses by voice, so a game on holds the lights and music here too.
+// Devices ---------------------------------------------------------------------------------------
+// The camera link, routines (run and edit), lights by group (a switch for the group, each light inside), the TV
+// and Spotify. Every change goes through the tools Reachy uses by voice, so a game on holds lights and music here too.
 
 const LIGHT_COLORS = [
   ["Red", "red", "#e5484d"], ["Orange", "orange", "#f76b15"], ["Yellow", "yellow", "#ffc53d"],
   ["Green", "green", "#30a46c"], ["Cyan", "cyan", "#05a2c2"], ["Blue", "blue", "#3e63dd"],
   ["Purple", "purple", "#8e4ec6"], ["Pink", "pink", "#d6409f"], ["White", "white", "#ffffff"],
 ];
-const HOLD_MS = 450; // a press this long opens the light's sheet instead of switching it
 const SETTLE_MS = 1500; // devices take a moment to report a change; the refresh waits this long after one
 
-const home = { data: null, loading: null, quietUntil: 0, sheetLight: null };
+const home = { data: null, loading: null, quietUntil: 0, sheetLight: null, open: new Set() };
 
 function loadDevices() {
   if (home.loading || performance.now() < home.quietUntil) return home.loading;
   home.loading = api("/api/home")
     .then(renderDevices)
-    .catch(() => {}) // Reachy not running: the stage above already says so
+    .catch((error) => showDevicesNote(error.message))
     .finally(() => (home.loading = null));
   return home.loading;
+}
+
+function openDevices() {
+  home.quietUntil = 0;
+  if (!home.data) showDevicesNote("Asking Reachy about the devices…");
+  loadDevices();
+}
+
+function showDevicesNote(message) {
+  const note = $("#devices-note");
+  note.textContent = message;
+  note.hidden = !message;
 }
 
 const titleCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function renderDevices(data) {
   home.data = data;
-  const section = $("#home-devices");
-  section.hidden = !data.lights && !data.tv && !data.music;
+  showDevicesNote(!data.lights && !data.tv && !data.music ? "No lights, TV or Spotify are set up on Reachy." : "");
   renderLights(data.lights);
   renderTv(data.tv);
   renderMusic(data.music);
 }
 
 function renderLights(lights) {
-  const routines = $("#routines");
-  const rooms = $("#rooms");
-  $("#devices-hint").hidden = !lights || Boolean(lights.error);
-  if (!lights) {
-    routines.replaceChildren();
-    rooms.replaceChildren();
-    return;
-  }
+  $("#routines-block").hidden = !lights || Boolean(lights.error);
+  $("#lights-block").hidden = !lights;
+  if (!lights) return;
   if (lights.error) {
-    routines.replaceChildren();
-    rooms.replaceChildren(el("p", { className: "devices-hint" }, lights.error));
+    $("#rooms").replaceChildren(el("p", { className: "devices-hint" }, lights.error));
     return;
   }
-  routines.replaceChildren(
+  $("#routines").replaceChildren(
     ...lights.routines.map((name) => {
       const button = el("button", { className: "pill soft", type: "button" }, titleCase(name));
       button.addEventListener("click", () => runRoutine(button, name));
@@ -432,7 +440,7 @@ function renderLights(lights) {
     }),
     allOffButton(),
   );
-  rooms.replaceChildren(...lightGroups(lights).map(groupBlock));
+  $("#rooms").replaceChildren(...lightGroups(lights).map(groupCard));
 }
 
 function allOffButton() {
@@ -456,7 +464,7 @@ function lightGroups(lights) {
   for (const area of lights.areas) {
     const items = lights.devices.filter((device) => device.areas.includes(area) && !placed.has(device.name));
     items.forEach((device) => placed.add(device.name));
-    if (items.length) groups.push({ name: area, items });
+    if (items.length) groups.push({ name: area, target: area, items });
   }
   const rest = lights.devices.filter((device) => !placed.has(device.name));
   for (const room of [...new Set(rest.map((device) => device.room || "Other"))]) {
@@ -465,50 +473,55 @@ function lightGroups(lights) {
   return groups;
 }
 
-function groupBlock(group) {
-  const anyOn = group.items.some((device) => device.on && device.reachable);
-  const target = group.target === undefined ? group.name : group.target;
-  const head = el("div", { className: "area-head" }, [el("h4", {}, group.name)]);
-  if (target) {
-    const toggle = el("button", { className: "pill soft", type: "button" }, anyOn ? "Turn off" : "Turn on");
-    toggle.addEventListener("click", () => switchLights(target, group.items, !anyOn));
-    head.append(toggle);
-  }
-  return el("div", { className: "area" }, [head, el("div", { className: "device-tiles" }, group.items.map(lightTile))]);
+function lightSwitch(on, label, disabled, onToggle) {
+  const toggle = el("button", { className: "switch", type: "button", role: "switch", ariaChecked: String(on), ariaLabel: label });
+  toggle.disabled = disabled;
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onToggle();
+  });
+  return toggle;
 }
 
-function lightTile(device) {
-  const lit = device.on && device.reachable;
-  const sub = !device.reachable ? "Not responding" : !device.on ? "Off" : device.brightness ? `On · ${device.brightness}%` : "On";
-  const tile = el("button", { className: device.reachable ? "device-tile" : "device-tile away", type: "button", ariaPressed: String(lit) }, [
-    icon(device.kind === "plug" ? "plug" : "bulb"),
-    el("span", { className: "tile-name" }, device.name),
-    el("span", { className: "tile-sub" }, sub),
+function groupCard(group) {
+  const reachable = group.items.filter((device) => device.reachable);
+  const lit = reachable.filter((device) => device.on).length;
+  const open = home.open.has(group.name);
+  const summary = !reachable.length ? "Not responding" : lit === 0 ? "All off" : lit === reachable.length ? "All on" : `${lit} of ${reachable.length} on`;
+  const expand = el("button", { className: "group-open", type: "button", ariaExpanded: String(open) }, [
+    el("span", { className: "group-name" }, group.name),
+    el("span", { className: "group-sub" }, `${summary} · ${group.items.length} ${group.items.length === 1 ? "light" : "lights"}`),
   ]);
-  if (lit && device.brightness) {
-    const level = el("span", { className: "level" });
-    level.style.width = `${device.brightness}%`;
-    tile.append(level);
+  expand.addEventListener("click", () => {
+    if (home.open.has(group.name)) home.open.delete(group.name);
+    else home.open.add(group.name);
+    renderLights(home.data.lights);
+  });
+  const head = el("div", { className: "group-head" }, [icon(open ? "down" : "chevron"), expand]);
+  if (group.target) {
+    head.append(lightSwitch(lit > 0, `${group.name}: all lights`, !reachable.length, () => switchLights(group.target, group.items, lit === 0)));
   }
-  const adjustable = device.kind === "light" && (device.brightness !== null || device.warmth || device.colors);
-  let timer = 0;
-  let held = false;
-  tile.addEventListener("pointerdown", () => {
-    held = false;
-    quiet(); // no refresh redraws the tile under a finger
-    if (adjustable) timer = setTimeout(() => {
-      held = true;
-      if (navigator.vibrate) navigator.vibrate(15);
-      openLightSheet(device);
-    }, HOLD_MS);
-  });
-  for (const type of ["pointerup", "pointercancel", "pointerleave"]) tile.addEventListener(type, () => clearTimeout(timer));
-  tile.addEventListener("contextmenu", (event) => event.preventDefault());
-  tile.addEventListener("click", () => {
-    if (held) return;
-    switchLights(device.name, [device], !device.on);
-  });
-  return tile;
+  const card = el("div", { className: lit ? "group lit" : "group" }, [head]);
+  if (open) card.append(el("div", { className: "group-lights" }, group.items.map(lightRow)));
+  return card;
+}
+
+function lightRow(device) {
+  const sub = !device.reachable ? "Not responding" : !device.on ? "Off" : device.brightness ? `On · ${device.brightness}%` : "On";
+  const adjustable = device.kind === "light" && device.reachable && (device.brightness !== null || device.warmth || device.colors);
+  const label = el(adjustable ? "button" : "span", { className: "light-open" }, [
+    el("span", { className: "row-label" }, device.name),
+    el("span", { className: "row-sub" }, adjustable ? `${sub} · adjust` : sub),
+  ]);
+  if (adjustable) {
+    label.type = "button";
+    label.addEventListener("click", () => openLightSheet(device));
+  }
+  return el("div", { className: device.reachable ? "light-row" : "light-row away" }, [
+    icon(device.kind === "plug" ? "plug" : "bulb"),
+    label,
+    lightSwitch(device.on && device.reachable, device.name, !device.reachable, () => switchLights(device.name, [device], !device.on)),
+  ]);
 }
 
 function quiet(ms = 4000) {
@@ -519,7 +532,7 @@ function settleThenRefresh() {
   quiet(SETTLE_MS);
   setTimeout(() => {
     home.quietUntil = 0;
-    if (currentTab === "home") loadDevices();
+    if (currentTab === "devices") loadDevices();
   }, SETTLE_MS);
 }
 
@@ -552,6 +565,176 @@ async function runRoutine(button, name) {
     settleThenRefresh();
   });
 }
+
+// Routine editor ----------------------------------------------------------------------------------
+// The routines live in the home layout file on the Mac mini; a save replaces them all, unless someone changed
+// them since this sheet opened. Reachy uses the new ones at once, by voice too.
+
+const routines = { list: [], version: "", targets: null, scenes: [], editing: -1, draft: null };
+
+async function openRoutines() {
+  const answer = await run($("#routines-edit"), () => api("/api/home/routines"));
+  if (!answer) return;
+  Object.assign(routines, { list: answer.routines, version: answer.version, targets: answer.targets, scenes: answer.scenes });
+  renderRoutineList();
+  $("#routines-sheet").showModal();
+}
+
+function routineSummary(routine) {
+  const parts = [];
+  const turnsOn = (routine.on || []).length > 0;
+  if (turnsOn) parts.push(`on: ${routine.on.map((target) => targetLabel(target, "on")).join(", ")}`);
+  if ((routine.off || []).length) parts.push(`off: ${routine.off.map((target) => targetLabel(target, turnsOn ? "off" : "on")).join(", ")}`);
+  if (routine.tv === "off") parts.push("TV off");
+  if (routine.music === "pause") parts.push("music paused");
+  if (routine.sleep) parts.push("Reachy sleeps");
+  return parts.join(" · ");
+}
+
+function targetLabel(target, side) {
+  if (target.toLowerCase() !== "all") return target;
+  return side === "off" ? "Everything else" : "All lights";
+}
+
+function renderRoutineList() {
+  $("#routine-list").replaceChildren(
+    ...routines.list.map((routine, index) => {
+      const row = el("button", { className: "row", type: "button" }, [
+        el("span", { className: "row-text" }, [el("span", { className: "row-label" }, titleCase(routine.say[0])), el("span", { className: "row-sub" }, routineSummary(routine))]),
+        icon("chevron"),
+      ]);
+      row.addEventListener("click", () => editRoutine(index));
+      return row;
+    }),
+  );
+  if (!routines.list.length) $("#routine-list").append(el("p", { className: "hint center" }, "No routines yet."));
+  const note = $("#scene-note");
+  note.hidden = !routines.scenes.length;
+  note.textContent = routines.scenes.length ? `Also from the IKEA app (edit them there): ${routines.scenes.join(", ")}.` : "";
+}
+
+function editRoutine(index) {
+  routines.editing = index;
+  const source = index >= 0 ? routines.list[index] : { say: [], on: [], off: [] };
+  routines.draft = { say: [...source.say], on: [...(source.on || [])], off: [...(source.off || [])], tv: source.tv === "off", music: source.music === "pause", sleep: Boolean(source.sleep) };
+  $("#routine-title").textContent = index >= 0 ? titleCase(source.say[0]) : "New routine";
+  $("#routine-delete").hidden = index < 0;
+  renderRoutineDraft();
+  $("#routine-sheet").showModal();
+  if (index < 0) $("#phrase-input").focus();
+}
+
+function renderRoutineDraft() {
+  const draft = routines.draft;
+  $("#phrase-chips").replaceChildren(
+    ...draft.say.map((phrase, index) => {
+      const remove = el("button", { className: "remove", type: "button", ariaLabel: `Remove ${phrase}` }, icon("x"));
+      remove.addEventListener("click", () => {
+        draft.say.splice(index, 1);
+        renderRoutineDraft();
+      });
+      return el("span", { className: index === 0 ? "chip on" : "chip" }, [phrase, remove]);
+    }),
+    $("#phrase-input"),
+  );
+  const targets = routines.targets || { areas: [], rooms: [], devices: [] };
+  const choices = [...new Set([...targets.areas, ...targets.rooms, ...targets.devices, ...draft.on, ...draft.off].filter((name) => name.toLowerCase() !== "all"))];
+  for (const side of ["on", "off"]) {
+    const picked = draft[side];
+    const chip = (name) => {
+      const chosen = picked.some((each) => each.toLowerCase() === name.toLowerCase());
+      const button = el("button", { className: chosen ? "chip on" : "chip", type: "button", ariaPressed: String(chosen) }, targetLabel(name, side));
+      button.addEventListener("click", () => {
+        draft[side] = chosen ? picked.filter((each) => each.toLowerCase() !== name.toLowerCase()) : [...picked, name];
+        const other = side === "on" ? "off" : "on"; // a light turned on is not also turned off
+        if (!chosen && name.toLowerCase() !== "all") draft[other] = draft[other].filter((each) => each.toLowerCase() !== name.toLowerCase());
+        renderRoutineDraft();
+      });
+      return button;
+    };
+    $(`#routine-${side}`).replaceChildren(chip("all"), ...choices.map(chip));
+  }
+  for (const toggle of document.querySelectorAll("[data-routine-flag]")) toggle.setAttribute("aria-checked", String(draft[toggle.dataset.routineFlag]));
+}
+
+function addPhrase() {
+  const input = $("#phrase-input");
+  for (const part of input.value.split(",")) {
+    const phrase = part.trim();
+    if (phrase && !routines.draft.say.some((each) => each.toLowerCase() === phrase.toLowerCase())) routines.draft.say.push(phrase);
+  }
+  input.value = "";
+  renderRoutineDraft();
+  input.focus();
+}
+
+$("#phrase-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    addPhrase();
+  } else if (event.key === "Backspace" && !event.target.value && routines.draft.say.length) {
+    routines.draft.say.pop();
+    renderRoutineDraft();
+    $("#phrase-input").focus();
+  }
+});
+$("#phrase-input").addEventListener("input", (event) => {
+  if (event.target.value.includes(",")) addPhrase();
+});
+$("#phrase-input").addEventListener("blur", () => {
+  if ($("#phrase-input").value.trim()) addPhrase();
+});
+for (const toggle of document.querySelectorAll("[data-routine-flag]")) {
+  toggle.addEventListener("click", () => {
+    const flag = toggle.dataset.routineFlag;
+    routines.draft[flag] = !routines.draft[flag];
+    toggle.setAttribute("aria-checked", String(routines.draft[flag]));
+  });
+}
+
+function draftAsRoutine() {
+  const draft = routines.draft;
+  const routine = { say: draft.say };
+  if (draft.on.length) routine.on = draft.on;
+  if (draft.off.length) routine.off = draft.off;
+  if (draft.tv) routine.tv = "off";
+  if (draft.music) routine.music = "pause";
+  if (draft.sleep) routine.sleep = true;
+  return routine;
+}
+
+async function saveRoutines(list, button, done) {
+  const answer = await run(button, () => api("/api/home/routines", { method: "PUT", body: { version: routines.version, routines: list } }));
+  if (!answer) return false;
+  routines.list = list;
+  routines.version = answer.version;
+  renderRoutineList();
+  toast(done);
+  home.quietUntil = 0;
+  loadDevices();
+  return true;
+}
+
+$("#routine-save").addEventListener("click", async (event) => {
+  if ($("#phrase-input").value.trim()) addPhrase();
+  const routine = draftAsRoutine();
+  if (!routine.say.length) return toast("Give the routine a name: what someone says to start it.", "bad");
+  const list = [...routines.list];
+  if (routines.editing >= 0) list[routines.editing] = routine;
+  else list.push(routine);
+  if (await saveRoutines(list, event.currentTarget, `${titleCase(routine.say[0])} saved.`)) $("#routine-sheet").close();
+});
+
+$("#routine-delete").addEventListener("click", async (event) => {
+  const name = titleCase(routines.list[routines.editing].say[0]);
+  const yes = await ask({ title: `Delete ${name}?`, body: "Reachy stops answering its phrases.", yes: "Delete", danger: true });
+  if (!yes) return;
+  const list = routines.list.filter((_, index) => index !== routines.editing);
+  if (await saveRoutines(list, event.currentTarget, `${name} deleted.`)) $("#routine-sheet").close();
+});
+
+$("#routines-edit").addEventListener("click", openRoutines);
+$("#routine-new").addEventListener("click", () => editRoutine(-1));
 
 function openLightSheet(device) {
   home.sheetLight = device;
@@ -609,7 +792,7 @@ $("#light-colors .swatches").replaceChildren(
 
 function renderTv(tv) {
   const card = $("#tv-card");
-  card.hidden = !tv;
+  $("#tv-block").hidden = !tv;
   if (!tv) return;
   const sub = tv.error || (tv.on ? ["On", tv.app, tv.volume !== null && tv.volume !== undefined ? `volume ${tv.volume}` : ""].filter(Boolean).join(" · ") : "Off");
   const open = el("button", { className: "open", type: "button" }, [el("span", {}, "TV"), el("span", {}, sub)]);
@@ -686,7 +869,7 @@ let musicVolumeTimer = 0;
 
 function renderMusic(music) {
   const card = $("#music-card");
-  card.hidden = !music;
+  $("#music-block").hidden = !music;
   if (!music) return;
   const art = music.art ? el("img", { src: music.art, alt: "" }) : icon("music");
   const title = music.error || music.title || "Nothing playing";

@@ -149,14 +149,6 @@
       </div>
       <div id="now-playing" class="now-slot" hidden></div>
 
-      <section id="home-devices" class="devices" hidden aria-labelledby="devices-title">
-        <h3 id="devices-title" class="section-title">Your home</h3>
-        <div id="routines" class="routines" role="group" aria-label="Routines"></div>
-        <div id="rooms"></div>
-        <p id="devices-hint" class="devices-hint" hidden>Tap to switch on or off · hold for brightness and color</p>
-        <div id="tv-card" class="device-card" hidden></div>
-        <div id="music-card" class="device-card music" hidden></div>
-      </section>
 
       <h3 class="section-title">Health</h3>
       <div id="health" class="health"></div>
@@ -186,6 +178,34 @@
       <div id="shared-names" class="notice" hidden></div>
       <ul id="people" class="people"></ul>
       <button id="add-person" class="fab" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add person</button>
+    </section>
+
+    <section id="view-devices" class="view" hidden>
+      <a href="#camera" class="device-card camera-link">
+        <svg class="icon"><use href="#i-camera"/></svg>
+        <span class="open"><span>Reachy's camera</span><span>See, listen and talk through him</span></span>
+        <svg class="icon chevron"><use href="#i-chevron"/></svg>
+      </a>
+      <p id="devices-note" class="devices-hint" hidden></p>
+      <div id="routines-block" hidden>
+        <div class="section-head">
+          <h3 class="section-title">Routines</h3>
+          <button id="routines-edit" class="text-button" type="button"><svg class="icon"><use href="#i-pencil"/></svg>Edit</button>
+        </div>
+        <div id="routines" class="routines" role="group" aria-label="Routines"></div>
+      </div>
+      <div id="lights-block" hidden>
+        <h3 class="section-title">Lights</h3>
+        <div id="rooms"></div>
+      </div>
+      <div id="tv-block" hidden>
+        <h3 class="section-title">TV</h3>
+        <div id="tv-card" class="device-card"></div>
+      </div>
+      <div id="music-block" hidden>
+        <h3 class="section-title">Spotify</h3>
+        <div id="music-card" class="device-card music"></div>
+      </div>
     </section>
 
     <section id="view-camera" class="view" hidden>
@@ -275,7 +295,7 @@
     <a href="#home" data-tab="home"><svg class="icon"><use href="#i-home"/></svg>Home</a>
     <a href="#games" data-tab="games"><svg class="icon"><use href="#i-game"/></svg>Games</a>
     <a href="#stories" data-tab="stories"><svg class="icon"><use href="#i-book"/></svg>Stories</a>
-    <a href="#camera" data-tab="camera"><svg class="icon"><use href="#i-camera"/></svg>Camera</a>
+    <a href="#devices" data-tab="devices"><svg class="icon"><use href="#i-bulb"/></svg>Devices</a>
     <a href="#gallery" data-tab="gallery"><svg class="icon"><use href="#i-gallery"/></svg>Gallery</a>
     <a href="#activity" data-tab="activity"><svg class="icon"><use href="#i-activity"/></svg>Activity</a>
   </nav>
@@ -495,6 +515,57 @@
           <h4><svg class="icon"><use href="#i-spark"/></svg>Color</h4>
           <div class="swatches"></div>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="routines-sheet" class="sheet tall" aria-labelledby="routines-title">
+    <div class="sheet-frame">
+      <div class="sheet-bar">
+        <button class="text-button" type="button" data-close>Close</button>
+        <span id="routines-title" class="sheet-title">Routines</span>
+        <button id="routine-new" class="pill sun small" type="button"><svg class="icon"><use href="#i-plus"/></svg>New</button>
+      </div>
+      <div class="sheet-body">
+        <div id="routine-list" class="panel"></div>
+        <p id="scene-note" class="hint" hidden></p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="routine-sheet" class="sheet tall" aria-labelledby="routine-title">
+    <div class="sheet-frame">
+      <div class="sheet-bar">
+        <button class="text-button" type="button" data-close>Cancel</button>
+        <span id="routine-title" class="sheet-title">Routine</span>
+        <button id="routine-save" class="pill sun small" type="button">Save</button>
+      </div>
+      <div class="sheet-body">
+        <section class="field first">
+          <h4><svg class="icon"><use href="#i-mic"/></svg>When someone says</h4>
+          <div id="phrase-chips" class="chips editable">
+            <input id="phrase-input" maxlength="60" autocomplete="off" placeholder="Add a phrase" aria-label="A phrase that starts this routine">
+          </div>
+          <p class="hint">The first is its name. Add the other ways people say it, in any language: “movie mode”, “modo cine”.</p>
+        </section>
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-bulb"/></svg>Turn on</h4>
+          <div id="routine-on" class="chips"></div>
+        </section>
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-moon"/></svg>Turn off</h4>
+          <div id="routine-off" class="chips"></div>
+          <p class="hint">“Everything else” turns off every light this routine doesn't turn on.</p>
+        </section>
+        <section class="field">
+          <h4><svg class="icon"><use href="#i-spark"/></svg>Also</h4>
+          <div class="panel">
+            <div class="row"><svg class="icon"><use href="#i-tv"/></svg><span class="row-text"><span class="row-label">Turn the TV off</span></span><button class="switch" role="switch" type="button" aria-checked="false" data-routine-flag="tv" aria-label="Turn the TV off"></button></div>
+            <div class="row"><svg class="icon"><use href="#i-music"/></svg><span class="row-text"><span class="row-label">Pause the music</span></span><button class="switch" role="switch" type="button" aria-checked="false" data-routine-flag="music" aria-label="Pause the music"></button></div>
+            <div class="row"><svg class="icon"><use href="#i-moon"/></svg><span class="row-text"><span class="row-label">Reachy goes to sleep</span></span><button class="switch" role="switch" type="button" aria-checked="false" data-routine-flag="sleep" aria-label="Reachy goes to sleep"></button></div>
+          </div>
+        </section>
+        <button id="routine-delete" class="pill ghost wide danger" type="button"><svg class="icon"><use href="#i-trash"/></svg>Delete this routine</button>
       </div>
     </div>
   </dialog>

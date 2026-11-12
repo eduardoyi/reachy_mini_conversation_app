@@ -109,8 +109,9 @@ integration) is the path that scales.
   device. `home_lights` (`LIGHT_TOOLS`)
   then loads unless the profile's tools were customized.
 
-The admin app shows and changes the same lights and routines through this tool (see
-[home-controls.md](home-controls.md)).
+The admin app shows and changes the same lights and routines through this tool, and edits the routines
+(see [home-controls.md](home-controls.md), which also explains how a routine runs from a quick command, a
+Gemini conversation and the phone).
 
 ## Setup
 

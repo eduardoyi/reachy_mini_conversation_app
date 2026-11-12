@@ -6,12 +6,15 @@ Each provider lists its devices as ``HubDevice`` and applies a provider-neutral 
 
 from __future__ import annotations
 import json
+import shutil
 import asyncio
+import hashlib
 import logging
 import unicodedata
-from typing import Protocol
+from typing import Any, Protocol
 from pathlib import Path
 from dataclasses import field, replace, dataclass
+from collections.abc import Sequence
 
 
 logger = logging.getLogger(__name__)
@@ -170,6 +173,45 @@ def _routines(raw: object) -> tuple[Routine, ...]:
     return tuple(routines)
 
 
+def routine_json(routine: Routine) -> dict[str, Any]:
+    """Return ``routine`` as the layout file writes it (the inverse of reading it)."""
+    raw: dict[str, Any] = {"say": list(routine.say)}
+    if routine.on:
+        raw["on"] = list(routine.on)
+    if routine.off:
+        raw["off"] = list(routine.off)
+    if routine.sleep:
+        raw["sleep"] = True
+    if routine.tv_off:
+        raw["tv"] = "off"
+    if routine.pause_music:
+        raw["music"] = "pause"
+    return raw
+
+
+def routines_version(routines: Sequence[Routine]) -> str:
+    """Return a short fingerprint of ``routines``, so a save can tell it would overwrite someone else's change."""
+    text = json.dumps([routine_json(routine) for routine in routines], sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def save_routines(path: Path, routines: Sequence[Routine]) -> None:
+    """Write ``routines`` into the layout file, keeping everything else in it and the previous file as ``.bak``."""
+    try:
+        raw = json.loads(path.read_text())
+    except FileNotFoundError:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("the home layout file is not a JSON object")
+    raw["routines"] = [routine_json(routine) for routine in routines]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        shutil.copy2(path, path.with_name(f"{path.name}.bak"))
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")
+    temporary.replace(path)
+
+
 @dataclass(frozen=True)
 class HomeLayout:
     """Household-specific grouping the systems do not store: rooms for devices without one, and areas.
@@ -237,6 +279,10 @@ class HomeDevices:
     def layout(self) -> HomeLayout:
         """The household layout (areas, routines, lights left out of "all on")."""
         return self._layout
+
+    def set_layout(self, layout: HomeLayout) -> None:
+        """Use ``layout`` from now on (routines edited in the admin app)."""
+        self._layout = layout
 
     async def devices(self) -> list[HubDevice]:
         """List every system's devices; a system that fails is skipped unless all fail."""
