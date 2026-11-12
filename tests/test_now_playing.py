@@ -74,6 +74,14 @@ def test_a_song_on_reachys_speaker_is_read_with_its_art() -> None:
     )
 
 
+def test_the_speakers_volume_is_read_when_spotify_gives_it() -> None:
+    """The admin app's music card shows the speaker's Spotify volume."""
+    body = _track()
+    body["device"]["volume_percent"] = 35
+    playback = parse_playback(body, "speaker")
+    assert playback is not None and playback.volume == 35
+
+
 def test_an_episode_shows_its_show() -> None:
     """Podcast episodes show the show's name and publisher, and the episode's art."""
     body = {

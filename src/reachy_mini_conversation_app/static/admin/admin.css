@@ -707,6 +707,66 @@ dialog { color: var(--ink); }
 .be-bottom .talk { margin: 0; flex: 0 1 260px; min-height: 58px; }
 .round-spacer { width: 44px; flex: none; }
 
+/* Home devices ---------------------------------------------------------------------------------- */
+
+.routines { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; }
+.routines::-webkit-scrollbar { display: none; }
+.routines .pill { flex: none; min-height: 42px; padding: 0 16px; font-size: 15px; }
+.area-head { display: flex; align-items: center; justify-content: space-between; margin: 16px 4px 8px; }
+.area-head h4 { margin: 0; font-size: 15px; font-weight: 700; }
+.area-head .pill { min-height: 34px; padding: 0 14px; font-size: 14px; }
+.device-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.device-tile {
+  position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 10px;
+  min-height: 72px; padding: 12px 14px; border: 0; border-radius: 20px; background: var(--shell); color: var(--ink);
+  text-align: left; overflow: hidden; touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; transition: background .2s, transform .1s;
+}
+.device-tile:active { transform: scale(.97); }
+.device-tile .icon { grid-row: span 2; width: 26px; height: 26px; color: var(--ink-3); }
+.tile-name { font-weight: 700; font-size: 15px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-sub { font-size: 13px; color: var(--ink-2); }
+.device-tile[aria-pressed="true"] { background: var(--sun); color: var(--sun-ink); }
+.device-tile[aria-pressed="true"] .icon, .device-tile[aria-pressed="true"] .tile-sub { color: var(--sun-ink); }
+.device-tile.away { opacity: .5; }
+.device-tile .level { position: absolute; left: 0; bottom: 0; height: 4px; background: rgba(43, 31, 0, .35); }
+.devices-hint { color: var(--ink-3); font-size: 13px; text-align: center; margin: 10px 0 0; }
+.device-card {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: 20px;
+  background: var(--shell); color: var(--ink);
+}
+.device-card > .icon { width: 26px; height: 26px; color: var(--ink-2); }
+.device-card .open { flex: 1; min-width: 0; display: grid; text-align: left; border: 0; background: none; color: inherit; padding: 4px 0; }
+.device-card .open span:first-child { font-weight: 700; }
+.device-card .open span + span { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-card .round { background: var(--paper); color: var(--ink); flex: none; }
+.device-card .round.on { background: var(--sun); color: var(--sun-ink); }
+.music { flex-wrap: wrap; }
+.music img { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; flex: none; background: var(--paper); }
+.music .music-volume { flex-basis: 100%; display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatches button { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line); }
+.tv-top { display: flex; align-items: center; gap: 12px; }
+.tv-state { margin: 0; color: var(--ink-2); font-size: 14px; }
+.tv-apps { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.tv-apps .pill { min-height: 40px; padding: 0 14px; font-size: 14px; }
+.sheet .tv-search { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 14px; max-height: none; }
+.tv-search input {
+  flex: 1; min-width: 0; min-height: 46px; padding: 0 14px; border-radius: 14px; border: 1.5px solid var(--line);
+  background: var(--paper); color: var(--ink); font-size: 16px;
+}
+.tv-pad [data-tv-key="up"] { top: 6px; left: calc(50% - 34px); }
+.tv-pad [data-tv-key="down"] { bottom: 6px; left: calc(50% - 34px); }
+.tv-pad [data-tv-key="left"] { left: 6px; top: calc(50% - 34px); }
+.tv-pad [data-tv-key="right"] { right: 6px; top: calc(50% - 34px); }
+.tv-pad [data-tv-key="select"] {
+  top: calc(50% - 34px); left: calc(50% - 34px); background: var(--sun); color: var(--sun-ink); font-weight: 800;
+}
+.tv-pad { background: var(--paper); }
+.tv-keys { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.tv-keys .pill { flex: 1; max-width: 130px; }
+.tv-keys .pill .icon { width: 18px; height: 18px; }
+
 /* Activity ------------------------------------------------------------------------------------- */
 
 .segmented { display: flex; background: var(--shell); border-radius: 999px; padding: 4px; }

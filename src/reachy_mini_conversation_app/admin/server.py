@@ -70,6 +70,8 @@ MAX_PERSONALITY_BYTES: Final[int] = 256 * 1024
 MAX_GROUP_PHONES: Final[int] = 20
 MAX_WAKE_NAME_CHARS: Final[int] = 60
 MAX_WAKE_PROMPT_CHARS: Final[int] = 200
+# Home controls: the slowest part (an unplugged Tuya device) gives up after 8 s; the TV and Spotify sooner.
+HOME_STATUS_TIMEOUT_S: Final[float] = 12.0
 # What the phone may report about its own errors: small, and at most this many a minute.
 MAX_CLIENT_LOG_BYTES: Final[int] = 2 * 1024
 MAX_CLIENT_LOGS_PER_MINUTE: Final[int] = 20
@@ -566,6 +568,34 @@ def create_app(
     @app.post("/api/look-up")
     async def _look_up(request: Request) -> Response:
         return await control(request, "/look-up", "")
+
+    @app.get("/api/home")
+    async def _home() -> Response:
+        try:
+            response = await link.request("GET", "/home", timeout=HOME_STATUS_TIMEOUT_S)
+        except AppUnavailable:
+            return _error("Reachy is not running.", 503)
+        return _relay(response)
+
+    @app.post("/api/home/{part}")
+    async def _home_change(request: Request, part: str) -> Response:
+        if part not in {"light", "all-off", "routine", "tv", "music"}:
+            return _error("Unknown home control.", 404)
+        payload: dict[str, Any] = {}
+        if part != "all-off":
+            body = await _json_body(request)
+            if isinstance(body, Response):
+                return body
+            payload = body
+        # Single taps are not written down; routines, everything off and the TV's power are.
+        action = ""
+        if part == "routine":
+            action = f"routine {str(payload.get('name') or '')[:60]}"
+        elif part == "all-off":
+            action = "all lights off"
+        elif part == "tv" and payload.get("action") == "power" and isinstance(payload.get("on"), bool):
+            action = "TV on" if payload["on"] else "TV off"
+        return await control(request, f"/home/{part}", action, payload)
 
     async def relay_socket(websocket: WebSocket, path: str, action: str = "") -> None:
         """Carry ``websocket`` to the app's ``path`` both ways until either side goes; ``action`` is audited."""

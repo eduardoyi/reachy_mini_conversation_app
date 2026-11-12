@@ -84,6 +84,12 @@ class ControlAPI:
         if path == "/privacy":
             self.privacy = {"on": body["on"], "since": "2026-10-30T10:00:00+00:00" if body["on"] else None}
             return httpx.Response(200, json=self.status())
+        if path == "/home":
+            return httpx.Response(200, json={"lights": None, "tv": {"on": False}, "music": None})
+        if path.startswith("/home/"):
+            if body and body.get("name") == "nope":
+                return httpx.Response(409, json={"error": "No such routine."})
+            return httpx.Response(200, json={"ok": True})
         if path == "/camera":
             if self.camera == "busy":
                 return httpx.Response(409, json={"error": "privacy is on"})
@@ -530,6 +536,39 @@ def test_camera_while_the_app_is_down_is_unavailable(admin: Admin) -> None:
     admin.control.down = True
     with admin.client() as client:
         assert client.get("/api/camera").status_code == 503
+
+
+def test_home_controls_are_relayed_and_routines_written_down(admin: Admin) -> None:
+    """The phone reads and changes devices through the app; routines, all off and TV power are audited."""
+    with admin.client() as client:
+        assert client.get("/api/home").json()["tv"] == {"on": False}
+        for part, body in [
+            ("light", {"target": "Dining", "on": True}),
+            ("routine", {"name": "movie mode"}),
+            ("tv", {"action": "power", "on": True}),
+            ("tv", {"action": "navigate", "key": "up"}),
+            ("music", {"action": "pause"}),
+        ]:
+            assert client.post(f"/api/home/{part}", json=body, headers=SAME_ORIGIN).status_code == 200
+        assert client.post("/api/home/all-off", headers=SAME_ORIGIN).status_code == 200
+        refused = client.post("/api/home/routine", json={"name": "nope"}, headers=SAME_ORIGIN)
+        assert refused.status_code == 409 and refused.json() == {"error": "No such routine."}
+        assert client.post("/api/home/garage", json={}, headers=SAME_ORIGIN).status_code == 404
+        assert (
+            client.post("/api/home/light", json={"target": "x"}, headers={"Origin": "http://evil.example"}).status_code
+            == 403
+        )
+    assert admin.control.calls("/home/light") == [{"target": "Dining", "on": True}]
+    assert admin.control.calls("/home/all-off") == [{}]
+    assert [e["action"] for e in admin.audit()] == ["all lights off", "TV on", "routine movie mode"]
+
+
+def test_home_controls_while_the_app_is_down(admin: Admin) -> None:
+    """No running app: 503."""
+    admin.control.down = True
+    with admin.client() as client:
+        assert client.get("/api/home").status_code == 503
+        assert client.post("/api/home/all-off", headers=SAME_ORIGIN).status_code == 503
 
 
 class _Upstream:

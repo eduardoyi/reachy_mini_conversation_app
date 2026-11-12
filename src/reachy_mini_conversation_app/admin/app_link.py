@@ -36,10 +36,16 @@ class AppLink:
         return {"Authorization": f"Bearer {token}"}
 
     async def request(
-        self, method: str, path: str, *, json: Any = None, params: dict[str, str] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+        params: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         """Send one request; raises AppUnavailable when the app cannot be reached or refuses the token."""
-        timeout = STATUS_TIMEOUT_S if method == "GET" else ACTION_TIMEOUT_S
+        timeout = timeout or (STATUS_TIMEOUT_S if method == "GET" else ACTION_TIMEOUT_S)
         try:
             response = await self._client.request(
                 method, self._url + path, json=json, params=params, headers=self._headers(), timeout=timeout

@@ -37,6 +37,7 @@ the implementation.
 | E-ink display (TRMNL) | [eink-display.md](eink-display.md) | in-progress |
 | Phone admin app, privacy switch, quiet hours | [phone-admin-app.md](phone-admin-app.md) | running on the Mac mini; phone checks pending |
 | Photos and messages to WhatsApp | [whatsapp-photos.md](whatsapp-photos.md) | in-progress; photos checked live on the Mac mini; family messages checked live |
+| Home controls (admin app: lights, TV, music) | [home-controls.md](home-controls.md) | in-progress: built and tested with fakes 2026-11-12 |
 | Intercom and "Be Reachy" (admin app) | [intercom.md](intercom.md) | in-progress: built and tested with fakes 2026-11-10; not yet tried on the robot |
 | WhatsApp calls through Reachy | [whatsapp-calls.md](whatsapp-calls.md) | in-progress; outgoing calls checked live; incoming calls built (stage 3), live check pending |
 | Skill tools (progressive tool disclosure) | [skill-tools.md](skill-tools.md) | in-progress |

@@ -38,7 +38,7 @@ _EVERYTHING = frozenset(
 )  # fmt: skip
 
 
-def _without_offline_duplicates(devices: list[HubDevice]) -> list[HubDevice]:
+def without_offline_duplicates(devices: list[HubDevice]) -> list[HubDevice]:
     """Drop an unreachable device when a reachable one has the same name (an old bulb left in an app)."""
     online = {normalize_name(device.name) for device in devices if device.reachable}
     return [device for device in devices if device.reachable or normalize_name(device.name) not in online]
@@ -62,7 +62,7 @@ def _core(text: str) -> str:
 
 def _match_targets(devices: list[HubDevice], target: str) -> list[HubDevice] | None:
     """Return the devices a spoken target names: everything, a room, an area, a device, or a partial name."""
-    devices = _without_offline_duplicates(devices)
+    devices = without_offline_duplicates(devices)
     wanted = normalize_name(target)
     if wanted in _EVERYTHING:
         return devices
@@ -211,7 +211,7 @@ class HomeLights(Tool):
         return {
             "rooms": rooms,
             "areas": areas,
-            "devices": [_describe(device) for device in _without_offline_duplicates(devices)],
+            "devices": [_describe(device) for device in without_offline_duplicates(devices)],
             "scenes": [scene.name for scene in scenes] + [routine.name for routine in _layout(home).routines],
         }
 

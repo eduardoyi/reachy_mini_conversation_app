@@ -27,6 +27,7 @@ from reachy_mini_conversation_app.privacy import PRIVACY, quiet_now
 from reachy_mini_conversation_app.intercom import Talk, IntercomSession, talk_samples
 from reachy_mini_conversation_app.face_routes import register_face_routes
 from reachy_mini_conversation_app.camera_frames import capture_jpeg
+from reachy_mini_conversation_app.home_controls import HomeControls
 from reachy_mini_conversation_app.memory_routes import register_memory_routes
 from reachy_mini_conversation_app.hybrid_runtime import HybridRuntime
 from reachy_mini_conversation_app.tools.move_head import MoveHead
@@ -97,6 +98,7 @@ class ControlApi:
         self._wake_store = wake_store
         self._token = token
         self._peek = (0.0, 0.0)
+        self._home = HomeControls(deps)
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         self._add_routes()
         register_face_routes(self.app, deps.face_recognition, self._denied)
@@ -345,6 +347,47 @@ class ControlApi:
             return JSONResponse(
                 {"ok": True, "reason": None, "seconds": round(seconds, 2), "level_db": loudness}, headers=_NO_STORE
             )
+
+        @app.get("/home")
+        async def _home(request: Request) -> Response:
+            denied = self._denied(request)
+            if denied is not None:
+                return denied
+            if self._runtime is None or self._runtime.loop is None:
+                return JSONResponse(
+                    {"error": "Home controls need Reachy running."}, status_code=503, headers=_NO_STORE
+                )
+            return JSONResponse(await self._on_runtime(self._home.status()), headers=_NO_STORE)
+
+        @app.post("/home/{part}")
+        async def _home_change(request: Request, part: str) -> Response:
+            denied = self._denied(request, mutation=True)
+            if denied is not None:
+                return denied
+            payload = await self._json_body(request) if part != "all-off" else {}
+            if isinstance(payload, Response):
+                return payload
+            home = self._home
+            changes: dict[str, Callable[[], Coroutine[Any, Any, dict[str, Any]]]] = {
+                "light": lambda: home.light(payload),
+                "all-off": home.all_off,
+                "routine": lambda: home.routine(payload.get("name")),
+                "tv": lambda: home.tv(payload),
+                "music": lambda: home.music(payload),
+            }
+            change = changes.get(part)
+            if change is None:
+                return Response(status_code=404, headers=_NO_STORE)
+            if self._runtime is None or self._runtime.loop is None:
+                return JSONResponse(
+                    {"error": "Home controls need Reachy running."}, status_code=503, headers=_NO_STORE
+                )
+            result = await self._on_runtime(change())
+            if "error" in result:
+                return JSONResponse({"error": str(result["error"])}, status_code=409, headers=_NO_STORE)
+            if result.get("sleep"):
+                await asyncio.to_thread(self.go_to_sleep)
+            return JSONResponse(result, headers=_NO_STORE)
 
         @app.websocket("/intercom")
         async def _intercom(websocket: WebSocket) -> None:

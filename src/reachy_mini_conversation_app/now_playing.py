@@ -50,6 +50,7 @@ class Playback:
     art_id: str
     playing: bool
     remaining_s: float
+    volume: int | None = None  # the speaker's Spotify volume, 0-100
 
 
 def parse_playback(body: Any, device_id: str) -> Playback | None:
@@ -79,6 +80,7 @@ def parse_playback(body: Any, device_id: str) -> Playback | None:
         art_id=art_id,
         playing=bool(body.get("is_playing")),
         remaining_s=max(0.0, duration - progress),
+        volume=volume if isinstance(volume := body["device"].get("volume_percent"), int) else None,
     )
 
 

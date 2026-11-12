@@ -476,3 +476,76 @@ def _eventually(check: Any, timeout: float = 2.0) -> bool:
             return True
         time.sleep(0.01)
     return False
+
+
+class _Home:
+    """The home controls, answering as told and noting which loop each call ran on."""
+
+    def __init__(self, answer: dict[str, Any] | None = None) -> None:
+        self.answer = answer or {"ok": True}
+        self.calls: list[tuple[str, Any]] = []
+        self.loops: list[Any] = []
+
+    async def _note(self, name: str, payload: Any) -> dict[str, Any]:
+        self.calls.append((name, payload))
+        self.loops.append(asyncio.get_running_loop())
+        return dict(self.answer)
+
+    async def status(self) -> dict[str, Any]:
+        return await self._note("status", None)
+
+    async def light(self, payload: Any) -> dict[str, Any]:
+        return await self._note("light", payload)
+
+    async def all_off(self) -> dict[str, Any]:
+        return await self._note("all-off", None)
+
+    async def routine(self, name: Any) -> dict[str, Any]:
+        return await self._note("routine", name)
+
+    async def tv(self, payload: Any) -> dict[str, Any]:
+        return await self._note("tv", payload)
+
+    async def music(self, payload: Any) -> dict[str, Any]:
+        return await self._note("music", payload)
+
+
+def test_home_controls_run_on_the_runtimes_loop(switch: PrivacySwitch, runtime_loop: Any) -> None:
+    """Status and each change run where the TV and hub connections live; a refusal is a 409 with its reason."""
+    api, movement, runtime = _api()
+    runtime.loop = runtime_loop
+    home = _Home({"lights": None, "tv": None, "music": None})
+    api._home = home  # type: ignore[assignment]
+    client = _client(api)
+    assert client.get("/home", headers=AUTH).json() == {"lights": None, "tv": None, "music": None}
+    home.answer = {"ok": True}
+    assert client.post("/home/light", json={"target": "Dining", "on": True}, headers=AUTH).status_code == 200
+    assert client.post("/home/all-off", headers=AUTH).status_code == 200
+    assert client.post("/home/tv", json={"action": "power", "on": False}, headers=AUTH).status_code == 200
+    assert client.post("/home/music", json={"action": "pause"}, headers=AUTH).status_code == 200
+    assert client.post("/home/sofa", json={}, headers=AUTH).status_code == 404
+    home.answer = {"error": "A game is on"}
+    refused = client.post("/home/routine", json={"name": "movie mode"}, headers=AUTH)
+    assert refused.status_code == 409 and refused.json() == {"error": "A game is on"}
+    assert [name for name, _ in home.calls] == ["status", "light", "all-off", "tv", "music", "routine"]
+    assert home.calls[1][1] == {"target": "Dining", "on": True} and home.calls[5][1] == "movie mode"
+    assert set(home.loops) == {runtime_loop}
+    assert client.post("/home/light", json={"target": "x", "on": True}).status_code == 403
+    movement.go_to_sleep.assert_not_called()
+
+
+def test_a_bedtime_routine_from_the_phone_puts_him_to_sleep(switch: PrivacySwitch, runtime_loop: Any) -> None:
+    """A routine that says sleep closes the conversation and lowers his head, as the spoken one does."""
+    api, movement, runtime = _api()
+    runtime.loop = runtime_loop
+    api._home = _Home({"ok": True, "sleep": True})  # type: ignore[assignment]
+    assert _client(api).post("/home/routine", json={"name": "good night"}, headers=AUTH).status_code == 200
+    movement.go_to_sleep.assert_called_once()
+    runtime.request_close.assert_called_once_with("go_to_sleep")
+
+
+def test_home_controls_need_the_runtime(switch: PrivacySwitch) -> None:
+    """Without the hybrid runtime there is no loop to run them on."""
+    api, _, _ = _api()
+    api._runtime = None
+    assert _client(api).get("/home", headers=AUTH).status_code == 503

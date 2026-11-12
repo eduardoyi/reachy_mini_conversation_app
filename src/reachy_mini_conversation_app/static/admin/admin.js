@@ -341,7 +341,11 @@ async function showHome() {
   if (!status) return;
   state.status = status;
   showPrivacy(status.privacy.on);
-  if (currentTab === "home") renderHome(status);
+  if (currentTab === "home") {
+    renderHome(status);
+    if (status.app.running) loadDevices();
+    else $("#home-devices").hidden = true;
+  }
   showPushState();
 }
 
@@ -371,6 +375,352 @@ setInterval(() => {
   if (currentTab === "home") loadHome();
   if (isGamesTab()) loadGames();
 }, 8000);
+
+// Home devices ----------------------------------------------------------------------------------
+// Lights and plugs (tap to switch, hold for brightness and color), routines, the TV and Spotify. Every change
+// goes through the tools Reachy uses by voice, so a game on holds the lights and music here too.
+
+const LIGHT_COLORS = [
+  ["Red", "red", "#e5484d"], ["Orange", "orange", "#f76b15"], ["Yellow", "yellow", "#ffc53d"],
+  ["Green", "green", "#30a46c"], ["Cyan", "cyan", "#05a2c2"], ["Blue", "blue", "#3e63dd"],
+  ["Purple", "purple", "#8e4ec6"], ["Pink", "pink", "#d6409f"], ["White", "white", "#ffffff"],
+];
+const HOLD_MS = 450; // a press this long opens the light's sheet instead of switching it
+const SETTLE_MS = 1500; // devices take a moment to report a change; the refresh waits this long after one
+
+const home = { data: null, loading: null, quietUntil: 0, sheetLight: null };
+
+function loadDevices() {
+  if (home.loading || performance.now() < home.quietUntil) return home.loading;
+  home.loading = api("/api/home")
+    .then(renderDevices)
+    .catch(() => {}) // Reachy not running: the stage above already says so
+    .finally(() => (home.loading = null));
+  return home.loading;
+}
+
+const titleCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+function renderDevices(data) {
+  home.data = data;
+  const section = $("#home-devices");
+  section.hidden = !data.lights && !data.tv && !data.music;
+  renderLights(data.lights);
+  renderTv(data.tv);
+  renderMusic(data.music);
+}
+
+function renderLights(lights) {
+  const routines = $("#routines");
+  const rooms = $("#rooms");
+  $("#devices-hint").hidden = !lights || Boolean(lights.error);
+  if (!lights) {
+    routines.replaceChildren();
+    rooms.replaceChildren();
+    return;
+  }
+  if (lights.error) {
+    routines.replaceChildren();
+    rooms.replaceChildren(el("p", { className: "devices-hint" }, lights.error));
+    return;
+  }
+  routines.replaceChildren(
+    ...lights.routines.map((name) => {
+      const button = el("button", { className: "pill soft", type: "button" }, titleCase(name));
+      button.addEventListener("click", () => runRoutine(button, name));
+      return button;
+    }),
+    allOffButton(),
+  );
+  rooms.replaceChildren(...lightGroups(lights).map(groupBlock));
+}
+
+function allOffButton() {
+  const button = el("button", { className: "pill soft", type: "button" }, [icon("power"), "All off"]);
+  button.addEventListener("click", () =>
+    run(button, async () => {
+      quiet();
+      await api("/api/home/all-off", { method: "POST" });
+      for (const device of home.data.lights.devices) device.on = false;
+      renderLights(home.data.lights);
+      settleThenRefresh();
+    }),
+  );
+  return button;
+}
+
+// Areas first (in the layout's order), then the rest by room; a device shows once.
+function lightGroups(lights) {
+  const groups = [];
+  const placed = new Set();
+  for (const area of lights.areas) {
+    const items = lights.devices.filter((device) => device.areas.includes(area) && !placed.has(device.name));
+    items.forEach((device) => placed.add(device.name));
+    if (items.length) groups.push({ name: area, items });
+  }
+  const rest = lights.devices.filter((device) => !placed.has(device.name));
+  for (const room of [...new Set(rest.map((device) => device.room || "Other"))]) {
+    groups.push({ name: room, target: room === "Other" ? null : room, items: rest.filter((device) => (device.room || "Other") === room) });
+  }
+  return groups;
+}
+
+function groupBlock(group) {
+  const anyOn = group.items.some((device) => device.on && device.reachable);
+  const target = group.target === undefined ? group.name : group.target;
+  const head = el("div", { className: "area-head" }, [el("h4", {}, group.name)]);
+  if (target) {
+    const toggle = el("button", { className: "pill soft", type: "button" }, anyOn ? "Turn off" : "Turn on");
+    toggle.addEventListener("click", () => switchLights(target, group.items, !anyOn));
+    head.append(toggle);
+  }
+  return el("div", { className: "area" }, [head, el("div", { className: "device-tiles" }, group.items.map(lightTile))]);
+}
+
+function lightTile(device) {
+  const lit = device.on && device.reachable;
+  const sub = !device.reachable ? "Not responding" : !device.on ? "Off" : device.brightness ? `On · ${device.brightness}%` : "On";
+  const tile = el("button", { className: device.reachable ? "device-tile" : "device-tile away", type: "button", ariaPressed: String(lit) }, [
+    icon(device.kind === "plug" ? "plug" : "bulb"),
+    el("span", { className: "tile-name" }, device.name),
+    el("span", { className: "tile-sub" }, sub),
+  ]);
+  if (lit && device.brightness) {
+    const level = el("span", { className: "level" });
+    level.style.width = `${device.brightness}%`;
+    tile.append(level);
+  }
+  const adjustable = device.kind === "light" && (device.brightness !== null || device.warmth || device.colors);
+  let timer = 0;
+  let held = false;
+  tile.addEventListener("pointerdown", () => {
+    held = false;
+    quiet(); // no refresh redraws the tile under a finger
+    if (adjustable) timer = setTimeout(() => {
+      held = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      openLightSheet(device);
+    }, HOLD_MS);
+  });
+  for (const type of ["pointerup", "pointercancel", "pointerleave"]) tile.addEventListener(type, () => clearTimeout(timer));
+  tile.addEventListener("contextmenu", (event) => event.preventDefault());
+  tile.addEventListener("click", () => {
+    if (held) return;
+    switchLights(device.name, [device], !device.on);
+  });
+  return tile;
+}
+
+function quiet(ms = 4000) {
+  home.quietUntil = performance.now() + ms;
+}
+
+function settleThenRefresh() {
+  quiet(SETTLE_MS);
+  setTimeout(() => {
+    home.quietUntil = 0;
+    if (currentTab === "home") loadDevices();
+  }, SETTLE_MS);
+}
+
+async function setLight(target, change) {
+  quiet();
+  try {
+    const answer = await api("/api/home/light", { method: "POST", body: { target, ...change } });
+    const missing = [...(answer.failed || []), ...(answer.unreachable || [])];
+    if (missing.length) toast(`${missing.join(", ")} didn't respond.`, "bad");
+  } catch (error) {
+    toast(error.message, "bad");
+  } finally {
+    settleThenRefresh();
+  }
+}
+
+function switchLights(target, items, on) {
+  // Shown at once; the next refresh corrects anything that did not change.
+  for (const device of items) if (device.reachable) device.on = on;
+  renderLights(home.data.lights);
+  setLight(target, { on });
+}
+
+async function runRoutine(button, name) {
+  await run(button, async () => {
+    quiet();
+    const answer = await api("/api/home/routine", { method: "POST", body: { name } });
+    const missing = answer.failed || [];
+    toast(missing.length ? `${missing.join(", ")} didn't respond.` : `${titleCase(name)}.`, missing.length ? "bad" : "good");
+    settleThenRefresh();
+  });
+}
+
+function openLightSheet(device) {
+  home.sheetLight = device;
+  $("#light-title").textContent = device.name;
+  for (const button of document.querySelectorAll("[data-light-on]")) {
+    button.setAttribute("aria-selected", String(button.dataset.lightOn === String(device.on)));
+  }
+  const dims = device.brightness !== null;
+  $("#light-brightness").hidden = !dims;
+  if (dims) {
+    const slider = $("#light-slider");
+    slider.value = device.brightness || 100;
+    $("#light-level").textContent = `${slider.value}%`;
+    setFill(slider);
+  }
+  $("#light-warmth").hidden = !device.warmth;
+  $("#light-colors").hidden = !device.colors;
+  const sheet = $("#light-sheet");
+  if (!sheet.open) sheet.showModal();
+}
+
+for (const button of document.querySelectorAll("[data-light-on]")) {
+  button.addEventListener("click", () => {
+    const device = home.sheetLight;
+    const on = button.dataset.lightOn === "true";
+    for (const other of document.querySelectorAll("[data-light-on]")) other.setAttribute("aria-selected", String(other === button));
+    switchLights(device.name, [device], on);
+  });
+}
+
+$("#light-slider").addEventListener("input", (event) => {
+  $("#light-level").textContent = `${event.target.value}%`;
+  setFill(event.target);
+});
+$("#light-slider").addEventListener("change", (event) => {
+  const device = home.sheetLight;
+  device.on = true;
+  device.brightness = Number(event.target.value);
+  renderLights(home.data.lights);
+  setLight(device.name, { brightness: device.brightness });
+});
+for (const button of document.querySelectorAll("[data-warmth]")) {
+  button.addEventListener("click", () => setLight(home.sheetLight.name, { warmth: button.dataset.warmth }));
+}
+$("#light-colors .swatches").replaceChildren(
+  ...LIGHT_COLORS.map(([label, name, swatch]) => {
+    const button = el("button", { type: "button", ariaLabel: label });
+    button.style.background = swatch;
+    button.addEventListener("click", () => setLight(home.sheetLight.name, { color: name }));
+    return button;
+  }),
+);
+
+// The TV ------------------------------------------------------------------------------------------
+
+function renderTv(tv) {
+  const card = $("#tv-card");
+  card.hidden = !tv;
+  if (!tv) return;
+  const sub = tv.error || (tv.on ? ["On", tv.app, tv.volume !== null && tv.volume !== undefined ? `volume ${tv.volume}` : ""].filter(Boolean).join(" · ") : "Off");
+  const open = el("button", { className: "open", type: "button" }, [el("span", {}, "TV"), el("span", {}, sub)]);
+  open.addEventListener("click", openTvSheet);
+  const power = el("button", { className: tv.on ? "round on" : "round", type: "button", ariaLabel: tv.on ? "Turn the TV off" : "Turn the TV on" }, icon("power"));
+  power.disabled = Boolean(tv.error);
+  power.addEventListener("click", () => tvPower(power));
+  card.replaceChildren(icon("tv"), open, power);
+  if ($("#tv-sheet").open) fillTvSheet(tv);
+}
+
+function fillTvSheet(tv) {
+  const button = $("#tv-power");
+  button.querySelector("span").textContent = tv.on ? "Turn off" : "Turn on";
+  button.disabled = Boolean(tv.error);
+  $("#tv-state").textContent = tv.error || (tv.on ? [tv.app, tv.muted ? "muted" : tv.volume !== null && tv.volume !== undefined ? `volume ${tv.volume}` : ""].filter(Boolean).join(" · ") : "Off");
+  $("#tv-apps").replaceChildren(
+    ...(tv.apps || []).map((app) => {
+      const open = el("button", { className: "pill soft", type: "button" }, app);
+      open.addEventListener("click", () => tvCommand(open, { action: "open", app }));
+      return open;
+    }),
+  );
+}
+
+function openTvSheet() {
+  fillTvSheet(home.data.tv);
+  $("#tv-sheet").showModal();
+}
+
+async function tvCommand(button, body) {
+  const answer = await run(button, () => api("/api/home/tv", { method: "POST", body }));
+  if (answer) settleThenRefresh();
+  return answer;
+}
+
+async function tvPower(button) {
+  const tv = home.data.tv;
+  const answer = await tvCommand(button, { action: "power", on: !tv.on });
+  if (!answer) return;
+  tv.on = !tv.on;
+  renderTv(tv);
+  if (answer.confirmed === false) toast(tv.on ? "The TV is turning on." : "The TV is turning off.");
+  quiet(6000); // it can take seconds to report
+}
+
+$("#tv-power").addEventListener("click", (event) => tvPower(event.currentTarget));
+for (const button of document.querySelectorAll("[data-tv-key]")) {
+  button.addEventListener("click", () => tvCommand(null, { action: "navigate", key: button.dataset.tvKey }));
+}
+for (const button of document.querySelectorAll("[data-tv-media]")) {
+  button.addEventListener("click", () => tvCommand(null, { action: "media", key: button.dataset.tvMedia }));
+}
+for (const button of document.querySelectorAll("[data-tv-volume]")) {
+  button.addEventListener("click", () => tvCommand(null, { action: "volume", change: button.dataset.tvVolume, steps: 2 }));
+}
+$("[data-tv-mute]").addEventListener("click", (event) =>
+  tvCommand(event.currentTarget, { action: "mute", muted: !(home.data.tv && home.data.tv.muted) }),
+);
+$("#tv-search").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const field = event.currentTarget.elements.query;
+  const query = field.value.trim();
+  if (!query) return;
+  if (await tvCommand(event.submitter, { action: "youtube", query })) {
+    field.value = "";
+    toast(`Searching YouTube for "${query}".`);
+  }
+});
+
+// Music -------------------------------------------------------------------------------------------
+
+let musicVolumeTimer = 0;
+
+function renderMusic(music) {
+  const card = $("#music-card");
+  card.hidden = !music;
+  if (!music) return;
+  const art = music.art ? el("img", { src: music.art, alt: "" }) : icon("music");
+  const title = music.error || music.title || "Nothing playing";
+  const text = el("div", { className: "open" }, [el("span", {}, title), el("span", {}, music.error ? "" : music.artist || "Spotify")]);
+  const play = el("button", { className: music.playing ? "round on" : "round", type: "button", ariaLabel: music.playing ? "Pause" : "Play" }, icon(music.playing ? "pause" : "play"));
+  const next = el("button", { className: "round", type: "button", ariaLabel: "Next song" }, icon("next"));
+  play.disabled = next.disabled = Boolean(music.error);
+  play.addEventListener("click", async () => {
+    const answer = await run(play, () => api("/api/home/music", { method: "POST", body: { action: music.playing ? "pause" : "resume" } }));
+    if (!answer) return;
+    music.playing = !music.playing;
+    renderMusic(music);
+    settleThenRefresh();
+  });
+  next.addEventListener("click", async () => {
+    if (await run(next, () => api("/api/home/music", { method: "POST", body: { action: "next" } }))) settleThenRefresh();
+  });
+  const children = [art, text, play, next];
+  if (typeof music.volume === "number") {
+    const slider = el("input", { type: "range", min: 0, max: 100, step: 5, value: music.volume, ariaLabel: "Music volume" });
+    setFill(slider);
+    slider.addEventListener("input", () => {
+      setFill(slider);
+      quiet();
+      clearTimeout(musicVolumeTimer);
+      musicVolumeTimer = setTimeout(
+        () => run(null, () => api("/api/home/music", { method: "POST", body: { action: "volume", volume: Number(slider.value) } })),
+        300,
+      );
+    });
+    children.push(el("div", { className: "music-volume" }, [icon("speaker"), slider]));
+  }
+  card.replaceChildren(...children);
+}
 
 // Games -----------------------------------------------------------------------------------------
 

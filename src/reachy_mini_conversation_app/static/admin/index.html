@@ -66,6 +66,11 @@
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5V15M7.5 10.5 12 15l4.5-4.5M5 20h14"/></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
       <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 4.5a3 3 0 0 0-3 3v.2A3 3 0 0 0 4.5 13a3 3 0 0 0 1.8 5.2A3 3 0 0 0 12 18V6a2.5 2.5 0 0 0-3-1.5zM15 4.5a3 3 0 0 1 3 3v.2a3 3 0 0 1 1.5 5.3 3 3 0 0 1-1.8 5.2A3 3 0 0 1 12 18"/></symbol>
+      <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.5 18h5M10.5 21h3M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.2 1.1 2V16h5v-.2c0-.8.4-1.5 1.1-2A6 6 0 0 0 12 3z"/></symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3.5V8M15 3.5V8M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"/></symbol>
+      <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 17v3.5"/></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6l9 6-9 6zM18 6v12"/></symbol>
       <symbol id="i-move" viewBox="0 0 24 24"><rect x="8" y="4.5" width="8" height="15" rx="1.8"/><path d="M11 16.5h2M4.8 8.5a9 9 0 0 0 0 7M19.2 8.5a9 9 0 0 1 0 7"/></symbol>
       <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 2.7-1.6 3.9-2.7 4.9-.9.8-1.2 1.6-1.5 2.9a2.8 2.8 0 0 1-5.3.5"/><path d="M10 9.8a2.2 2.2 0 0 1 4.4 0c0 1.2-.8 1.7-1.6 2.3"/></symbol>
       <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5V9H9"/><path d="m10.5 9.5 4 2.5-4 2.5z"/></symbol>
@@ -143,6 +148,15 @@
         </div>
       </div>
       <div id="now-playing" class="now-slot" hidden></div>
+
+      <section id="home-devices" class="devices" hidden aria-labelledby="devices-title">
+        <h3 id="devices-title" class="section-title">Your home</h3>
+        <div id="routines" class="routines" role="group" aria-label="Routines"></div>
+        <div id="rooms"></div>
+        <p id="devices-hint" class="devices-hint" hidden>Tap to switch on or off · hold for brightness and color</p>
+        <div id="tv-card" class="device-card" hidden></div>
+        <div id="music-card" class="device-card music" hidden></div>
+      </section>
 
       <h3 class="section-title">Health</h3>
       <div id="health" class="health"></div>
@@ -451,6 +465,76 @@
         <button id="ask-yes" value="yes" class="pill sun" type="submit">OK</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="light-sheet" class="sheet" aria-labelledby="light-title">
+    <div class="sheet-frame">
+      <div class="sheet-bar">
+        <button class="text-button" type="button" data-close>Close</button>
+        <span id="light-title" class="sheet-title"></span>
+        <span></span>
+      </div>
+      <div class="sheet-body">
+        <div class="segmented" role="group" aria-label="Power">
+          <button type="button" data-light-on="true">On</button>
+          <button type="button" data-light-on="false">Off</button>
+        </div>
+        <div id="light-brightness" class="field">
+          <h4><svg class="icon"><use href="#i-sun"/></svg>Brightness <output id="light-level"></output></h4>
+          <input id="light-slider" type="range" min="1" max="100" step="1" aria-label="Brightness">
+        </div>
+        <div id="light-warmth" class="field">
+          <h4><svg class="icon"><use href="#i-bulb"/></svg>White</h4>
+          <div class="segmented" role="group" aria-label="Warmth">
+            <button type="button" data-warmth="warm">Warm</button>
+            <button type="button" data-warmth="neutral">Neutral</button>
+            <button type="button" data-warmth="cool">Cool</button>
+          </div>
+        </div>
+        <div id="light-colors" class="field">
+          <h4><svg class="icon"><use href="#i-spark"/></svg>Color</h4>
+          <div class="swatches"></div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="tv-sheet" class="sheet tall" aria-labelledby="tv-title">
+    <div class="sheet-frame">
+      <div class="sheet-bar">
+        <button class="text-button" type="button" data-close>Close</button>
+        <span id="tv-title" class="sheet-title">TV</span>
+        <span></span>
+      </div>
+      <div class="sheet-body">
+        <div class="tv-top">
+          <button id="tv-power" class="pill soft" type="button"><svg class="icon"><use href="#i-power"/></svg><span>Turn on</span></button>
+          <p id="tv-state" class="tv-state"></p>
+        </div>
+        <div id="tv-apps" class="tv-apps"></div>
+        <form id="tv-search" class="tv-search">
+          <input name="query" type="search" placeholder="Search YouTube on the TV" aria-label="Search YouTube on the TV" maxlength="100">
+          <button class="pill sun small" type="submit">Search</button>
+        </form>
+        <div class="dpad tv-pad" role="group" aria-label="Remote">
+          <button data-tv-key="up" type="button" aria-label="Up"><svg class="icon"><use href="#i-up"/></svg></button>
+          <button data-tv-key="left" type="button" aria-label="Left"><svg class="icon"><use href="#i-left"/></svg></button>
+          <button data-tv-key="select" type="button" aria-label="OK">OK</button>
+          <button data-tv-key="right" type="button" aria-label="Right"><svg class="icon"><use href="#i-right"/></svg></button>
+          <button data-tv-key="down" type="button" aria-label="Down"><svg class="icon"><use href="#i-down"/></svg></button>
+        </div>
+        <div class="tv-keys">
+          <button class="pill soft small" type="button" data-tv-key="back">Back</button>
+          <button class="pill soft small" type="button" data-tv-key="home">Home</button>
+          <button class="pill soft small" type="button" data-tv-media="play_pause" aria-label="Play or pause"><svg class="icon"><use href="#i-play"/></svg><svg class="icon"><use href="#i-pause"/></svg></button>
+        </div>
+        <div class="tv-keys">
+          <button class="pill soft small" type="button" data-tv-volume="down" aria-label="Quieter">Vol −</button>
+          <button class="pill soft small" type="button" data-tv-mute>Mute</button>
+          <button class="pill soft small" type="button" data-tv-volume="up" aria-label="Louder">Vol +</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <div id="be-reachy" class="be-reachy" hidden>
