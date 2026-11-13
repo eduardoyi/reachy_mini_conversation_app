@@ -228,6 +228,17 @@ sound:
       A silly toy battle for small children: tiny toy drums rattling, wooden soldiers clacking, a little toy trumpet
       toot and squeaky mice squeaks, playful and comic, never scary.
 
+  # Cenicienta (2026-11-13)
+  fanfare:
+    seconds: 3
+    prompt: >-
+      A royal herald's long trumpet fanfare, tu-tu-ruuu, bright and proud, a short announcement call for a fairy tale.
+  horse_neigh:
+    seconds: 2.5
+    prompt: >-
+      A happy horse neighing and snorting with a few clip-clop hoof steps on cobblestones, friendly, for small
+      children.
+
 music:
   story_move:
     seconds: 15
@@ -285,3 +296,17 @@ music:
     source: https://upload.wikimedia.org/wikipedia/commons/b/b5/Waltz_of_the_Flowers_-_Concert_Band_-_United_States_Air_Force_Band.mp3
     license: Public domain (United States Air Force Band, a work of the US government)
     prompt: The Waltz of the Flowers from The Nutcracker.
+  # Cenicienta (2026-11-13): no free recording of Rossini's Cenerentola was found, so his William Tell gallop and
+  # Strauss's Blue Danube, both played by the US Marine Band (a work of the US government, public domain).
+  cin_gallop:
+    seconds: 16
+    start: 470
+    source: https://upload.wikimedia.org/wikipedia/commons/4/43/Gioachino_Rossini%2C_William_Tell_Overture_%28military_band_version%2C_2000%29.ogg
+    license: Public domain (United States Marine Band, a work of the US government)
+    prompt: The gallop from Rossini's William Tell Overture.
+  cin_waltz:
+    seconds: 20
+    start: 62
+    source: https://upload.wikimedia.org/wikipedia/commons/d/d4/%22An_der_sch%C3%B6nen%2C_blauen_Donau%22_performed_by_the_U.S._Marine_Band.mp3
+    license: Public domain (United States Marine Band, a work of the US government)
+    prompt: The Blue Danube waltz by Johann Strauss II.

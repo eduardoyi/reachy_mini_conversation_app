@@ -1,0 +1,416 @@
+# Cenicienta / Cenerentola (docs/plans/story-mode.md).
+# Our own telling for a 2- and a 4-year-old of Charles Perrault's Cendrillon (1697), public domain: a kind girl who
+# works all day for her bossy stepmother and two silly stepsisters; her fairy godmother turns a pumpkin into a
+# carriage, mice into horses and her rags into a gown; she dances with the prince, runs off at midnight and loses a
+# glass slipper, and the slipper fits only her. As in Perrault, she forgives her stepsisters at the end. Nothing from
+# the Disney film (no named mice, no cat, none of its songs or looks). The music is Rossini's William Tell gallop and
+# Strauss's Blue Danube, cut from US Marine Band recordings, which are public domain (sounds.yaml). About 7 minutes
+# with 13 moments where the children join in. Spanish is Venezuelan (ustedes, chévere), Italian is standard.
+
+key: cenicienta
+# Drawn from turnaround sheets (stories/cast-turnaround/) with free poses.
+turnaround: true
+title:
+  es: Cenicienta
+  it: Cenerentola
+names:
+  es: [cenicienta, la cenicienta, el cuento de cenicienta, la historia de cenicienta, el de cenicienta,
+       el zapatito de cristal, la princesa cenicienta]
+  it: [cenerentola, la cenerentola, la storia di cenerentola, la fiaba di cenerentola, quella di cenerentola,
+       la scarpetta di cristallo]
+# Single words that point to this story alone, said next to "cuento", "historia", "el de"...
+keywords:
+  es: [cenicienta, calabaza, carroza, zapatito, cristal, madrina, madrastra, hermanastras, principe, princesa]
+  it: [cenerentola, zucca, carrozza, scarpetta, cristallo, madrina, matrigna, sorellastre, principe, principessa]
+pitch:
+  es: "Una calabaza que se vuelve carroza, un baile en el palacio y un zapatito de cristal que se queda en la escalera."
+  it: "Una zucca che diventa carrozza, un ballo al palazzo e una scarpetta di cristallo rimasta sulle scale."
+rules: >-
+  Reachy tells Cenicienta (Perrault's Cinderella: a kind girl works all day for her bossy stepmother and two silly
+  stepsisters; when the prince invites everyone to a ball, her fairy godmother turns a pumpkin into a carriage, mice
+  into horses and her old dress into a gown, but the magic ends at midnight; she dances with the prince, runs off at
+  midnight and loses a glass slipper; the prince tries it on every girl and it fits only her, and she forgives her
+  stepsisters), about 7 minutes, in Spanish or Italian, with character voices, sounds and music. The children join
+  in: they scrub the floor, blow the herald's trumpet, say the magic words, neigh like horses, ride the carriage,
+  waltz, strike midnight by patting his head, run down the stairs, say "no" when the slipper doesn't fit the
+  stepsisters, cheer at the wedding and pick small things (a dress of stars or of flowers, the stairs or the garden).
+  The story never waits for long: if nobody joins in, it carries on.
+cover:
+  id: cover
+  picture: the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, running down the wide palace staircase at night, one glass slipper left behind on a step, a big clock tower behind her showing midnight, a pumpkin-shaped carriage waiting below
+  with: [cinderella]
+
+steps:
+  # The kind girl and the ashes --------------------------------------------------------------------------------
+  - scene:
+      id: kitchen
+      picture: a big old kitchen with a stone fireplace, the girl in her patched dress kneeling to scrub the floor with a brush and a bucket of soap bubbles, a smudge of ash on her cheek, three little mice peeking from a hole and smiling at her
+      with: [cinderella]
+      move: calming
+  - say: narrator
+    es: "[warm] Había una vez una muchacha muy buena y muy dulce."
+    it: "[warm] C'era una volta una ragazza tanto buona e tanto dolce."
+  - say: narrator
+    es: "[warm] Siempre tenía la carita llena de ceniza de la chimenea... por eso todos la llamaban: ¡Cenicienta!"
+    it: "[warm] Aveva sempre il visetto sporco di cenere del camino... per questo tutti la chiamavano: Cenerentola!"
+  - say: cinderella
+    es: "[cheerful, humming] Mmm, mm, mm... ¡Hola, ratoncitos! Ya casi termino de limpiar."
+    it: "[cheerful, humming] Mmm, mm, mm... Ciao, topolini! Ho quasi finito di pulire."
+  - scene:
+      id: family
+      picture: inside an old house, the tall bossy stepmother pointing at a long list of chores, the two silly stepsisters lounging on a sofa eating cake, one very tall and thin, one short and round, the girl holding a broom and a pile of laundry
+      with: [stepmother, stepsister_tall, stepsister_small, cinderella]
+      move: impatient
+  - say: narrator
+    es: "[playful] Pero vivía con su madrastra, que era muy mandona, y con dos hermanastras... ¡que no hacían nada en todo el día!"
+    it: "[playful] Ma viveva con la sua matrigna, che era tanto prepotente, e con due sorellastre... che non facevano niente tutto il giorno!"
+  - say: stepmother
+    es: "[bossy, haughty] ¡Cenicienta! Lava los platos, plancha los vestidos... ¡y que el piso brille!"
+    it: "[bossy, haughty] Cenerentola! Lava i piatti, stira i vestiti... e che il pavimento brilli!"
+  - copy:
+      ask:
+        es: "[playful] ¡Ayuden a Cenicienta a fregar el piso! Frota, frota, con las dos manos, en circulitos..."
+        it: "[playful] Aiutate Cenerentola a lavare il pavimento! Strofina, strofina, con tutte e due le mani, in tondo..."
+      done:
+        es: "[delighted] ¡Ahora sí, el piso quedó brillante!"
+        it: "[delighted] Adesso sì, il pavimento brilla!"
+      move: happy
+      music: story_move
+      seconds: 8
+
+  # The invitation ---------------------------------------------------------------------------------------------
+  - scene:
+      id: herald
+      picture: at the open front door of the old house, a royal messenger in a feathered hat blowing a long trumpet and holding out a rolled invitation with a big seal, the two stepsisters jumping with excitement, the girl peeking shyly from behind the door
+      with: [stepsister_tall, stepsister_small, cinderella]
+      move: surprised
+  - say: narrator
+    es: "[excited] Un día llegó un mensajero del palacio, con una trompeta larguísima..."
+    it: "[excited] Un giorno arrivò un messaggero del palazzo, con una tromba lunghissima..."
+  - noise:
+      ask:
+        es: "[playful] ¡Toquen la trompeta del mensajero! Todos juntos: ¡tu-tu-ruuu!"
+        it: "[playful] Suonate la tromba del messaggero! Tutti insieme: tu-tu-ruuu!"
+      louder:
+        es: "[playful] ¡Más fuerte, que lo escuche todo el reino! ¡Tu-tu-ruuuuu!"
+        it: "[playful] Più forte, che lo senta tutto il regno! Tu-tu-ruuuuu!"
+      done:
+        es: "[grand, playful] ¡Escuchen, escuchen! ¡El príncipe invita a todas las muchachas del reino a un gran baile en el palacio!"
+        it: "[grand, playful] Udite, udite! Il principe invita tutte le ragazze del regno a un grande ballo al palazzo!"
+      without:
+        es: "[grand, playful] ¡Tu-tu-ruuu! ¡Escuchen, escuchen! ¡El príncipe invita a todas las muchachas del reino a un gran baile en el palacio!"
+        it: "[grand, playful] Tu-tu-ruuu! Udite, udite! Il principe invita tutte le ragazze del regno a un grande ballo al palazzo!"
+      sound: fanfare
+  - say: stepsister_tall
+    es: "[snooty, excited] ¡Un baile! ¡El príncipe va a bailar conmigo, porque yo soy la más elegante!"
+    it: "[snooty, excited] Un ballo! Il principe ballerà con me, perché io sono la più elegante!"
+  - say: stepsister_small
+    es: "[whiny, silly] ¡No, conmigo! ¡Porque yo soy la más bonita! ¡Mi-mi-miii!"
+    it: "[whiny, silly] No, con me! Perché io sono la più carina! Mi-mi-miii!"
+  - say: cinderella
+    es: "[hopeful, shy] ¿Y yo? ¿Yo también puedo ir al baile?"
+    it: "[hopeful, shy] E io? Posso venire anch'io al ballo?"
+  - say: stepmother
+    es: "[haughty, mocking] ¿Tú? ¿Con ese vestido lleno de remiendos? ¡Ja! Tú te quedas en la casa."
+    it: "[haughty, mocking] Tu? Con quel vestito pieno di toppe? Ah! Tu resti a casa."
+
+  # The fairy godmother ----------------------------------------------------------------------------------------
+  - scene:
+      id: crying
+      picture: night in the moonlit garden behind the old house, the girl in her patched dress sitting sadly on the edge of a well, the little fairy godmother appearing beside her in a swirl of sparkles, a big round pumpkin in the vegetable patch nearby
+      with: [cinderella, godmother]
+      move: loving
+  - say: narrator
+    es: "[softly, sad] Esa noche, todos se fueron al baile. Y Cenicienta se quedó solita en el jardín, muy triste."
+    it: "[softly, sad] Quella sera, tutti andarono al ballo. E Cenerentola rimase tutta sola in giardino, molto triste."
+  - sound: sparkle
+  - say: narrator
+    es: "[amazed, softly] Pero de pronto, entre chispitas de luz, apareció una viejita con alas... ¡su hada madrina!"
+    it: "[amazed, softly] Ma all'improvviso, tra scintille di luce, apparve una vecchina con le ali... la sua fata madrina!"
+  - say: godmother
+    es: "[warm, cheeky] No llores, mi niña. ¡Tú también vas a ir al baile! Pero primero... tráeme esa calabaza."
+    it: "[warm, cheeky] Non piangere, bambina mia. Anche tu andrai al ballo! Ma prima... portami quella zucca."
+  - chorus:
+      ask:
+        es: "[playful, whispers] Ayuden al hada con las palabras mágicas. Digan conmigo: ¡calabaza, carroza!"
+        it: "[playful, whispers] Aiutate la fata con le parole magiche. Dite con me: zucca, carrozza!"
+      done:
+        who: godmother
+        es: "[delighted] ¡Eso es! ¡Calabaza, carroza! ¡Bim, bam, bum!"
+        it: "[delighted] Proprio così! Zucca, carrozza! Bim, bam, bum!"
+      without:
+        who: godmother
+        es: "[delighted] ¡Calabaza, carroza! ¡Bim, bam, bum!"
+        it: "[delighted] Zucca, carrozza! Bim, bam, bum!"
+  - sound: growing
+  - scene:
+      id: carriage
+      picture: night in the moonlit garden, the big pumpkin turned into a shining round pumpkin-shaped carriage with curly golden wheels, six little mice turning into six white horses with plumes in a swirl of sparkles, the fairy godmother waving her wand, the girl in her patched dress clapping with joy
+      with: [godmother, cinderella]
+      move: amazed
+  - say: narrator
+    es: "[amazed] ¡Y la calabaza se volvió una carroza dorada! Y seis ratoncitos se volvieron... ¡seis caballos blancos!"
+    it: "[amazed] E la zucca diventò una carrozza dorata! E sei topolini diventarono... sei cavalli bianchi!"
+  - noise:
+      ask:
+        es: "[playful] ¿Cómo hacen los caballos? Todos juntos: ¡jiiii-jiii-jiii!"
+        it: "[playful] Come fanno i cavalli? Tutti insieme: iiii-hiii-hiii!"
+      louder:
+        es: "[playful] ¡Son seis caballos! ¡Más fuerte! ¡Jiiiii-jiii-jiii!"
+        it: "[playful] Sono sei cavalli! Più forte! Iiiii-hiii-hiii!"
+      done:
+        es: "[delighted] ¡Qué caballos tan chéveres!"
+        it: "[delighted] Che cavalli magnifici!"
+      without:
+        es: "[delighted] ¡Jiiii-jiii! ¡Qué caballos tan chéveres!"
+        it: "[delighted] Iiiii-hiii! Che cavalli magnifici!"
+      sound: horse_neigh
+  - say: godmother
+    es: "[warm, playful] ¡Y ahora, tu vestido! ¿Cómo lo quieres, mi niña?"
+    it: "[warm, playful] E adesso, il tuo vestito! Come lo vuoi, bambina mia?"
+  - choice:
+      id: dress
+      ask:
+        es: "[curious] ¿Qué vestido le hace el hada: un vestido de estrellas... o un vestido de flores?"
+        it: "[curious] Che vestito le fa la fata: un vestito di stelle... o un vestito di fiori?"
+      options:
+        stars:
+          words: {es: [estrellas, de estrellas, estrella, estrellitas, el de estrellas], it: [stelle, di stelle, stella, stelline, quello di stelle]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que de estrellas!"
+            it: "[thoughtful] Mmm... secondo me, di stelle!"
+          then:
+            who: godmother
+            es: "[delighted] ¡Un vestido de estrellas, que brilla como el cielo de noche! ¡Bim, bam, bum!"
+            it: "[delighted] Un vestito di stelle, che brilla come il cielo di notte! Bim, bam, bum!"
+        flowers:
+          words: {es: [flores, de flores, flor, florecitas, el de flores], it: [fiori, di fiori, fiore, fiorellini, quello di fiori]}
+          picked:
+            es: "[thoughtful] Mmm... ¡yo digo que de flores!"
+            it: "[thoughtful] Mmm... secondo me, di fiori!"
+          then:
+            who: godmother
+            es: "[delighted] ¡Un vestido de flores, lleno de rosas que huelen rico! ¡Bim, bam, bum!"
+            it: "[delighted] Un vestito di fiori, pieno di rose profumate! Bim, bam, bum!"
+  - sound: sparkle
+  - scene:
+      id: gown
+      about: dress
+      with: [cinderella, godmother]
+      options:
+        stars: night in the moonlit garden, the kind young woman from the kitchen now dressed for the royal ball in a long, wide, shining princess gown with long sleeves, covered in little stars, her hair up in a bun with a star clip, curtsying with a big smile, the fairy godmother beside her laughing with her wand raised, the pumpkin carriage and the white horses waiting behind them
+        flowers: night in the moonlit garden, the kind young woman from the kitchen now dressed for the royal ball in a long, wide, shining princess gown with long sleeves, covered in roses and little flowers, her hair up in a bun with a flower clip, curtsying with a big smile, the fairy godmother beside her laughing with her wand raised, the pumpkin carriage and the white horses waiting behind them
+      move: happy
+  - say: cinderella
+    es: "[amazed, delighted] ¡Qué bonito! ¡Y unos zapatitos de cristal! ¡Gracias, madrina!"
+    it: "[amazed, delighted] Che bello! E delle scarpette di cristallo! Grazie, madrina!"
+  - say: godmother
+    es: "[serious, kind] Pero escucha bien: la magia se acaba a las doce de la noche. ¡Tienes que volver antes de que suene la última campanada!"
+    it: "[serious, kind] Ma ascolta bene: la magia finisce a mezzanotte. Devi tornare prima dell'ultimo rintocco!"
+
+  # The ball ---------------------------------------------------------------------------------------------------
+  - scene:
+      id: ride
+      picture: the shining pumpkin-shaped carriage pulled by six white horses galloping along a winding road at night toward a big palace on a hill with lit-up windows, the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, waving happily from the carriage window
+      with: [cinderella]
+      move: excited
+  - copy:
+      ask:
+        es: "[excited] ¡Súbanse a la carroza! Agárrense fuerte... ¡y al galope, hasta el palacio! ¡Arre, caballitos!"
+        it: "[excited] Salite sulla carrozza! Tenetevi forte... e al galoppo fino al palazzo! Arri, cavallini!"
+      done:
+        es: "[delighted, out of breath] ¡Llegamos al palacio!"
+        it: "[delighted, out of breath] Siamo arrivati al palazzo!"
+      move: excited
+      music: cin_gallop
+      seconds: 10
+  - scene:
+      id: ball
+      picture: a grand ballroom with crystal chandeliers, everyone turning to stare in wonder as the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, walks in, the young prince bowing to her at the foot of the stairs, the two stepsisters in the crowd with their mouths wide open, not recognising her
+      with: [cinderella, prince, stepsister_tall, stepsister_small]
+      move: amazed
+  - say: narrator
+    es: "[amazed] Cuando Cenicienta entró al baile, todos se quedaron con la boca abierta. ¡Ni sus hermanastras la reconocieron!"
+    it: "[amazed] Quando Cenerentola entrò al ballo, tutti rimasero a bocca aperta. Nemmeno le sorellastre la riconobbero!"
+  - say: prince
+    es: "[warm, smiling] Buenas noches. ¿Quiere bailar conmigo, señorita?"
+    it: "[warm, smiling] Buonasera. Vuole ballare con me, signorina?"
+  - say: cinderella
+    es: "[shy, happy] ¡Sí, me encantaría!"
+    it: "[shy, happy] Sì, mi piacerebbe tanto!"
+  - scene:
+      id: waltz
+      picture: the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, waltzing with the young prince in the middle of the grand ballroom under the crystal chandeliers, her gown swirling wide, other couples dancing in circles around them
+      with: [cinderella, prince]
+      move: dance
+  - copy:
+      ask:
+        es: "[softly, warm] Bailen el vals con Cenicienta y el príncipe. Den vueltas despacito... un, dos, tres... un, dos, tres..."
+        it: "[softly, warm] Ballate il valzer con Cenerentola e il principe. Girate piano piano... un, due, tre... un, due, tre..."
+      done:
+        es: "[delighted] ¡Qué bien bailan!"
+        it: "[delighted] Come ballate bene!"
+      move: dance
+      music: cin_waltz
+      seconds: 14
+
+  # Midnight ---------------------------------------------------------------------------------------------------
+  - scene:
+      id: midnight
+      picture: the palace balcony at night, the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, turning in alarm toward a big clock tower whose hands both point to twelve, the young prince reaching out his hand to her, the moon behind the tower
+      with: [cinderella, prince]
+      move: surprised
+  - say: narrator
+    es: "[mysterious] Bailaron y bailaron toda la noche... hasta que el reloj del palacio empezó a sonar."
+    it: "[mysterious] Ballarono e ballarono tutta la notte... finché l'orologio del palazzo cominciò a suonare."
+  - pat:
+      ask:
+        es: "[whispers] ¡Son las doce! Hagan sonar el reloj: denle golpecitos a mi cabeza... ¡dong, dong, dong!"
+        it: "[whispers] È mezzanotte! Fate suonare l'orologio: datemi dei colpetti sulla testa... dong, dong, dong!"
+      done:
+        who: cinderella
+        es: "[panicked] ¡Dong, dong! ¡Ay, no! ¡La medianoche! ¡Me tengo que ir!"
+        it: "[panicked] Dong, dong! Oh, no! La mezzanotte! Devo andare!"
+      without:
+        who: cinderella
+        es: "[panicked] ¡Dong, dong, dong! ¡Ay, no! ¡La medianoche! ¡Me tengo que ir!"
+        it: "[panicked] Dong, dong, dong! Oh, no! La mezzanotte! Devo andare!"
+      sound: clock_midnight
+  - choice:
+      id: escape
+      ask:
+        es: "[excited] ¡Rápido! ¿Por dónde corre Cenicienta: por la escalera grande... o por el jardín?"
+        it: "[excited] Presto! Da dove scappa Cenerentola: dalla grande scalinata... o dal giardino?"
+      options:
+        stairs:
+          words: {es: [escalera, la escalera, escaleras, las escaleras, escalera grande], it: [scalinata, la scalinata, scala, scale, le scale]}
+          picked:
+            es: "[excited] Mmm... ¡yo digo que por la escalera!"
+            it: "[excited] Mmm... secondo me, dalla scalinata!"
+          then:
+            es: "[excited] ¡Bajó corriendo la escalera, saltando los escalones de dos en dos!"
+            it: "[excited] Scese di corsa la scalinata, saltando i gradini a due a due!"
+        garden:
+          words: {es: [jardin, el jardin, por el jardin, las flores], it: [giardino, il giardino, dal giardino, i fiori]}
+          picked:
+            es: "[excited] Mmm... ¡yo digo que por el jardín!"
+            it: "[excited] Mmm... secondo me, dal giardino!"
+          then:
+            es: "[excited] ¡Corrió por el jardín, entre las fuentes y los rosales!"
+            it: "[excited] Corse per il giardino, tra le fontane e i roseti!"
+  - scene:
+      id: escape
+      about: escape
+      with: [cinderella, prince]
+      options:
+        stairs: the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, running down the wide palace staircase at night holding up her skirt, one sparkling glass slipper left behind on a step, the young prince running after her from the top of the stairs
+        garden: the kind young woman from the kitchen, now dressed for the ball in a long, wide, shining princess gown with long sleeves and sparkling glass slippers, no headscarf and no apron, her hair up in a bun, running through the moonlit palace garden past fountains and rose bushes, holding up her skirt, one sparkling glass slipper left behind on the path, the young prince running after her from the palace doors
+      move: excited
+  - copy:
+      ask:
+        es: "[excited] ¡Corran con Cenicienta, sin moverse del sitio! ¡Rápido, rápido, rapidísimo!"
+        it: "[excited] Correte con Cenerentola, senza muovervi dal posto! Veloci, veloci, velocissimi!"
+      done:
+        es: "[out of breath] ¡Uf! ¡Llegó justo a tiempo!"
+        it: "[out of breath] Uff! È arrivata appena in tempo!"
+      move: excited
+      music: cin_gallop
+      seconds: 7
+  - say: narrator
+    es: "[playful] Y en la última campanada... ¡puf! La carroza volvió a ser calabaza, los caballos volvieron a ser ratoncitos... y Cenicienta tenía otra vez su vestido viejito."
+    it: "[playful] E all'ultimo rintocco... puf! La carrozza tornò zucca, i cavalli tornarono topolini... e Cenerentola aveva di nuovo il suo vestito vecchio."
+  - say: narrator
+    es: "[warm, mysterious] Pero en la escalera del palacio se había quedado algo... ¡un zapatito de cristal!"
+    it: "[warm, mysterious] Ma sulla scala del palazzo era rimasta una cosa... una scarpetta di cristallo!"
+
+  # The slipper ------------------------------------------------------------------------------------------------
+  - scene:
+      id: search
+      picture: inside the old house, the young prince holding the sparkling glass slipper on a velvet cushion while the very tall thin stepsister sits on a stool trying to push her huge foot into it, the short round stepsister and the stepmother watching, the girl in her patched dress peeking from the kitchen door
+      with: [prince, stepsister_tall, stepsister_small, stepmother, cinderella]
+      move: attentive
+  - say: narrator
+    es: "[playful] Al día siguiente, el príncipe buscó por todo el reino a la dueña del zapatito. ¡Y llegó a la casa de Cenicienta!"
+    it: "[playful] Il giorno dopo, il principe cercò in tutto il regno la padrona della scarpetta. E arrivò a casa di Cenerentola!"
+  - say: stepsister_tall
+    es: "[snooty, straining] ¡Es mío, es mío! Uuugh... ¡entra, pie, entra!"
+    it: "[snooty, straining] È mia, è mia! Uuugh... entra, piede, entra!"
+  - chorus:
+      ask:
+        es: "[playful] ¿Le queda el zapatito? Digan todos: ¡nooo!"
+        it: "[playful] Le sta la scarpetta? Dite tutti: nooo!"
+      done:
+        es: "[laughing] ¡Nooo! ¡Tiene un pie gigante!"
+        it: "[laughing] Nooo! Ha un piede gigante!"
+      without:
+        es: "[laughing] ¡Nooo! ¡Tiene un pie gigante!"
+        it: "[laughing] Nooo! Ha un piede gigante!"
+  - say: stepsister_small
+    es: "[whiny, silly] ¡Ahora yo! Mmmmf... ¡ay, ay, ay, me aprieta el dedito!"
+    it: "[whiny, silly] Adesso io! Mmmmf... ahi, ahi, ahi, mi stringe il ditino!"
+  - chorus:
+      ask:
+        es: "[playful] ¿Y a ella? ¿Le queda? Digan todos: ¡nooo!"
+        it: "[playful] E a lei? Le sta? Dite tutti: nooo!"
+      done:
+        es: "[laughing] ¡Nooo! ¡Ni el dedito le cabe!"
+        it: "[laughing] Nooo! Non ci entra neanche il ditino!"
+      without:
+        es: "[laughing] ¡Nooo! ¡Ni el dedito le cabe!"
+        it: "[laughing] Nooo! Non ci entra neanche il ditino!"
+  - say: prince
+    es: "[kind, hopeful] ¿Y aquella muchacha de la cocina? Ella también tiene que probárselo."
+    it: "[kind, hopeful] E quella ragazza in cucina? Deve provarla anche lei."
+  - say: stepmother
+    es: "[haughty, mocking] ¿Cenicienta? ¡Ja! Ella nunca fue al baile..."
+    it: "[haughty, mocking] Cenerentola? Ah! Lei non è mai andata al ballo..."
+  - sound: sparkle
+  - scene:
+      id: fits
+      picture: inside the old house, the girl in her patched dress sitting on a stool while the young prince, kneeling, slips the sparkling glass slipper onto her foot and it fits perfectly, the prince smiling with delight, the stepmother and the two stepsisters behind them with their jaws dropped in surprise
+      with: [cinderella, prince, stepmother, stepsister_tall, stepsister_small]
+      move: amazed
+  - say: narrator
+    es: "[amazed, softly] Cenicienta se sentó, estiró el pie... y el zapatito entró... ¡perfecto!"
+    it: "[amazed, softly] Cenerentola si sedette, allungò il piede... e la scarpetta entrò... perfetta!"
+  - say: prince
+    es: "[joyful] ¡Eres tú! ¡La muchacha del baile!"
+    it: "[joyful] Sei tu! La ragazza del ballo!"
+
+  # The wedding ------------------------------------------------------------------------------------------------
+  - scene:
+      id: wedding
+      picture: a joyful wedding on the palace steps on a sunny day, the kind young woman from the kitchen, now a bride in a long white wedding gown with a veil, no headscarf and no apron, and the young prince holding hands, flower petals falling everywhere, the fairy godmother waving her wand happily, the two stepsisters and the stepmother smiling sheepishly and throwing petals too
+      with: [cinderella, prince, godmother, stepsister_tall, stepsister_small, stepmother]
+      move: happy
+  - say: narrator
+    es: "[warm] Y así, Cenicienta y el príncipe se casaron. Y como Cenicienta era tan buena... ¡perdonó a sus hermanastras!"
+    it: "[warm] E così, Cenerentola e il principe si sposarono. E siccome Cenerentola era tanto buona... perdonò le sue sorellastre!"
+  - say: stepsister_small
+    es: "[sheepish, sweet] Perdón, Cenicienta... ¿podemos ser amigas?"
+    it: "[sheepish, sweet] Scusa, Cenerentola... possiamo essere amiche?"
+  - say: cinderella
+    es: "[warm, laughing] ¡Claro que sí! ¡Todos están invitados a la fiesta!"
+    it: "[warm, laughing] Ma certo! Siete tutti invitati alla festa!"
+  - noise:
+      ask:
+        es: "[excited] ¡Vamos a celebrar! Aplaudan fuerte y griten: ¡vivan los novios!"
+        it: "[excited] Festeggiamo! Applaudite forte e gridate: evviva gli sposi!"
+      louder:
+        es: "[excited] ¡Más fuerte! ¡Vivan los noviooos!"
+        it: "[excited] Più forte! Evviva gli spooosi!"
+      done:
+        who: godmother
+        es: "[delighted, laughing] ¡Ja, ja! ¡Qué fiesta tan chévere!"
+        it: "[delighted, laughing] Ah, ah! Che bella festa!"
+      without:
+        who: godmother
+        es: "[delighted, laughing] ¡Vivan los novios! ¡Qué fiesta tan chévere!"
+        it: "[delighted, laughing] Evviva gli sposi! Che bella festa!"
+      sound: crowd_cheer
+  - move: dance
+  - music: {name: cin_waltz, seconds: 10}
+  - say: narrator
+    es: "[warm, playful] Y vivieron felices... y bailaron el vals todas las noches, ¡pero sin mirar el reloj! Y colorín colorado... ¡este cuento se ha acabado!"
+    it: "[warm, playful] E vissero felici... e ballarono il valzer tutte le sere, ma senza guardare l'orologio! E vissero tutti felici e contenti. Fine!"
+  - sound: story_end

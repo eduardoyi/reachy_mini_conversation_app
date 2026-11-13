@@ -377,3 +377,60 @@ sugar_fairy:
   look: >-
     the Sugar Plum Fairy, a graceful fairy with a sparkling tiara, a wide puffy tutu dotted with sugar sparkles, small
     shimmering wings, her hair in a high bun and a wand topped with a little round sweet
+
+# Cenicienta (2026-11-13). Every voice is reused from roles that are never in the same story.
+
+cinderella:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Lucía Herrera" (also Lola, Goldilocks and Clara; never in the same
+    story): bright, eager and friendly. Cenicienta, a kind, cheerful young woman.
+  voice: "0QLnKAGnepQitThaQFxG"
+  look: >-
+    Cenicienta, a kind young woman of about eighteen with long hair tied in a loose low ponytail under a knotted
+    headscarf, a smudge of ash on one cheek, a plain long dress with square patches on the skirt, a big apron and
+    worn little flat shoes
+
+stepmother:
+  description: >-
+    Reuses "Detectives · The Last Toast · Valeria Montoro": sharp, proud and impatient, a cool edge. The stepmother,
+    bossy and haughty, comic rather than scary.
+  voice: "nIrHKPn3gy1hRnQGS0kK"
+  look: >-
+    the stepmother, a tall, thin, haughty woman with a long pointy nose, a towering curled hairdo, a stiff high
+    collar, a long striped dress and a folding fan; comic rather than scary
+
+stepsister_tall:
+  description: >-
+    Reuses "Detectives · Blackout at the Gala · Elena Vidal": precise, dry, clipped. The tall stepsister, snooty and
+    silly.
+  voice: "N5wxdtdu31dAaPAMUXMN"
+  look: >-
+    the tall stepsister, a very tall, skinny young woman with frizzy hair in two big puffs, a huge feather sticking
+    up from her hair, a frilly dress with a giant bow at the back and very big feet; silly, never scary
+
+stepsister_small:
+  description: >-
+    Reuses the little straw pig's voice (an adult voice actor doing a high, squeaky, giggly cartoon voice; also the
+    mouse; never in the same story). The short stepsister, whiny and silly.
+  voice: "iVT2VOVHkBNE0J6nTdL5"
+  look: >-
+    the short stepsister, a short, round young woman with tight little curls, a big polka-dot bow on top of her head,
+    a puffy ruffled dress with puffed sleeves and a pearl necklace; silly, never scary
+
+godmother:
+  description: >-
+    Reuses "Detectives · Who Ate the Cookies? · Grandma" (the turnip story's grandma; never in the same story): a
+    sweet grandmother, warm, funny and a bit cheeky. The fairy godmother.
+  voice: "FTUoMlBeU7pi34pUd8vh"
+  look: >-
+    the fairy godmother, a small, round, smiling old woman with rosy cheeks, round little glasses and white hair in a
+    bun, a long hooded cloak dotted with little stars, small shimmering wings and a wand topped with a star
+
+prince:
+  description: >-
+    Reuses "Detectives · The Last Toast · Tomás Rivas" (also the dog; never in the same story): warm, chatty, quick
+    to laugh. The prince, kind and friendly.
+  voice: "md3DYVVA3AQ29K3RXagc"
+  look: >-
+    the prince, a friendly young man with short wavy hair, a small simple crown, a short fitted jacket with shoulder
+    tassels and a row of buttons, a sash across his chest, a short cape and tall boots

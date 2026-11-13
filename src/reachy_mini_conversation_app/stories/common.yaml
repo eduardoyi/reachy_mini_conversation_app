@@ -69,3 +69,9 @@ offer_el_cascanueces:
 or_el_cascanueces:
   es: "[curious] ...¿o El Cascanueces?"
   it: "[curious] ...o Lo Schiaccianoci?"
+offer_cenicienta:
+  es: "[excited] ¡Dale! ¿Les cuento Cenicienta..."
+  it: "[excited] Va bene! Vi racconto Cenerentola..."
+or_cenicienta:
+  es: "[curious] ...¿o Cenicienta?"
+  it: "[curious] ...o Cenerentola?"

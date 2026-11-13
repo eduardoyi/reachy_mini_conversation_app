@@ -198,7 +198,7 @@ The softened ending (cold water, the wolf runs away) is on purpose for the 2-yea
 ## Next stories
 
 Shipped after the prototype (2026-11-07): El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera; then
-(2026-11-09) ¿Dónde está Bigotes? and La monedita de plata; (2026-11-11) La Befana and El Cascanueces. Ideas for later: an
+(2026-11-09) ¿Dónde está Bigotes? and La monedita de plata; (2026-11-11) La Befana and El Cascanueces; (2026-11-13) Cenicienta. Ideas for later: an
 own Christmas reindeer story (Rudolph is still in copyright and trademarked, so only the bare idea of a teased
 reindeer whose difference saves Christmas, with a different gift), a Venezuelan Christmas (patinatas, hallacas, the
 Niño Jesús), La araña de Navidad, La flor de Nochebuena, Pinocchio in short episodes (Collodi's book,
@@ -377,3 +377,16 @@ our own.
   noises still count as joining in. La Befana's Spanish lines are said with an Italian accent, its Venezuelan
   diminutives are gone, and the coal is explained first (sweets for good children, coal for naughty ones) and turns
   out to be sugar coal, so the cat eating it makes sense.
+- 2026-11-11: the Befana's accent still sounded Venezuelan (Eduardo): voices designed from a description ("an
+  Italian grandmother speaking Spanish") came out Latin American, so she now speaks with "Angelina", a native
+  Italian voice from the ElevenLabs library, and only the characters' lines carry the `[Italian accent]` tag (the
+  narrator keeps his own). Three unused "Reachy Pilot" voices were deleted to free slots.
+- 2026-11-13: `cenicienta` (Cenicienta / Cenerentola) is Perrault's Cendrillon (1697), with nothing from the Disney
+  film: the bossy stepmother and two silly stepsisters, the fairy godmother's pumpkin carriage and mice-horses, the
+  ball, midnight, the glass slipper that fits only her, and (as in Perrault) she forgives her stepsisters. 13
+  moments (scrubbing, the herald's trumpet, "¡calabaza, carroza!", neighing, a dress of stars or flowers, the
+  carriage gallop, the waltz, striking midnight with pats, the stairs or the garden, running, "¡nooo!" twice for the
+  stepsisters' feet, cheering the wedding). No free recording of Rossini's Cenerentola turned up, so the music is his
+  William Tell gallop and Strauss's Blue Danube, both by the US Marine Band (public domain). Six new roles on voices
+  already on the account; the Befana's old voice is now the fairy godmother. `story_build.py` keeps a downloaded
+  recording and reuses it, since Wikimedia answers repeated downloads with 429. About 12k credits.

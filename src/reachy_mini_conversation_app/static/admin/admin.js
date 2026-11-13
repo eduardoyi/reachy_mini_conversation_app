@@ -931,6 +931,7 @@ const GAME_CARDS = {
   la_gran_carrera: { name: "The Big Race", shelf: "stories", facts: ["About 6 minutes", "Kids rev, honk, steer and cheer"] },
   donde_esta_bigotes: { name: "Where's Bigotes?", shelf: "stories", facts: ["About 7 minutes", "Kids call, meow, guess and count kittens"] },
   la_befana: { name: "La Befana", shelf: "stories", facts: ["About 7 minutes", "Kids sweep, fly the broom, sneeze and say her rhyme"] },
+  cenicienta: { name: "Cinderella", shelf: "stories", facts: ["About 7 minutes", "Kids say the magic words, neigh, waltz and run at midnight"] },
   el_cascanueces: { name: "The Nutcracker", shelf: "stories", facts: ["About 7 minutes", "Tchaikovsky's music; kids march, squeak and dance"] },
   la_monedita_de_plata: { name: "The Little Silver Coin", shelf: "stories", art: "monedita", facts: ["About 7 minutes", "Kids clink, caw, knead and say the magic word"] },
 };

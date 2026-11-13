@@ -250,16 +250,18 @@ async def _cut_recording(name: str, info: dict[str, object], out: Path) -> str |
     The cut fades in and out and is evened to ``loudness`` (LUFS) like the generated music.
     """
     seconds, start = float(info["seconds"]), float(info.get("start", 0.0))  # type: ignore[arg-type]
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "ReachyStoryBuilder/1.0 (private home robot)"}, timeout=300, follow_redirects=True
-    ) as client:
-        response = await client.get(str(info["source"]))
-    if response.status_code != 200:
-        return f"{name}: {response.status_code} from {info['source']}"
     folder = out / "sounds" / name
     folder.mkdir(parents=True, exist_ok=True)
     original = folder / f"original{Path(str(info['source'])).suffix or '.audio'}"
-    original.write_bytes(response.content)
+    # A downloaded recording is kept, so a new cut (or a 429 from Wikimedia) never needs it again.
+    if not original.is_file():
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "ReachyStoryBuilder/1.0 (private home robot)"}, timeout=300, follow_redirects=True
+        ) as client:
+            response = await client.get(str(info["source"]))
+        if response.status_code != 200:
+            return f"{name}: {response.status_code} from {info['source']}"
+        original.write_bytes(response.content)
     fade_out = min(2.0, seconds / 4)
     cut = folder / "cut.wav"
     filters = (
@@ -282,7 +284,6 @@ async def _cut_recording(name: str, info: dict[str, object], out: Path) -> str |
         check=True,
     )  # fmt: skip
     cut.unlink()
-    original.unlink()
     return None
 
 

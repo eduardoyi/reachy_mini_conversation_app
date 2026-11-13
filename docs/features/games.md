@@ -53,7 +53,7 @@ own page: [scribble-rush.md](scribble-rush.md).
 Detectives, the mystery party game played on phones, also runs on the host and has its own page:
 [detectives.md](detectives.md).
 
-**Story mode** runs on the same host too. Richie tells a classic story (Los tres cerditos, El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera, ¿Dónde está Bigotes?, La monedita de plata, La Befana, El Cascanueces) in Spanish or
+**Story mode** runs on the same host too. Richie tells a classic story (Los tres cerditos, El nabo gigante, Ricitos de Oro, Los músicos de Bremen, La gran carrera, ¿Dónde está Bigotes?, La monedita de plata, La Befana, El Cascanueces, Cenicienta) in Spanish or
 Italian, and the kids knock, shout, blow, copy moves and pick small things. Each story is a data file under
 `stories/`, and its audio is recorded ahead of time by `scripts/story_build.py`. Plan:
 [story-mode.md](../plans/story-mode.md). Stories are catalog entries with `kind="story"`, and Italian is used only
