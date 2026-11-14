@@ -1194,9 +1194,11 @@ class QuickCommands:
                 return reply
         writing = getattr(self._deps, "writing", None)
         if writing is not None and writing.active:
-            if writing.hear(text):  # "Richie, siguiente" while a child writes is the next letter, not a song
-                return QuickReply(None, "es", "writing")
-            writing.stop()  # any other request ends it
+            # "Listo, Richie" while a child writes is the next letter, not a song. Anything else leaves the word
+            # alone: 2026-11-14 a request with his name in it ("Listo Richie.") ended the practice here.
+            written: QuickReply | None = writing.addressed(text)
+            if written is not None:
+                return written
         game_request = parse_game_request(text) if games is not None else None
         if games is not None and game_request is not None:
             offered: QuickReply = games.offer(game_request)  # "juguemos a los colores": asks first, a yes starts it

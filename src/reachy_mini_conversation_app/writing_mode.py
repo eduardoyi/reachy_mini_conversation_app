@@ -302,6 +302,7 @@ class WritingMode:
         if cooldown and now - self._stepped_at < STEP_COOLDOWN_S:
             return None
         self._step += 1
+        logger.info("Writing practice step %d of %d", self._step + 1, len(self._letters))
         if self._step < len(self._letters):
             return self._show_step()
         logger.info("Writing practice finished")
@@ -314,6 +315,7 @@ class WritingMode:
         if cooldown and self._clock() - self._stepped_at < STEP_COOLDOWN_S:
             return None
         self._step = max(0, self._step - 1)
+        logger.info("Writing practice back to step %d of %d", self._step + 1, len(self._letters))
         return self._show_step()
 
     def _show_step(self) -> str:

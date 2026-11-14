@@ -320,6 +320,9 @@ HEAD_TOUCH_WINDOW_S = 0.2
 # The command must stay put this long first: the head trails a stopped breath by about 0.5 s.
 HEAD_TOUCH_SETTLE_S = 1.5
 HEAD_TOUCH_COOLDOWN_S = 1.0
+# While the head is held, the largest move that was not a touch is logged this often, to tune the thresholds
+# against light pats that were missed (2026-11-14: taps during writing practice went unnoticed).
+HEAD_TOUCH_REPORT_S = 30.0
 
 
 class AntennaTouchDetector:
@@ -372,6 +375,8 @@ class HeadTouchDetector:
         self._last_touch = -math.inf
         self.touch_move_m = 0.0  # how far the head moved in the last touch, for the log
         self.touch_tilt_rad = 0.0
+        self.peak_move_m = 0.0  # the largest move that was not a touch since the last report, for tuning
+        self.peak_tilt_rad = 0.0
 
     def reset(self) -> None:
         """Forget the history: the head is no longer held still."""
@@ -399,6 +404,8 @@ class HeadTouchDetector:
         )
         tilt = float(np.arcsin(np.clip(np.linalg.norm(axis) / 2.0, 0.0, 1.0)))
         if move < HEAD_TOUCH_MOVE_M and tilt < HEAD_TOUCH_TILT_RAD:
+            self.peak_move_m = max(self.peak_move_m, move)
+            self.peak_tilt_rad = max(self.peak_tilt_rad, tilt)
             return False
         self._measured.clear()  # one push is one touch, not one per tick until it settles
         self._measured.append((now, np.array(measured, dtype=np.float64)))
@@ -625,6 +632,7 @@ class MovementManager:
         self._holding_still_until = -math.inf
         self._head_touch = HeadTouchDetector()
         self._head_touches = 0  # touches on the held-still head so far; guarded by _status_lock
+        self._head_touch_reported_at = -math.inf
         # Ringing for a call since then (``ring_antennas``), until RING_MAX_S has passed.
         self._ringing_since: float | None = None
         # Tracking paused while a speaker turn runs, to resume once the turn ends.
@@ -1577,7 +1585,17 @@ class MovementManager:
             return
         if measured.shape != (4, 4) or not np.all(np.isfinite(measured)):
             return
-        if not self._head_touch.update(now, np.asarray(commanded, dtype=np.float64), measured):
+        touched = self._head_touch.update(now, np.asarray(commanded, dtype=np.float64), measured)
+        if now - self._head_touch_reported_at >= HEAD_TOUCH_REPORT_S:
+            self._head_touch_reported_at = now
+            logger.info(
+                "Head held: largest untouched move %.2f mm, %.2f deg in %.0f s",
+                self._head_touch.peak_move_m * 1000.0,
+                math.degrees(self._head_touch.peak_tilt_rad),
+                HEAD_TOUCH_REPORT_S,
+            )
+            self._head_touch.peak_move_m = self._head_touch.peak_tilt_rad = 0.0
+        if not touched:
             return
         with self._status_lock:
             self._head_touches += 1

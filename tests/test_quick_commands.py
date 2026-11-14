@@ -1292,9 +1292,11 @@ class _Writing:
         self.active = True
         return None
 
-    def hear(self, text: str) -> bool:
+    def addressed(self, text: str) -> QuickReply | None:
         self.heard.append(text)
-        return normalize(text) == "ya"
+        if normalize(text) in ("ya", "listo richie"):
+            return QuickReply("Ahora, la o.", "es", "writing")
+        return None
 
     def stop(self) -> None:
         self.stopped += 1
@@ -1316,18 +1318,20 @@ async def test_teach_me_to_write_starts_writing_without_the_cloud() -> None:
 
 
 @pytest.mark.asyncio
-async def test_while_writing_a_writing_word_steps_and_anything_else_ends_it() -> None:
-    """Saying "Richie, ya" is the next letter (not a song); another request ends writing and runs as usual."""
+async def test_while_writing_a_writing_word_steps_and_anything_else_leaves_it() -> None:
+    """Saying "Listo, Richie" is the next letter (not a song); another request runs and the word stays.
+
+    2026-11-14: "Listo Richie." was read as another request and ended the practice.
+    """
     runner, tools, deps = _runner()
     deps.writing = _Writing()
     deps.writing.active = True
 
-    reply = await runner.handle("ya")
-    assert reply is not None and reply.kind == "writing" and reply.text is None
-    assert deps.writing.stopped == 0
+    reply = await runner.handle("Listo Richie.")
+    assert reply is not None and reply.kind == "writing" and reply.text == "Ahora, la o."
 
     reply = await runner.handle("apaga las luces")
-    assert deps.writing.stopped == 1
+    assert deps.writing.stopped == 0 and deps.writing.active
     assert reply is not None and tools["lights"].calls == [{"action": "set", "target": "all", "on": False}]
 
 
