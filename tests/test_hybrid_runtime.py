@@ -495,6 +495,41 @@ async def test_strategy_a_injects_completed_dinner_context_without_replaying_aud
 
 
 @pytest.mark.asyncio
+async def test_a_context_note_opens_the_conversation_context() -> None:
+    """What is going on (the word being written) reaches the conversation after the room transcript."""
+    clock = FakeClock()
+    clock.value = 4.0
+    processor = AmbientContextProcessor(
+        vad=SilentVAD(),
+        stt=RecordingSTT("unused"),
+        config=AmbientContextConfig(strategy=AmbientContextStrategy.CONTINUOUS_TRANSCRIPT),
+        clock=clock,
+    )
+    assert processor.transcript.add(TranscriptSegment("Earlier dinner context.", 1, 2, 1))
+    assert processor.transcript.add(TranscriptSegment("Reachy, it has an H.", 3, 4, 2))
+    handler = FakeHandler()
+    runtime = HybridRuntime(
+        lambda: handler,
+        local_processor=processor,
+        context_processor=processor,
+        local_processing_close_callback=processor.close,
+        wake_detector=TranscriptWakeWordDetector(cooldown_seconds=0),
+        clock=clock,
+    )
+    runtime.set_context_note(lambda: "Writing practice is on: 'MATÍAS'.")
+
+    runtime.observe_local_transcript(TranscriptSegment("Reachy, it has an H.", 3, 4, 2))
+    await handler.started.wait()
+    handler.set_connected(True)
+    await handler.say_called.wait()
+
+    context = handler.get_initial_context()
+    assert context.startswith(framed("Earlier dinner context."))
+    assert context.endswith("Writing practice is on: 'MATÍAS'.")
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_strategy_a_excludes_current_wake_question_from_seeded_context() -> None:
     """A live wake question is sent once as the addressed turn, not as background history."""
     clock = FakeClock()

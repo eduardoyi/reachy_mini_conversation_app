@@ -84,7 +84,9 @@ class ShowOnDisplay(Tool):
         "painting by Leonardo da Vinci' or 'a tiger in the wild, photo'. If no suitable picture is found it is "
         "drawn instead. "
         "kind=writing: every time a child wants to learn to write a word or short phrase ('enséñame a escribir "
-        "PAPÁ'), pass it as `word`, spelled correctly with its accents (at most 12 letters); it is shown one big "
+        "PAPÁ'), pass it as `word`, spelled correctly with its accents (at most 12 letters); a name is spelled "
+        "exactly as they spell or describe it ('Mathias, con hache' is MATHIAS); called again while a word is "
+        "being written, it corrects that word and keeps the letters that still match; it is shown one big "
         "capital at a time and you say each letter by yourself, so then say only '¡Vamos!'; the conversation "
         "closes by itself (no goodbye). "
         "kind=word: a word card with `word`, `pronunciation`, `meaning`, an optional `header` and an optional "
@@ -221,6 +223,7 @@ class ShowOnDisplay(Tool):
             if kind == "writing":
                 if deps.writing is None:
                     return {"error": "Writing practice is not set up here."}
+                correcting = bool(getattr(deps.writing, "active", False))
                 problem = deps.writing.start(_text(kwargs, "word"))
                 if problem is not None:
                     return {
@@ -229,9 +232,10 @@ class ShowOnDisplay(Tool):
                     }
                 if deps.end_conversation is not None:
                     deps.end_conversation(goodbye=False)
+                opening = "'¡Corregido!'" if correcting else "'¡Vamos!'"
                 return {
                     "ok": True,
-                    "instruction": "Say only '¡Vamos!', nothing more: no goodbye, and do not call end_conversation. "
+                    "instruction": f"Say only {opening}, nothing more: no goodbye, and do not call end_conversation. "
                     "The conversation closes by itself and the letters go on without you.",
                 }
             if kind == "now_playing":

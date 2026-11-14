@@ -748,6 +748,8 @@ class HybridRuntime:
         # Answers, instead of the conversation, a wake that no quick command took (a game in progress); its
         # reply is None when the conversation should open after all.
         self._cloud_gate: QuickCommandHandler | None = None
+        # A note on what is going on that the conversation should know (the word being written), or "".
+        self._context_note: Callable[[], str] | None = None
         # While it returns True (a game is playing), announcements other than the game's own wait.
         self._announcement_hold: Callable[[], bool] | None = None
         self._strict_wake: Callable[[], bool] | None = None
@@ -1123,6 +1125,10 @@ class HybridRuntime:
     def set_cloud_gate(self, gate: QuickCommandHandler | None) -> None:
         """Offer every wake that would open the conversation to ``gate`` first; a reply keeps it closed."""
         self._cloud_gate = gate
+
+    def set_context_note(self, note: Callable[[], str] | None) -> None:
+        """Add ``note()`` (when not empty) to each conversation's opening context."""
+        self._context_note = note
 
     def set_announcement_hold(self, hold: Callable[[], bool] | None) -> None:
         """Hold announcements other than a game's own while ``hold()`` is True; awaited answers still run."""
@@ -1818,6 +1824,9 @@ class HybridRuntime:
 
             ambient_text = await self._context_for_activation(before_sequence=wake_sequence)
             hint = request_audio_hint(addressed_text) if request_in_audio and addressed_text else ""
+            note = self._context_note() if self._context_note is not None else ""
+            if note:
+                hint = f"{note}\n\n{hint}".strip()
             # Gemini cuts the context at LOCAL_CONTEXT_MAX_CHARS; keep room for the hint at its end.
             initial_context = frame_activation_context(
                 ambient_text, config.LOCAL_CONTEXT_MAX_CHARS - (len(hint) + 2 if hint else 0)

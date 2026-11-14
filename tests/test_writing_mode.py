@@ -238,3 +238,27 @@ async def test_a_conversation_pauses_the_practice_and_it_picks_up_after(tmp_path
     assert room.said[-1] == "Ahora, la o. Suena o."
     room.writing.stop()
     assert room.quiet[-1] is False
+
+
+@pytest.mark.asyncio
+async def test_a_corrected_spelling_keeps_the_letters_that_still_match(tmp_path: Path) -> None:
+    """2026-11-14: MATÍAS was written when they wanted MATHIAS, with no way to fix it; now the fix goes on at H."""
+    room = _Room(tmp_path)
+    room.writing.start("Matías")
+    for _ in range(3):
+        await room.pat()
+    assert room.writing.step == 3  # M, A, T done; the Í is on the screen
+    assert "'MATÍAS'" in room.writing.context_note() and "'MAT' done" in room.writing.context_note()
+
+    assert room.writing.start("Mathias") is None
+
+    assert room.writing.step == 3 and room.writing.active
+    assert room.said[-1] == "Ahora, la hache. Es muda: no suena."
+    assert "'MATHIAS'" in room.writing.context_note()
+    await room.pat()
+    assert room.said[-1] == "Ahora, la i. Suena i."
+
+    room.writing.start("Mat")  # shorter than what was done: the last letter is shown again
+    assert room.writing.step == 2
+    room.writing.stop()
+    assert room.writing.context_note() == ""

@@ -163,6 +163,8 @@ async def test_writing_starts_practice_and_closes_the_conversation_without_a_goo
     closes: list[bool] = []
 
     class Writing:
+        active = False
+
         def start(self, text: str) -> str | None:
             if len(text) > 12:
                 return "It has 17 letters."
@@ -179,6 +181,10 @@ async def test_writing_starts_practice_and_closes_the_conversation_without_a_goo
     result = await ShowOnDisplay()(deps, kind="writing", word="PAPÁ")
     assert result["ok"] is True and "no goodbye" in result["instruction"]
     assert started == ["PAPÁ"] and closes == [False] and stopped == []
+
+    Writing.active = True  # a word being written: the call corrects it
+    corrected = await ShowOnDisplay()(deps, kind="writing", word="PAPÀ")
+    assert "¡Corregido!" in corrected["instruction"] and started[-1] == "PAPÀ"
 
     await ShowOnDisplay()(deps, kind="home")
     assert stopped == [True]  # something else on the screen ends writing practice

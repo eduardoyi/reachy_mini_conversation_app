@@ -1161,6 +1161,7 @@ def run(
                 return await game_gate(text) if game_gate is not None else None
 
             hybrid_runtime.set_cloud_gate(cloud_gate)
+            hybrid_runtime.set_context_note(writing_gate.context_note)
         if deps.maribel is not None:
             from reachy_mini_conversation_app.maribel import MaribelReply
             from reachy_mini_conversation_app.quick_commands import guess_language

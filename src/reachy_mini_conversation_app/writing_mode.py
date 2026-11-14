@@ -195,14 +195,41 @@ class WritingMode:
         count = sum(1 for letter in letters if letter != " ")
         if count > MAX_WRITING_LETTERS:
             return f"It has {count} letters; a child learning to write manages {MAX_WRITING_LETTERS} at most."
+        step = 0
         if self.active:
+            # A corrected spelling (MATÍAS -> MATHIAS) keeps the letters already written that still match.
+            same = next(
+                (at for at, (old, new) in enumerate(zip(self._letters, letters)) if old != new),
+                min(len(self._letters), len(letters)),
+            )
+            step = min(self._step, same, len(letters) - 1)
             self._end()
-        self._letters, self._text, self._step = letters, " ".join(text.split()), 0
+        self._letters, self._text, self._step = letters, " ".join(text.split()), step
         self._paused = False
         self._start_watch()
-        logger.info("Writing practice started letters=%d", count)
+        logger.info("Writing practice started letters=%d from_step=%d", count, step)
         self._say(self._show_step(), "es")
         return None
+
+    @property
+    def step(self) -> int:
+        """How many letters (and spaces) are already written."""
+        return self._step if self.active else 0
+
+    def context_note(self) -> str:
+        """Tell a conversation opened mid-word which word is on the screen and how to correct it; "" when none."""
+        if not self.active:
+            return ""
+        word = "".join(self._letters)
+        done = "".join(self._letters[: self._step])
+        return (
+            f"Writing practice is on: the children are copying {word!r} from the screen one letter at a time "
+            f"({done!r} done so far, now {self._letters[self._step]!r}). It is paused while you talk and goes on "
+            "by itself when this conversation closes. If they say it is spelled differently (a name spelled "
+            "another way, a missing or wrong letter), call show_on_display kind=writing with the corrected word, "
+            "spelled exactly as they say: the letters that still match stay done. For 'go back a letter' or "
+            "'next letter', tell them to say 'atrás' or 'listo'."
+        )
 
     def hear(self, text: str) -> bool:
         """Act on ``text`` when it is only a writing word ("ya", "atrás", "ya terminé"); False otherwise."""
