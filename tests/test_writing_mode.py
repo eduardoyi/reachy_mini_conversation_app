@@ -194,3 +194,47 @@ async def test_a_new_word_replaces_the_one_being_written(tmp_path: Path) -> None
     assert room.said[-1] == "Ahora, la a. Suena a."
     assert len([task for task in asyncio.all_tasks() if task.get_name() == "writing-touches"]) == 1
     room.writing.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_writing_word_said_with_his_name_steps_instead_of_opening_a_conversation(tmp_path: Path) -> None:
+    """2026-11-14: "Listo, Richie" opened a conversation that ended the practice; now it steps, no cooldown."""
+    room = _Room(tmp_path)
+    assert room.writing.addressed("Richie, listo") is None  # nothing being written
+    room.writing.start("sol")
+
+    reply = room.writing.addressed("Listo Richie.")
+    assert reply is not None and reply.text == "Ahora, la o. Suena o." and reply.language == "es"
+    reply = room.writing.addressed("oye risi, atrás")
+    assert reply is not None and reply.text == "Primero, la ese. Suena sss, como en sol."
+    assert room.writing.addressed("Richie, pon música") is None
+    assert room.writing.addressed("Richie") is None
+    assert room.said == ["Primero, la ese. Suena sss, como en sol."]  # the runtime speaks the replies
+
+    reply = room.writing.addressed("Richie, ya terminé")
+    assert reply is not None and reply.text == "Listo, lo dejamos aquí." and not room.writing.active
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_pauses_the_practice_and_it_picks_up_after(tmp_path: Path) -> None:
+    """While a conversation is open pats and room words do nothing and the head is free; then it goes on."""
+    room = _Room(tmp_path)
+    room.writing.start("sol")
+
+    room.writing.pause()
+    assert room.quiet == [True, False]
+    await room.pat()
+    room.now += STEP_COOLDOWN_S
+    assert not room.writing.hear("listo")
+    room.now += IDLE_END_S  # a long conversation does not end it
+    await asyncio.sleep(0.25)
+    assert room.writing.active and len(room.said) == 1
+
+    room.writing.resume()
+    assert room.quiet == [True, False, True]
+    await asyncio.sleep(0.25)
+    assert len(room.said) == 1  # the pat during the conversation is not counted afterwards
+    await room.pat()
+    assert room.said[-1] == "Ahora, la o. Suena o."
+    room.writing.stop()
+    assert room.quiet[-1] is False

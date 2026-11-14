@@ -153,9 +153,14 @@ async def test_a_lesson_tells_reachy_not_to_read_the_steps_out(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_writing_starts_practice_and_asks_reachy_to_end_the_conversation(tmp_path: Path) -> None:
-    """kind=writing hands the word to writing practice; a word too long comes back with a hint."""
+async def test_writing_starts_practice_and_closes_the_conversation_without_a_goodbye(tmp_path: Path) -> None:
+    """kind=writing hands the word to writing practice and closes the conversation with no goodbye.
+
+    2026-11-14: "¡Vamos! ¡Hasta luego!" before the first letter was awkward. A word too long comes back with a hint.
+    """
     started: list[str] = []
+    stopped: list[bool] = []
+    closes: list[bool] = []
 
     class Writing:
         def start(self, text: str) -> str | None:
@@ -164,12 +169,19 @@ async def test_writing_starts_practice_and_asks_reachy_to_end_the_conversation(t
             started.append(text)
             return None
 
+        def stop(self) -> None:
+            stopped.append(True)
+
     deps = _deps(_display(tmp_path))
     deps.writing = Writing()
+    deps.end_conversation = lambda goodbye=True: closes.append(goodbye) or {"status": "ending"}
 
     result = await ShowOnDisplay()(deps, kind="writing", word="PAPÁ")
-    assert result["ok"] is True and "end_conversation" in result["instruction"]
-    assert started == ["PAPÁ"]
+    assert result["ok"] is True and "no goodbye" in result["instruction"]
+    assert started == ["PAPÁ"] and closes == [False] and stopped == []
+
+    await ShowOnDisplay()(deps, kind="home")
+    assert stopped == [True]  # something else on the screen ends writing practice
 
     refused = await ShowOnDisplay()(deps, kind="writing", word="MURCIÉLAGO GIGANTE")
     assert refused["error"] == "It has 17 letters." and "shorter" in refused["instruction"]

@@ -45,11 +45,12 @@ PAUSED_END_S: Final[float] = 600.0
 HOLD_RENEW_S: Final[float] = 60.0
 _TICK_S: Final[float] = 0.05
 
-_ASK: Final[dict[str, str]] = {"es": "¿Jugamos {title}? {pitch}", "en": "Shall we play {title}? {pitch}"}
+# Just the name: a summary with it was long and annoying (2026-11-14).
+_ASK: Final[dict[str, str]] = {"es": "¿Jugamos {title}?", "en": "Shall we play {title}?"}
 _ASK_STORY: Final[dict[str, str]] = {
-    "es": "¿Les cuento {title}? {pitch}",
-    "it": "Vi racconto {title}? {pitch}",
-    "en": "Shall I tell {title}? {pitch}",
+    "es": "¿Quieren que les cuente {title}?",
+    "it": "Volete che vi racconti {title}?",
+    "en": "Do you want me to tell {title}?",
 }
 _MENU: Final[dict[str, str]] = {
     "es": "¿A qué jugamos? Puedo jugar {titles}.",
@@ -123,10 +124,10 @@ def _titles(language: str, keys: Iterable[str] = GAMES, kind: str = "game") -> s
     return titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + joiner + titles[-1]
 
 
-def _asking(info: GameInfo, language: str) -> str:
-    """Return the question before ``info`` starts: "¿Jugamos a los colores? …" or "¿Les cuento Los tres cerditos? …"."""
+def start_question(info: GameInfo, language: str) -> str:
+    """Return the question before ``info`` starts: "¿Jugamos a los colores?" or "¿Quieren que les cuente …?"."""
     table = _ASK_STORY if info.kind == "story" else _ASK
-    return table[language].format(title=info.title[language], pitch=info.pitch[language])
+    return table[language].format(title=info.title[language])
 
 
 def _ending_for(info: GameInfo, language: str) -> str:
@@ -147,7 +148,7 @@ def host_phrases() -> frozenset[str]:
             lines.add(_STORY_MENU[language].format(titles=stories))
         for game in GAMES.values():
             if language in game.languages and (game.kind == "story" or language in _ASK):
-                lines.add(_asking(game, language))
+                lines.add(start_question(game, language))
                 lines.add(_ending_for(game, language))
     return frozenset(lines)
 
@@ -229,7 +230,7 @@ class GameHost:
             self._language = language
             text = _MENU[language].format(titles=_titles(language, self._factories))
         else:
-            text = _asking(game, language)
+            text = start_question(game, language)
         logger.info("Game offered: %s", game.key if game is not None else "which game")
 
         async def listen() -> str | None:

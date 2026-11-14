@@ -2,6 +2,7 @@ import time
 import logging
 from typing import Any, Final
 
+from reachy_mini_conversation_app.games.host import start_question
 from reachy_mini_conversation_app.games.catalog import GAMES
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -24,9 +25,10 @@ class PlayGame(Tool):
         "Reachy's games, played locally after this conversation closes: "
         + "; ".join(f"{game.key} ({game.title['en']}, '{game.title['es']}')" for game in GAMES.values())
         + ". The stories (kind story, told in Spanish or Italian, the children join in) are started the same "
-        "way when someone asks for a story. When someone wants to play, call action=rules first: it says how to explain the game in one "
-        "sentence and ask whether they want to play. Only after a yes, call action=start, then say only "
-        "'¡Vamos!' (or 'Let's go!') and call end_conversation. Never start a game without that yes."
+        "way when someone asks for a story. When someone wants to play, call action=rules first: it gives the short question to ask "
+        "whether they want to play (just the name, no description). Only after a yes, call action=start, then "
+        "say only '¡Vamos!' (or 'Let's go!'): the conversation closes by itself. Never start a game without "
+        "that yes."
     )
     parameters_schema = {
         "type": "object",
@@ -65,8 +67,8 @@ class PlayGame(Tool):
             return {
                 "game": key,
                 "rules": game.rules,
-                "ask": f"Explain it in one short sentence ({game.pitch[language]}) and ask whether they want "
-                "to play. Start it only after a yes.",
+                "ask": f"Ask only this, word for word, with no description or summary: "
+                f"{start_question(game, language)!r} Start it only after a yes.",
             }
         if action != "start":
             return {"error": "action must be rules or start."}
@@ -77,4 +79,12 @@ class PlayGame(Tool):
         if problem is not None:
             return {"error": problem}
         self._rules_read.clear()
-        return {"status": "started", "note": "Say only '¡Vamos!' (or 'Let's go!') and call end_conversation now."}
+        if deps.writing is not None:
+            deps.writing.stop()
+        if deps.end_conversation is not None:
+            deps.end_conversation(goodbye=False)
+        return {
+            "status": "started",
+            "note": "Say only '¡Vamos!' (or 'Let's go!'), nothing more: no goodbye, and do not call "
+            "end_conversation. The conversation closes by itself.",
+        }

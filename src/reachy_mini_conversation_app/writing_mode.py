@@ -3,19 +3,24 @@
 "Richie, enséñame a escribir PAPÁ" shows the first letter very large, with the word filling in above it, and
 Reachy names it and its sound ("Primero, la pe. Suena p, como en pato."). A pat on his head, or a room
 transcript that is only "¡ya!", "listo" or "siguiente" (no name needed), shows the next; "atrás" goes back and
-"ya terminé" ends it. It all runs locally: the room is already transcribed on this computer, the phrases are
+"ya terminé" ends it. The same words said with his name ("¡Listo, Richie!") do the same instead of opening a
+conversation. A conversation opened for something else pauses the practice (the head may move again) and it picks
+up where it was once the conversation closes; showing something else on the screen or starting a game ends it.
+It all runs locally: the room is already transcribed on this computer, the phrases are
 fixed lines cached by the reply voice, and no cloud conversation stays open while he writes.
 """
 
 import time
 import asyncio
+import difflib
 import logging
 import itertools
 import unicodedata
 from typing import Final, Callable
 
+from reachy_mini_conversation_app.wake_word import REACHY_TRANSCRIPT_ALIASES
 from reachy_mini_conversation_app.eink_display import EInkDisplay, render_writing
-from reachy_mini_conversation_app.quick_commands import normalize
+from reachy_mini_conversation_app.quick_commands import QuickReply, normalize
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +73,21 @@ _END_WORDS: Final[frozenset[str]] = frozenset(
      "para ya"}
 )  # fmt: skip
 _STOPPED: Final[str] = "Listo, lo dejamos aquí."
+# Dropped from a request said with his name before it is read as a writing word ("oye Richie, listo").
+_NAME_WORDS: Final[frozenset[str]] = frozenset({"reachy", *REACHY_TRANSCRIPT_ALIASES, "oye", "hey", "eh"})
+# How close (difflib ratio) a word must be to "reachy" or "richi" to count as his name misheard ("risi").
+_NAME_SIMILARITY: Final[float] = 0.6
+_NAME_FORMS: Final[tuple[str, ...]] = ("reachy", "richi")
+
+
+def _without_name(said: str) -> str:
+    """Return normalized ``said`` without Reachy's name (or a mishearing of it) and calls like "oye"."""
+    return " ".join(
+        word
+        for word in said.split()
+        if word not in _NAME_WORDS
+        and all(difflib.SequenceMatcher(None, word, name).ratio() < _NAME_SIMILARITY for name in _NAME_FORMS)
+    )
 
 
 def writing_letters(text: str) -> list[str] | None:
@@ -160,6 +180,7 @@ class WritingMode:
         self._stepped_at = -IDLE_END_S
         self._watch: asyncio.Task[None] | None = None
         self._screen = b""
+        self._paused = False
 
     @property
     def active(self) -> bool:
@@ -177,30 +198,69 @@ class WritingMode:
         if self.active:
             self._end()
         self._letters, self._text, self._step = letters, " ".join(text.split()), 0
-        self._quiet_head(True)
-        self._watch = asyncio.get_running_loop().create_task(
-            self._watch_touches(self._touches(), self._clock()), name="writing-touches"
-        )
+        self._paused = False
+        self._start_watch()
         logger.info("Writing practice started letters=%d", count)
-        self._show_step()
+        self._say(self._show_step(), "es")
         return None
 
     def hear(self, text: str) -> bool:
         """Act on ``text`` when it is only a writing word ("ya", "atrás", "ya terminé"); False otherwise."""
-        if not self.active:
+        if not self.active or self._paused:
             return False
         said = normalize(text)
         if said in _NEXT_WORDS:
-            self._next()
+            phrase = self._next()
         elif said in _BACK_WORDS:
-            self._back()
+            phrase = self._back()
         elif said in _END_WORDS:
             logger.info("Writing practice ended: asked")
             self.stop()
-            self._say(_STOPPED, "es")
+            phrase = _STOPPED
         else:
             return False
+        if phrase is not None:
+            self._say(phrase, "es")
         return True
+
+    def addressed(self, text: str) -> QuickReply | None:
+        """Answer a writing word said with Reachy's name ("¡Listo, Richie!"); None for anything else.
+
+        The reply is spoken by the runtime in place of a conversation, so the practice goes on.
+        """
+        if not self.active:
+            return None
+        said = _without_name(normalize(text))
+        if said in _NEXT_WORDS:
+            phrase = self._next(cooldown=False)
+        elif said in _BACK_WORDS:
+            phrase = self._back(cooldown=False)
+        elif said in _END_WORDS:
+            logger.info("Writing practice ended: asked by name")
+            self.stop()
+            phrase = _STOPPED
+        else:
+            return None
+        logger.info("Writing practice stepped by a request with the name")
+        return QuickReply(phrase, "es", "writing")
+
+    def pause(self) -> None:
+        """Let go of the head and stop counting pats while a conversation is open; the word stays."""
+        if not self.active or self._paused:
+            return
+        self._paused = True
+        self._quiet_head(False)
+        self._cancel_watch()
+        logger.info("Writing practice paused for a conversation")
+
+    def resume(self) -> None:
+        """Hold the head again and count new pats, after a conversation that left the word on the screen."""
+        if not self.active or not self._paused:
+            return
+        self._paused = False
+        self._stepped_at = self._clock()
+        self._start_watch()
+        logger.info("Writing practice resumed")
 
     def stop(self) -> None:
         """End writing now (another request, or asked); the screen stays and follows the usual rules again."""
@@ -209,38 +269,50 @@ class WritingMode:
         self._end()
         self._display.show(self._screen)
 
-    def _next(self) -> None:
+    def _next(self, *, cooldown: bool = True) -> str | None:
+        """Show the next letter (or the whole word at the end); return what to say, None within the cooldown."""
         now = self._clock()
-        if now - self._stepped_at < STEP_COOLDOWN_S:
-            return
+        if cooldown and now - self._stepped_at < STEP_COOLDOWN_S:
+            return None
         self._step += 1
         if self._step < len(self._letters):
-            self._show_step()
-            return
+            return self._show_step()
         logger.info("Writing practice finished")
         letters, text = self._letters, self._text
         self._end()
         self._display.show(render_writing(letters, len(letters)))
-        self._say(f"¡Muy bien! Escribiste {text.lower()}.", "es")
+        return f"¡Muy bien! Escribiste {text.lower()}."
 
-    def _back(self) -> None:
-        if self._clock() - self._stepped_at < STEP_COOLDOWN_S:
-            return
+    def _back(self, *, cooldown: bool = True) -> str | None:
+        if cooldown and self._clock() - self._stepped_at < STEP_COOLDOWN_S:
+            return None
         self._step = max(0, self._step - 1)
-        self._show_step()
+        return self._show_step()
 
-    def _show_step(self) -> None:
+    def _show_step(self) -> str:
+        """Show the current letter and return its phrase."""
         self._stepped_at = self._clock()
         self._screen = render_writing(self._letters, self._step)
         self._display.show(self._screen, owner="writing")
-        self._say(letter_phrase(self._letters, self._step), "es")
+        return letter_phrase(self._letters, self._step)
 
-    def _end(self) -> None:
-        self._letters = []
-        self._quiet_head(False)
+    def _start_watch(self) -> None:
+        self._quiet_head(True)
+        self._watch = asyncio.get_running_loop().create_task(
+            self._watch_touches(self._touches(), self._clock()), name="writing-touches"
+        )
+
+    def _cancel_watch(self) -> None:
         watch, self._watch = self._watch, None
         if watch is not None and watch is not asyncio.current_task():
             watch.cancel()
+
+    def _end(self) -> None:
+        self._letters = []
+        if not self._paused:
+            self._quiet_head(False)
+        self._paused = False
+        self._cancel_watch()
 
     async def _watch_touches(self, seen: int, held_at: float) -> None:
         """Step on each pat after the ``seen`` ones, keep the head held, and end after IDLE_END_S without a step."""
@@ -257,4 +329,6 @@ class WritingMode:
             count = self._touches()
             if count > seen:
                 seen = count
-                self._next()
+                phrase = self._next()
+                if phrase is not None:
+                    self._say(phrase, "es")

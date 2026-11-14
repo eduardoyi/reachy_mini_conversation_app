@@ -58,10 +58,10 @@ async def _playing(reachy: FakeReachy, host: GameHost) -> None:
 
 @pytest.mark.asyncio
 async def test_a_game_asks_first_and_a_yes_starts_it(room) -> None:
-    """Saying "Juguemos a los colores" asks with a one-line pitch; "sí" starts it, pauses music, takes the screen."""
+    """Saying "Juguemos a los colores" asks with just the name; "sí" starts it, pauses music, takes the screen."""
     reachy, host, made = room
     reply = host.offer(GameRequest(COLOR_HUNT, "es"))
-    assert reply.text == "¿Jugamos a los colores? Yo digo un color y tú me traes algo de ese color."
+    assert reply.text == "¿Jugamos a los colores?"
     assert host.state is GameState.ASKING and made == []
     assert reply.after is not None
     await reply.after()
@@ -269,7 +269,7 @@ async def test_the_admin_app_can_start_in_kids_mode(room) -> None:
 def test_every_host_line_is_cached() -> None:
     """The questions and replies are fixed lines in both languages, so the reply voice caches them."""
     phrases = host_phrases()
-    assert "¿Jugamos a los colores? Yo digo un color y tú me traes algo de ese color." in phrases
-    assert "Shall we play color hunt? I say a color, and you bring me something that color." in phrases
+    assert "¿Jugamos a los colores?" in phrases
+    assert "Shall we play color hunt?" in phrases
     assert "Estamos jugando a los colores. ¿Lo terminamos?" in phrases
     assert "Paused. Keep playing, or stop?" in phrases

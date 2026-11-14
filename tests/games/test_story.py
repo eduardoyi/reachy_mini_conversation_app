@@ -369,8 +369,8 @@ def test_the_host_asks_about_stories_in_italian() -> None:
     """The host's lines exist in Italian and stories are asked about as stories."""
     lines = host_phrases()
     assert "Pausa. Continuiamo o finiamo?" in lines
-    assert any(line.startswith("Vi racconto I tre porcellini?") for line in lines)
-    assert any(line.startswith("¿Les cuento Los tres cerditos?") for line in lines)
+    assert any(line == "Volete che vi racconti I tre porcellini?" for line in lines)
+    assert any(line == "¿Quieren que les cuente Los tres cerditos?" for line in lines)
 
 
 # Telling a story -----------------------------------------------------------------------------------

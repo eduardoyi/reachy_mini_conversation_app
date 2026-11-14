@@ -959,8 +959,9 @@ def run(
             from reachy_mini_conversation_app.tools.spotify_control import SPOTIFY_DUCKER
 
             conversation_people.clear()
-            if active and deps.writing is not None:
-                deps.writing.stop()  # any other request ends writing practice
+            if deps.writing is not None:
+                # A conversation pauses writing practice; it goes on from the same letter once it closes.
+                deps.writing.pause() if active else deps.writing.resume()
 
             if config.SPEAKER_FOLLOWING_ENABLED:
                 movement_manager.set_conversation_active(active)
@@ -1148,6 +1149,18 @@ def run(
                 return (games is not None and games.heard(text)) or (writing is not None and writing.hear(text))
 
             hybrid_runtime.set_room_listener(room_heard)
+        if deps.writing is not None:
+            writing_gate = deps.writing
+            game_gate = deps.games.addressed if deps.games is not None else None
+
+            async def cloud_gate(text: str) -> Any:
+                """Step writing practice on "¡Listo, Richie!", then let a game answer, before a conversation opens."""
+                reply = writing_gate.addressed(text)
+                if reply is not None:
+                    return reply
+                return await game_gate(text) if game_gate is not None else None
+
+            hybrid_runtime.set_cloud_gate(cloud_gate)
         if deps.maribel is not None:
             from reachy_mini_conversation_app.maribel import MaribelReply
             from reachy_mini_conversation_app.quick_commands import guess_language
@@ -1169,11 +1182,13 @@ def run(
                 "note": "Say one short good night now, once. You no longer hear the room.",
             }
 
-        def end_conversation() -> dict[str, Any]:
-            """Close the conversation after Reachy's goodbye; the wake word starts a new one."""
+        def end_conversation(goodbye: bool = True) -> dict[str, Any]:
+            """Close the conversation after Reachy's goodbye (or his last line); the wake word starts a new one."""
             closing = runtime_for_tools.request_close("assistant_ended")
             if not closing:
                 return {"status": "no_conversation"}
+            if not goodbye:
+                return {"status": "ending"}
             return {
                 "status": "ending",
                 "note": "Say one short goodbye now, once. You no longer hear the room; do not say goodbye again.",

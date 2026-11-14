@@ -85,8 +85,8 @@ class ShowOnDisplay(Tool):
         "drawn instead. "
         "kind=writing: every time a child wants to learn to write a word or short phrase ('enséñame a escribir "
         "PAPÁ'), pass it as `word`, spelled correctly with its accents (at most 12 letters); it is shown one big "
-        "capital at a time and you say each letter by yourself, so then say only '¡Vamos!' and call "
-        "end_conversation. "
+        "capital at a time and you say each letter by yourself, so then say only '¡Vamos!'; the conversation "
+        "closes by itself (no goodbye). "
         "kind=word: a word card with `word`, `pronunciation`, `meaning`, an optional `header` and an optional "
         "`picture` (its subject in English); for every translation ('how do you say X in Y') and every word you "
         "teach. "
@@ -187,6 +187,8 @@ class ShowOnDisplay(Tool):
             return {"error": "No e-ink screen is set up."}
         kind = kwargs.get("kind")
         logger.info("Tool call: show_on_display kind=%s", kind)
+        if kind != "writing" and deps.writing is not None:
+            deps.writing.stop()  # something else on the screen ends writing practice
         result: dict[str, Any] = {"ok": True, "note": "The screen updates in a few seconds."}
         try:
             if kind == "home":
@@ -225,9 +227,12 @@ class ShowOnDisplay(Tool):
                         "error": problem,
                         "instruction": "Suggest something shorter (one of its words) and start that if they agree.",
                     }
+                if deps.end_conversation is not None:
+                    deps.end_conversation(goodbye=False)
                 return {
                     "ok": True,
-                    "instruction": "Say only '¡Vamos!' and call end_conversation now; the letters go on without you.",
+                    "instruction": "Say only '¡Vamos!', nothing more: no goodbye, and do not call end_conversation. "
+                    "The conversation closes by itself and the letters go on without you.",
                 }
             if kind == "now_playing":
                 if deps.now_playing is None:

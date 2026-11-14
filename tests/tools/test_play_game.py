@@ -26,16 +26,21 @@ def _deps(host: Any) -> ToolDependencies:
 
 @pytest.mark.asyncio
 async def test_start_needs_the_rules_first() -> None:
-    """Starting without the rules is refused; after them, the game starts and the conversation should close."""
+    """Starting without the rules is refused; after them, the game starts and the conversation closes by itself."""
     host = _Host()
     tool = PlayGame()
-    refused = await tool(_deps(host), game="colors", action="start")
+    closes: list[bool] = []
+    deps = _deps(host)
+    deps.end_conversation = lambda goodbye=True: closes.append(goodbye) or {"status": "ending"}
+    refused = await tool(deps, game="colors", action="start")
     assert "rules first" in refused["error"] and host.started == []
-    rules = await tool(_deps(host), game="colors", action="rules", language="es")
-    assert "Yo digo un color" in rules["ask"] and "red" in rules["rules"]
-    started = await tool(_deps(host), game="colors", action="start", language="es")
-    assert started["status"] == "started" and "end_conversation" in started["note"]
-    assert host.started == [("colors", "es")]
+    rules = await tool(deps, game="colors", action="rules", language="es")
+    # Only the short question: no summary of the game (2026-11-14).
+    assert "'¿Jugamos a los colores?'" in rules["ask"] and "Yo digo un color" not in rules["ask"]
+    assert "red" in rules["rules"]
+    started = await tool(deps, game="colors", action="start", language="es")
+    assert started["status"] == "started" and "no goodbye" in started["note"]
+    assert host.started == [("colors", "es")] and closes == [False]
     again = await tool(_deps(host), game="colors", action="start")
     assert "error" in again  # each start needs its own rules and question
 

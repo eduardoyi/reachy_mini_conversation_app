@@ -54,7 +54,8 @@ class ToolDependencies:
     # Hybrid runtime only: sleep pose and back to waiting for the wake word, with the app still running.
     standby: Callable[[], dict[str, Any]] | None = None
     # Hybrid runtime only: close the conversation after Reachy's goodbye and wait for the wake word.
-    end_conversation: Callable[[], dict[str, Any]] | None = None
+    # Closes after the reply; goodbye=False when the last line is not a goodbye ("¡Vamos!" before a game).
+    end_conversation: Callable[..., dict[str, Any]] | None = None
     face_recognition: Any = None  # FaceRecognitionService from face_identity.py, when enabled
     home_hub: Any = None  # HomeDevices from home_devices.py, when lights are set up
     tv: Any = None  # AndroidTV from android_tv.py, when a TV is paired
