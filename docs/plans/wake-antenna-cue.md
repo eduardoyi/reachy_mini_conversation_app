@@ -38,3 +38,4 @@ up. The previous acknowledgment (a 0.18 s, 4° nod) was easy to miss.
 | Date | Update |
 |------|--------|
 | 2026-10-25 | Implemented on `feat/antenna-wake-cue`. `tests/test_moves.py` 29 passed; full suite 1,939 passed, 4 opt-in skips; ruff, format, mypy clean. Robot check pending. |
+| 2026-11-15 | Thinking and miss cues: the right antenna twirls ±22° after 0.6 s until he answers; a Gemini turn with no speech, no tool and no interruption drops the hold and plays `uncertain` (13 such turns in the past week of logs). Tests in `tests/test_moves.py`, `tests/test_gemini_live.py`. Robot check pending. |

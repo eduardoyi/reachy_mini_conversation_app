@@ -3327,6 +3327,30 @@ async def test_a_prompt_reply_or_more_speech_skips_the_thinking_gesture(gemini_c
 
 
 @pytest.mark.asyncio
+async def test_a_turn_with_no_answer_and_nothing_done_looks_unsure(gemini_config, deps, thinking_cues) -> None:
+    """Only a silent turn with no tool call and no interruption relaxes the antennas and plays "uncertain"."""
+    session = FakeSession()
+    handler = build_handler(deps)
+    activate_session(handler, session)
+    turn_complete = types.LiveServerMessage(server_content=types.LiveServerContent(turn_complete=True))
+    interrupted = types.LiveServerMessage(server_content=types.LiveServerContent(interrupted=True))
+
+    await handler._handle_server_message(audio_event(), session, 1)
+    await handler._handle_server_message(turn_complete, session, 1)
+    await handler._handle_server_message(interrupted, session, 1)
+    await handler._handle_server_message(turn_complete, session, 1)
+    await asyncio.sleep(0.05)
+    assert thinking_cues == []
+    deps.movement_manager.drop_attention.assert_not_called()
+
+    await handler._handle_server_message(turn_complete, session, 1)
+    await asyncio.sleep(0.05)
+    assert thinking_cues == ["uncertain"]
+    deps.movement_manager.drop_attention.assert_called_once()
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_turn_usage_is_summed_into_one_cost_record_per_connection(gemini_config, deps) -> None:
     """Each turn's usage report adds up; the connection's total is written once to the cost ledger."""
     from reachy_mini_conversation_app.usage_costs import get_ledger

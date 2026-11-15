@@ -19,7 +19,7 @@ Units and frames
 
 Safety
 - A wake or listening springs the antennas to an alert pose and holds it until he answers,
-  then blends them back.
+  then blends them back. While he works out an answer the right antenna twirls slowly.
 - Interpolations and blends are used to avoid jumps at all times.
 - `set_target` errors are rate-limited in logs.
 """
@@ -69,6 +69,12 @@ PERK_DECAY_S = 0.1
 PERK_FREQUENCY_HZ = 3.0
 # Caps the perk's swing, e.g. out of the folded sleep pose; recorded emotions peak near 8 rad/s.
 PERK_MAX_SPEED_RAD_S = 6.0
+# Thinking: once the user stops talking, the right antenna twirls slowly around the alert pose until he answers,
+# so the wait reads as working on it. It waits a moment first, so a quick answer shows no twirl.
+THINKING_TWIRL_DELAY_S = 0.6
+THINKING_TWIRL_EASE_S = 0.5
+THINKING_TWIRL_RAD = float(np.deg2rad(22.0))
+THINKING_TWIRL_HZ = 0.6
 # A WhatsApp call ringing, awake or asleep: two quick flutters of the antennas toward each other, then a rest,
 # like a phone's ring-ring. Toward each other, as the sleep pose has them folded near their limits.
 RING_FLUTTER_RAD = float(np.deg2rad(20.0))
@@ -88,6 +94,16 @@ def ring_offset(t: float) -> float:
         if 0.0 <= u < RING_FLUTTER_S:
             return float(RING_FLUTTER_RAD * (1.0 - np.cos(2.0 * np.pi * RING_FLUTTER_HZ * u)) / 2.0)
     return 0.0
+
+
+def thinking_twirl(t: float) -> float:
+    """Return the right antenna's offset (radians) from the alert pose ``t`` seconds after the user stopped."""
+    u = t - THINKING_TWIRL_DELAY_S
+    if u <= 0.0:
+        return 0.0
+    return float(
+        THINKING_TWIRL_RAD * min(1.0, u / THINKING_TWIRL_EASE_S) * np.sin(2.0 * np.pi * THINKING_TWIRL_HZ * u)
+    )
 
 
 # Type definitions
@@ -685,6 +701,8 @@ class MovementManager:
         self._attentive_until: float | None = None
         self._perk_started_at: float | None = None  # when the antennas began springing to the alert pose
         self._perk_from: Tuple[float, float] = self._last_commanded_pose[1]
+        # The user stopped talking then and no answer has started: the alert antennas twirl (``thinking_twirl``).
+        self._thinking_since: float | None = None
         self._breathing_active = False  # true when breathing move is running or queued
         self._listening_debounce_s = 0.15
         self._last_listening_toggle_time = self._now()
@@ -811,6 +829,10 @@ class MovementManager:
             rows, self._head_recording = self._head_recording, None
         return rows or []
 
+    def drop_attention(self) -> None:
+        """Let the alert antennas relax now, e.g. when a turn ended without an answer; thread-safe."""
+        self._command_queue.put(("drop_attention", None))
+
     def set_head_tracking(self, enabled: bool) -> None:
         """Start or stop following the user's face; thread-safe via the command queue."""
         self._command_queue.put(("set_head_tracking", enabled))
@@ -933,12 +955,17 @@ class MovementManager:
             self._is_listening = desired_state
             self._last_listening_blend_time = now
             if desired_state:
+                self._thinking_since = None
                 self._request_speaker_turn()
             else:
                 # Keep the alert pose while he works out an answer; speaking releases it.
                 self._attentive_until = now + ATTENTIVE_HOLD_S
+                self._thinking_since = now
             self._antenna_unfreeze_blend = 0.0
             self.state.update_activity()
+        elif command == "drop_attention":
+            self._attentive_until = None
+            self._thinking_since = None
         elif command == "set_head_tracking":
             self._tracking_auto = False
             self._framing_faces = False
@@ -997,6 +1024,7 @@ class MovementManager:
         elif command == "set_speaking":
             if payload:
                 self._attentive_until = None  # answering: drop the alert antennas
+                self._thinking_since = None
             if not self._head_tracking or self._aim_paused_tracking:
                 return  # the countdown's "3, 2, 1" must not hand the aimed head back to the tracker
             speaking = bool(payload)
@@ -1448,10 +1476,13 @@ class MovementManager:
 
         if listening:
             antennas_cmd = self._perk_antennas(now, max(0.0, now - last_update))
+            if self._thinking_since is not None and not self._is_listening:
+                antennas_cmd = (antennas_cmd[0], antennas_cmd[1] + thinking_twirl(now - self._thinking_since))
             self._listening_antennas = antennas_cmd  # releasing blends back from wherever the perk is
             new_blend = 0.0
         else:
             self._perk_started_at = None
+            self._thinking_since = None
             dt = max(0.0, now - last_update)
             if blend_duration <= 0:
                 new_blend = 1.0

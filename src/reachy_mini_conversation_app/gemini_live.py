@@ -235,6 +235,7 @@ class GeminiLiveHandler(ConversationHandler):
         # Per model turn, to log turns that end without speech (the model chose to stay silent).
         self._turn_spoke = False
         self._turn_tool_names: list[str] = []
+        self._turn_interrupted = False
         self._thinking_level = (
             resolve_gemini_thinking_level(self._model, config.GEMINI_THINKING_LEVEL)
             if self._extended_thinking
@@ -276,6 +277,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._interaction_deadline_at: float | None = None
         self._interaction_deadline_task: asyncio.Task[None] | None = None
         self._thinking_cue_task: asyncio.Task[None] | None = None
+        self._missed_cue_task: asyncio.Task[str | None] | None = None
         # Token usage reported this connection (one report per turn), recorded when it ends.
         self._usage_tokens: dict[str, int] = {}
         self._usage_turns = 0
@@ -543,6 +545,14 @@ class GeminiLiveHandler(ConversationHandler):
         move = await asyncio.to_thread(queue_intent_move, self.deps.movement_manager, "thinking")
         if move is not None:
             logger.info("No reply %.0f s after the user stopped; showing %s", _THINKING_CUE_DELAY_S, move)
+
+    def _show_missed(self) -> None:
+        """Relax the alert antennas and look unsure: the turn ended with no answer and nothing done."""
+        self._cancel_thinking_cue()
+        self.deps.movement_manager.drop_attention()
+        self._missed_cue_task = asyncio.create_task(
+            asyncio.to_thread(queue_intent_move, self.deps.movement_manager, "uncertain")
+        )
 
     def _clear_interaction_deadline(self) -> None:
         """Clear the fixed interaction deadline after authoritative IDLE."""
@@ -1649,6 +1659,7 @@ class GeminiLiveHandler(ConversationHandler):
                     )
                 self._clear_first_audio_markers(reason="interrupted")
                 self._cancel_thinking_cue()
+                self._turn_interrupted = True
                 self._spoken_turns.interrupted()
                 if self._conversation_record is not None:
                     self._conversation_record.cut_off()
@@ -1732,8 +1743,11 @@ class GeminiLiveHandler(ConversationHandler):
                 if not self._turn_spoke:
                     tools = ",".join(self._turn_tool_names) or "none"
                     logger.info("Gemini turn ended without speech tools=%s", tools)
+                    if not self._turn_tool_names and not self._turn_interrupted:
+                        self._show_missed()
                 self._turn_spoke = False
                 self._turn_tool_names = []
+                self._turn_interrupted = False
 
         if event.tool_call is not None:
             await self._handle_tool_call(event.tool_call, session, generation)

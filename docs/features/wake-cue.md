@@ -1,7 +1,7 @@
 # Feature: Wake cue (antennas)
 
 - Status: `in-progress`
-- Last updated: 2026-10-25
+- Last updated: 2026-11-15
 - Plan: [Wake antenna cue](../plans/wake-antenna-cue.md)
 
 ## Overview
@@ -24,14 +24,20 @@ audio (about 0.4 s, up to about 2 s); asleep, the name must come first (see
 - **Wake:** the antennas flick from wherever they are to ±35° (the spread of
   Pollen's `attentive` emotion), overshoot to about ±40° and settle in about
   0.35 s. The head lifts 8° and returns over 0.35 s.
-- **Listening and thinking:** the antennas stay still in the alert pose while the
-  user talks and while Reachy works out an answer.
+- **Listening:** the antennas stay still in the alert pose while the user talks.
+- **Thinking:** once the user stops, the left antenna holds the alert pose and,
+  after 0.6 s, the right one twirls ±22° around it at 0.6 Hz until he answers,
+  the user talks again or the hold runs out. A quick answer shows no twirl. The
+  recorded `thoughtful` move Gemini Live queues 2 s into a silence plays under it.
+- **No answer:** a Gemini Live turn that ends with no speech, no tool call and no
+  interruption relaxes the antennas at once (`drop_attention`) and plays the
+  recorded `uncertain` move, so a miss looks like "¿perdón?" rather than nothing.
 - **Answering:** the first `set_speaking(True)` releases the pose; the antennas
   blend back to the current move's antennas over 0.4 s.
 - **Follow-up turns:** in an open conversation, the user starting to talk
   (`set_listening(True)`) perks the antennas again, so each turn shows whose turn
   it is.
-- **No answer:** the pose relaxes 8 s after the wake or the user's last words,
+- **Timeout:** the pose relaxes 8 s after the wake or the user's last words,
   when the conversation closes, or when Reachy goes to sleep.
 - **Waking from sleep:** the perk swings the antennas up from the folded sleep
   pose at no more than 6 rad/s. The 1.5 s rise to the neutral pose is the
@@ -58,7 +64,9 @@ flowchart LR
 
 Attentive means `_is_listening` or a live `_attentive_until` deadline. The
 listening-end edge re-arms the deadline so the pose holds through the pause
-before the answer. The perk starts from the last commanded antennas, follows
+before the answer, and sets `_thinking_since`; while attentive and not listening,
+`thinking_twirl(now - _thinking_since)` is added to the right antenna. Listening,
+speaking, `drop_attention` and the end of the hold clear it. The perk starts from the last commanded antennas, follows
 `1 - exp(-t/0.1) cos(2π·3t)` toward the alert pose, and each tick's change is
 clipped to `PERK_MAX_SPEED_RAD_S × dt`. While attentive, `_listening_antennas`
 tracks the perk output so the release blend starts from where the antennas
@@ -69,9 +77,11 @@ actually are.
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
 | Constants | `moves.py`: `ATTENTIVE_ANTENNAS`, `ATTENTIVE_HOLD_S`, `PERK_DECAY_S`, `PERK_FREQUENCY_HZ`, `PERK_MAX_SPEED_RAD_S` | Alert pose (radians, `[left, right]`), hold timeout, spring shape and speed cap |
+| Thinking twirl | `moves.py`: `thinking_twirl`, `THINKING_TWIRL_*` | Right-antenna offset from the alert pose after the user stops; 0 for the first 0.6 s |
+| Miss | `GeminiLiveHandler._show_missed`, `MovementManager.drop_attention` | A silent turn with no tool call and no interruption: release the hold, queue `uncertain` |
 | Head lift | `ActivationAcknowledgementMove` | 0.35 s relative lift of −8° pitch (negative looks up); antennas and body untouched; returns to the captured pose |
 | Antenna layer | `MovementManager._calculate_blended_antennas`, `_perk_antennas` | Worker-thread only; the one place antenna commands are finalized |
-| Triggers | `acknowledge_activation`, `set_listening`, `set_speaking`, `set_conversation_active`, `go_to_sleep` | Existing thread-safe command-queue APIs; no new public API |
+| Triggers | `acknowledge_activation`, `set_listening`, `set_speaking`, `set_conversation_active`, `go_to_sleep`, `drop_attention` | Thread-safe command-queue APIs |
 
 `set_speaking(True)` releases the hold even when head tracking is off; the
 tracking handoff that follows is unchanged.
@@ -124,7 +134,11 @@ tracking handoff that follows is unchanged.
 
 | File | Scenarios |
 |------|-----------|
-| `tests/test_moves.py::test_wake_springs_the_antennas_to_the_alert_pose_and_holds_it` | Overshoot past the alert pose, settle, hold through listening and the pause before an answer |
+| `tests/test_moves.py::test_wake_springs_the_antennas_to_the_alert_pose_and_holds_it` | Overshoot past the alert pose, settle, hold through listening; the left antenna holds through the pause before an answer |
+| `tests/test_moves.py::test_the_right_antenna_twirls_while_he_works_out_an_answer` | No twirl for 0.6 s, then ±22°; talking again stops it; speaking releases |
+| `tests/test_moves.py::test_dropping_attention_relaxes_the_antennas_at_once` | `drop_attention` releases before the 8 s hold ends |
+| `tests/test_moves.py::test_antenna_sway_perk_and_twirl_are_not_touches` | The twirl, measured 0.1 s late, never reads as a bent antenna |
+| `tests/test_gemini_live.py::test_a_turn_with_no_answer_and_nothing_done_looks_unsure` | Spoken, interrupted and tool turns show nothing; a silent empty turn plays `uncertain` once |
 | `tests/test_moves.py::test_answering_releases_the_alert_antennas_smoothly` | Speaking releases; no snap; back to move antennas in 0.5 s |
 | `tests/test_moves.py::test_alert_antennas_release_without_an_answer` | Timeout, conversation close and sleep each release |
 | `tests/test_moves.py::test_following_turns_perk_again_when_the_user_speaks` | Listening alone perks |
@@ -136,6 +150,7 @@ tracking handoff that follows is unchanged.
 | Command or artifact | Scenarios |
 |---------------------|-----------|
 | Pending: on the robot | Say "Reachy": antennas flick out and hold; they drop when he answers; check the motion is clearly visible from across the room and not noisy in the mic |
+| Pending: on the robot | Ask something slow (a web picture): the right antenna twirls until he answers; the twirl is not heard in the mic |
 
 ### Test commands
 
@@ -155,3 +170,4 @@ skips, 2 expected warnings; ruff, ruff format and mypy clean.
 | 2026-10-25 | Initial implementation: antenna perk and hold, head lift replaces the nod. |
 | 2026-10-28 | Waking from sleep: no head lift after the rise (it dipped the head back down); `test_sleep_holds_the_pose_until_an_activation_wakes_him`. |
 | 2026-10-28 | Bending an antenna wakes him too (same cue); see [antenna-touch-wake.md](../plans/antenna-touch-wake.md). |
+| 2026-11-15 | Thinking twirl on the right antenna while he works out an answer; a silent, empty Gemini turn relaxes the antennas and plays `uncertain`. Silent turns with no tool were 13 in the week of logs to 2026-11-15. |

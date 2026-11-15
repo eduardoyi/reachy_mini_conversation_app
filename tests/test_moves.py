@@ -19,9 +19,11 @@ from reachy_mini_conversation_app.moves import (
     RING_FLUTTER_RAD,
     ATTENTIVE_ANTENNAS,
     REMOTE_LOOK_IDLE_S,
+    THINKING_TWIRL_RAD,
     HEAD_RECORDING_MAX_S,
     PERK_MAX_SPEED_RAD_S,
     HEAD_RECORDING_COLUMNS,
+    THINKING_TWIRL_DELAY_S,
     ANTENNA_TOUCH_PRESS_RAD,
     GazeTurnMove,
     PhotoAimMove,
@@ -32,6 +34,7 @@ from reachy_mini_conversation_app.moves import (
     AntennaTouchDetector,
     ActivationAcknowledgementMove,
     head_world_yaw,
+    thinking_twirl,
 )
 from reachy_mini_conversation_app.privacy import PrivacySwitch
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, EmotionQueueMove
@@ -192,6 +195,7 @@ class _AntennaClock:
         self.manager._poll_signals(self.now)
         antennas = self.manager._calculate_blended_antennas(target)
         self.manager._issue_control_command(np.eye(4), antennas, 0.0)
+        self.manager._publish_shared_state()
         return antennas
 
     def run(self, seconds: float, target: tuple[float, float] = (-0.1745, 0.1745)) -> list[tuple[float, float]]:
@@ -210,11 +214,50 @@ def test_wake_springs_the_antennas_to_the_alert_pose_and_holds_it() -> None:
     assert max(right for _, right in path) > ATTENTIVE_ANTENNAS[1] + np.deg2rad(3)
     np.testing.assert_allclose(path[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
 
-    # Listening, then the pause while he works out an answer, keep the pose.
+    # Listening keeps the pose; the pause while he works out an answer keeps the left antenna there.
     manager.set_listening(True)
-    clock.run(3.0)
+    np.testing.assert_allclose(clock.run(3.0)[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
     manager.set_listening(False)
-    np.testing.assert_allclose(clock.run(ATTENTIVE_HOLD_S - 1.0)[-1], ATTENTIVE_ANTENNAS, atol=1e-3)
+    thinking = clock.run(ATTENTIVE_HOLD_S - 1.0)
+    np.testing.assert_allclose([left for left, _ in thinking], ATTENTIVE_ANTENNAS[0], atol=1e-3)
+
+
+def test_the_right_antenna_twirls_while_he_works_out_an_answer() -> None:
+    """After a short pause the right antenna swings around the alert pose, until he answers or the user talks."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+    manager.set_listening(True)
+    clock.run(1.0)
+    manager.set_listening(False)
+
+    early = clock.run(THINKING_TWIRL_DELAY_S - 0.05)
+    np.testing.assert_allclose([right for _, right in early], ATTENTIVE_ANTENNAS[1], atol=1e-3)
+    swing = [right - ATTENTIVE_ANTENNAS[1] for _, right in clock.run(2.0)]
+    assert max(swing) > THINKING_TWIRL_RAD * 0.8 and min(swing) < -THINKING_TWIRL_RAD * 0.8
+
+    manager._last_listening_toggle_time = clock.now - 1.0
+    manager.set_listening(True)
+    np.testing.assert_allclose(clock.run(1.0)[-1], ATTENTIVE_ANTENNAS, atol=1e-2)
+
+    manager._last_listening_toggle_time = clock.now - 1.0
+    manager.set_listening(False)
+    clock.run(1.5)
+    manager.set_speaking(True)
+    np.testing.assert_allclose(clock.run(0.6)[-1], (-0.1745, 0.1745), atol=1e-6)
+
+
+def test_dropping_attention_relaxes_the_antennas_at_once() -> None:
+    """A turn that ended without an answer lets the alert antennas go before the 8 s hold runs out."""
+    manager = MovementManager(MagicMock())
+    clock = _AntennaClock(manager)
+    manager.set_listening(True)
+    clock.run(1.0)
+    manager.set_listening(False)
+    clock.run(2.0)
+
+    manager.drop_attention()
+    np.testing.assert_allclose(clock.run(0.6)[-1], (-0.1745, 0.1745), atol=1e-6)
+    assert manager._thinking_since is None
 
 
 def test_answering_releases_the_alert_antennas_smoothly() -> None:
@@ -733,8 +776,8 @@ def _touch_ticks(
     return fired
 
 
-def test_antenna_sway_and_the_perk_are_not_touches() -> None:
-    """Breathing sways 15 deg at 0.5 Hz and the perk moves at 6 rad/s; a measurement 0.1 s behind is not a touch."""
+def test_antenna_sway_perk_and_twirl_are_not_touches() -> None:
+    """Breathing's sway, the perk and the thinking twirl: a measurement 0.1 s behind is not a touch."""
 
     def sway(t: float) -> tuple[float, float]:
         angle = np.deg2rad(15) * np.sin(2 * np.pi * 0.5 * t)
@@ -744,7 +787,10 @@ def test_antenna_sway_and_the_perk_are_not_touches() -> None:
         angle = min(0.61, 6.0 * (t % 2.0))
         return (-angle, angle)
 
-    for target in (sway, perk):
+    def twirl(t: float) -> tuple[float, float]:
+        return (ATTENTIVE_ANTENNAS[0], ATTENTIVE_ANTENNAS[1] + thinking_twirl(t))
+
+    for target in (sway, perk, twirl):
         detector = AntennaTouchDetector()
         assert _touch_ticks(detector, 10.0, target, lambda t, target=target: target(t - 0.1)) == []
         assert detector.peak_deviation < ANTENNA_TOUCH_PRESS_RAD
