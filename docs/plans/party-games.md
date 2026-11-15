@@ -512,3 +512,5 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-15: End cards for all five phone games (`games/end_card.py`, `static/endcard.js`, `/endcard.js` on the
   phone server): when a game ends each phone shows its player's result as a 4:5 picture to save or share. Tests in
   `tests/games/test_end_card.py` and the Ballpark, Detectives and Big Brain tests. Not yet seen on a guest's phone.
+- 2026-11-15: deployed to the Mac mini (`129cf55`, restarted 12:50 while asleep): the log shows the morning page and
+  `magazine_cover` loaded, the games enabled, no errors. Not yet seen live.

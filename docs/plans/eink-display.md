@@ -218,3 +218,5 @@ port answers setup/display/image like the device expects. Tool: no display, each
   cover (masthead, issue number counted from the gallery, Gemini's headline and two cover lines, the dithered photo
   on the right). Home only: the screen for 10 minutes and the gallery. Tests: `tests/tools/test_magazine_cover.py`.
   Next: send it to the family WhatsApp group the way `take_photo` sends photos, once the household has tried it.
+- 2026-11-15: deployed to the Mac mini (`129cf55`, restarted 12:50 while asleep): the log shows the morning page and
+  `magazine_cover` loaded, the games enabled, no errors. Not yet seen live.
