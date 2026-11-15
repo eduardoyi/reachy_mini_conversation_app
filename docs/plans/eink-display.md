@@ -49,7 +49,7 @@ image generation uses the existing `GEMINI_API_KEY`.
 v2 adds **pictures**: a real photo or artwork from the web, checked for young children, with its
 source site in small type; drawn instead when none passes.
 
-v3 adds **visual explanations** (built 2026-10-25). Deferred: bedtime stories, morning page, calendar.
+v3 adds **visual explanations** (built 2026-10-25). The morning page was built 2026-11-15 (see the execution log). Deferred: bedtime stories, calendar.
 
 ## Implementation order
 
@@ -209,3 +209,12 @@ port answers setup/display/image like the device expects. Tool: no display, each
   T. rex and Eiffel Tower accurate and readable, and turned Parque das Nações into the Oriente station
   and the Vasco da Gama tower; "bold pictogram" lost too much (no launch tower). Adopted "simple";
   cache `drawings-v3/`; 3.0–3.6 s.
+- 2026-11-15: Morning page. From 7:00 to 10:00 the resting card shows the weekday and date in Spanish, a drawn
+  weather picture with the high and low, and a word of the day (Spanish with its European Portuguese name and a
+  cached drawing). `morning_page.py`, `render_morning_page`, `DISPLAY_MORNING_PAGE` (default on, also in the admin
+  app's Settings). Tests: `tests/test_morning_page.py`. Pending: see it on the TRMNL tomorrow morning; the first
+  60 mornings each make one drawing.
+- 2026-11-15: Richie magazine. `magazine_cover` frames the group, takes the burst photo and shows it as a magazine
+  cover (masthead, issue number counted from the gallery, Gemini's headline and two cover lines, the dithered photo
+  on the right). Home only: the screen for 10 minutes and the gallery. Tests: `tests/tools/test_magazine_cover.py`.
+  Next: send it to the family WhatsApp group the way `take_photo` sends photos, once the household has tried it.

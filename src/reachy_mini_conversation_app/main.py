@@ -435,6 +435,30 @@ def _build_display() -> Any:
     )
 
 
+def _home_weather() -> Any:
+    """Return the Open-Meteo forecast service for HOME_LOCATION, or None when no home is set."""
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.weather import Place, WeatherService
+
+    if not config.HOME_LOCATION:
+        return None
+    home = None
+    if config.HOME_LATITUDE is not None and config.HOME_LONGITUDE is not None:
+        home = Place(config.HOME_LOCATION, config.HOME_LATITUDE, config.HOME_LONGITUDE)
+    return WeatherService(home, home_name=config.HOME_LOCATION)
+
+
+def _build_morning_page(display: Any) -> Any:
+    """Return the morning page watcher for the e-ink screen, or None when the screen or the page is off."""
+    from reachy_mini_conversation_app.config import config
+
+    if display is None or not config.DISPLAY_MORNING_PAGE:
+        return None
+    from reachy_mini_conversation_app.morning_page import MorningPage
+
+    return MorningPage(display, _home_weather())
+
+
 def _build_now_playing(display: Any) -> Any:
     """Return the watcher that shows Spotify songs on the e-ink screen, or None when it is off or not set up."""
     from reachy_mini_conversation_app.config import config
@@ -521,7 +545,6 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
 
     if not config.QUICK_COMMANDS_ENABLED:
         return None, None
-    from reachy_mini_conversation_app.weather import Place, WeatherService
     from reachy_mini_conversation_app.games.host import host_phrases
     from reachy_mini_conversation_app.local_speech import LocalSpeech
     from reachy_mini_conversation_app.photographer import FACES
@@ -531,10 +554,7 @@ def _build_quick_commands(deps: Any) -> tuple[Any, Any]:
     from reachy_mini_conversation_app.games.simon_says import simon_says_phrases
     from reachy_mini_conversation_app.games.treasure_hunt import treasure_hunt_phrases
 
-    home = None
-    if config.HOME_LOCATION and config.HOME_LATITUDE is not None and config.HOME_LONGITUDE is not None:
-        home = Place(config.HOME_LOCATION, config.HOME_LATITUDE, config.HOME_LONGITUDE)
-    weather = WeatherService(home, home_name=config.HOME_LOCATION) if config.HOME_LOCATION else None
+    weather = _home_weather()
     speech = LocalSpeech(
         (config.GEMINI_API_KEY or "").strip() or None,
         config.GEMINI_VOICE,
@@ -891,6 +911,7 @@ def run(
     deps.tv = _build_tv()
     deps.display = _build_display()
     deps.now_playing = _build_now_playing(deps.display)
+    morning_page = _build_morning_page(deps.display)
     deps.maribel = _build_maribel()
     deps.whatsapp = _build_whatsapp()
 
@@ -1236,6 +1257,7 @@ def run(
             task
             for task in (
                 deps.now_playing.run if deps.now_playing is not None else None,
+                morning_page.run if morning_page is not None else None,
                 deps.tv.watch if deps.tv is not None and hybrid_runtime is not None else None,
             )
             if task is not None

@@ -3811,6 +3811,7 @@ function renderSettings() {
     ["FACE_RECOGNITION_ENABLED", "face", "Recognize faces", "Greets people by name"],
     ["SPEAKER_FOLLOWING_ENABLED", "speaker", "Turn toward voices", "Looks at whoever is talking"],
     ["DISPLAY_NOW_PLAYING", "screen", "Show the song on the e-ink screen", ""],
+    ["DISPLAY_MORNING_PAGE", "screen", "Morning page", "7:00–10:00: the day, the weather and a word in Spanish and Portuguese"],
     ["PHOTO_ARCHIVE_ENABLED", "gallery", "Keep photos in the gallery", "Photos he takes stay on the Mac mini"],
   ].filter(([key]) => meta[key]);
   if (flags.length) {

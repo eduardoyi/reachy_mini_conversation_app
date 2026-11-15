@@ -50,3 +50,15 @@ def keep(
         logger.warning("Photo not kept for the gallery: %s", type(error).__name__)
         return None
     return folder / f"{stem}{suffix}"
+
+
+def count(outcome: str, folder: Path | None = None) -> int:
+    """Return how many kept images have ``outcome`` (e.g. how many magazine covers came before)."""
+    folder = folder or Path(config.PHOTO_ARCHIVE_DIR)
+    total = 0
+    for meta in folder.glob("*.json"):
+        try:
+            total += json.loads(meta.read_text()).get("outcome") == outcome
+        except (OSError, ValueError, AttributeError):
+            continue
+    return total

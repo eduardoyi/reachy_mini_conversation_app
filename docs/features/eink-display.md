@@ -1,7 +1,7 @@
 # Feature: E-ink display (TRMNL)
 
 - Status: `in-progress` (drawings, web pictures, word cards, text and visual explanations checked live on the household TRMNL; pictures used by voice; explanations and drawing lessons not yet asked for by voice)
-- Last updated: 2026-10-30
+- Last updated: 2026-11-15
 - Plan: [docs/plans/eink-display.md](../plans/eink-display.md)
 
 ## Overview
@@ -11,7 +11,7 @@ explanations and drawing lessons on a TRMNL OG e-ink display (7.5", 800x480, fou
 screen changes only when someone asks; otherwise it shows a resting card with a cartoon Reachy and
 "¡Hola! Soy Reachy / Hi, I'm Reachy".
 
-Out of scope so far: stories, scheduled pages such as a morning page or calendar (see the plan).
+From 7:00 to 10:00 the resting card is the [morning page](#morning-page). Out of scope so far: a calendar.
 
 ## User-visible behavior
 
@@ -168,6 +168,51 @@ in bold, the artist, and the album in grey. Music on any other device is ignored
   `SPOTIFY_DEVICE_ID`).
 - Logs say "Now playing card updated" and whether it had art, never titles, artists or albums.
 
+## Morning page
+
+From 7:00 to 10:00 local time the resting card is the morning page instead of "¡Hola! Soy Reachy":
+
+- **Left:** the weekday in Anton ("MIÉRCOLES") and the date in Spanish ("18 de noviembre"); under them a drawn
+  weather picture for today (sun, sun behind a cloud, cloud, fog, drizzle, rain, heavy rain, showers, snow, storm;
+  `_draw_sky` draws it, no image model), the high and low ("18° / 11°") and the conditions in Spanish.
+- **Right:** a word of the day with its drawing: the Spanish word with its article ("el tranvía") and, in grey,
+  the European Portuguese the school uses ("o elétrico · em português"). The 60 words (`MORNING_WORDS`) are
+  things a 2- and 4-year-old know, with European forms such as comboio, autocarro, sumo and gelado. The word is
+  picked by date, so consecutive days never repeat and the list comes round every 60 days.
+- **How it runs** (`morning_page.py`, `MorningPage`): a task on the app's event loop
+  (`LocalStream(background_tasks=...)`) checks every minute. The first check in the window draws the day's page
+  once (forecast from Open-Meteo through `WeatherService`; drawing through `EInkDisplay.drawing`, cached in
+  `drawings-v3/` like any drawing) and makes it the resting card; later checks set the same bytes, which
+  `set_resting_card` does not redraw. The first check after 10:00 puts Reachy's own card back.
+- **Who wins the screen:** it is only the resting card, so anything someone asks for, a game, writing or the
+  music card shows over it and idles back to it.
+- **Privacy:** while privacy is on the page leaves the "Privacy on" card alone; after privacy is turned off the
+  next check (within a minute) puts the page back.
+- **Failures:** no `HOME_LOCATION` or a failed forecast leaves the weather out; a failed drawing leaves the
+  picture out. Logs carry neither the forecast nor the word.
+- **Cost:** one drawing per new word (60 in all, then cached); the forecast is free.
+- **Off switch:** `DISPLAY_MORNING_PAGE=0`, also in the admin app (Settings → "Morning page"). Needs
+  `TRMNL_ENABLED`.
+
+## Richie magazine
+
+"¡Richie, sácanos una foto de revista!" (`magazine_cover`, offered with `TRMNL_ENABLED`): Reachy counts "3, 2, 1"
+while he frames the group (`start_framing`, as `take_photo` does), takes the burst photo (`photographer.take_photo`:
+the sharpest frame with the most faces, touched up) and shows the cover of RICHIE magazine:
+
+- **Left column:** "RICHIE" in Anton, the issue line ("Nº 12 · DOMINGO 15 DE NOVIEMBRE"; the number counts the
+  covers kept in the gallery), a rule, the headline in Anton capitals (up to four lines, shrunk to fit) and up to two
+  "+" cover lines.
+- **Right:** the photo itself, cropped to fill and dithered to the four greys. It is not redrawn, so faces stay
+  exactly as they are and no image model is called.
+- **Words:** Gemini writes them from the conversation (the tool asks for a playful tabloid headline quoting someone
+  by name and kind, never mocking, cover lines). Characters the bundled fonts lack (emoji) are dropped; curly quotes
+  become « » and '.
+- **Where it goes:** the screen, for 10 minutes like any camera photo (private: not served once it leaves), and the
+  admin app's gallery as a photo edit titled "Magazine: <headline>" (outcome `magazine`). It is not sent to WhatsApp
+  (home only for now; sending it to the family group like `take_photo` is the next step).
+- Logs carry the number of cover lines, never the words.
+
 ## Camera photos
 
 "Take my picture" or "make me a pirate": `show_on_display kind=camera` takes a photo with Reachy's
@@ -257,6 +302,8 @@ flowchart LR
 | Area | File or interface | Responsibility / contract |
 |------|-------------------|---------------------------|
 | Screens | `eink_display.py` | `render_home/drawing/photo/word/text/steps/lesson/writing/now_playing() -> bytes` (PNG); `encode_png`; `EInkDisplay.show(png, owner, expires_after_s)/show_home/current/owner/keep_alive/awake/drawing/lesson/edit_photo/picture/start/stop`; `lesson(subject, title) -> [(caption, panel)] * 4` |
+| Richie magazine | `tools/magazine_cover.py`, `eink_display.render_magazine`, `photo_archive.count` | `magazine_cover(headline, lines)`; `render_magazine(photo, headline, lines, issue) -> bytes`; `issue_line(number, day)` |
+| Morning page | `morning_page.py`, `eink_display.render_morning_page` | `MorningPage(display, weather, now, privacy_on).run/check`; `word_for(day) -> MorningWord(subject, spanish, portuguese)`; `render_morning_page(weekday, date_line, word, school_word, sky, temperatures, conditions, picture) -> bytes` |
 | Now playing | `now_playing.py` | `parse_playback(body, device_id) -> Playback`; `NowPlaying(display, fetch, in_conversation, art_dir).run/check/show_now/refresh_soon`; `spotify_fetcher(credentials, device)` |
 | Device server | `eink_server.py` | Separate process; `DeviceServer(spool, port, refresh_s)`; spool contract `current.json` (incl. `owner`, `expires_at`, `private`) / `device.json` / `server.json`; `current_filename`, `is_awake`, `fingerprint`, `running_pid` |
 | Web pictures | `web_pictures.py` | `WebPictures(..., screen_preview=render_photo).find(subject) -> WebPicture(image, source)`; raises `PictureError`. Downloads only from `THUMBNAIL_HOST` |
@@ -348,6 +395,8 @@ TRMNL device API, as served (firmware 1.8.17 checked):
 | `tests/test_quick_commands.py` | (writing) the word kept as heard; names and "algo" go to the conversation; a word that fits starts writing, one too long does not; while writing, "ya" steps and another request ends writing and runs |
 | `tests/test_hybrid_smoke.py` | (writing) the room listener takes what it acts on before wake detection and passes the rest on |
 | `tests/test_now_playing.py` | A writing screen holds through new songs; track and episode parsing; other devices and empty players ignored; covers only from `i.scdn.co` over https; each new song gets the card once, covers cached; the next look at the song's end; no idle return during a long track; requested screens hold during the conversation, then return at the next song or after 2 minutes; 2 minutes after the music stops; nothing playing leaves screens alone; "what song is this"; a missing cover; `refresh_soon`; the Spotify fetch (token, episodes, 204); the watcher needs the screen, the switch and Spotify |
+| `tests/tools/test_magazine_cover.py` | The cover is shown for 10 minutes like a photo and kept with outcome `magazine`; the next cover is the next issue; no screen, camera, headline or picture each says why and keeps nothing; a busy photo with emoji and curly quotes still fits the TRMNL; the issue line |
+| `tests/test_morning_page.py` | Consecutive days never share a word, every word has both languages; the page fits the TRMNL for every weather picture; 7:00 shows it, drawn once a day, 10:00 restores his card once; privacy keeps its card and the page returns after; no weather or no drawing still shows the page; the watcher needs the screen and the switch |
 | `tests/tools/test_spotify_control.py` | Pause, next and resume refresh the screen; rejected commands do not |
 | `tests/test_config.py` | `TRMNL_*` parsing and fallbacks |
 
@@ -366,6 +415,12 @@ reusing the cached drawing and a list; the device fetched each at its next check
 through a spoken conversation.
 
 ## Changelog
+
+- 2026-11-15: Richie magazine (`magazine_cover`): the framed burst photo as a magazine cover with a headline and cover
+  lines Gemini writes, an issue number, kept in the gallery, not sent anywhere. Not yet tried by voice.
+
+- 2026-11-15: Morning page (`DISPLAY_MORNING_PAGE`): 7:00–10:00 the resting card shows the day, a drawn weather
+  picture and a word of the day in Spanish and European Portuguese. Not yet seen on the TRMNL.
 
 - 2026-11-02: Game screens redesigned (see [games.md](games.md#what-the-screens-look-like)); Anton bundled for their
   titles and numbers.

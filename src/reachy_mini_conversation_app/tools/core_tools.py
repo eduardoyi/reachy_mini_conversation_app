@@ -367,7 +367,7 @@ def _tv_configured() -> bool:
 
 
 # Enabled automatically with TRMNL_ENABLED, unless the profile's tools were customized.
-DISPLAY_TOOLS = ("show_on_display",)
+DISPLAY_TOOLS = ("show_on_display", "magazine_cover")
 
 
 # Enabled automatically once Maribel's webhook and Reachy's callback are configured, unless customized.

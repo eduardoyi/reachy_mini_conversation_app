@@ -37,6 +37,7 @@ SETTINGS: Final[dict[str, Setting]] = {
     "FACE_RECOGNITION_ENABLED": Setting("Face recognition", "flag", default="0"),
     "SPEAKER_FOLLOWING_ENABLED": Setting("Turn toward whoever speaks", "flag", default="1"),
     "DISPLAY_NOW_PLAYING": Setting("Show the song on the e-ink screen", "flag", default="1"),
+    "DISPLAY_MORNING_PAGE": Setting("Morning page on the e-ink screen", "flag", default="1"),
     "PHOTO_ARCHIVE_ENABLED": Setting("Keep photos in the gallery", "flag", default="1"),
     "WAKE_REMINDER_TIME": Setting("Wake word reminder", "time", default="19:30"),
 }

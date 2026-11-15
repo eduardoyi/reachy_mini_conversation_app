@@ -258,6 +258,54 @@ def _picture_screen(picture: Image.Image, caption: str, source: str = "", palett
     return encode_png(canvas)
 
 
+_TYPOGRAPHY = str.maketrans({"\u201c": "«", "\u201d": "»", "\u2018": "'", "\u2019": "'", "\u2014": "-", "\u2013": "-"})
+
+
+def _latin(text: str) -> str:
+    """Keep what the bundled fonts draw (Latin-1): curly quotes become « » and ', anything else (emoji) goes."""
+    return "".join(char for char in text.translate(_TYPOGRAPHY) if ord(char) < 256).strip()
+
+
+def render_magazine(photo: Image.Image, headline: str, lines: list[str], issue: str) -> bytes:
+    """Render a magazine cover: the masthead, issue line, headline and cover lines left, the photo right."""
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    column = 330
+    gray = ImageOps.autocontrast(photo.convert("L"), cutoff=1)
+    cropped = ImageOps.fit(gray, (WIDTH - column, HEIGHT), centering=(0.5, 0.4))
+    palette = Image.new("P", (1, 1))
+    palette.putpalette([level for level in (0, 85, 170, 255) for _ in range(3)])
+    dithered = cropped.convert("RGB").quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("L")
+    canvas.paste(dithered, (column, 0))
+    draw = ImageDraw.Draw(canvas)
+    width = column - 36
+    masthead = _fitted_display("RICHIE", width, 120, 60)
+    draw.text((18, 6), "RICHIE", font=masthead, fill=0)
+    top = 14 + int(masthead.size * 1.2)
+    issue_font = _fitted(_latin(issue), width, 15, 10)
+    draw.text((20, top), _latin(issue), font=issue_font, fill=0)
+    top += 26
+    draw.rectangle((18, top, 18 + width, top + 4), fill=0)
+    top += 16
+    headline_text = _latin(headline).upper()
+    for size in range(44, 22, -2):
+        font = _display_font(size)
+        wrapped = _wrapped(headline_text, font, width, 4)
+        if not wrapped[-1].endswith("…"):
+            break
+    top = _draw_lines(draw, wrapped, font, left=18, width=width, top=top) + 8
+    cover_font = _font(18, bold=True)
+    for line in lines[:2]:
+        if top > HEIGHT - 50:
+            break
+        top = (
+            _draw_lines(
+                draw, _wrapped(f"+ {_latin(line)}", cover_font, width, 2), cover_font, left=18, width=width, top=top
+            )
+            + 6
+        )
+    return encode_png(canvas)
+
+
 def render_word(
     word: str, pronunciation: str = "", meaning: str = "", header: str = "", picture: Image.Image | None = None
 ) -> bytes:
@@ -299,6 +347,123 @@ def render_word(
         _draw_lines(
             draw, _wrapped(meaning, font, width, 2), font, left=left, width=width, top=top + 22, centered=centered
         )
+    return encode_png(canvas)
+
+
+def _draw_sky(draw: ImageDraw.ImageDraw, sky: str, left: int, top: int, size: int) -> None:
+    """Draw a weather picture for a ``weather.condition_key`` group in a ``size`` square: sun, cloud, rain..."""
+    unit = size / 10
+    line = max(3, round(unit * 0.5))
+
+    def cloud(x: float, y: float, fill: int) -> None:
+        # Black shapes, then the fill inset by the line width, so only the outer silhouette is outlined.
+        for grow, colour in ((line, 0), (0, fill)):
+            for cx, cy, r in ((3.2, 5.6, 1.9), (5.3, 4.6, 2.5), (7.3, 5.8, 1.7)):
+                draw.ellipse(
+                    (
+                        x + (cx - r) * unit - grow,
+                        y + (cy - r) * unit - grow,
+                        x + (cx + r) * unit + grow,
+                        y + (cy + r) * unit + grow,
+                    ),
+                    fill=colour,
+                )
+            draw.rectangle((x + 3.2 * unit, y + 5.4 * unit, x + 7.3 * unit, y + 7.5 * unit + grow), fill=colour)
+
+    def sun(cx: float, cy: float, r: float) -> None:
+        for step in range(8):
+            angle = step * math.pi / 4
+            inner, outer = r * 1.35, r * 1.85
+            draw.line(
+                (
+                    cx + inner * math.cos(angle),
+                    cy + inner * math.sin(angle),
+                    cx + outer * math.cos(angle),
+                    cy + outer * math.sin(angle),
+                ),
+                fill=0,
+                width=line,
+            )
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_LIGHT_GREY, outline=0, width=line)
+
+    if sky in ("clear", "mostly_clear"):
+        sun(left + 5 * unit, top + 5 * unit, 2.3 * unit)
+        return
+    if sky == "partly_cloudy":
+        sun(left + 6.8 * unit, top + 3.0 * unit, 2.0 * unit)
+        cloud(left, top + unit, 255)
+        return
+    cloud(left, top - unit, _LIGHT_GREY if sky in ("rain", "heavy_rain", "showers", "storm") else 255)
+    bottom = top + 7.2 * unit
+    if sky in ("drizzle", "rain", "heavy_rain", "showers"):
+        drops = 5 if sky == "heavy_rain" else 3
+        for i in range(drops):
+            x = left + (3.0 + i * 4.4 / max(1, drops - 1)) * unit
+            draw.line((x, bottom, x - 0.6 * unit, bottom + 1.8 * unit), fill=0, width=line)
+    elif sky == "snow":
+        for i in range(3):
+            x, y = left + (3.4 + i * 1.6) * unit, bottom + (0.8 + (i % 2) * 0.9) * unit
+            draw.ellipse((x - 0.4 * unit, y - 0.4 * unit, x + 0.4 * unit, y + 0.4 * unit), fill=0)
+    elif sky == "storm":
+        x, y = left + 5 * unit, bottom
+        draw.line(
+            [(x, y), (x - unit, y + 1.3 * unit), (x + 0.3 * unit, y + 1.3 * unit), (x - 0.7 * unit, y + 2.6 * unit)],
+            fill=0,
+            width=line,
+        )
+    elif sky == "fog":
+        for i in range(2):
+            y = bottom + (0.6 + i * 1.1) * unit
+            draw.line((left + 2.4 * unit, y, left + 7.8 * unit, y), fill=_GREY, width=line)
+
+
+def render_morning_page(
+    weekday: str,
+    date_line: str,
+    word: str,
+    school_word: str,
+    *,
+    sky: str | None = None,
+    temperatures: str = "",
+    conditions: str = "",
+    picture: Image.Image | None = None,
+) -> bytes:
+    """Render the morning page: the day on the left with the weather, a word of the day on the right."""
+    canvas = Image.new("L", (WIDTH, HEIGHT), 255)
+    draw = ImageDraw.Draw(canvas)
+    column = 360
+    day_font = _fitted_display(weekday.upper(), column - 40, 96, 48)
+    draw.text((32, 18), weekday.upper(), font=day_font, fill=0)
+    top = 30 + int(day_font.size * 1.25)
+    draw.text((34, top), date_line, font=_fitted(date_line, column - 40, 34, 20, bold=False), fill=_GREY)
+    if sky is not None:
+        _draw_sky(draw, sky, 30, 230, 170)
+        draw.text((210, 262), temperatures, font=_fitted(temperatures, 150, 52, 26), fill=0)
+        if conditions:
+            font = _fitted(conditions, 150, 28, 16, bold=False)
+            _draw_lines(draw, _wrapped(conditions, font, 150, 2), font, left=212, width=150, top=330, fill=_GREY)
+    draw.line((column, 36, column, HEIGHT - 36), fill=_LIGHT_GREY, width=3)
+    right, width = column + 30, WIDTH - column - 60
+    word_top = 40
+    if picture is not None:
+        fitted = ImageOps.contain(picture.convert("L"), (width, 250))
+        canvas.paste(fitted, (right + (width - fitted.width) // 2, 24 + (250 - fitted.height) // 2))
+        word_top = 290
+    word_font = _fitted(word, width, 72, 34)
+    top = _draw_lines(
+        draw, _wrapped(word, word_font, width, 1), word_font, left=right, width=width, top=word_top, centered=True
+    )
+    school_font = _fitted(school_word, width, 40, 22, bold=False)
+    _draw_lines(
+        draw,
+        _wrapped(school_word, school_font, width, 1),
+        school_font,
+        left=right,
+        width=width,
+        top=top + 4,
+        fill=_GREY,
+        centered=True,
+    )
     return encode_png(canvas)
 
 
