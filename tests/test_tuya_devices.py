@@ -120,9 +120,11 @@ async def test_devices_read_state_from_the_snapshot_addresses(tmp_path: Path) ->
     assert (plug.kind, plug.is_on, plug.dims) == ("outlet", True, False)
     assert (offline.reachable, offline.name) == (False, "Study light")
 
+    assert strip.color is None  # white mode reports no color
+
     home, _ = _home(tmp_path, _FakeBulb(mode="colour"), _FakePlug())
     strip, *_ = await home.devices()
-    assert strip.brightness == 40
+    assert strip.brightness == 40 and strip.color == (180.0, 0.8)
 
 
 @pytest.mark.asyncio

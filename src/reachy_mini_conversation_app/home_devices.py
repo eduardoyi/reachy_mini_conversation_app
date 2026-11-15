@@ -38,6 +38,7 @@ class HubDevice:
     # Kelvin range, warmest first, when the light can change color temperature.
     kelvin_range: tuple[int, int] | None = None
     colors: bool = False  # can show any color
+    color: tuple[float, float] | None = None  # the color it shows now (hue 0-360, saturation 0-1), when reported
     source: str = "dirigera"
     areas: tuple[str, ...] = ()  # parts of a room ("Dining"), from the home layout
     # Only shows colors (an RGB strip): its system's white mode leaves it dark, so white is made as a color.

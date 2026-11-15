@@ -154,6 +154,7 @@ def _build_games(
     from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.games.base import SPEAK_TIMEOUT_S, Game, GameServices
     from reachy_mini_conversation_app.games.host import GameHost
+    from reachy_mini_conversation_app.games.lights import GameLights
     from reachy_mini_conversation_app.camera_frames import capture_jpeg
     from reachy_mini_conversation_app.games.sheeple import Sheeple, SheepleSetup
     from reachy_mini_conversation_app.games.ballpark import Ballpark, BallparkSetup
@@ -280,6 +281,8 @@ def _build_games(
     def emotion(intent: str) -> None:
         threading.Thread(target=queue_intent_move, args=(movement, intent), name="game-emotion", daemon=True).start()
 
+    lights = GameLights(deps.home_hub) if deps.home_hub is not None else None
+
     services = GameServices(
         speak=speak,
         ask=ask,
@@ -294,6 +297,8 @@ def _build_games(
         camera=camera,
         jev=ask_jev,
         emotion=emotion,
+        light=lights.effect if lights is not None else (lambda effect, color: None),
+        restore_lights=lights.restore if lights is not None else (lambda: None),
         call_busy=(lambda: bool(calls.busy)) if calls is not None else (lambda: False),
         picture=display.game_picture if display is not None else None,
         draw_pictures=display.draw_game_pictures if display is not None else None,

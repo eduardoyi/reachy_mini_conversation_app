@@ -546,7 +546,7 @@ function handle(m) {
  else if (m.type === 'error') { if (m.message === 'join') joined = false; toast(m.message === 'closed' ? t().errClosed : m.message === 'name' ? t().errName : m.message); render(); }
  else if (m.type === 'state') {
   var before = S && S.phase, beforeTurn = S && S.turn;
-  S = m; lang = m.language === 'en' ? 'en' : 'es'; document.documentElement.lang = lang;
+  S = m; lang = m.language === 'en' ? 'en' : 'es'; document.documentElement.lang = lang; if (window.RichieEndCard) RichieEndCard.update(m);
   if (m.you) joined = true;
   if (before !== m.phase && m.phase === 'turn' && can('act')) { try { if (navigator.vibrate) navigator.vibrate([150, 80, 150]); } catch (e) {} }
   if (m.phase !== 'accuse') choice = {suspect: null, motive: null};
@@ -799,5 +799,7 @@ function demo(phase) {
 render();
 if (DEMO) { if (!code) code = 'KWZRTB'; demo(DEMO); } else connect();
 </script>
+<script>// The end-of-game card (static/endcard.js), served with the join code like everything else.
+(function () { var s = document.createElement('script'); s.src = 'endcard.js' + location.search; document.head.appendChild(s); })();</script>
 </body>
 </html>

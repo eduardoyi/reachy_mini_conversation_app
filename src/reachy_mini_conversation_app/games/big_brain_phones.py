@@ -30,6 +30,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 logger = logging.getLogger(__name__)
 
 PAGE: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "big_brain" / "index.html"
+# The end-of-game card every phone game's page draws (games/end_card.py fills it in).
+END_CARD_SCRIPT: Final[Path] = Path(__file__).resolve().parent.parent / "static" / "endcard.js"
 TEAMS: Final[tuple[str, ...]] = ("red", "blue", "green", "yellow")
 NAME_MAX: Final[int] = 16
 GONE: Final[str] = "<!doctype html><meta name=viewport content='width=device-width'><h2 style='font-family:sans-serif'>Este juego ya terminó · This game is over</h2>"  # fmt: skip
@@ -164,6 +166,12 @@ class Phones:
             if c.upper() != self.code or not self._page.exists():
                 return HTMLResponse(GONE, status_code=404)
             return FileResponse(self._page, headers={"Cache-Control": "no-store"})
+
+        @app.get("/endcard.js")
+        async def end_card(c: str = "") -> Any:
+            if c.upper() != self.code:
+                return HTMLResponse(GONE, status_code=404)
+            return FileResponse(END_CARD_SCRIPT, media_type="text/javascript", headers={"Cache-Control": "no-store"})
 
         @app.websocket("/ws")
         async def phone(websocket: WebSocket, code: str = "") -> None:

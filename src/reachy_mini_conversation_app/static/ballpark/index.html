@@ -264,7 +264,7 @@ function handle(m) {
   toast(em === 'closed' ? t().errClosed : em === 'name' ? t().errName : em);
   lock = false; cache.stage = null; render();
  } else if (m.type === 'state') {
-  S = m; lang = m.language === 'en' ? 'en' : 'es';
+  S = m; lang = m.language === 'en' ? 'en' : 'es'; if (window.RichieEndCard) RichieEndCard.update(m);
   var r = m.round ? m.round.number : null;
   if (r !== lastRound) { form = {low: '', high: '', copy: null, swap: [], double: false, picking: null}; lastRound = r; }
   var entered = m.phase !== lastPhase;
@@ -565,5 +565,7 @@ render();
 if (demo) { if (demo !== 'connecting') runDemo(demo); } else connect();
 })();
 </script>
+<script>// The end-of-game card (static/endcard.js), served with the join code like everything else.
+(function () { var s = document.createElement('script'); s.src = 'endcard.js' + location.search; document.head.appendChild(s); })();</script>
 </body>
 </html>

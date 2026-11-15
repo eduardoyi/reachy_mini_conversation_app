@@ -473,6 +473,7 @@ class GallinaLoca(Game):
         """Crow: whoever has the hen lays an egg (a silly hen move); a pat or "¡listo!" and it is laid."""
         language = context.language
         context.services.emotion("excited")
+        context.services.light("flash", "yellow")
         context.show(render_game_prompt(_BOOM[language], 0, 0, name or _CAPTION[language]))
         key = self._rng.choice(list(FORFEITS))
         way = FORFEITS[key]

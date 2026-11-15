@@ -121,6 +121,7 @@ async def test_pause_and_resume_words_heard_without_the_name(room) -> None:
     assert host.heard("¡Pausa!")
     assert host.state is GameState.PAUSED and made[0].paused_count == 1
     assert reachy.screens[-1] != b"game screen"  # the PAUSA screen
+    assert reachy.lights_restored == 1
     await ticks(0.05)
     assert "Pausa." in reachy.said
     assert host.heard("seguimos")
@@ -137,7 +138,7 @@ async def test_a_bare_para_is_left_alone_and_quit_words_end_the_game(room) -> No
     assert host.heard("aqui") and made[0].heard_texts[-1] == "aqui"  # the game's own word
     assert host.heard("se acabó el juego")
     await ticks(0.05)
-    assert host.state is GameState.IDLE and reachy.restored == 1
+    assert host.state is GameState.IDLE and reachy.restored == 1 and reachy.lights_restored == 1
     assert reachy.said[-1] == "Listo, se acabó el juego."
 
 

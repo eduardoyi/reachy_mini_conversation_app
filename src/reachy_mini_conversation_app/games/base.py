@@ -82,6 +82,10 @@ class GameServices:
     # The words the game's spoken answers are likely to be (its board's answers, its names), so the speech model
     # leans toward them; the host clears them when the game ends.
     hint_answers: Callable[[list[str]], None] = lambda words: None
+    # Glow ("glow") or flash ("flash") the home's color lights in a color named in ``LIGHT_COLORS``, in the
+    # background; and put them back as they were (the host does, on a pause and at the end).
+    light: Callable[[str, str], None] = lambda effect, color: None
+    restore_lights: Callable[[], None] = lambda: None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
     # How long the e-ink screen has gone without checking in (0 while it is awake); it naps 5 minutes after a

@@ -509,3 +509,6 @@ game, a living-room escape room, map conquest and a co-op island adventure.
 - 2026-11-03: Sheeple moves to Big Brain's host voice with a survey host's banter (sheeple_lines.py, 392 takes;
   names, answers and questions live in the same voice), and Big Brain gets 196 more takes and lines for misses
   in a row, below zero, comebacks and runaways. Clips not yet recorded; not yet played.
+- 2026-11-15: End cards for all five phone games (`games/end_card.py`, `static/endcard.js`, `/endcard.js` on the
+  phone server): when a game ends each phone shows its player's result as a 4:5 picture to save or share. Tests in
+  `tests/games/test_end_card.py` and the Ballpark, Detectives and Big Brain tests. Not yet seen on a guest's phone.

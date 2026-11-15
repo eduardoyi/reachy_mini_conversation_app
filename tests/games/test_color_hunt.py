@@ -64,7 +64,7 @@ async def test_two_frames_of_the_color_find_it_and_win_a_star(game) -> None:
     host.start("colors", "es")
     await _until(lambda: "¡Sí! ¡Rojo!" in reachy.said)
     assert reachy.said[:2] == ["¡Vamos a jugar a los colores!", "¡Busca algo ROJO!"]
-    assert reachy.emotions == ["happy"]
+    assert reachy.emotions == ["happy"] and reachy.lights == [("flash", "green")]
     await _until(lambda: bool(reachy.asked))
     assert "¡Una estrella!" in reachy.said and reachy.asked[-1][0] == "¿Otra vez?"
     await reachy.asked[-1][1]("no")

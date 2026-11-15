@@ -151,6 +151,16 @@ big-brain/rulings.json          Jev's and the room's rulings
   text once read, hidden}, buzzed, deadline (epoch ms), can, max_bet, vote, message, final {category, answers},
   cards (the team's hand), playable (the cards it may play now), frozen, shielded (teams), hint {first, letters,
   words, pattern} only on the hinted team's phones).
+- End cards (all five phone games: Big Brain, Sheeple, Ballpark, Scribble Rush, Detectives): once a game is over,
+  each joined phone's `state` carries `card` {game, name, title, line, team, won} (`games/end_card.py`:
+  `team_card` from the game's own `teams` list, the top score or the game's own winners being champions and the rest
+  their place, ties at the top sharing it; `case_card` for Detectives: solved, with the culprit). The phone server
+  serves `static/endcard.js` at `/endcard.js?c=<code>` (404 without the code, like the page); each page loads it
+  with its own `location.search` and calls `RichieEndCard.update(state)` on every state. The script draws a
+  1080x1350 picture (the team's color, the game, a little Richie, the title, the player's name, the line, "Jugado
+  con Richie · Reachy Mini" and the date), opens it 2.5 s after the game ends, and offers Save (a download link) and,
+  where the browser can share files (the https Funnel address), Share; a "Ver tu tarjeta" button reopens it. Only the
+  player's own result and team are on it.
 - Timings (`games/big_brain.py`): pick 40 s, buzz 8 s (6 s after a miss), 6 s for an answer to start (passed to
   the runtime as `say_audio(..., listen_s=)`, where silence then reaches the handler as ""), everyone 30 s, bets up
   to 30 s, final answers 30 s, the page stays 30 s after the end.
@@ -212,6 +222,10 @@ big-brain/rulings.json          Jev's and the room's rulings
   pick; Richie asks the new team), the bomb (only the picker buzzes; right doubles; wrong and silence cost; a
   Shield saves it; kids lose nothing), a moment with no clip said live in the host voice, and the whole show with
   both pretend phones playing every card they can.
+- End cards: `tests/games/test_end_card.py` (champions, places, ties at the top, a game's own winners, squares,
+  no card for a team that did not play, Detectives solved and missed, every page loads the script and hands it
+  each state), the card in the Ballpark and Detectives whole-game tests, and `/endcard.js` needing the code in
+  `test_big_brain.py`. The picture itself was checked in headless Chrome at phone width; not yet on a guest's phone.
 - `tests/test_hybrid_runtime.py::test_a_game_announcement_can_play_recorded_speech_instead_of_saying_its_text`.
 - `tests/games/test_big_brain_lines.py` (4): both languages, known tags only, tags stripped for screens.
 - Full gate on 2026-11-01: `ruff check . --fix && ruff format . && mypy --pretty --show-error-codes && pytest
@@ -222,6 +236,8 @@ big-brain/rulings.json          Jev's and the room's rulings
 
 ## Changelog
 
+- 2026-11-15: End cards on every phone game: each player's phone shows a picture of their result (title, name,
+  team and score, the game) to save or share when the game ends.
 - 2026-11-08: Power cards and the bomb, for more chaos: each team is dealt 2 of Freeze, Shield, Hint and Hijack
   (no Shield in kids mode), shown and played on its phones and announced by Richie (a Hint's content stays on the
   team's phones); a fourth hidden square, the bomb, only for the team that picked it (double if right, the

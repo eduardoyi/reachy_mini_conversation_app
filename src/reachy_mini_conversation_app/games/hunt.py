@@ -304,6 +304,7 @@ class Hunt(Game):
         if found:
             context.played()
             context.services.emotion("happy")
+            context.services.light("flash", "green")
             await self._say(context, "found", target, sounds=("found",), after=("star",))
             context.show(await self.screen(context, target, self._stars + 1))
             await context.sleep(1.0)

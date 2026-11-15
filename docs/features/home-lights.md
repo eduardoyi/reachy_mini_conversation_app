@@ -33,7 +33,8 @@ integration) is the path that scales.
 ## Architecture
 
 - `home_devices.py` holds the shared pieces. `HubDevice` records what a device
-  supports (`dims`, `warmth`, `colors`) and its `source`. `LightChange` is a
+  supports (`dims`, `warmth`, `colors`), its `source` and, when its system reports it, the `color` it shows now
+  (the Tuya strip in color mode; used to put it back after [game lights](games.md)). `LightChange` is a
   provider-neutral change, and `for_device` keeps only what a device supports;
   a brightness, warmth or color alone implies on. `HomeDevices` merges the
   providers and skips one that fails unless all fail.

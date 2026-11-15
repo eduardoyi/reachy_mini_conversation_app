@@ -397,7 +397,7 @@ function handle(m) {
  if (m.type === 'welcome') { if (m.player) save(m.player); }
  else if (m.type === 'forget') { forget(); shown = ''; render(); }
  else if (m.type === 'error') { toast(m.message === 'closed' ? t().errClosed : m.message === 'name' ? t().errName : m.message); }
- else if (m.type === 'state') { P = S; S = m; render(); }
+ else if (m.type === 'state') { P = S; S = m; render(); if (window.RichieEndCard) RichieEndCard.update(m); }
 }
 
 /* ---------- Doodles ---------- */
@@ -861,5 +861,7 @@ function runDemo() {
 }
 if (DEMO) runDemo(); else connect();
 </script>
+<script>// The end-of-game card (static/endcard.js), served with the join code like everything else.
+(function () { var s = document.createElement('script'); s.src = 'endcard.js' + location.search; document.head.appendChild(s); })();</script>
 </body>
 </html>

@@ -233,9 +233,11 @@ class TuyaHome:
             if not isinstance(state, dict) or "Error" in state:
                 return unreachable
             dpset = getattr(device, "dpset", {}) or {}
+            color = None
             if state.get("mode") == "colour":
-                _hue, _saturation, value = device.colour_hsv(state=state)
+                hue, saturation, value = device.colour_hsv(state=state)
                 brightness = max(1, round(float(value) * 100))
+                color = (round(float(hue) * 360, 1), round(float(saturation), 3))
             else:
                 brightness = _percent(state.get("brightness"), dpset.get("value_min"), dpset.get("value_max"))
             return HubDevice(
@@ -248,6 +250,7 @@ class TuyaHome:
                 brightness=brightness,
                 kelvin_range=TUYA_KELVIN_RANGE if state.get("colourtemp") is not None else None,
                 colors=state.get("colour") is not None,
+                color=color,
                 source="tuya",
             )
         except Exception as error:  # TinyTuya raises a range of socket and decode errors

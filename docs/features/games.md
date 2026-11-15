@@ -1,7 +1,7 @@
 # Feature: Games
 
 - Status: `in-progress` (built and tested on the MacBook; not deployed or played on the robot yet)
-- Last updated: 2026-11-09 (the number race, the first learning game, on its own Learning games shelf)
+- Last updated: 2026-11-15 (game lights: the color lights glow and flash at big moments)
 - Plan: [games.md](../plans/games.md)
 
 ## Overview
@@ -37,9 +37,30 @@ cars from the story *La gran carrera*); a pat spins a wheel of 1 or 2 and the ki
 Learning games are a category of their own in the admin app ("Learning games"), and kids' games all the same:
 "¿Otra vez?" switches between them.
 
-Out of scope for now: flashing the room lights in the game's color (the light systems do not report a lamp's
-current color, so it could not be put back exactly), pausing camera games when nobody is in view, writing
-practice on the host, and every other game from the 2026-10-30 brainstorm.
+**Game lights** (`games/lights.py`, since 2026-11-15): the home's color lights (today only the TV strip; the
+white ceiling lights and the plugs never take part) light up at a game's big moments, then go back as they were:
+
+| Game | Moment | Effect |
+|------|--------|--------|
+| Color hunt, treasure hunt | Found it | three green flashes |
+| La gallina loca | The hen goes off (an egg) | three yellow flashes |
+| Big Brain | A bomb square is picked | 3 s red glow |
+| Big Brain | The bomb blows up (wrong or silent) | three red flashes |
+| Big Brain | A right answer | three flashes in the team's color (the teams are red, blue, green, yellow) |
+| Detectives | The reveal starts | 3 s purple glow |
+| Detectives | Solved / unsolved | three green / red flashes |
+
+A flash goes bright then dim (100% then 15%) rather than on and off, which the strip does slowly and unreliably.
+The first effect in a game saves each color light as its system reports it, including its color (the Tuya strip
+reports it in color mode; a DIRIGERA color bulb would not yet, and would go back on or off only). Every effect ends
+by putting the lights back, and so do a pause and the end of the game: the saved color first (which also lights
+it), then off again if it was off, so the strip's next plain "on" still shows the household's color. Effects run
+in the background, one at a time: a newer one waits for the current step of the last one and replaces it. A light
+that fails is logged and skipped; the game never waits on the lights. The camera games flash only after a find,
+so the colored light never tints what the camera checks.
+
+Out of scope for now: lights in Scribble Rush, Sheeple, Ballpark, Simón dice and the number race, pausing camera
+games when nobody is in view, writing practice on the host, and every other game from the 2026-10-30 brainstorm.
 
 Big Brain, the team quiz show played on phones, runs on the same host and has its own page:
 [big-brain.md](big-brain.md). It adds `GameServices.say_audio` (recorded speech played as Reachy's line, through
@@ -322,6 +343,7 @@ flowchart LR
 |------|-------------------|---------------------------|
 | Names and words | `games/catalog.py` | `GAMES`, `parse_game_request(text)`, `find_game`, `words`, the YES / NO / PAUSE / RESUME / QUIT word sets (whole transcripts, normalized); `KIDS_GAMES`, `again_answer(text, playing)` (a game key, `STOP`, `ANOTHER_GAME` or None; cues anywhere, the first of a yes and a no wins) |
 | Host | `games/host.py` | `GameHost(services, factories)`: `offer`, `start(key, language) -> str | None`, `heard`, `addressed`, `pause`, `resume`, `end`, `holding`, `status`; `host_phrases()` for the speech cache |
+| Game lights | `games/lights.py` | `GameLights(home).effect(kind, color)` (`glow` 3 s or three `flash`es, a `LIGHT_COLORS` name) and `.restore()`; exposed to games as `GameServices.light` / `restore_lights` (no-ops without a home hub); the host restores on pause and at the end |
 | Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext` (`next_game`: set by a game as it ends, the host starts it), `Game` (`phrases`, `play`, `heard`, `paused`) |
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line), `ask_again(context, audio) -> next game or None` (all three kids' games; asked twice at most, `AGAIN_LISTEN_S` 12 s to start answering), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
@@ -374,12 +396,19 @@ recorded color hunt, and that every moment the games use is written in both lang
 `test_number_race.py` for numbers heard, a whole race with pats and right counts, nobody spinning or counting,
 a wrong count counted together, "¡gira!", the names and switching, the screen and every count's line),
 `tests/tools/test_play_game.py`, the runtime hooks in `tests/test_hybrid_runtime.py`, quick-command routing in
-`tests/test_quick_commands.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
+`tests/test_quick_commands.py`, `tests/games/test_lights.py` (only color lights, bright-dim flashes, the strip
+put back color-first then off, no-color lights back on/off only, a newer effect replacing a running one, restore
+last, unknown colors, no color lights and failing lights), the lights asserted in the color hunt, gallina loca,
+Big Brain bomb, Detectives whole-game and host pause/end tests, the strip's color read in
+`tests/test_tuya_devices.py`, the screens in `tests/test_eink_display.py`, `tests/test_control_api.py` and
 `tests/admin/test_server.py`. Jev thresholds come from the 2026-10-31 spike on 258 frames from Reachy's camera
 (see the plan).
 
 ## Changelog
 
+- 2026-11-15: Game lights: the color lights (the TV strip) flash and glow at finds, eggs, bombs, right answers and
+  the Detectives reveal, and are put back exactly afterwards (`HubDevice.color` now carries the strip's color).
+  Not yet seen in a real game.
 - 2026-11-09: La carrera de números, the first learning game (a 1–10 counting race with Tito and Flecha, pats to
   spin, counts heard by Scribe, the cars as drawn in the story), on a new "Learning games" shelf in the admin app. Kids' games may sit on the
   "For little ones" or the "Learning games" shelf.

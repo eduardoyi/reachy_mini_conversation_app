@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from reachy_mini_conversation_app.games.base import Game, GameContext
 from reachy_mini_conversation_app.games.catalog import BALLPARK, words
+from reachy_mini_conversation_app.games.end_card import team_card
 from reachy_mini_conversation_app.games.big_brain import START_WORDS, team_name
 from reachy_mini_conversation_app.games.ballpark_lines import LINES as HOST_LINES
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Clips, Sounds, Speech, join
@@ -434,6 +435,11 @@ class Ballpark(Game):
             "target": TARGET,
             "you": {"player": player.id, "name": player.name, "team": player.team} if player else None,
             "teams": teams,
+            "card": (
+                team_card("Ballpark", language, player, teams, winners=self._winners)
+                if player and self._phase == "over"
+                else None
+            ),
             "round": {"number": self._number, "surprise": self._this_surprise or None} if asked else None,
             "question": asked.text if asked else None,
             "unit": asked.unit if asked else None,

@@ -132,6 +132,7 @@ async def test_a_whole_game_with_names_pats_and_listo(tmp_path: Path) -> None:
     golden = _count(reachy.said, "gallina_golden") + _count(reachy.said, "gallina_golden_tie")
     assert golden == 1 and _count(reachy.said, "gallina_golden_after") == 1  # the most eggs, or a tie
     assert reachy.emotions.count("excited") == 2 and reachy.screens
+    assert reachy.lights == [("flash", "yellow")] * 2  # each egg laid
     assert reachy.quiet[0] is True  # the head is held still from the start, so pats count while playing
     assert ["Enzo", "Sofía"] in reachy.hints  # the speech model leans toward the family's names
     await _until(lambda: reachy.hints[-1] == [])  # cleared once the game is over

@@ -20,6 +20,7 @@ from dataclasses import field, dataclass
 
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.games.catalog import DETECTIVES, words
+from reachy_mini_conversation_app.games.end_card import case_card
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain_audio import RATE, Audio, Sounds, Speech, beep, join, silence
 from reachy_mini_conversation_app.games.detectives_case import (
@@ -294,7 +295,19 @@ class Detectives(Game):
             "message": self._message,
             "listening": self._listening,
             "result": self._solution(player) if self._result is not None else None,
+            "card": self._card(player) if player and self._result is not None else None,
         }
+
+    def _card(self, player: Player) -> dict[str, Any]:
+        solution, case = self._solution(player), self._case
+        assert case is not None
+        return case_card(
+            case.title[self._language],
+            self._language,
+            player,
+            solved=solution["you_right"],
+            culprit=solution["culprit"],
+        )
 
     def _solution(self, player: Player | None) -> dict[str, Any]:
         case, result = self._case, self._result
@@ -321,6 +334,11 @@ class Detectives(Game):
     def _votes_needed(self) -> int:
         players = len(self._phones.players) if self._phones is not None else 0
         return max(1, players // 2 + 1)
+
+    def _light(self, effect: str, color: str) -> None:
+        """Glow or flash the room's color lights, when the game is playing on Reachy."""
+        if self._context is not None:
+            self._context.services.light(effect, color)
 
     def _changed(self) -> None:
         if self._phones is not None:
@@ -672,6 +690,7 @@ class Detectives(Game):
         language = self._language
         self._phase = "reveal"
         self._changed()
+        self._light("glow", "purple")
         await self._say(self._line("truth"))
         for index, step in enumerate(case.reveal, start=1):
             self._show(render_card(f"{case.title[language]} · {index}/{len(case.reveal)}", step[language]))
@@ -691,11 +710,13 @@ class Detectives(Game):
         if right:
             if self._context is not None:
                 self._context.services.emotion("excited")
+            self._light("flash", "green")
             await self._sound("fanfare")
             await self._say(self._line("solved", names=_names(right, language)))
             if both:
                 await self._say(self._line("motive", names=_names(both, language)))
         else:
+            self._light("flash", "red")
             await self._sound("wrong")
             await self._say(self._line("unsolved"))
         await self._say(self._line("goodbye"))

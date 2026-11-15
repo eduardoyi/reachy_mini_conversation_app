@@ -263,6 +263,10 @@ def test_phones_need_the_code_and_join_with_a_name_and_team() -> None:
     phones.changed = lambda: None  # type: ignore[method-assign]
     client = TestClient(phones.app)
     assert client.get("/?c=WXYZ").status_code == 404
+    assert client.get("/endcard.js?c=WXYZ").status_code == 404  # the end card script needs the code too
+    script = client.get("/endcard.js?c=abcd")
+    assert script.status_code == 200 and "RichieEndCard" in script.text
+    assert script.headers["content-type"].startswith("text/javascript")
     with client.websocket_connect("/ws?code=abcd") as socket:
         assert socket.receive_json()["type"] == "state"
         socket.send_json({"type": "join", "name": "  Ana  María ", "team": "blue"})
@@ -750,9 +754,12 @@ async def test_a_bomb_only_its_team_answers_right_doubles_and_a_miss_or_silence_
     await table.square(table.clue(600, "bomb"))
     assert "buzz" not in table.seen[-1]["blue"]["can"]
     assert game._scores["red"] == 1200 and ("bomb_defused",) in table.said and ("bomb",) in table.said
+    assert table.reachy.lights == [("glow", "red"), ("flash", "red")]  # the bomb, then red's right answer
+    table.reachy.lights.clear()
     table.buzzes, table.answer = ["red"], "Atlántico"
     await table.square(table.clue(400, "bomb"))
     assert game._scores["red"] == 800 and table.said[-2] == ("bomb_boom",)
+    assert table.reachy.lights == [("glow", "red"), ("flash", "red")]  # the bomb, then it blows up
     table.said.clear()
     await table.square(table.clue(400, "bomb"))  # nobody buzzes
     assert game._scores["red"] == 400 and ("bomb_boom",) in table.said

@@ -338,6 +338,8 @@ async def test_a_whole_game_from_joining_to_the_first_team_at_fifteen(
     game = games[0]
     assert host.state is GameState.IDLE and game._phase == "over"
     assert game._winners == ["green"] and game._scores["green"] >= ballpark.TARGET
+    ana, _, eva = room.players
+    assert game.snapshot(eva)["card"]["title"] == "¡Campeones!" and game.snapshot(ana)["card"]["won"] is False
     assert game._scores["blue"] == 0 and game._used["green"] == {"copy"}
     said = reachy.said
     assert "¡Verde copió a Rojo!" in said

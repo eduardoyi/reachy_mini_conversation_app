@@ -399,6 +399,7 @@ class GameHost:
         self._paused_at = self._services.clock()
         self._set_state(GameState.PAUSED)
         self._game.paused(self._context)
+        self._services.restore_lights()
         self._services.show(render_game_paused(self._context.info.title[self._language], self._language))
         logger.info("Game paused: %s", self._context.info.key)
 
@@ -435,6 +436,7 @@ class GameHost:
         restore, self._restore_screen = self._restore_screen, None
         self._set_state(GameState.IDLE)
         self._game = None
+        self._services.restore_lights()
         if restore is not None:
             try:
                 restore()

@@ -33,6 +33,7 @@ from reachy_mini_conversation_app.usage_costs import get_ledger
 from reachy_mini_conversation_app.eink_display import render_photo
 from reachy_mini_conversation_app.local_speech import SAMPLE_RATE
 from reachy_mini_conversation_app.games.catalog import SCRIBBLE_RUSH, words
+from reachy_mini_conversation_app.games.end_card import team_card
 from reachy_mini_conversation_app.games.big_brain import START_WORDS, team_name
 from reachy_mini_conversation_app.games.scribble_words import KIDS_WORDS, ADULT_WORDS, Word, category_name
 from reachy_mini_conversation_app.games.big_brain_judge import plain
@@ -240,6 +241,7 @@ _LINES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "thanks": {"es": ("¡Gracias por jugar Scribble Rush!",), "en": ("Thanks for playing Scribble Rush!",)},
 }
 _SQUARES: Final[dict[str, tuple[str, str]]] = {"es": ("una casilla", "{n} casillas"), "en": ("one square", "{n} squares")}  # fmt: skip
+_CARD_UNIT: Final[dict[str, str]] = {"es": "casillas", "en": "squares"}
 _CARD_NAMES: Final[dict[str, dict[str, str]]] = {
     "hand": {"es": "Mano contraria", "en": "Other hand"},
     "eyes": {"es": "Ojos cerrados", "en": "Eyes closed"},
@@ -480,20 +482,26 @@ class ScribbleRush(Game):
         if self._deadline is not None and context is not None and not paused:
             deadline = int((time.time() + max(0.0, self._deadline - context.played_s)) * 1000)
         show_word = word is not None and (drawing or self._phase in ("result", "over"))
+        teams = [
+            {
+                "key": team,
+                "name": team_name(team, language),
+                "squares": self._squares.get(team, 0),
+                "players": [p.name for p in phones.team_players(team)] if phones else [],
+            }
+            for team in (TEAMS if self._phase == "lobby" else self._teams_playing())
+        ]
         return {
             "phase": "paused" if paused else self._phase,
             "language": language,
             "kids": self._kids,
             "you": {"player": player.id, "name": player.name, "team": player.team} if player else None,
-            "teams": [
-                {
-                    "key": team,
-                    "name": team_name(team, language),
-                    "squares": self._squares.get(team, 0),
-                    "players": [p.name for p in phones.team_players(team)] if phones else [],
-                }
-                for team in (TEAMS if self._phase == "lobby" else self._teams_playing())
-            ],
+            "teams": teams,
+            "card": (
+                team_card("Scribble Rush", language, player, teams, value="squares", unit=_CARD_UNIT)
+                if player and self._phase == "over"
+                else None
+            ),
             "goal": GOAL,
             "round": self._round,
             "rounds": ROUNDS,

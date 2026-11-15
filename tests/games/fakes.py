@@ -32,6 +32,8 @@ class FakeReachy:
         self.music_paused = 0
         self.handed: list[str] = []
         self.emotions: list[str] = []
+        self.lights: list[tuple[str, str]] = []
+        self.lights_restored = 0
         self.restored = 0
         self.busy = False
         self.frames: deque[bytes] = deque()
@@ -64,6 +66,8 @@ class FakeReachy:
             camera=self._camera,
             jev=self._jev,
             emotion=self.emotions.append,
+            light=lambda effect, color: self.lights.append((effect, color)),
+            restore_lights=self._restore_lights,
             call_busy=lambda: self.busy,
             picture=self.pictures.get,
             draw_pictures=self._draw_pictures,
@@ -98,6 +102,9 @@ class FakeReachy:
             self.restored += 1
 
         return restore
+
+    def _restore_lights(self) -> None:
+        self.lights_restored += 1
 
     async def _draw_pictures(self, subjects: list[str]) -> None:
         self.drawn.append(subjects)

@@ -29,6 +29,7 @@ from reachy_mini_conversation_app.games.catalog import (
     GameInfo,
     words,
 )
+from reachy_mini_conversation_app.games.end_card import team_card
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain_audio import (
     RATE,
@@ -306,6 +307,7 @@ class BigBrain(Game):
             "kids": self._kids,
             "you": {"player": player.id, "name": player.name, "team": player.team} if player else None,
             "teams": teams,
+            "card": team_card("Big Brain", language, player, teams) if player and self._phase == "over" else None,
             "board": (
                 {
                     "columns": [
@@ -332,6 +334,11 @@ class BigBrain(Game):
             "shielded": [team for team in TEAMS if team in self._shields],
             "hint": answer_hint(self._clue.answer) if player and player.team in self._hinted and self._clue else None,
         }
+
+    def _light(self, effect: str, color: str) -> None:
+        """Glow or flash the room's color lights, when the game is playing on Reachy."""
+        if self._context is not None:
+            self._context.services.light(effect, color)
 
     def _changed(self) -> None:
         if self._phones is not None:
@@ -831,6 +838,7 @@ class BigBrain(Game):
         self._shields = {team: clue if on is None and self._costly(clue) else on for team, on in self._shields.items()}  # fmt: skip
         self._changed()
         if clue.hidden == "bomb":
+            self._light("glow", "red")
             await self._say("bomb_kids" if self._kids else "bomb", sounds=("pick", "drumroll"))
         elif clue.hidden:
             await self._say(clue.hidden, sounds=("pick", "steal" if clue.hidden == "steal" else "hidden"))
@@ -909,6 +917,7 @@ class BigBrain(Game):
             _, saved = self._lose(picker, clue)
             self._phase = "reading"
             self._changed()
+            self._light("flash", "red")
             await self._say("bomb_boom", *(("shield_saved",) if saved else ()), sounds=("wrong",))
         self._phase = "reading"
         self._buzz = None
@@ -959,6 +968,7 @@ class BigBrain(Game):
         self._changed()
         if self._context is not None:
             self._context.services.emotion("happy")
+        self._light("flash", team)  # the teams are named after colors: red, blue, green, yellow
         moment = "bomb_defused" if clue.hidden == "bomb" else "correct_hard" if clue.points == POINTS[-1] else "correct_streak" if self._streak[team] >= STREAK else "correct"  # fmt: skip
         await self._say(moment, sounds=("correct",))
 
@@ -977,6 +987,7 @@ class BigBrain(Game):
         self._changed()
         shield = ("shield_saved",) if saved else ()
         if clue.hidden == "bomb":
+            self._light("flash", "red")
             await self._say("bomb_boom", *shield, sounds=("wrong",))
         elif self._wrong_row[team] >= MISS_STREAK:
             self._wrong_row[team] = 0

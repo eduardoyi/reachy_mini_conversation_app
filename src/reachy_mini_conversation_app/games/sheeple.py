@@ -23,6 +23,7 @@ from dataclasses import field, dataclass
 
 from reachy_mini_conversation_app.games.base import UNCLEAR_ANSWER, Game, GameContext
 from reachy_mini_conversation_app.games.catalog import SHEEPLE, words
+from reachy_mini_conversation_app.games.end_card import team_card
 from reachy_mini_conversation_app.quick_commands import QuickReply
 from reachy_mini_conversation_app.games.big_brain import START_WORDS, team_name
 from reachy_mini_conversation_app.games.sheeple_lines import LINES as HOST_LINES
@@ -266,6 +267,7 @@ class Sheeple(Game):
             "kids": self._kids,
             "you": {"player": player.id, "name": player.name, "team": player.team} if player else None,
             "teams": teams,
+            "card": team_card("Sheeple", language, player, teams) if player and self._phase == "over" else None,
             "round": {"number": self._round, "of": len(self._surveys), "kind": self._kind} if board else None,
             "question": board.question if board else None,
             "answers": (

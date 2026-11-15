@@ -22,7 +22,7 @@ _BACKGROUND: set[asyncio.Task[Any]] = set()
 
 _WARMTH_POSITION = {"warm": 0.0, "neutral": 0.5, "cool": 1.0}
 # (hue in degrees, saturation 0-1)
-_COLORS: dict[str, tuple[float, float]] = {
+LIGHT_COLORS: dict[str, tuple[float, float]] = {
     "red": (0.0, 1.0),
     "orange": (25.0, 1.0),
     "yellow": (55.0, 1.0),
@@ -165,8 +165,8 @@ def _describe(device: HubDevice) -> dict[str, Any]:
 def _parse_color(value: str) -> tuple[float, float] | None:
     """Return (hue, saturation) for a color name or #rrggbb."""
     value = value.strip().lower()
-    if value in _COLORS:
-        return _COLORS[value]
+    if value in LIGHT_COLORS:
+        return LIGHT_COLORS[value]
     hex_digits = value.removeprefix("#")
     if len(hex_digits) == 6:
         try:
