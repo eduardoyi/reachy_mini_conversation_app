@@ -130,6 +130,29 @@ def test_tomorrows_clips_put_missed_calls_first_skip_answers_and_stop_at_thirty(
     assert (items[0].start, items[0].end) == (5.0, 9.5)
 
 
+def test_a_name_said_before_the_wake_that_answered_is_asked_about_after_missed_calls() -> None:
+    """The scoreboard counts it as a first call he missed, so a person checks it, just after the missed calls.
+
+    Only the latest name before the wake is asked about. A name with the fire (the call that woke him) is not, nor
+    one in a wake told "not to you" (talk about him), nor one inside a transcript wake's own sentence.
+    """
+    late = _event("wake", DAY + 100, heard=True, request_chars=12)
+    answered = _event("wake", DAY + 200, heard=True, request_chars=12)
+    told_off = _event("wake", DAY + 300, heard=True, request_chars=12, said="not_called")
+    sentence = _event("name_heard", DAY + 400, outcome="woke", speech_seconds=3.0)
+    transcript_late = _event("name_heard", DAY + 500, outcome="woke", speech_seconds=3.0)
+    missed = _event("missed", DAY + 600, event_at=60.0)
+    events = [late, answered, told_off, sentence, transcript_late, missed]
+    names = {late["id"]: [2.0, 4.0, 9.8], answered["id"]: [9.8], told_off["id"]: [4.0], sentence["id"]: [8.0],
+             transcript_late["id"]: [5.0], missed["id"]: [50.0]}  # fmt: skip
+
+    items = review_items(events, names, {}, random.Random(1))
+
+    assert [item.id for item in items] == [f"{missed['id']}@50.00", f"{late['id']}@4.00",
+                                           f"{transcript_late['id']}@5.00"]  # fmt: skip
+    assert all(item.question == "Did someone say his name?" and item.follow_up for item in items[1:])
+
+
 def test_transcript_wakes_the_check_doubted_are_asked_about_fifteen_a_day() -> None:
     """A call among them is what the check costs; the whole sentence is played.
 

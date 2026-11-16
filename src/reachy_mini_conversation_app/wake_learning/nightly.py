@@ -636,6 +636,16 @@ def review_items(events: list[dict[str, Any]], names: dict[str, list[float]], an
             continue
         located = names.get(event["id"], [])
         kind, fired_at = event["kind"], float(event.get("event_at") or 0.0)
+        if _woke(event) and not _not_called(event):
+            # His name seconds before a wake that answered is a first call he missed, the scoreboard's commonest
+            # miss, yet only the night's speech model vouched for it: of 14 on 2026-11-09 to 11-15, 2 had been
+            # answered as calls and none of the rest asked; the accurate model heard no name around 10 of them.
+            cutoff = (
+                _sentence_span(event)[0] - clip_start(event) if kind == "name_heard" else fired_at - EARLIER_CALL_S
+            )
+            earlier = [at for at in located if at < cutoff]
+            if earlier:
+                offer(1, event, earlier[-1])
         if kind == "missed":
             for at in located[-2:]:
                 offer(0, event, at, MISSED_QUESTION)
