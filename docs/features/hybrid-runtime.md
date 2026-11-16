@@ -950,21 +950,31 @@ Now, with a request transcriber configured, every acoustic detection snapshots t
 wake model heard (`_wake_name_audio`, in memory, used once). `_run_activation` enters
 `LOCAL_COMMAND` quietly and starts the request clip at once, so nothing said after the name is
 lost, then `_name_in_wake_audio` asks whisper-small (`name_check_transcriber`, the ambient model)
-and, only if it did not hear the name, the request model (turbo). Awake, a Whisper spelling of the
+and the request model (turbo) 0.05 s later (`_NAME_CHECK_STAGGER_S`), or as soon as the fast one misses; the
+first to hear the name wins (`_hear_name`). Awake, a Whisper spelling of the
 name anywhere in the window counts (`_WAKE_WORD_TRANSCRIPT_PATTERN`); asleep it must lead a
-sentence. Heard: the listening notice, antenna cue and head turn follow (about 0.4 s later than
-before, about 2 s when only turbo heard it). Not heard: `_drop_unconfirmed_wake` returns to
+sentence. Heard: the listening notice, antenna cue and head turn follow. Not heard: `_drop_unconfirmed_wake` returns to
 `LOCAL_AMBIENT` (`unconfirmed_wake`, or `unconfirmed_wake_while_asleep`) without moving or opening
 the cloud. If every check fails with an error, an awake Reachy wakes as before and an asleep one
 stays asleep. Each check is bounded by `_WAKE_NAME_CHECK_TIMEOUT_S` (4 s).
 
-A miss is checked once more with the request clip's first 0.4 s (`_WAKE_NAME_REST_S`) added, when that
-audio is over the voice threshold (`_wake_audio_with_rest_of_name`). The wake model can fire mid-name: on
+The same check runs on the wake audio with the request clip's first 0.4 s (`_WAKE_NAME_REST_S`) added, once
+that audio has come (`_WAKE_NAME_REST_WAIT_S` at most) and is over the voice threshold
+(`_wake_audio_with_rest_of_name`), alongside the first (`_check_wake_name`). The wake model can fire mid-name: on
 2026-11-05 "Richi, lights" took 0.9 s, the model fired 0.6 s in, whisper heard half a word and the wake was
 dropped. The transcript backup heard the name a second later, without the command, so a silent conversation
 opened. Replaying the 490 rejected wakes of 2026-11-04/05, 0.3 s more audio found the name in 2 more calls.
-Quiet after the fire (a clink) skips the second check, so only a would-be rejection by someone still talking
-waits for it.
+Quiet after the fire (a clink) skips the second check.
+
+**Both checks at once (2026-11-16).** The models and the two windows used to be asked one after the other, so on
+2026-11-13 to 11-16 half the real calls took 1-2 s from the fire to the cue (the fast model alone: 0.2 s; the
+accurate one: 0.96 s; with the rest of the name: 0.9-1.9 s), and every name said twice in a request (6 of 86)
+came after one of those slow ones (none of the 52 under a second). The accurate model's request had waited
+behind the room clip the speech server took up after the fast one (0.15-0.7 s). Now the accurate model starts
+0.05 s after the fast one (an urgent request, so it goes before any room clip) and the window with the rest of
+the name starts once its audio is there; the first to hear the name cues him. The same wakes pass as before: a
+name heard only with the rest of it still gets no second look, which waits for the wake audio's own verdict.
+A miss with no audio after the fire (no request clip yet) now takes up to 0.9 s to drop.
 
 With the check, a low `LOCAL_ACOUSTIC_WAKE_THRESHOLD` is safe: on the 269 saved clips, threshold
 0.3 with both checks woke 34 of 38 named calls with no false wake (threshold 0.95 alone: 27 and
@@ -978,7 +988,9 @@ Tests (`tests/test_hybrid_runtime.py`):
 `test_when_whisper_is_down_an_awake_reachy_still_wakes_on_the_wake_model`,
 `test_asleep_only_the_name_leading_the_wake_audio_wakes_him`, `test_no_cue_until_the_name_check_passes`,
 `test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check`,
-`test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed`.
+`test_a_name_cut_off_by_the_fire_is_checked_again_with_what_followed`,
+`test_the_accurate_model_does_not_wait_for_a_slow_fast_one`,
+`test_a_name_heard_with_the_rest_of_it_does_not_wait_for_the_first_check`.
 
 **Second look (2026-11-06).** The check can turn a word or two in its 2.5 s into the name: on 2026-11-05 four
 of the ten false wakes came through it (adult talk, children playing, near silence). When the first check heard

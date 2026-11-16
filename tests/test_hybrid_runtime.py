@@ -4842,6 +4842,71 @@ async def test_a_name_heard_with_the_rest_of_it_needs_no_second_look() -> None:
         await runtime.close()
 
 
+@pytest.mark.asyncio
+async def test_the_accurate_model_does_not_wait_for_a_slow_fast_one() -> None:
+    """One after the other, a fast check stuck behind the room's clips held the antennas down (2026-11-15)."""
+    release = asyncio.Event()
+    runtime, _handler, acknowledged, _listening, _asked = _runtime_with_wake_audio("unused", "Ritchie.")
+
+    async def stuck_fast(_audio: Any) -> str:
+        await release.wait()
+        return ""
+
+    runtime._name_check_transcriber = stuck_fast
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        for _ in range(100):
+            if acknowledged:
+                break
+            await asyncio.sleep(0.01)
+        assert acknowledged == ["acoustic_wake"] and not release.is_set()
+        release.set()
+        assert await asyncio.wait_for(activation, timeout=3.0)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.parametrize("first_heard", [False, True])
+@pytest.mark.asyncio
+async def test_a_name_heard_with_the_rest_of_it_does_not_wait_for_the_first_check(first_heard: bool) -> None:
+    """Both checks run at once: hearing the name with 0.4 s more cues him while the wake audio's check goes on.
+
+    A second look follows only if the wake audio itself held the name, as when the checks ran one after the other.
+    """
+    release = asyncio.Event()
+    runtime, _handler, acknowledged, _listening, looked = _runtime_for_a_second_look(
+        lambda _m, size: size == 16_000 + 6_400, after_fire=3_000, first_heard=first_heard
+    )
+    wake_audio = runtime._wake_name_audio
+
+    def held_back(transcribe: Callable[[Any], Awaitable[str]] | None) -> Callable[[Any], Awaitable[str]]:
+        assert transcribe is not None
+
+        async def model(audio: Any) -> str:
+            if audio is wake_audio:
+                await release.wait()
+            return await transcribe(audio)
+
+        return model
+
+    runtime._name_check_transcriber = held_back(runtime._name_check_transcriber)
+    runtime._request_transcriber = held_back(runtime._request_transcriber)
+    try:
+        activation = asyncio.create_task(runtime.activate("acoustic_wake"))
+        for _ in range(150):
+            if acknowledged:
+                break
+            await asyncio.sleep(0.01)
+        assert acknowledged == ["acoustic_wake"] and not release.is_set()
+        release.set()
+        await asyncio.sleep(0.3)
+        assert looked[0] == ("fast", 16_000 + 6_400)
+        assert (("fast", _NEAR) in looked) is first_heard
+        activation.cancel()
+    finally:
+        await runtime.close()
+
+
 @pytest.mark.parametrize(("heard", "opens"), [("Richie.", True), ("so", False)])
 @pytest.mark.asyncio
 async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(heard: str, opens: bool) -> None:
@@ -4872,7 +4937,12 @@ async def test_an_acoustic_wake_sends_the_audio_it_fired_on_to_the_name_check(he
         if opens:
             await asyncio.wait_for(handler.started.wait(), timeout=3.0)
         else:
-            await wait_until(lambda: runtime.mode is RuntimeMode.LOCAL_AMBIENT and not runtime._local_event_tasks)
+            # No audio follows the fire here, so the check with the rest of the name waits its 0.9 s for it.
+            for _ in range(300):
+                if runtime.mode is RuntimeMode.LOCAL_AMBIENT and not runtime._local_event_tasks:
+                    break
+                await asyncio.sleep(0.01)
+            assert runtime.mode is RuntimeMode.LOCAL_AMBIENT
             assert not handler.started.is_set()
         assert runtime._wake_name_audio is None
     finally:

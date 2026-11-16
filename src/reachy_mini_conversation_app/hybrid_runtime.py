@@ -493,6 +493,11 @@ class HybridRuntime:
     # the check heard half a word. A miss with a voice still going is checked again with this much more audio
     # (replaying 490 rejected wakes, 0.3 s more found the name in 2 more calls).
     _WAKE_NAME_REST_S = 0.4
+    # That check runs alongside the first rather than after it, so it waits this much past those 0.4 s for them.
+    _WAKE_NAME_REST_WAIT_S = 0.5
+    # Each name check asks the fast model, and the accurate one this long after (or once the fast one misses), so
+    # the fast one usually has the speech server first and still answers in 0.2 s when it hears the name.
+    _NAME_CHECK_STAGGER_S = 0.05
     # The check can turn a word or two in its window into the name: on 2026-11-05 it let four nameless fires
     # through (adult talk, children playing, near silence). Once he has reacted, a second look listens again with
     # more audio around the fire, first 0.4 s more after it, then 4 s before and 0.8 s after, and drops the wake
@@ -1563,18 +1568,12 @@ class HybridRuntime:
             # request shows it was for him. On 2026-10-29 a TV programme opened two conversations this way.
             trusted_unnamed = False
             if wake_audio is not None:
-                heard = await self._name_in_wake_audio(wake_audio, asleep=asleep)
-                heard_with_rest = False
-                if not heard:
-                    longer = self._wake_audio_with_rest_of_name(wake_audio)
-                    if longer is not None:
-                        heard = heard_with_rest = await self._name_in_wake_audio(longer, asleep=asleep)
-                if heard and not heard_with_rest and wake_lead is not None and clip_request:
-                    # Heard with the rest of the name, it has already had the longer audio.
-                    second_look = asyncio.create_task(
-                        self._second_look(wake_lead, asleep=asleep, generation=generation),
-                        name=f"hybrid-second-look-{generation}",
-                    )
+                heard, second_look = await self._check_wake_name(
+                    wake_audio,
+                    wake_lead if clip_request else None,
+                    asleep=asleep,
+                    generation=generation,
+                )
                 trusted_unnamed = not heard and self._trusted_voice_wake(wake_audio, wake_score, asleep=asleep)
                 self._note_wake(wake_event, heard=heard, trusted=trusted_unnamed)
                 if not heard and not trusted_unnamed:
@@ -2155,12 +2154,78 @@ class HybridRuntime:
         if excess > 0:
             del self._wake_window[:excess]
 
+    async def _check_wake_name(
+        self,
+        wake_audio: tuple[int, NDArray[np.int16]],
+        lead: tuple[int, NDArray[np.int16]] | None,
+        *,
+        asleep: bool,
+        generation: int,
+    ) -> tuple[bool, asyncio.Task[bool] | None]:
+        """Return whether the name is heard in the wake audio, and the second look to await before acting on it.
+
+        The wake audio and, once it has come, the same with the first moments after the fire (a voice still going)
+        are checked at once, and the first to hear the name wins; they used to run one after the other, which kept
+        the antennas down 1-2 s for half the calls. Only a name the wake audio held gets a second look (with
+        ``lead``; none without): the longer audio already is its first window. The same wakes pass as before.
+        """
+        short = asyncio.create_task(self._name_in_wake_audio(wake_audio, asleep=asleep), name="hybrid-name-check")
+        longer = asyncio.create_task(
+            self._name_with_rest_of_it(wake_audio, asleep=asleep, generation=generation),
+            name="hybrid-name-check-longer",
+        )
+        handed_on: set[asyncio.Task[bool]] = set()
+        pending: set[asyncio.Task[bool]] = {short, longer}
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                if short in done and short.result():
+                    return True, self._start_second_look(lead, short, asleep=asleep, generation=generation)
+                if longer in done and longer.result():
+                    if short.done() or lead is None:
+                        return True, None  # heard only with the rest of the name: that was the longer look
+                    handed_on.add(short)  # whether a second look is due waits for the wake audio's own verdict
+                    return True, self._start_second_look(lead, short, asleep=asleep, generation=generation)
+            return False, None
+        finally:
+            for task in (short, longer):
+                if task not in handed_on:
+                    task.cancel()
+
+    def _start_second_look(
+        self,
+        lead: tuple[int, NDArray[np.int16]] | None,
+        short: asyncio.Task[bool],
+        *,
+        asleep: bool,
+        generation: int,
+    ) -> asyncio.Task[bool] | None:
+        """Start the second look, due only if the wake audio itself held the name; None without a ``lead``."""
+        if lead is None:
+            return None
+
+        async def look() -> bool:
+            if not await short:
+                return True  # heard only with the rest of the name, which already was the longer look
+            return await self._second_look(lead, asleep=asleep, generation=generation)
+
+        return asyncio.create_task(look(), name=f"hybrid-second-look-{generation}")
+
+    async def _name_with_rest_of_it(
+        self, wake_audio: tuple[int, NDArray[np.int16]], *, asleep: bool, generation: int
+    ) -> bool:
+        """Whether the name is heard in the wake audio and the moments after the fire; False with nobody speaking."""
+        longer = await self._wake_audio_with_rest_of_name(wake_audio, generation)
+        if longer is None:
+            return False
+        return await self._name_in_wake_audio(longer, asleep=asleep)
+
     async def _name_in_wake_audio(self, audio: tuple[int, NDArray[np.int16]], *, asleep: bool) -> bool:
         """Return whether Whisper hears the name in the audio the wake model fired on.
 
-        The fast model is asked first and the request model only when it did not hear the name. Awake, the
-        name anywhere counts; asleep, it must lead a sentence. If no check could run at all (Whisper down),
-        an awake Reachy wakes as he did before the check and an asleep one stays asleep.
+        Both models are asked (``_hear_name``). Awake, the name anywhere counts; asleep, it must lead a sentence. If
+        no check could run at all (Whisper down), an awake Reachy wakes as he did before the check and an asleep one
+        stays asleep.
         """
         heard = await self._hear_name(audio, asleep=asleep, check="name check")
         if heard is None:
@@ -2169,31 +2234,69 @@ class HybridRuntime:
         return heard
 
     async def _hear_name(self, audio: tuple[int, NDArray[np.int16]], *, asleep: bool, check: str) -> bool | None:
-        """Ask the fast model, then the accurate one, for the name in ``audio``; None when neither could run."""
+        """Ask the fast and the accurate model for the name in ``audio``; None when neither could run.
+
+        The accurate one starts ``_NAME_CHECK_STAGGER_S`` after the fast one (or as soon as it misses) rather than
+        after it: one at a time, its request waited behind the room clip the speech server took up in between
+        (2026-11-15: 0.15-0.7 s, for a check heard 0.75-1.3 s after the fire). The first to hear the name wins.
+        """
         transcribers = [
             (label, transcriber)
             for label, transcriber in (("fast", self._name_check_transcriber), ("accurate", self._request_transcriber))
             if transcriber is not None
         ]
+        pending: set[asyncio.Task[bool | None]] = set()
         failed = 0
-        for label, transcriber in transcribers:
-            try:
-                text = await asyncio.wait_for(transcriber(audio), self._WAKE_NAME_CHECK_TIMEOUT_S)
-            except asyncio.CancelledError:
-                raise
-            except Exception as error:
-                logger.warning("Wake %s failed model=%s: %s", check, label, type(error).__name__)
-                failed += 1
-                continue
-            if isinstance(text, str) and (
-                _name_leads(text) if asleep else _WAKE_WORD_TRANSCRIPT_PATTERN.search(text) is not None
-            ):
-                logger.info("Wake %s heard=True model=%s", check, label)
-                return True
+        try:
+            for index, (label, transcriber) in enumerate(transcribers):
+                pending.add(
+                    asyncio.create_task(self._name_heard_by(label, transcriber, audio, asleep=asleep, check=check))
+                )
+                more = index < len(transcribers) - 1
+                while pending:
+                    done, pending = await asyncio.wait(
+                        pending,
+                        timeout=self._NAME_CHECK_STAGGER_S if more else None,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in done:
+                        heard = task.result()
+                        if heard:
+                            return True
+                        failed += heard is None
+                    if more:
+                        break  # the next model starts now: this one missed, or is still listening
+        finally:
+            for task in pending:
+                task.cancel()
         if transcribers and failed == len(transcribers):
             return None
         logger.info("Wake %s heard=False", check)
         return False
+
+    async def _name_heard_by(
+        self,
+        label: str,
+        transcriber: Callable[[AudioFrame], Awaitable[str]],
+        audio: tuple[int, NDArray[np.int16]],
+        *,
+        asleep: bool,
+        check: str,
+    ) -> bool | None:
+        """Whether one model hears the name in ``audio``; None when it could not run."""
+        try:
+            text = await asyncio.wait_for(transcriber(audio), self._WAKE_NAME_CHECK_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Wake %s failed model=%s: %s", check, label, type(error).__name__)
+            return None
+        heard = isinstance(text, str) and (
+            _name_leads(text) if asleep else _WAKE_WORD_TRANSCRIPT_PATTERN.search(text) is not None
+        )
+        if heard:
+            logger.info("Wake %s heard=True model=%s", check, label)
+        return heard
 
     async def _second_look(self, lead: tuple[int, NDArray[np.int16]], *, asleep: bool, generation: int) -> bool:
         """Whether the name is heard again with more audio on both sides of the fire (True when it can't look).
@@ -2215,11 +2318,13 @@ class HybridRuntime:
             self._second_look_failed = generation
         return False
 
-    async def _audio_after_fire(self, rate: int, seconds: float, generation: int) -> NDArray[np.int16] | None:
-        """Return the request clip's first ``seconds``, waiting for them; None if they do not come."""
+    async def _audio_after_fire(
+        self, rate: int, seconds: float, generation: int, *, wait_s: float | None = None
+    ) -> NDArray[np.int16] | None:
+        """Return the request clip's first ``seconds``, waiting for them (``wait_s`` more); None if they do not come."""
         needed = int(rate * seconds)
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + seconds + self._SECOND_LOOK_WAIT_S
+        deadline = loop.time() + seconds + (self._SECOND_LOOK_WAIT_S if wait_s is None else wait_s)
         while True:
             frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
             if sum(frame.size for frame in frames) >= needed:
@@ -2296,17 +2401,25 @@ class HybridRuntime:
                 return True
         return False
 
-    def _wake_audio_with_rest_of_name(
-        self, wake_audio: tuple[int, NDArray[np.int16]]
+    async def _wake_audio_with_rest_of_name(
+        self, wake_audio: tuple[int, NDArray[np.int16]], generation: int
     ) -> tuple[int, NDArray[np.int16]] | None:
         """Return the wake audio and the request clip's first moments, or None when nobody was still speaking.
 
         The request clip records from the fire, so it holds the rest of a name the wake model fired in the middle
-        of; the first check (0.4 s and more) has given it time to.
+        of; this waits for those moments (``_WAKE_NAME_REST_WAIT_S`` at most, then takes what came).
         """
         rate = wake_audio[0]
-        frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
-        rest = np.concatenate(frames)[: int(rate * self._WAKE_NAME_REST_S)] if frames else None
+        with self._lifecycle_lock:
+            recording = self._request_clip is not None
+        if not recording:
+            return None
+        rest = await self._audio_after_fire(
+            rate, self._WAKE_NAME_REST_S, generation, wait_s=self._WAKE_NAME_REST_WAIT_S
+        )
+        if rest is None:
+            frames = [audio_to_mono_int16(frame[1]) for frame in self._request_clip_frames() if frame[0] == rate]
+            rest = np.concatenate(frames)[: int(rate * self._WAKE_NAME_REST_S)] if frames else None
         try:
             still_speaking = rest is not None and self._request_clip_vad.is_speech((rate, rest))
         except (TypeError, ValueError):
