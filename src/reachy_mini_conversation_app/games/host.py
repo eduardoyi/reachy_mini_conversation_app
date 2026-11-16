@@ -280,6 +280,8 @@ class GameHost:
         self._restore_screen = services.save_screen()
         self._spawn(services.pause_music(), "game-pause-music")
         self._set_state(GameState.PLAYING)
+        if game.ambience is not None:
+            services.room(game.ambience)
         self._task = asyncio.get_running_loop().create_task(self._play(game, context), name=f"game-{key}")
         logger.info("Game started: %s (%s%s)", key, language, ", kids" if kids else "")
         return None
@@ -410,6 +412,8 @@ class GameHost:
         self._resume_at = None
         self._context.played()
         self._set_state(GameState.PLAYING)
+        if self._game is not None and self._game.ambience is not None:
+            self._services.room(self._game.ambience)
         if self._context.screen:
             self._services.show(self._context.screen)
         if say:

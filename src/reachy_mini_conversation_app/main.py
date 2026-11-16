@@ -298,6 +298,7 @@ def _build_games(
         jev=ask_jev,
         emotion=emotion,
         light=lights.effect if lights is not None else (lambda effect, color: None),
+        room=lights.mood if lights is not None else (lambda mood: None),
         restore_lights=lights.restore if lights is not None else (lambda: None),
         call_busy=(lambda: bool(calls.busy)) if calls is not None else (lambda: False),
         picture=display.game_picture if display is not None else None,

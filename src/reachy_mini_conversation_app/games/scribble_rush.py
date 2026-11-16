@@ -854,7 +854,9 @@ class ScribbleRush(Game):
         best = max(scores.values(), default=0)
         winners = [finished] if finished else [team for team, squares in scores.items() if squares == best]
         context.services.emotion("excited")
+        context.services.room("party")
         if len(winners) == 1:
+            context.services.light("flash", winners[0])
             await self._say("winner", team=team_name(winners[0], language))
         else:
             await self._say("tie")

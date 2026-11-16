@@ -314,6 +314,7 @@ class Ballpark(Game):
     """One Ballpark game, from joining to the winner."""
 
     info = BALLPARK
+    ambience = "show"
 
     def __init__(self, setup: BallparkSetup, *, rng: random.Random | None = None) -> None:
         """Get ready to host; nothing is loaded until the game plays."""
@@ -964,6 +965,10 @@ class Ballpark(Game):
         self._changed()
         if self._context is not None:
             self._context.services.emotion("excited")
+        if self._context is not None:
+            self._context.services.room("party")
+            if len(self._winners) == 1:
+                self._context.services.light("flash", self._winners[0])
         if len(self._winners) == 1:
             await self._host("winner", f"winner_{self._winners[0]}", sounds=("drumroll",))
         else:

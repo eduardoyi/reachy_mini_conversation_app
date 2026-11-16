@@ -126,6 +126,25 @@ async def test_pause_and_resume_words_heard_without_the_name(room) -> None:
     assert "Pausa." in reachy.said
     assert host.heard("seguimos")
     assert host.state is GameState.PLAYING and reachy.screens[-1] == b"game screen"
+    assert reachy.moods == []  # a camera game leaves the room's lights alone
+
+
+class _Show(_Waiting):
+    ambience = "show"
+
+
+@pytest.mark.asyncio
+async def test_a_game_with_a_mood_sets_it_on_start_and_again_after_a_pause() -> None:
+    """The room dims as the game starts; a pause puts the lights back; resuming dims them again."""
+    reachy = FakeReachy()
+    host = GameHost(reachy.services, {"colors": _Show})
+    await _playing(reachy, host)
+    assert reachy.moods == ["show"]
+    assert host.heard("¡Pausa!") and reachy.lights_restored == 1
+    assert host.heard("seguimos") and reachy.moods == ["show", "show"]
+    host.end("test over", say=False)
+    await ticks(0.1)
+    assert reachy.lights_restored == 2
 
 
 @pytest.mark.asyncio

@@ -172,6 +172,7 @@ class Sheeple(Game):
     """One Sheeple game, from joining to the winner."""
 
     info = SHEEPLE
+    ambience = "show"
 
     def __init__(self, setup: SheepleSetup, *, rng: random.Random | None = None) -> None:
         """Get ready to host; nothing is loaded until the game plays."""
@@ -801,6 +802,10 @@ class Sheeple(Game):
         winners = [team for team, points in scores.items() if points == best]
         if self._context is not None:
             self._context.services.emotion("excited")
+        if self._context is not None:
+            self._context.services.room("party")
+            if len(winners) == 1:
+                self._context.services.light("flash", winners[0])
         if len(winners) == 1:
             await self._host("winner", f"winner_{winners[0]}", sounds=("drumroll",))
         else:

@@ -172,6 +172,7 @@ class BigBrain(Game):
     """One Big Brain show, from joining to the winner."""
 
     info = BIG_BRAIN
+    ambience = "show"
 
     def __init__(self, setup: BigBrainSetup, *, rng: random.Random | None = None) -> None:
         """Get ready to host; nothing is loaded until the game plays."""
@@ -339,6 +340,11 @@ class BigBrain(Game):
         """Glow or flash the room's color lights, when the game is playing on Reachy."""
         if self._context is not None:
             self._context.services.light(effect, color)
+
+    def _room(self, mood: str) -> None:
+        """Set the room's mood, when the game is playing on Reachy."""
+        if self._context is not None:
+            self._context.services.room(mood)
 
     def _changed(self) -> None:
         if self._phones is not None:
@@ -839,6 +845,7 @@ class BigBrain(Game):
         self._changed()
         if clue.hidden == "bomb":
             self._light("glow", "red")
+            self._room("tense")
             await self._say("bomb_kids" if self._kids else "bomb", sounds=("pick", "drumroll"))
         elif clue.hidden:
             await self._say(clue.hidden, sounds=("pick", "steal" if clue.hidden == "steal" else "hidden"))
@@ -881,6 +888,7 @@ class BigBrain(Game):
             player = self._buzz
             self._phase = "answering"
             self._changed()
+            self._light("glow", player.team)  # the room sees whose answer it is
             pieces, texts = await self._pieces((f"buzz_{player.team}",), (f"buzz_{player.team}", "answer"))
             # With no clip made, a moment of silence still opens the listening.
             spoken = join(*pieces) if pieces else silence(0.1)
@@ -899,6 +907,7 @@ class BigBrain(Game):
                 more_said = await self._play(again, more[0] if more else "", listen=True)
                 said = more_said if more_said and more_said != UNCLEAR_ANSWER else said
                 ruling = await self._judge.rule(clue.id, clue.text, clue.accept, said)
+            logger.info("Big Brain: %s answered, %s", player.team, ruling.name.lower())
             if ruling is Ruling.RIGHT:
                 await self._right(player, clue)
                 return
@@ -918,6 +927,7 @@ class BigBrain(Game):
             self._phase = "reading"
             self._changed()
             self._light("flash", "red")
+            self._room("show")
             await self._say("bomb_boom", *(("shield_saved",) if saved else ()), sounds=("wrong",))
         self._phase = "reading"
         self._buzz = None
@@ -969,6 +979,8 @@ class BigBrain(Game):
         if self._context is not None:
             self._context.services.emotion("happy")
         self._light("flash", team)  # the teams are named after colors: red, blue, green, yellow
+        if clue.hidden == "bomb":
+            self._room("show")
         moment = "bomb_defused" if clue.hidden == "bomb" else "correct_hard" if clue.points == POINTS[-1] else "correct_streak" if self._streak[team] >= STREAK else "correct"  # fmt: skip
         await self._say(moment, sounds=("correct",))
 
@@ -988,6 +1000,7 @@ class BigBrain(Game):
         shield = ("shield_saved",) if saved else ()
         if clue.hidden == "bomb":
             self._light("flash", "red")
+            self._room("show")
             await self._say("bomb_boom", *shield, sounds=("wrong",))
         elif self._wrong_row[team] >= MISS_STREAK:
             self._wrong_row[team] = 0
@@ -1088,7 +1101,9 @@ class BigBrain(Game):
         winners = [team for team, points in scores.items() if points == best]
         if self._context is not None:
             self._context.services.emotion("excited")
+        self._room("party")
         if len(winners) == 1:
+            self._light("flash", winners[0])
             await self._say("winner", f"winner_{winners[0]}", sounds=("drumroll",))
         else:
             await self._say("tie")

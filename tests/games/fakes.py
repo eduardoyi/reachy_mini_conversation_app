@@ -34,6 +34,7 @@ class FakeReachy:
         self.emotions: list[str] = []
         self.lights: list[tuple[str, str]] = []
         self.lights_restored = 0
+        self.moods: list[str] = []
         self.restored = 0
         self.busy = False
         self.frames: deque[bytes] = deque()
@@ -67,6 +68,7 @@ class FakeReachy:
             jev=self._jev,
             emotion=self.emotions.append,
             light=lambda effect, color: self.lights.append((effect, color)),
+            room=self.moods.append,
             restore_lights=self._restore_lights,
             call_busy=lambda: self.busy,
             picture=self.pictures.get,

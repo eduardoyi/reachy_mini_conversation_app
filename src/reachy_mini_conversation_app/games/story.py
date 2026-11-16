@@ -205,6 +205,7 @@ class StoryGame(Game):
     """Tells one story, with the children joining in."""
 
     holds_head = True  # a pat on his head knocks on the door
+    ambience = "cozy"
 
     def __init__(
         self,

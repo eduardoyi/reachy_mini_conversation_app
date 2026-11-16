@@ -422,5 +422,6 @@ async def test_a_whole_game_from_joining_to_the_solution(tmp_path: Path, monkeyp
     assert all(step["en"] in reachy.said for step in case.reveal)
     assert "The culprit is Doctor Julián Ferrer!" in reachy.said
     assert reachy.lights == [("glow", "purple"), ("flash", "green")]  # the reveal, then solved
+    assert reachy.moods == ["show", "tense", "party"]
     assert reachy.lights_restored == 1
     assert read_played(tmp_path / "detectives" / "played.json") == ["last-toast"]

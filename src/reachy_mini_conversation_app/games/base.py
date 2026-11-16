@@ -85,6 +85,8 @@ class GameServices:
     # Glow ("glow") or flash ("flash") the home's color lights in a color named in ``LIGHT_COLORS``, in the
     # background; and put them back as they were (the host does, on a pause and at the end).
     light: Callable[[str, str], None] = lambda effect, color: None
+    # Dim the room's lights to a mood ("show", "cozy", "tense") or pulse them for a winner ("party").
+    room: Callable[[str], None] = lambda mood: None
     restore_lights: Callable[[], None] = lambda: None
     # A call rings or is on.
     call_busy: Callable[[], bool] = lambda: False
@@ -152,6 +154,8 @@ class Game:
     info: GameInfo
     # The head is held still while playing too, so a pat on it counts (la gallina loca passes turns by pats).
     holds_head: bool = False
+    # The room's mood while it plays ("show", "cozy"), or None to leave the lights alone (the camera games need them).
+    ambience: str | None = None
 
     @classmethod
     def phrases(cls) -> frozenset[str]:

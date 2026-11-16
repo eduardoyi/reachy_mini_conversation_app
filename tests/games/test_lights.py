@@ -9,7 +9,9 @@ from reachy_mini_conversation_app.home_devices import HubDevice, LightChange, Ho
 
 
 STRIP = HubDevice("strip", "light", "TV Lights", "Living room", False, True, 60, colors=True, color=(30.0, 0.5))
-CEILING = HubDevice("ceiling", "light", "Living light 1", "Living room", True, True, 100)
+CEILING = HubDevice("ceiling", "light", "Living light 1", "Living room", True, True, 80)
+DARK = HubDevice("dark", "light", "Dining light 1", "Living room", False, True, 100)
+LAMP = HubDevice("lamp", "outlet", "Living lamp", "Living room", True, True)
 
 
 class _Home:
@@ -33,13 +35,12 @@ class _Home:
 @pytest.fixture(autouse=True)
 def fast(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every glow and flash step instant."""
-    for name in ("GLOW_S", "FLASH_ON_S", "FLASH_DIM_S"):
+    for name in ("GLOW_S", "FLASH_ON_S", "FLASH_DIM_S", "PARTY_BRIGHT_S", "PARTY_LOW_S"):
         monkeypatch.setattr(lights_module, name, 0.0)
 
 
 async def _settle(lights: GameLights) -> None:
-    while lights._task is not None and not lights._task.done():
-        await asyncio.sleep(0.001)
+    await lights.settled()
 
 
 @pytest.mark.asyncio
@@ -88,7 +89,7 @@ async def test_a_newer_effect_replaces_one_still_running_and_restore_comes_last(
         ("strip", LightChange(brightness=60, color=(30.0, 0.5))),
         ("strip", LightChange(on=False)),
     ]
-    assert lights._saved is None  # the next game saves the lights afresh
+    assert lights._color.saved is None  # the next game saves the lights afresh
 
 
 @pytest.mark.asyncio
@@ -108,3 +109,43 @@ async def test_unknown_colors_no_lights_and_failing_lights_never_break_a_game() 
     lights.restore()
     await _settle(lights)
     assert failing.changes == []
+
+
+@pytest.mark.asyncio
+async def test_the_room_dims_to_a_mood_and_goes_back_exactly() -> None:
+    """Only dimmable white lights that are on take part; moods are shares of their own level; restore is exact."""
+    home = _Home(STRIP, CEILING, DARK, LAMP)
+    lights = GameLights(home)  # type: ignore[arg-type]
+
+    lights.mood("show")
+    await _settle(lights)
+    lights.mood("tense")
+    await _settle(lights)
+    assert home.changes == [("ceiling", LightChange(brightness=36)), ("ceiling", LightChange(brightness=12))]
+
+    lights.restore()
+    await _settle(lights)
+    assert home.changes[-1] == ("ceiling", LightChange(on=True, brightness=80))
+    assert {device for device, _ in home.changes} == {"ceiling"}  # the strip, the dark light and the plug untouched
+
+
+@pytest.mark.asyncio
+async def test_a_party_pulses_and_returns_to_the_held_mood_or_to_how_it_was() -> None:
+    """Three bright-low pulses, then the game's mood again; with no mood held, back to the saved level."""
+    home = _Home(CEILING)
+    lights = GameLights(home)  # type: ignore[arg-type]
+    lights.mood("show")
+    await _settle(lights)
+    lights.mood("party")
+    await _settle(lights)
+    levels = [change.brightness for _, change in home.changes]
+    assert levels == [36, 100, 20, 100, 20, 100, 20, 36]
+
+    alone = _Home(CEILING)
+    lights = GameLights(alone)  # type: ignore[arg-type]
+    lights.mood("party")
+    await _settle(lights)
+    assert alone.changes[-1] == ("ceiling", LightChange(on=True, brightness=80))
+    lights.mood("disco")
+    await _settle(lights)
+    assert len(alone.changes) == 7

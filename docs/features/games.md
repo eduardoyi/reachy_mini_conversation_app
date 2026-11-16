@@ -46,9 +46,19 @@ white ceiling lights and the plugs never take part) light up at a game's big mom
 | La gallina loca | The hen goes off (an egg) | three yellow flashes |
 | Big Brain | A bomb square is picked | 3 s red glow |
 | Big Brain | The bomb blows up (wrong or silent) | three red flashes |
+| Big Brain | A team buzzes in | 3 s glow in that team's color, so the room sees whose answer it is |
 | Big Brain | A right answer | three flashes in the team's color (the teams are red, blue, green, yellow) |
+| Big Brain | One team wins | three flashes in the winner's color |
 | Detectives | The reveal starts | 3 s purple glow |
 | Detectives | Solved / unsolved | three green / red flashes |
+
+**Room moods** (the dimmable white lights, today the seven IKEA ceiling lights): only lights that are on when the
+game first touches them take part, and each dims to a share of its own level, so the room never lights up for a
+game and comes back exactly. A game declares its mood (`Game.ambience`): Big Brain, Detectives, Sheeple and
+Ballpark play at "show" (45%), stories at "cozy" (30%); the camera games and Scribble Rush (drawings held up to the
+camera) leave the lights alone. The host sets the mood at the start and again on resume. Big Brain's bomb and the
+Detectives reveal drop to "tense" (15%) and back; a winner gets "party": three pulses to full and down to 25%, then
+the game's mood again (Sheeple, Ballpark and Scribble Rush too, with a flash in the winning team's color).
 
 A flash goes bright then dim (100% then 15%) rather than on and off, which the strip does slowly and unreliably.
 The first effect in a game saves each color light as its system reports it, including its color (the Tuya strip
@@ -343,7 +353,7 @@ flowchart LR
 |------|-------------------|---------------------------|
 | Names and words | `games/catalog.py` | `GAMES`, `parse_game_request(text)`, `find_game`, `words`, the YES / NO / PAUSE / RESUME / QUIT word sets (whole transcripts, normalized); `KIDS_GAMES`, `again_answer(text, playing)` (a game key, `STOP`, `ANOTHER_GAME` or None; cues anywhere, the first of a yes and a no wins) |
 | Host | `games/host.py` | `GameHost(services, factories)`: `offer`, `start(key, language) -> str | None`, `heard`, `addressed`, `pause`, `resume`, `end`, `holding`, `status`; `host_phrases()` for the speech cache |
-| Game lights | `games/lights.py` | `GameLights(home).effect(kind, color)` (`glow` 3 s or three `flash`es, a `LIGHT_COLORS` name) and `.restore()`; exposed to games as `GameServices.light` / `restore_lights` (no-ops without a home hub); the host restores on pause and at the end |
+| Game lights | `games/lights.py` | `GameLights(home).effect(kind, color)` (`glow` 3 s or three `flash`es, a `LIGHT_COLORS` name), `.mood(name)` (`show`, `cozy`, `tense`, `party`; exposed as `GameServices.room`, with `Game.ambience` set by the host) and `.restore()`; exposed to games as `GameServices.light` / `restore_lights` (no-ops without a home hub); the host restores on pause and at the end |
 | Game interface | `games/base.py` | `GameServices` (wired in `main._build_games`), `GameContext` (`next_game`: set by a game as it ends, the host starts it), `Game` (`phrases`, `play`, `heard`, `paused`) |
 | Finding engine | `games/hunt.py` | `Hunt` (rounds, tune, frame loop, two-of-three, already in view, wrong line), `ask_again(context, audio) -> next game or None` (all three kids' games; asked twice at most, `AGAIN_LISTEN_S` 12 s to start answering), `Check`, `HELD_QUESTION`, thresholds from the 2026-10-31 spike |
 | Color hunt | `games/color_hunt.py` | `ColorHunt`, `TARGETS` (accepted Jev answers per color), `color_hunt_phrases()` |
@@ -406,6 +416,11 @@ Big Brain bomb, Detectives whole-game and host pause/end tests, the strip's colo
 
 ## Changelog
 
+- 2026-11-16: Room moods: the ceiling lights dim for party games and stories, darker for the bomb and the
+  Detectives reveal, and pulse for a winner; put back exactly on pause and at the end.
+- 2026-11-16: Big Brain lights also glow the buzzing team's color and flash the winner's: in the first real game
+  (one team, no right answers) nothing lit up. Each effect and each Big Brain ruling is now logged
+  ("Game lights: flash on 1 light(s)", "Big Brain: red answered, wrong").
 - 2026-11-15: Game lights: the color lights (the TV strip) flash and glow at finds, eggs, bombs, right answers and
   the Detectives reveal, and are put back exactly afterwards (`HubDevice.color` now carries the strip's color).
   Not yet seen in a real game.

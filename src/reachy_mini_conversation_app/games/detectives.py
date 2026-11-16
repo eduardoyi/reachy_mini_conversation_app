@@ -179,6 +179,7 @@ class Detectives(Game):
     """One Detectives game, from joining to the solution."""
 
     info = DETECTIVES
+    ambience = "show"
 
     def __init__(self, setup: DetectivesSetup, *, rng: random.Random | None = None) -> None:
         """Get ready; cases are loaded when the game plays."""
@@ -339,6 +340,11 @@ class Detectives(Game):
         """Glow or flash the room's color lights, when the game is playing on Reachy."""
         if self._context is not None:
             self._context.services.light(effect, color)
+
+    def _room(self, mood: str) -> None:
+        """Set the room's mood, when the game is playing on Reachy."""
+        if self._context is not None:
+            self._context.services.room(mood)
 
     def _changed(self) -> None:
         if self._phones is not None:
@@ -691,6 +697,7 @@ class Detectives(Game):
         self._phase = "reveal"
         self._changed()
         self._light("glow", "purple")
+        self._room("tense")
         await self._say(self._line("truth"))
         for index, step in enumerate(case.reveal, start=1):
             self._show(render_card(f"{case.title[language]} · {index}/{len(case.reveal)}", step[language]))
@@ -711,12 +718,14 @@ class Detectives(Game):
             if self._context is not None:
                 self._context.services.emotion("excited")
             self._light("flash", "green")
+            self._room("party")
             await self._sound("fanfare")
             await self._say(self._line("solved", names=_names(right, language)))
             if both:
                 await self._say(self._line("motive", names=_names(both, language)))
         else:
             self._light("flash", "red")
+            self._room("show")
             await self._sound("wrong")
             await self._say(self._line("unsolved"))
         await self._say(self._line("goodbye"))

@@ -484,6 +484,8 @@ async def test_a_whole_show_from_joining_to_the_winner(tmp_path: Path, monkeypat
         and game.snapshot(room.red)["final"]["answer"] == game._board.final.answer
     )  # type: ignore[union-attr]
     assert game._scores["red"] > 0 >= game._scores.get("blue", 0)
+    assert ("glow", "red") in reachy.lights and reachy.lights[-1] == ("flash", "red")  # buzzes, then the winner
+    assert reachy.moods[0] == "show" and reachy.moods[-1] == "party"
     assert game._board is not None and game._board.left == 0
     assert [entry["team"] for entry in game._reveal] == ["blue", "red"]
     assert len(read_history(tmp_path / "big-brain" / "history.json")) == 21
@@ -754,12 +756,14 @@ async def test_a_bomb_only_its_team_answers_right_doubles_and_a_miss_or_silence_
     await table.square(table.clue(600, "bomb"))
     assert "buzz" not in table.seen[-1]["blue"]["can"]
     assert game._scores["red"] == 1200 and ("bomb_defused",) in table.said and ("bomb",) in table.said
-    assert table.reachy.lights == [("glow", "red"), ("flash", "red")]  # the bomb, then red's right answer
+    # The bomb, red buzzing in, then red's right answer.
+    assert table.reachy.lights == [("glow", "red"), ("glow", "red"), ("flash", "red")]
+    assert table.reachy.moods[-2:] == ["tense", "show"]  # the room darkens for the bomb, then back to the show
     table.reachy.lights.clear()
     table.buzzes, table.answer = ["red"], "Atlántico"
     await table.square(table.clue(400, "bomb"))
     assert game._scores["red"] == 800 and table.said[-2] == ("bomb_boom",)
-    assert table.reachy.lights == [("glow", "red"), ("flash", "red")]  # the bomb, then it blows up
+    assert table.reachy.lights == [("glow", "red"), ("glow", "red"), ("flash", "red")]  # bomb, buzz, it blows up
     table.said.clear()
     await table.square(table.clue(400, "bomb"))  # nobody buzzes
     assert game._scores["red"] == 400 and ("bomb_boom",) in table.said
