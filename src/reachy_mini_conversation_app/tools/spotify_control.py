@@ -9,6 +9,7 @@ import asyncio
 import logging
 import tempfile
 import threading
+import unicodedata
 from typing import Any, TypeVar
 from pathlib import Path
 from collections.abc import Callable, Awaitable
@@ -31,6 +32,27 @@ class SpotifySearchLogFilter(logging.Filter):
 
 logging.getLogger("httpx").addFilter(SpotifySearchLogFilter())
 SPOTIFY_TRANSFER_SETTLE_SECONDS = 0.5
+# Spotify's largest accepted search page (it answers 20 with "Invalid limit"). Five once hid Juanes's "Nada"
+# behind his more popular "Nada Valgo Sin Tu Amor", and Reachy played the wrong song twice.
+SPOTIFY_SEARCH_LIMIT = 10
+_TITLE_FILTER = re.compile(r'\b(?:track|album|playlist):(?:"([^"]+)"|(\S+))', re.IGNORECASE)
+_FIELD_FILTER = re.compile(r'\b[a-z]+:(?:"[^"]*"|\S+)', re.IGNORECASE)
+
+
+def _plain(text: str) -> str:
+    """Fold case, accents and spacing so 'Canción' and 'cancion' compare equal."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return " ".join("".join(c for c in decomposed if not unicodedata.combining(c)).casefold().split())
+
+
+def _wanted_title(query: str) -> str:
+    """Return the title a search names: its track:/album:/playlist: filter, else the query without filters."""
+    named = _TITLE_FILTER.search(query)
+    if named:
+        return _plain(named.group(1) or named.group(2))
+    return _plain(_FIELD_FILTER.sub(" ", query))
+
+
 MUSIC_STARTED_IN_CONVERSATION = (
     "Spotify is playing (quietly while you talk). Reply with only a brief 'Enjoy!' in the user's language and "
     "nothing else; the conversation closes in a few seconds so the user can listen, unless they say more."
@@ -414,6 +436,10 @@ class SpotifyControl(Tool):
         "Control Spotify on the configured device, only when the user asks. "
         "Actions: search, play, queue, resume, pause, next, status, volume. "
         "Search Spotify first, then use an exact returned URI. "
+        'When the user names a title, search with field filters, e.g. track:"Nada" artist:"Juanes" '
+        "(album: and playlist: likewise); if that finds nothing, search again without them. "
+        "Results whose name is exactly the title come first. Never swap in a song with a different name; "
+        "if no result is called what the user asked for, say so. "
         "Search types: track, artist, album, episode, playlist. For podcasts search episodes. "
         "For decade requests use year:2000-2009 in the query. Play replaces current playback; queue appends a "
         "track or episode to the queue (not guaranteed immediately next). Ask only if matches are ambiguous. "
@@ -511,7 +537,7 @@ class SpotifyControl(Tool):
                             params={
                                 "q": str(query).strip(),
                                 "type": str(search_type),
-                                "limit": 5,
+                                "limit": SPOTIFY_SEARCH_LIMIT,
                             },
                             headers=headers,
                         )
@@ -523,7 +549,7 @@ class SpotifyControl(Tool):
                         if not isinstance(group, dict) or not isinstance(group.get("items"), list):
                             raise ValueError("Invalid search results")
                         results: list[dict[str, object]] = []
-                        for item in group["items"][:5]:
+                        for item in group["items"][:SPOTIFY_SEARCH_LIMIT]:
                             if not isinstance(item, dict) or item.get("is_playable") is False:
                                 continue
                             found_uri, title = item.get("uri"), item.get("name")
@@ -550,6 +576,9 @@ class SpotifyControl(Tool):
                             ):
                                 self._track_albums[found_uri] = album_uri
                         self._search_results = dict(list(self._search_results.items())[-50:])
+                        wanted = _wanted_title(str(query))
+                        # Stable: exact-title matches first, each group in Spotify's own order.
+                        results.sort(key=lambda result: _plain(str(result["name"])) != wanted)
                         return {"source": "Spotify", "results": results}
                     response = await client.get("https://api.spotify.com/v1/me/player/devices", headers=headers)
                     response.raise_for_status()

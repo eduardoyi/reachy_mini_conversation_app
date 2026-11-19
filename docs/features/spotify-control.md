@@ -86,7 +86,8 @@ Official references: [PKCE](https://developer.spotify.com/documentation/web-api/
 ## Search and selection extension — 2026-09-10
 
 Search takes query (1–250 characters) and search_type (track by default; artist,
-album, episode, playlist supported), returns at most five Spotify labels and URIs.
+album, episode, playlist supported), returns at most ten Spotify labels and URIs
+(five until 2026-11-19; see that section).
 No device needs to be online for search, though configuration is required.
 Null/unplayable/malformed results are omitted. Search queries are suppressed from
 httpx request logs. Returned labels are untrusted and enter the active provider.
@@ -328,3 +329,22 @@ next, so the e-ink now-playing watcher looks at once instead of at its next 10 s
 reads `/me/player` with the same credentials (`spotify_access_token`) and only for
 `SPOTIFY_DEVICE_ID`; see [eink-display.md](eink-display.md#now-playing). Tests:
 `test_playback_changes_tell_the_now_playing_screen`, `test_a_rejected_command_does_not_refresh_the_screen`.
+
+## Finding the song that was named — 2026-11-19
+
+Asked for Juanes's "Nada", Reachy offered and then played "Nada Valgo Sin Tu Amor", and a third
+try found nothing. "Nada" (from *25 Aniversario*, 2026) is on Spotify but ranks below the more
+popular song: it was missing from the top five for every query tried, and from the top ten for
+`Nada Juanes`; with `track:Nada artist:Juanes` it is second of ten (and absent at five, where
+Spotify returned only three results).
+
+- Search asks for `SPOTIFY_SEARCH_LIMIT` = 10 results, Spotify's maximum (20 gets `400 Invalid limit`),
+  and keeps all ten.
+- Results whose name equals the requested title, ignoring case, accents and spacing, move to the front;
+  the rest keep Spotify's order. The title is the query's `track:`/`album:`/`playlist:` filter
+  (quoted or one word), else the query with any field filters removed.
+- The tool description tells Gemini to search with field filters when a title is named, to search again
+  without them if that finds nothing, and to say so rather than play a differently named song.
+
+Tests: `test_search_asks_for_ten_results_and_keeps_them_all`, `test_exact_title_comes_first`,
+`test_search_with_no_exact_title_keeps_spotify_order`.

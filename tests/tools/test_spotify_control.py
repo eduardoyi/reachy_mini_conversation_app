@@ -274,6 +274,68 @@ async def test_unverified_selections_never_network(configured, monkeypatch, acti
     assert "error" in await SpotifyControl()(Mock(spec=ToolDependencies), action=action, uri=uri)
 
 
+def _tracks(names):
+    """Search items named in order, each with a distinct valid URI."""
+    return [
+        {"uri": "spotify:track:" + chr(ord("a") + index) * 22, "name": name, "artists": [{"name": "Juanes"}]}
+        for index, name in enumerate(names)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_asks_for_ten_results_and_keeps_them_all(configured, monkeypatch):
+    """A less popular exact title ranked sixth reaches the model (it once fell outside the top five)."""
+    names = ["Nada Valgo Sin Tu Amor"] * 5 + ["Nada"] + ["Es Por Ti"] * 4
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.params["limit"])
+        return httpx.Response(200, json={"tracks": {"items": _tracks(names)}})
+
+    install_transport(monkeypatch, handler)
+    found = await SpotifyControl()(Mock(spec=ToolDependencies), action="search", query="Nada Juanes")
+    assert seen == ["10"]
+    assert len(found["results"]) == 10
+    assert "Nada" in [result["name"] for result in found["results"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query,first",
+    [
+        ('track:"Nada" artist:"Juanes"', "Nada"),
+        ("track:nada artist:Juanes", "Nada"),
+        ("Nada", "Nada"),
+        ("artist:Juanes cancion", "Canción"),
+    ],
+)
+async def test_exact_title_comes_first(configured, monkeypatch, query, first):
+    """The song named like the request leads, ignoring case and accents; the rest keep Spotify's order."""
+    names = ["Nada Valgo Sin Tu Amor", "Canción", "Nada", "Es Por Ti"]
+
+    def handler(request):
+        return httpx.Response(200, json={"tracks": {"items": _tracks(names)}})
+
+    install_transport(monkeypatch, handler)
+    found = await SpotifyControl()(Mock(spec=ToolDependencies), action="search", query=query)
+    ordered = [result["name"] for result in found["results"]]
+    assert ordered[0] == first
+    assert [name for name in ordered if name != first] == [name for name in names if name != first]
+
+
+@pytest.mark.asyncio
+async def test_search_with_no_exact_title_keeps_spotify_order(configured, monkeypatch):
+    """Without an exact match nothing is reshuffled."""
+    names = ["Nada Valgo Sin Tu Amor", "Es Por Ti", "La Camisa Negra"]
+
+    def handler(request):
+        return httpx.Response(200, json={"tracks": {"items": _tracks(names)}})
+
+    install_transport(monkeypatch, handler)
+    found = await SpotifyControl()(Mock(spec=ToolDependencies), action="search", query="Juanes Nada")
+    assert [result["name"] for result in found["results"]] == names
+
+
 @pytest.mark.asyncio
 async def test_search_query_is_not_logged(configured, monkeypatch, caplog):
     """Keep search queries out of HTTP info logs."""
