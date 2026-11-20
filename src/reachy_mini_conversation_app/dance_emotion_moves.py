@@ -6,10 +6,11 @@ and executed sequentially by the MovementManager.
 
 from __future__ import annotations
 import logging
-from typing import Tuple
+from typing import Final, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial.transform import Rotation
 
 from reachy_mini.motion.move import Move
 from reachy_mini.motion.recorded_move import RecordedMoves
@@ -17,6 +18,20 @@ from reachy_mini_dances_library.dance_move import DanceMove
 
 
 logger = logging.getLogger(__name__)
+
+# Recorded dances played at this share of their swing, keeping their rhythm. At full size (dance2: head rolled 30
+# degrees and moved 29 mm sideways at up to 300 mm/s, the body turning 60 degrees, for 17 s; dance3, a story's
+# "excited", much the same for 18 s) Reachy swung hard enough to tip over during a story on 2026-11-20. Facing a
+# child, the dance adds to his head's tilt, and the robot logged poses it couldn't reach during stories.
+SOFTENED_MOVES: Final[dict[str, float]] = {"dance1": 0.5, "dance2": 0.5, "dance3": 0.5}
+
+
+def soften(head_pose: NDArray[np.float64], body_yaw: float, share: float) -> tuple[NDArray[np.float64], float]:
+    """Return the pose ``share`` of the way from neutral: head turn and offset, and the body's turn."""
+    softened = np.eye(4)
+    softened[:3, :3] = Rotation.from_rotvec(Rotation.from_matrix(head_pose[:3, :3]).as_rotvec() * share).as_matrix()
+    softened[:3, 3] = np.asarray(head_pose[:3, 3], dtype=np.float64) * share
+    return softened, float(body_yaw) * share
 
 
 class DanceQueueMove(Move):  # type: ignore
@@ -75,6 +90,10 @@ class EmotionQueueMove(Move):  # type: ignore
             # Convert to numpy array if antennas is tuple and return in official Move format
             if isinstance(antennas, tuple):
                 antennas = np.array([antennas[0], antennas[1]])
+
+            share = SOFTENED_MOVES.get(self.emotion_name)
+            if share is not None and head_pose is not None:
+                head_pose, body_yaw = soften(head_pose, body_yaw or 0.0, share)
 
             return (head_pose, antennas, body_yaw)
 

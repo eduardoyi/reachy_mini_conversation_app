@@ -90,6 +90,11 @@ Italian, and the kids knock, shout, blow, copy moves and pick small things. Each
 [story-mode.md](../plans/story-mode.md). Stories are catalog entries with `kind="story"`, and Italian is used only
 for them.
 
+A story's `excited` and `dance` moves are recorded dances (`dance3`, `dance2`). Since 2026-11-20 every recorded dance
+plays at half its swing (`SOFTENED_MOVES` in `dance_emotion_moves.py`): at full size Reachy tipped over during La
+monedita de plata. The rhythm, the length (17–18 s) and the antennas stay the same. Tested in
+`tests/test_moves.py` (`test_recorded_dances_swing_half_as_far`, `test_other_emotions_keep_their_full_swing`).
+
 ## User-facing behavior
 
 - **Starting by voice:** "Richie, juguemos a los colores" / "vamos a jugar al juego de los colores" / "let's

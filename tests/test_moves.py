@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
@@ -441,6 +442,38 @@ def test_breathing_stays_facing_the_last_speaker() -> None:
     head, _, body_yaw = breathing.evaluate(breathing.interpolation_duration + 3.0)
     assert head_world_yaw(head) == pytest.approx(np.radians(50.0))
     assert body_yaw == pytest.approx(np.radians(50.0))
+
+
+@pytest.mark.parametrize("name", ["dance1", "dance2", "dance3"])
+def test_recorded_dances_swing_half_as_far(name: str) -> None:
+    """A recorded dance tipped Reachy over during a story; it plays at half its turn, tilt, offset and body turn."""
+    recorded_head = create_head_pose(0.0, 0.02, 0.01, 30, 12, 20, degrees=True)
+
+    class _Recorded(_FakeMove):
+        def evaluate(self, t: float):
+            return (self._head, (0.4, -0.4), np.radians(30.0))
+
+    recorded = MagicMock()
+    recorded.get.return_value = _Recorded(recorded_head)
+
+    head, antennas, body_yaw = EmotionQueueMove(name, recorded).evaluate(1.0)
+
+    full = Rotation.from_matrix(recorded_head[:3, :3]).as_rotvec()
+    assert Rotation.from_matrix(head[:3, :3]).as_rotvec() == pytest.approx(full / 2)
+    assert head[:3, 3] == pytest.approx(recorded_head[:3, 3] / 2)
+    assert body_yaw == pytest.approx(np.radians(15.0))
+    assert tuple(antennas) == pytest.approx((0.4, -0.4))
+
+
+def test_other_emotions_keep_their_full_swing() -> None:
+    """Only the dances are softened."""
+    recorded_head = create_head_pose(0.0, 0.0, 0.0, 20, 0, 0, degrees=True)
+    recorded = MagicMock()
+    recorded.get.return_value = _FakeMove(recorded_head)
+
+    head, _, _ = EmotionQueueMove("surprised1", recorded).evaluate(1.0)
+
+    assert np.allclose(head, recorded_head)
 
 
 def test_emotions_play_toward_the_speaker() -> None:
